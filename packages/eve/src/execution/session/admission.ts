@@ -104,10 +104,11 @@ export async function applySessionCancellation(
   },
 ): Promise<void> {
   if (command.tasks === true) {
-    await cancelAllIndexedSessionTasksStep({
+    const cancelled = await cancelAllIndexedSessionTasksStep({
       serializedContext: input.cursor.serializedContext,
       sessionState: input.cursor.sessionState,
     });
+    await input.cursor.apply(cancelled);
   }
   if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
 }

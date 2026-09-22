@@ -46,6 +46,7 @@ describe("development generation staging", () => {
   const compileResult = {
     manifest: {},
     paths: { moduleMapPath: "/tmp/app/modules.mjs" },
+    project: { appRoot: "/tmp/app" },
   } as CompileAgentResult;
   beforeEach(() => {
     mocks.prepare.mockReset();
@@ -61,7 +62,11 @@ describe("development generation staging", () => {
     mocks.stage.mockReturnValue(staging.promise);
     mocks.materialize.mockResolvedValue({ fingerprint: "ready" });
     const result = stageDevelopmentGeneration(compileResult);
-    expect(mocks.prepare).toHaveBeenCalledOnce();
+    expect(mocks.prepare).toHaveBeenCalledWith({
+      appRoot: "/tmp/app",
+      manifest: compileResult.manifest,
+      moduleMapPath: "/tmp/app/modules.mjs",
+    });
     expect(mocks.stage).toHaveBeenCalledOnce();
     preparation.resolve({ authoredWorkflowModules: {} });
     await Promise.resolve();

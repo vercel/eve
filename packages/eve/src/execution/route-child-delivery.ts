@@ -1,3 +1,6 @@
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { formatTaskNotification } from "#tasks/notification.js";
+import type { TaskView } from "#tasks/types.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -35,8 +38,13 @@ export async function routeDeliverToChildren(input: {
   const payload = coalesceDeliverPayloads(input.delivery.payloads);
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
+  const recordedTaskViews = new Map<string, TaskView>();
+  // Coalescing can put an old request beside its outcome. Do not start new work
+  // or display new questions for a task settling in this same delivery.
+  const settlingTaskIds = new Set((payload.task?.views ?? []).map((view) => view.taskId));
 
   for (const request of payload.task?.inputRequests ?? []) {
+    if (settlingTaskIds.has(request.taskId)) continue;
     const recorded = await recordTaskInputRequestStep({
       request,
       sessionState,
@@ -54,6 +62,7 @@ export async function routeDeliverToChildren(input: {
   }
 
   for (const request of payload.task?.agentRequests ?? []) {
+    if (request.request.kind === "agent-invoke" && settlingTaskIds.has(request.taskId)) continue;
     const applied = await applyTaskAgentRequest(
       { ...request, ownerId: request.taskId },
       {
@@ -69,6 +78,11 @@ export async function routeDeliverToChildren(input: {
   // Authorization is display-only: the callback completes against the child,
   // so the parent re-emits the event without recording a proxy input request.
   for (const delivery of payload.task?.authorizationEvents ?? []) {
+    if (
+      delivery.hookPayload.event.type === "authorization.required" &&
+      settlingTaskIds.has(delivery.taskId)
+    )
+      continue;
     const accepted = await acceptTaskAuthorizationEventStep({ delivery, sessionState });
     if (!accepted) continue;
     const emitted = await runProxySubagentEventStep({
@@ -92,6 +106,17 @@ export async function routeDeliverToChildren(input: {
     });
     serializedContext = recorded.serializedContext;
     sessionState = recorded.sessionState;
+    for (const view of recorded.views) recordedTaskViews.set(view.taskId, view);
+    // Publish after the durable write; replay retains these events, while duplicate deliveries return none.
+    for (const event of recorded.subagentCompletions) {
+      const emitted = await emitSubagentEventStep({
+        event,
+        sessionWritable: input.sessionWritable,
+        serializedContext,
+        sessionState,
+      });
+      serializedContext = emitted.serializedContext;
+    }
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];
@@ -99,6 +124,14 @@ export async function routeDeliverToChildren(input: {
   for (const [sourcePayloadIndex, sourcePayload] of input.delivery.payloads.entries()) {
     const ordinaryPayload = { ...sourcePayload };
     delete ordinaryPayload.task;
+    if (ordinaryPayload.message !== undefined && sourcePayload.task?.views !== undefined) {
+      const notifications = sourcePayload.task.views.flatMap(({ taskId }) => {
+        const view = recordedTaskViews.get(taskId);
+        return view === undefined ? [] : [formatTaskNotification(view)];
+      });
+      if (notifications.length === 0) delete ordinaryPayload.message;
+      else ordinaryPayload.message = notifications.join("\n\n");
+    }
     if (Object.keys(ordinaryPayload).length === 0) continue;
     const payloadIndex = ordinaryPayloads.length;
     ordinaryPayloads.push(ordinaryPayload);

@@ -1,19 +1,18 @@
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/definition.js";
-import type { TaskExec } from "#tools/task.js";
 import type { AgentView } from "#subagents/handles/prompt.js";
 import type { JsonValue } from "#shared/json.js";
 
 export interface BackgroundExecutableTool {
   readonly label?: InternalToolLabelDefinition;
-  readonly execute: (input: unknown, options: ToolExecuteOptions, task: TaskExec) => unknown;
   readonly executeInput?: (input: unknown) => JsonValue;
   readonly name: string;
+  /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
   readonly nodeId?: string;
-  readonly resultKind?: "subagent" | "tool";
-  /** Present when the execute body runs in the task-owned durable workflow. */
-  readonly workflowId?: string;
+
+  /** Registered durable workflow body run by the session-owned task. */
+  readonly workflowId: string;
 }
 
 export interface BackgroundToolCall {

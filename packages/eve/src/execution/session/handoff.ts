@@ -18,8 +18,9 @@ import type { RunMode } from "#shared/run-mode.js";
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
+ * The shared workflow tool run registry replaces the separate task and waiting-run records.
  */
-export const SESSION_CHECKPOINT_VERSION = 4;
+export const SESSION_CHECKPOINT_VERSION = 7;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

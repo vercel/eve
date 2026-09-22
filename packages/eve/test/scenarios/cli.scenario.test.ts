@@ -433,7 +433,7 @@ describe("runCli", () => {
   it("preserves imported tool schema composition in the built server", async () => {
     const { buildApplication } = await import("../../src/internal/nitro/host.js");
     const { appRoot } = await scenarioApp(COMPOSED_TOOL_SCHEMAS_DESCRIPTOR);
-    await buildApplication(appRoot, { skipVercelSandboxPrewarm: true });
+    await buildApplication(appRoot, { skipSandboxPrewarm: true });
     const server = await startPackagedEveStart(appRoot);
 
     try {
@@ -457,7 +457,7 @@ describe("runCli", () => {
     const appRoot = await createMinimalAppRoot("eve-cli-start-health-");
 
     await buildApplication(appRoot, {
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
     });
 
     const server = await startPackagedEveStart(appRoot);
@@ -582,7 +582,7 @@ describe("runCli", () => {
 
     expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
       publicRoutePrefix: undefined,
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
       vercelServiceOutput: undefined,
       workspaceMember: false,
     });
@@ -618,7 +618,7 @@ describe("runCli", () => {
 
     expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
       publicRoutePrefix: undefined,
-      skipVercelSandboxPrewarm: true,
+      skipSandboxPrewarm: true,
       vercelServiceOutput: undefined,
       workspaceMember: false,
     });

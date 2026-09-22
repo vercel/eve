@@ -21,7 +21,10 @@ import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { getSessionTaskIndex, recordSessionTask } from "#tasks/session-index.js";
+import {
+  getBackgroundWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 vi.mock("#execution/tools/subagent/steer.js", () => ({ steerBackgroundAgent: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   sendTaskCommand: vi.fn(async () => "delivered"),
@@ -44,12 +47,16 @@ const handle = {
   phase: "claimed" as const,
 };
 const entry = {
-  createdByTurnId: "turn-1",
-  dispatchContext: { auth: { current: null, initiator: null } },
-  metadata: { agentId: identity.id, kind: "subagent", name: identity.name },
-  taskId: handle.ownerId,
-  taskInboxToken: "original-task-inbox",
-  taskRunId: "original-task-run",
+  callId: handle.ownerId,
+  toolName: { agentId: identity.id, kind: "subagent", name: identity.name }.name,
+  lifetime: "session" as const,
+  origin: { turnId: "turn-1", stepIndex: 0 },
+  address: { runId: "original-task-run", hookToken: "original-task-inbox" },
+  task: {
+    dispatchContext: { auth: { current: null, initiator: null } },
+    metadata: { agentId: identity.id, kind: "subagent", name: identity.name },
+    taskId: handle.ownerId,
+  },
 };
 
 function createSession(owned = true): HarnessSession {
@@ -64,7 +71,7 @@ function createSession(owned = true): HarnessSession {
     },
     { sessionStarted: true, sequence: 2, stepIndex: 0, turnId: "turn-2" },
   );
-  return owned ? recordSessionTask(session, entry) : session;
+  return owned ? registerWorkflowToolRun(session, entry) : session;
 }
 
 async function createScope(
@@ -91,15 +98,15 @@ async function createScope(
       callId = "steering-call",
       agentId: string | undefined = identity.id,
       name = identity.name,
-      resultKind: "subagent" | "tool" = "subagent",
+      kind: "subagent" | "tool" = "subagent",
+
       label?: (input: unknown) => string,
     ) {
       const definition = {
         execute: vi.fn(),
         label: label === undefined ? undefined : { start: label },
         name,
-        nodeId: identity.nodeId,
-        resultKind,
+        nodeId: kind === "subagent" ? identity.nodeId : undefined,
         workflowId: "research-workflow",
       };
       const toolInput = { agentId, message: "Use the updated instruction" };
@@ -138,10 +145,10 @@ describe("background subagent steering", () => {
         input: { agentId: identity.id, message: "Use the updated instruction" },
       }),
     );
-    expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.taskId });
+    expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.task.taskId });
     const session = await scope.commit();
     expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
-    expect(getSessionTaskIndex(session.state)).toEqual([entry]);
+    expect(getBackgroundWorkflowToolRuns(session.state)).toEqual([entry]);
     expect(startTaskRun).not.toHaveBeenCalled();
     expect(waitForTaskCommandOwner).not.toHaveBeenCalled();
     expect(sendTaskCommand).not.toHaveBeenCalled();
@@ -171,26 +178,30 @@ describe("background subagent steering", () => {
 
     await scope.execute("new-call", "");
     const committed = await scope.commit();
-    const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
-    expect(task?.dispatchContext).toEqual({
+    expect(task?.task.dispatchContext).toEqual({
       auth: { current: creatorCurrent, initiator: creatorInitiator },
     });
     if (task === undefined) throw new Error("Expected created task");
-    const replayed = recordSessionTask(committed, {
+    const replayed = registerWorkflowToolRun(committed, {
       ...task,
-      dispatchContext: {
-        auth: {
-          current: { ...creatorCurrent, principalId: "later-current" },
-          initiator: { ...creatorInitiator, principalId: "later-initiator" },
+      task: {
+        ...task.task,
+        dispatchContext: {
+          auth: {
+            current: { ...creatorCurrent, principalId: "later-current" },
+            initiator: { ...creatorInitiator, principalId: "later-initiator" },
+          },
         },
       },
     });
     expect(
-      getSessionTaskIndex(replayed.state).find((candidate) => candidate.taskId === task.taskId)
-        ?.dispatchContext,
+      getBackgroundWorkflowToolRuns(replayed.state).find(
+        (candidate) => candidate.task.taskId === task.task.taskId,
+      )?.task.dispatchContext,
     ).toEqual({ auth: { current: creatorCurrent, initiator: creatorInitiator } });
   });
 
@@ -209,18 +220,18 @@ describe("background subagent steering", () => {
 
     await scope.execute("new-call", "");
     const committed = await scope.commit();
-    const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
-    expect(task?.dispatchContext).toEqual({
+    expect(task?.task.dispatchContext).toEqual({
       auth: { current: null, initiator: sessionInitiator },
     });
   });
 
   it.each(["subagent", "tool"] as const)(
-    "persists agent-backed activity identity only (%s)",
-    async (resultKind) => {
+    "retains activity identity for parent-owned settlement (%s)",
+    async (kind) => {
       const activityObserver = {
         sink: { url: "https://parent.example/activity", version: 1 as const },
         workIdentity: {
@@ -232,18 +243,14 @@ describe("background subagent steering", () => {
       };
       const scope = await createScope(createSession(), activityObserver);
 
-      await scope.execute("new-call", "", identity.name, resultKind);
+      await scope.execute("new-call", "", identity.name, kind);
       const committed = await scope.commit();
-      const task = getSessionTaskIndex(committed.state).find(
-        (candidate) => candidate.taskId !== entry.taskId,
+      const task = getBackgroundWorkflowToolRuns(committed.state).find(
+        (candidate) => candidate.task.taskId !== entry.task.taskId,
       );
 
       expect(task).toBeDefined();
-      if (resultKind === "tool") {
-        expect(task?.activityWorkIdentity).toBeUndefined();
-        return;
-      }
-      expect(task?.activityWorkIdentity).toMatchObject({
+      expect(task?.task.activityWorkIdentity).toMatchObject({
         callId: "new-call",
         kind: "task",
         name: "research",
@@ -278,13 +285,15 @@ describe("background subagent steering", () => {
       }),
     );
     const committed = await scope.commit();
-    const task = getSessionTaskIndex(committed.state).find(
-      (candidate) => candidate.taskId !== entry.taskId,
+    const task = getBackgroundWorkflowToolRuns(committed.state).find(
+      (candidate) => candidate.task.taskId !== entry.task.taskId,
     );
 
     expect(task).toMatchObject({
-      activityWorkIdentity: { label: "Investigator", name: "research" },
-      metadata: { name: "research" },
+      task: {
+        activityWorkIdentity: { label: "Investigator", name: "research" },
+        metadata: { name: "research" },
+      },
     });
   });
 
@@ -296,9 +305,9 @@ describe("background subagent steering", () => {
 
   it("does not steer a task associated with another child", async () => {
     const scope = await createScope(
-      recordSessionTask(createSession(), {
+      registerWorkflowToolRun(createSession(), {
         ...entry,
-        metadata: { ...entry.metadata, agentId: "another-child" },
+        task: { ...entry.task, metadata: { ...entry.task.metadata, agentId: "another-child" } },
       }),
     );
     await expect(scope.execute()).rejects.toThrow("AGENT_BUSY");
@@ -379,8 +388,8 @@ describe("background subagent steering", () => {
     const scope = await createScope();
     const receipts = await Promise.all([scope.execute("first-call"), scope.execute("second-call")]);
     expect(receipts).toEqual([
-      { agentId: identity.id, status: "working", taskId: entry.taskId },
-      { agentId: identity.id, status: "working", taskId: entry.taskId },
+      { agentId: identity.id, status: "working", taskId: entry.task.taskId },
+      { agentId: identity.id, status: "working", taskId: entry.task.taskId },
     ]);
     expect(steerBackgroundAgent).toHaveBeenCalledTimes(2);
     expect(startTaskRun).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { CancelTurnResult } from "#channel/types.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -9,7 +10,11 @@ import {
 } from "#subagents/remote-dispatch.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { getWorkflowToolRuns, type WorkflowToolRunRecord } from "#harness/workflow-tool-runs.js";
+import {
+  getBlockingWorkflowToolRuns,
+  type BlockingWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
+
 import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -37,11 +42,15 @@ export async function cancelDescendantTurnsStep(input: {
   "use step";
 
   let running: readonly RunningAgentHandle[];
-  let workflowToolRuns: readonly WorkflowToolRunRecord[];
+  let workflowToolRuns: readonly BlockingWorkflowToolRun[];
   try {
     const session = readDurableSession(input.sessionState);
-    workflowToolRuns = getWorkflowToolRuns(session.state);
-    const workflowOwnerIds = new Set(workflowToolRuns.map((run) => run.runId));
+    workflowToolRuns = getBlockingWorkflowToolRuns(
+      session.state,
+      getPendingCoordinationBatch(session.state)?.event.turnId ??
+        input.sessionState.emissionState.turnId,
+    );
+    const workflowOwnerIds = new Set(workflowToolRuns.map((run) => run.address.runId));
     running = (getAgentHandleStore(session.state)?.handles ?? []).filter(
       (handle): handle is RunningAgentHandle =>
         handle.phase === "running" ||
@@ -53,13 +62,6 @@ export async function cancelDescendantTurnsStep(input: {
     });
     return;
   }
-
-  await Promise.all(
-    workflowToolRuns.map((record) =>
-      cancelWorkflowToolRun(record, "The turn that called the tool was cancelled."),
-    ),
-  );
-  if (running.length === 0) return;
 
   let remoteContext:
     | Promise<{
@@ -73,13 +75,16 @@ export async function cancelDescendantTurnsStep(input: {
       registry: ctx.require(BundleKey).subagentRegistry.subagentsByNodeId,
     })));
 
-  await Promise.all(
-    running.map((handle) =>
+  await Promise.all([
+    ...workflowToolRuns.map((record) =>
+      cancelWorkflowToolRun(record.address, "The turn that called the tool was cancelled."),
+    ),
+    ...running.map((handle) =>
       handle.address.kind === "agent/remote"
         ? cancelRemoteDescendant({ handle, remoteContext: getRemoteContext() })
         : cancelLocalDescendant({ handle }),
     ),
-  );
+  ]);
 }
 
 async function cancelLocalDescendant(input: {

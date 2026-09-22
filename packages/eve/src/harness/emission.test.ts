@@ -579,7 +579,7 @@ describe("emitStreamContent action requests", () => {
           description: "Delegate work to a subagent.",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
-          resultKind: "subagent",
+          nodeId: "subagents/researcher",
           workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],
@@ -718,7 +718,7 @@ describe("emitStreamContent action requests", () => {
     ]);
   });
 
-  it("marks a background subagent receipt on subagent.completed", async () => {
+  it("returns a background receipt without announcing subagent completion", async () => {
     const emit = createEmitStub();
     const tools = new Map<string, HarnessToolDefinition>([
       [
@@ -728,7 +728,7 @@ describe("emitStreamContent action requests", () => {
           execution: "background",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
-          resultKind: "subagent",
+          nodeId: "subagents/researcher",
           workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],
@@ -756,71 +756,12 @@ describe("emitStreamContent action requests", () => {
     );
 
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual([
-      "actions.requested",
-      "subagent.completed",
-      "action.result",
-    ]);
+    expect(events.map((event) => event.type)).toEqual(["actions.requested", "action.result"]);
     expect(events[1]).toMatchObject({
       data: {
-        backgroundTask: { status: "working", taskId: "task-1" },
-        callId: "call-delegate",
-        subagentName: "delegate",
+        result: { callId: "call-delegate", output: { status: "working", taskId: "task-1" } },
       },
-      type: "subagent.completed",
-    });
-  });
-
-  it("marks a background subagent receipt on subagent.completed", async () => {
-    const emit = createEmitStub();
-    const tools = new Map<string, HarnessToolDefinition>([
-      [
-        "delegate",
-        {
-          description: "Delegate work to a subagent.",
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "delegate",
-          resultKind: "subagent",
-          workflowId: "workflow//./agent/subagents/researcher//execute",
-        },
-      ],
-    ]);
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          input: { message: "research the release" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-call",
-        },
-        {
-          output: { status: "working", taskId: "task-1" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-result",
-        },
-        { finishReason: "tool-calls", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-      { excludedActionToolNames: new Set(), tools },
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual([
-      "actions.requested",
-      "subagent.completed",
-      "action.result",
-    ]);
-    expect(events[1]).toMatchObject({
-      data: {
-        backgroundTask: { status: "working", taskId: "task-1" },
-        callId: "call-delegate",
-        subagentName: "delegate",
-      },
-      type: "subagent.completed",
+      type: "action.result",
     });
   });
 

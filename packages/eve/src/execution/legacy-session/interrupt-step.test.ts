@@ -23,10 +23,10 @@ function fixture(turnId = ""): PreparedLegacySession {
     history: [],
     agent: { system: "old" },
     state: {
-      "eve.runtime.workflowToolRuns": [
-        { runId: "tool-run", callId: "call", toolName: "tool", hookToken: "tool-hook" },
-      ],
       "eve.harness.emission": { sessionStarted: true, turnId, sequence: 4, stepIndex: 2 },
+      "eve.runtime.workflowToolRuns": [
+        { callId: "call", toolName: "tool", runId: "tool-run", hookToken: "tool-hook" },
+      ],
     },
   };
   return {
@@ -68,6 +68,19 @@ describe("legacy pending work", () => {
     ).toBe(false);
     expect(mocks.settle).not.toHaveBeenCalled();
   });
+  it("discovers both pre-registry formats during conversation import", async () => {
+    const prepared = fixture();
+    const originalSession = {
+      ...prepared.originalSession,
+      state: {
+        "eve.runtime.workflowToolRuns": [{ runId: "waiting-old" }],
+        "eve.tasks": { version: 2, tasks: [{ taskRunId: "task-old" }] },
+      },
+    };
+    await interruptLegacySessionStep({ ...prepared, originalSession });
+    expect(mocks.cancel.mock.calls.map((call) => call[1])).toEqual(["waiting-old", "task-old"]);
+  });
+
   it("settles an open turn once after stopping its work", async () => {
     const prepared = fixture("turn_4");
     mocks.settle.mockResolvedValue({ sessionState: prepared.sessionState, serializedContext: {} });

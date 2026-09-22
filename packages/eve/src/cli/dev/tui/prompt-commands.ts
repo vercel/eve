@@ -44,22 +44,13 @@ interface PromptCommandDefinition extends PromptCommandSpec {
  * transcript-echo suppression, and command discovery cannot drift apart.
  */
 const PROMPT_COMMAND_DEFINITIONS = [
-  // `help` leads so that the typeahead's default highlight — what a bare `/`
-  // plus Enter submits — is the safest command, not session-resetting `/reset`.
   {
-    name: "help",
+    name: "model",
     aliases: [],
-    description: "Show available commands",
-    takesArgument: false,
-    build: () => ({ type: "help" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "info",
-    aliases: [],
-    description: "Show application and messaging information",
-    takesArgument: false,
-    build: () => ({ type: "info" }),
+    description: "Choose a model, speed, and reasoning",
+    argumentHint: "[provider/model]",
+    takesArgument: true,
+    build: (argument) => ({ type: "extension", name: "model", argument }),
     targets: ["local"],
   },
   {
@@ -68,14 +59,6 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Start a fresh session",
     takesArgument: false,
     build: () => ({ type: "reset" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "cancel",
-    aliases: [],
-    description: "Cancel the running turn",
-    takesArgument: false,
-    build: () => ({ type: "cancel" }),
     targets: ["local", "remote"],
   },
   {
@@ -95,38 +78,19 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
+    name: "cancel",
+    aliases: [],
+    description: "Cancel the running turn",
+    takesArgument: false,
+    build: () => ({ type: "cancel" }),
+    targets: ["local", "remote"],
+  },
+  {
     name: "login",
     aliases: [],
     description: "Connect a model provider",
     takesArgument: false,
     build: () => ({ type: "extension", name: "login", argument: "" }),
-    targets: ["local"],
-  },
-  {
-    name: "model",
-    aliases: [],
-    description: "Choose a model and its settings",
-    argumentHint: "[provider/model]",
-    takesArgument: true,
-    build: (argument) => ({ type: "extension", name: "model", argument }),
-    targets: ["local"],
-  },
-  {
-    name: "loglevel",
-    aliases: [],
-    description: "Show or hide captured stdout/stderr/sandbox logs",
-    argumentHint: "[all|stderr|sandbox|none]",
-    takesArgument: true,
-    build: (argument) => ({ type: "loglevel", argument }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "traces",
-    aliases: [],
-    description: "Open the local trace viewer",
-    argumentHint: "[trace]",
-    takesArgument: true,
-    build: (argument) => ({ type: "traces", argument }),
     targets: ["local"],
   },
   {
@@ -146,6 +110,40 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local"],
   },
   {
+    name: "traces",
+    aliases: [],
+    description: "Open the local trace viewer",
+    argumentHint: "[trace]",
+    takesArgument: true,
+    build: (argument) => ({ type: "traces", argument }),
+    targets: ["local"],
+  },
+  {
+    name: "loglevel",
+    aliases: [],
+    description: "Show or hide captured stdout/stderr/sandbox logs",
+    argumentHint: "[all|stderr|sandbox|none]",
+    takesArgument: true,
+    build: (argument) => ({ type: "loglevel", argument }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "info",
+    aliases: [],
+    description: "Show application and messaging information",
+    takesArgument: false,
+    build: () => ({ type: "info" }),
+    targets: ["local"],
+  },
+  {
+    name: "help",
+    aliases: [],
+    description: "Show available commands",
+    takesArgument: false,
+    build: () => ({ type: "help" }),
+    targets: ["local", "remote"],
+  },
+  {
     name: "exit",
     aliases: ["quit"],
     description: "Quit the TUI",
@@ -158,9 +156,17 @@ const PROMPT_COMMAND_DEFINITIONS = [
 export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = PROMPT_COMMAND_DEFINITIONS;
 
 export function promptCommandsFor(target: PromptCommandTarget): readonly PromptCommandSpec[] {
-  return PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
+  const commands = PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
     definition.targets.some((supportedTarget) => supportedTarget === target),
   );
+  // Remote sessions have no model picker, so keep bare `/` from defaulting to reset.
+  if (target === "remote") {
+    return [
+      ...commands.filter((command) => command.name === "help"),
+      ...commands.filter((command) => command.name !== "help"),
+    ];
+  }
+  return commands;
 }
 
 /** Whether a command runs against this target — the one authority dispatch shares with discovery. */

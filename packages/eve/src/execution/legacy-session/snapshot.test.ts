@@ -9,7 +9,7 @@ describe("conversation import", () => {
       history: [{ role: "user", content: "Alice chose blue." }],
       agent: { system: "old prompt" },
       limits: { maxInputTokensPerSession: 40 },
-      sandboxState: { initialized: false, session: null },
+      sandboxState: { session: null },
       state: {
         "app.color": "blue",
         "eve.runtime.pendingCoordinationBatch": { callId: "old" },

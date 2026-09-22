@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import assert from "node:assert/strict";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
@@ -41,7 +42,7 @@ export default ["first", "later"].map((launchTurn) =>
 
 function expectFiveReviewers(started: EveEvalTurn) {
   expectHealthyTurn(started);
-  started.calledSubagent("reviewer", { count: 5 });
+  started.calledSubagent("reviewer", { status: "working", count: 5 });
   const launchSteps = started.events
     .filter((event) => event.type === "actions.requested")
     .flatMap(({ data }) =>
@@ -52,9 +53,7 @@ function expectFiveReviewers(started: EveEvalTurn) {
   assert.equal(launchSteps.length, 5, "five reviewer requests");
   assert.equal(new Set(launchSteps).size, 1, "all five reviewers launch in one model step");
 
-  const taskIds = started.events
-    .filter((event) => event.type === "subagent.completed")
-    .flatMap(({ data }) => (data.backgroundTask ? [data.backgroundTask.taskId] : []));
+  const taskIds = taskReceipts(started.events).map(({ taskId }) => taskId);
   assert.equal(taskIds.length, 5, "five background task receipts");
   assert.equal(new Set(taskIds).size, 5, "five distinct background tasks");
   return taskIds;

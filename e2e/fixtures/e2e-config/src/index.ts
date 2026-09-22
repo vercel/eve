@@ -1,6 +1,8 @@
 import type { AgentDefinition, AgentStaticModelDefinition } from "eve";
 import { mockModel, type MockModelResponder } from "eve/evals";
 
+export { e2eJudgeModel } from "./judge.js";
+
 /**
  * Sentinel value for `EVE_E2E_MODEL` that makes fixtures author a
  * deterministic `mockModel()` instead of a real gateway model. The world
@@ -90,21 +92,6 @@ export function e2eSubagentConfig(options?: E2EModelOptions): E2ESubagentConfig 
   }
 
   return { model, modelContextWindowTokens: MOCK_MODEL_CONTEXT_WINDOW_TOKENS };
-}
-
-/**
- * Resolves the judge model for a fixture's `evals.config.ts`. Judge
- * assertions only run in the model suite, so the mock sentinel falls back to
- * the harness default rather than leaking `"mock"` as a gateway model id.
- */
-export function e2eJudgeModel(): string {
-  const requested = process.env.EVE_E2E_MODEL;
-
-  if (requested === undefined || requested === MOCK_MODEL_SENTINEL) {
-    return DEFAULT_MODEL;
-  }
-
-  return requested;
 }
 
 const defaultMockResponder: MockModelResponder = ({ lastUserMessage }) =>

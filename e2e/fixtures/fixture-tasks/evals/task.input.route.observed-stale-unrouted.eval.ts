@@ -18,7 +18,7 @@ export default defineTaskEval({
     dimensions: { transport: "local" },
   },
   async test(t) {
-    const started = await t.send("TASK-INPUT-BATCH-ORDERING");
+    const started = await t.send("TASK-INPUT-BATCH-ORDERING", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     const taskId = requireBackgroundTaskId(started);
 

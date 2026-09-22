@@ -30,11 +30,11 @@ export async function computeDevelopmentHostFingerprint(
           sourceRoot: mount.sourceRoot,
         }))
         .sort((left, right) => left.sourceRoot.localeCompare(right.sourceRoot)),
-      sandboxBackends: [
+      sandboxProviders: [
         ...new Set(
           agentNodes
-            .map((node) => node.sandbox?.backendName)
-            .filter((backendName): backendName is string => backendName !== undefined),
+            .map((node) => node.sandbox?.providerName)
+            .filter((providerName): providerName is string => providerName !== undefined),
         ),
       ].sort((left, right) => left.localeCompare(right)),
     },

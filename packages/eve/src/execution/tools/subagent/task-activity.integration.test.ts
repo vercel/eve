@@ -12,7 +12,7 @@ import {
 } from "#execution/activity-work.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import { projectSessionActivity } from "#execution/session-activity-projection.js";
-import { projectTaskActivity } from "#execution/tasks/child/steps.js";
+import { projectTaskActivity } from "#execution/tasks/child/notify.js";
 import { startSubagent, type SubagentStartTarget } from "#execution/tools/subagent/start.js";
 import type { ActivityEventV1, ActivitySnapshotV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";

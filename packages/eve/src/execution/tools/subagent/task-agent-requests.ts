@@ -1,5 +1,5 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
@@ -8,7 +8,6 @@ import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
 export interface AgentRequestDelivery {
-  readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
   readonly request: TaskAgentRequestDelivery["request"];
@@ -39,15 +38,29 @@ export async function applyTaskAgentRequest(
   switch (request.kind) {
     case "agent-settled": {
       const settled = await settleTaskAgentInvocationStep({
-        accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
         serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
+      let serializedContext = settled.serializedContext;
+      if (settled.completion !== undefined) {
+        const emitted = await emitSubagentEventStep({
+          event: settled.completion,
+          sessionWritable: ctx.sessionWritable,
+          serializedContext,
+          sessionState: settled.sessionState,
+        });
+        serializedContext = emitted.serializedContext;
+      }
+      await resumeHookStep(
+        delivery.replyTo,
+        { kind: "agent-settled", callId: request.result.callId },
+        { ifPresent: true },
+      );
       return {
-        serializedContext: settled.serializedContext,
+        serializedContext,
         sessionState: settled.sessionState,
       };
     }
@@ -62,10 +75,11 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitTaskSubagentCalledStep({
+          const emitted = await emitSubagentEventStep({
             event: dispatched.event,
             sessionWritable: ctx.sessionWritable,
             serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
+            sessionState: dispatched.sessionState,
           });
           return {
             serializedContext: emitted.serializedContext,

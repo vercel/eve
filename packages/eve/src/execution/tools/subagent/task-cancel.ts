@@ -11,30 +11,13 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.agent-invocation-cancel");
 
-/** Cancels the active child turn owned by a background subagent task. */
+/** Cancels all child turns still owned by a background task. */
 export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
   if (input.session === undefined || input.serializedContext === undefined) return;
-  const session = input.session as RuntimeSession;
-  const handle = getAgentHandleStore(session.state)?.handles.find(
-    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.entry.taskId,
-  );
-  if (handle === undefined || handle.phase !== "claimed") return;
-  if (handle.address.kind !== "agent/remote") {
-    await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
-    return;
-  }
-  const ctx = await deserializeContext(input.serializedContext);
-  const bundle = ctx.require(BundleKey);
-  const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
-  const remote = resolveRemoteAgentForAction({
-    dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-    nodeId: handle.identity.nodeId,
-    registry: bundle.subagentRegistry.subagentsByNodeId,
-    remoteAgentName: handle.identity.name,
-  });
-  await cancelRemoteAgentTurn({
-    remote: { ...remote, url: handle.address.url },
-    sessionId: handle.address.sessionId,
+  await cancelAgentInvocationOwner({
+    ownerId: input.entry.task.taskId,
+    serializedContext: input.serializedContext,
+    session: input.session,
   });
 };
 
@@ -46,41 +29,54 @@ export async function cancelAgentInvocationOwnerStep(input: {
 }): Promise<void> {
   "use step";
 
-  const session = readDurableSession(input.sessionState);
-  const handles = (getAgentHandleStore(session.state)?.handles ?? []).filter(
+  try {
+    await cancelAgentInvocationOwner({
+      ownerId: input.ownerId,
+      serializedContext: input.serializedContext,
+      session: readDurableSession(input.sessionState),
+    });
+  } catch (error) {
+    logError(log, "failed to cancel workflow-owned agent turn", error, { ownerId: input.ownerId });
+  }
+}
+
+async function cancelAgentInvocationOwner(input: {
+  readonly ownerId: string;
+  readonly serializedContext: Record<string, unknown>;
+  readonly session: Pick<RuntimeSession, "state">;
+}): Promise<void> {
+  const handles = (getAgentHandleStore(input.session.state)?.handles ?? []).filter(
     (candidate): candidate is Extract<AgentHandle, { phase: "claimed" }> =>
       candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
   );
   if (handles.length === 0) return;
-  const remoteContext = handles.some((handle) => handle.address.kind === "agent/remote")
-    ? await deserializeContext(input.serializedContext)
-    : undefined;
-  await Promise.all(
+  let remoteContext: ReturnType<typeof deserializeContext> | undefined;
+  const results = await Promise.allSettled(
     handles.map(async (handle) => {
-      try {
-        if (handle.address.kind !== "agent/remote") {
-          await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
-          return;
-        }
-        const bundle = remoteContext!.require(BundleKey);
-        const selection = getDynamicSubagentSelection(remoteContext!, handle.identity.nodeId);
-        const remote = resolveRemoteAgentForAction({
-          dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-          nodeId: handle.identity.nodeId,
-          registry: bundle.subagentRegistry.subagentsByNodeId,
-          remoteAgentName: handle.identity.name,
-        });
-        await cancelRemoteAgentTurn({
-          remote: { ...remote, url: handle.address.url },
-          sessionId: handle.address.sessionId,
-        });
-      } catch (error) {
-        logError(log, "failed to cancel workflow-owned agent turn", error, {
-          agentId: handle.identity.id,
-          childSessionId: handle.address.sessionId,
-          ownerId: input.ownerId,
-        });
+      if (handle.address.kind !== "agent/remote") {
+        await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
+        return;
       }
+      remoteContext ??= deserializeContext(input.serializedContext);
+      const ctx = await remoteContext;
+      const bundle = ctx.require(BundleKey);
+      const selection = getDynamicSubagentSelection(ctx, handle.identity.nodeId);
+      const remote = resolveRemoteAgentForAction({
+        dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
+        nodeId: handle.identity.nodeId,
+        registry: bundle.subagentRegistry.subagentsByNodeId,
+        remoteAgentName: handle.identity.name,
+      });
+      await cancelRemoteAgentTurn({
+        remote: { ...remote, url: handle.address.url },
+        sessionId: handle.address.sessionId,
+      });
     }),
   );
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0)
+    throw new AggregateError(
+      failures.map((result) => result.reason),
+      "Failed to cancel owned agent turns.",
+    );
 }

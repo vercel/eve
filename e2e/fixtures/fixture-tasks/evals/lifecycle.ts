@@ -57,7 +57,7 @@ export function lifecycleDriver(t: EveEvalContext, key: string) {
     controls,
     taskIds,
     async start(message: string) {
-      const turn = (await t.send(message)).expectOk();
+      const turn = (await t.send(message, { taskDeliveryPolicy: "cohort" })).expectOk();
       sessionId = turn.sessionId;
       streamIndex = requireSessionStreamIndex(turn.session, "Lifecycle setup");
       return record(turn);
@@ -80,7 +80,7 @@ export function lifecycleDriver(t: EveEvalContext, key: string) {
         equals({
           marker,
           status: "completed",
-          deliveries: agent ? ["agent-request", "agent-request", "completed"] : ["completed"],
+          notificationCount: agent ? 3 : 1,
         }),
       );
     },

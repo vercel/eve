@@ -1,3 +1,4 @@
+import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
@@ -31,7 +32,10 @@ import {
   abandonRunningAgentTurns,
 } from "#subagents/handles/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
-import { clearWorkflowToolRuns, getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import {
+  removeBlockingWorkflowToolRuns,
+  getBlockingWorkflowToolRuns,
+} from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import {
@@ -142,10 +146,13 @@ export async function settleCancelledTurnStep(input: {
   // gone, so a child settlement can never reach this store again. This is the
   // last write that can park turn-owned `running` and workflow-owned `claimed`
   // handles.
-  const workflowToolRuns = getWorkflowToolRuns(session.state);
+  const owningTurnId =
+    getPendingCoordinationBatch(session.state)?.event.turnId ??
+    input.sessionState.emissionState.turnId;
+  const workflowToolRuns = getBlockingWorkflowToolRuns(session.state, owningTurnId);
   session = abandonAgentInvocationOwners(
     session,
-    new Set(workflowToolRuns.map((run) => run.runId)),
+    new Set(workflowToolRuns.map((run) => run.address.runId)),
   );
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
@@ -153,8 +160,9 @@ export async function settleCancelledTurnStep(input: {
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingCoordinationBatch(
-            clearWorkflowToolRuns(
+            removeBlockingWorkflowToolRuns(
               abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+              owningTurnId,
             ),
           ),
         ),

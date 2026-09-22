@@ -22,12 +22,14 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-CANCEL-SETUP");
+    const started = await t.send("TASK-CANCEL-SETUP", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-CANCEL-READY");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "fanout-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "fanout-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 

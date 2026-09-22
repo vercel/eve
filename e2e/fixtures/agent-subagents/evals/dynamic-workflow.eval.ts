@@ -48,7 +48,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
-    turn.calledSubagent("echo-marker", { count: 2, status: "pending" });
+    turn.calledSubagent("echo-marker", { count: 2, status: "completed" });
     firstChildTurn.eventsSatisfy(
       "first child does not complete before both children start",
       (events) =>

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createMicrosandboxSandboxBackend } from "#execution/sandbox/bindings/microsandbox.js";
 import {
   createMicrosandboxNetworkPlan,
   createTransformBrokerEnvironment,
@@ -23,13 +22,9 @@ vi.mock("#execution/sandbox/bindings/microsandbox-lifecycle.js", () => lifecycle
 // glibc Linux only; keep every microsandbox suite off Windows.
 const onWindows = process.platform === "win32";
 
-describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
+describe.skipIf(onWindows)("microsandbox provider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("exposes the stable backend name without loading microsandbox", () => {
-    expect(createMicrosandboxSandboxBackend().name).toBe("microsandbox");
   });
 
   it("defaults to eve's published sandbox runtime image", () => {
@@ -44,32 +39,6 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
     const noInstall = resolveMicrosandboxOptions({ setup: { autoInstall: false } });
     expect(base.setup.autoInstall).toBe(true);
     expect(noInstall.setup.autoInstall).toBe(false);
-  });
-
-  it("adds version-skew guidance to database failures during prewarm", async () => {
-    const cause = Object.assign(
-      new Error("Migration file of version 'm20260606_000001_named_volume_kinds' is missing"),
-      { code: "database" },
-    );
-    lifecycleMocks.prewarmMicrosandboxTemplate.mockRejectedValueOnce(cause);
-
-    const prewarm = createMicrosandboxSandboxBackend().prewarm?.({
-      runtimeContext: { appRoot: "/tmp/eve-app" },
-      seedFiles: [],
-      templateKey: "template-key",
-    });
-
-    await expect(prewarm).rejects.toMatchObject({
-      cause,
-      message: expect.stringContaining(
-        'Failed to prewarm microsandbox template "template-key" [database]: ' +
-          "Migration file of version 'm20260606_000001_named_volume_kinds' is missing.",
-      ),
-      // The per-code remediation travels as a structured hint, not prose.
-      hint:
-        "Check that the microsandbox npm package and installed VM runtime use the same version. " +
-        "If versions changed, use a clean MSB_HOME or migrate the existing database.",
-    });
   });
 });
 

@@ -4,7 +4,6 @@ import {
   formatCompactTokenCount,
   formatTokenFlow,
   formatTurnDuration,
-  typewriterText,
   isIncompletePaste,
   nextKey,
   parseKey,
@@ -75,16 +74,6 @@ describe("formatTokenFlow", () => {
   });
 });
 
-describe("typewriterText", () => {
-  it("reveals one character per step, then holds the full text", () => {
-    expect(typewriterText("Working…", 0, 80)).toBe("W");
-    expect(typewriterText("Working…", 79, 80)).toBe("W");
-    expect(typewriterText("Working…", 160, 80)).toBe("Wor");
-    expect(typewriterText("Working…", 560, 80)).toBe("Working…");
-    expect(typewriterText("Working…", 60_000, 80)).toBe("Working…");
-  });
-});
-
 describe("formatTurnDuration", () => {
   it("scales through seconds, minutes, and hours", () => {
     expect(formatTurnDuration(400)).toBe("1s");
@@ -112,9 +101,13 @@ describe("nextKey", () => {
     expect(nextKey("\x1bO")).toEqual({ consumed: 0, incomplete: true });
   });
 
-  it("decodes Alt+B/F as complete readline word-movement chords", () => {
+  it("decodes Alt+B/F/Y and Alt+Backspace as complete readline chords", () => {
     expect(nextKey("\x1bb")).toEqual({ key: { type: "alt-b" }, consumed: 2 });
     expect(nextKey("\x1bF")).toEqual({ key: { type: "alt-f" }, consumed: 2 });
+    expect(nextKey("\x1by")).toEqual({ key: { type: "alt-y" }, consumed: 2 });
+    expect(nextKey("\x1bY")).toEqual({ key: { type: "alt-y" }, consumed: 2 });
+    expect(nextKey("\x1b\x7f")).toEqual({ key: { type: "alt-backspace" }, consumed: 2 });
+    expect(nextKey("\x1b\b")).toEqual({ key: { type: "alt-backspace" }, consumed: 2 });
   });
 
   it("takes a printable run as a single character token", () => {
@@ -210,17 +203,25 @@ describe("parseKey", () => {
     expect(parseKey(Buffer.from("\r"))).toEqual({ type: "enter" });
   });
 
-  it("decodes ctrl-b/f/n/p for emacs-style navigation", () => {
+  it("decodes ctrl-b/f/n/p/y for emacs-style editing", () => {
     expect(parseKey(Buffer.from("\u0002"))).toEqual({ type: "ctrl-b" });
     expect(parseKey(Buffer.from("\u0006"))).toEqual({ type: "ctrl-f" });
     expect(parseKey(Buffer.from("\u000e"))).toEqual({ type: "ctrl-n" });
     expect(parseKey(Buffer.from("\u0010"))).toEqual({ type: "ctrl-p" });
+    expect(parseKey(Buffer.from("\u0019"))).toEqual({ type: "ctrl-y" });
   });
 
   it("decodes common modified-arrow word-movement sequences", () => {
     expect(parseKey(Buffer.from("\x1b[1;3D"))).toEqual({ type: "alt-b" });
     expect(parseKey(Buffer.from("\x1b[1;5C"))).toEqual({ type: "alt-f" });
     expect(parseKey(Buffer.from("\x1b[5D"))).toEqual({ type: "alt-b" });
+  });
+
+  it("decodes kitty and xterm Alt+Backspace sequences", () => {
+    expect(parseKey(Buffer.from("\x1b[127;3u"))).toEqual({ type: "alt-backspace" });
+    expect(parseKey(Buffer.from("\x1b[8;3u"))).toEqual({ type: "alt-backspace" });
+    expect(parseKey(Buffer.from("\x1b[27;3;127~"))).toEqual({ type: "alt-backspace" });
+    expect(parseKey(Buffer.from("\x1b[27;3;8~"))).toEqual({ type: "alt-backspace" });
   });
 
   it("decodes SGR mouse press and release with cell coordinates", () => {

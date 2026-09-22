@@ -7,8 +7,7 @@ const FINAL = "SCHEDULED-EXPORT-DONE";
  * A schedule-launched turn that dispatches a background task sends no launch
  * acknowledgement even when it runs with a user principal: durable schedule
  * provenance keeps conditional delivery, so the
- * launching turn and the pending message wake both complete with a null
- * message, and only the settled wake delivers a report.
+ * launching turn completes with a null message, and only the settled wake delivers a report.
  */
 export default defineEval({
   description:
@@ -45,29 +44,8 @@ export default defineEval({
       data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
     });
 
-    // The executor's explicit message wakes the parent while the cohort is
-    // still pending; that wake stays silent too.
-    const updateLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(session, "update wait"),
-    });
-    const updateTurn = await updateLive.result();
-    updateTurn.expectOk();
-    updateTurn.event("message.completed", {
-      data: (data) => data.finishReason !== "tool-calls" && data.message === null,
-      count: 1,
-    });
-    updateTurn.notEvent("message.completed", {
-      data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
-    });
-    await t.require(
-      updateTurn.message,
-      satisfies((message) => message === undefined, "the pending message wake is silent"),
-    );
-
-    // Agent receives background task result after turn ended.
-    // Only the settled wake produces the single final non-null delivery.
     const doneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(updateLive.session, "completion wait"),
+      startIndex: requireStreamIndex(session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
@@ -88,21 +66,13 @@ export default defineEval({
       ),
     );
 
-    // Replay all three durable turns. Only the late report survives as assistant output.
+    // Replay both durable turns. Only the late report survives as assistant output.
     const replayedLaunch = await t.target.attachSession(sessionId);
-    const replayedUpdateLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(replayedLaunch, "replayed update"),
-    });
-    await replayedUpdateLive.result();
     const replayedDoneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(replayedUpdateLive.session, "replayed completion"),
+      startIndex: requireStreamIndex(replayedLaunch, "replayed completion"),
     });
     await replayedDoneLive.result();
-    const replayedEvents = [
-      ...replayedLaunch.events,
-      ...replayedUpdateLive.events,
-      ...replayedDoneLive.events,
-    ];
+    const replayedEvents = [...replayedLaunch.events, ...replayedDoneLive.events];
     await t.require(
       replayedEvents,
       satisfies(

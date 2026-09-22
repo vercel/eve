@@ -23,9 +23,9 @@ const CATALOG = {
       type: "language",
     },
     {
-      id: "openai/gpt-5.6-luna-fast",
-      name: "GPT-5.6 Luna Fast",
-      owned_by: "openai",
+      id: "spacexai/grok-4.7",
+      name: "Grok 4.7",
+      owned_by: "spacexai",
       tags: [],
       type: "language",
     },
@@ -49,11 +49,11 @@ describe("searchGatewayModels", () => {
   });
 
   it("uses the same language-model eligibility as /model", () => {
-    expect(searchGatewayModels(parseGatewayModelCatalog(CATALOG), "luna")).toEqual([
+    expect(searchGatewayModels(parseGatewayModelCatalog(CATALOG), "grok")).toEqual([
       {
-        id: "openai/gpt-5.6-luna-fast",
-        name: "GPT-5.6 Luna Fast",
-        provider: "openai",
+        id: "spacexai/grok-4.7",
+        name: "Grok 4.7",
+        provider: "spacexai",
       },
     ]);
     expect(searchGatewayModels(parseGatewayModelCatalog(CATALOG), "image")).toEqual([]);

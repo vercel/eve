@@ -1,5 +1,5 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
@@ -7,7 +7,6 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cacheTerminalTaskView } from "#tasks/session-index.js";
 import type { TaskView } from "#tasks/types.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -25,6 +24,9 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
   vi.mocked(cancelAllIndexedSessionTasksStep).mockReset();
+  vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
+    sessionState,
+  }));
 });
 
 interface ScriptedRead {
@@ -149,7 +151,7 @@ describe("nextTurnDelivery", () => {
       kind: "turn",
       delivery: {
         auth,
-        payloads: [...first.payloads, ...second.payloads],
+        payloads: [...report(first).payloads, ...report(second).payloads],
         deliveryMetadata: [
           first.deliveryMetadata![0],
           { ...second.deliveryMetadata![0], payloadIndex: 1 },
@@ -465,6 +467,28 @@ function completion(taskId: string): DeliverHookPayload {
   };
 }
 
+function terminalDelivery(taskId: string, status: "failed" | "cancelled"): DeliverHookPayload {
+  const view: TaskView = {
+    taskId,
+    metadata: { kind: "subagent", name: "worker" },
+    ...(status === "failed"
+      ? { status, lastOutput: { type: "error", data: "failed" } }
+      : { status }),
+  };
+  return {
+    kind: "deliver",
+    taskDeliveryId: `${taskId}:ready:${status}`,
+    payloads: [{ message: status, task: { views: [view] } }],
+  };
+}
+
+function report(delivery: DeliverHookPayload): DeliverHookPayload {
+  return {
+    ...delivery,
+    payloads: delivery.payloads.map(({ task: _task, ...payload }) => payload),
+  };
+}
+
 function batchingInput(count = 100, crossTurn = false) {
   const input = waitInput(createMockInbox([]));
   const taskSessionState = {
@@ -476,25 +500,33 @@ function batchingInput(count = 100, crossTurn = false) {
         history: [],
         agent: { system: "" },
         state: {
-          "eve.tasks": {
-            version: 2,
-            tasks: Array.from({ length: count }, (_, index) => ({
-              taskId: `task_${index}`,
-              cohortId: "task_0",
-              taskRunId: `run-${index}`,
-              taskInboxToken: `inbox-${index}`,
-              createdByTurnId: crossTurn ? `turn-${index + 1}` : "turn-1",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "subagent", name: "worker" },
-            })).concat([
-              {
-                taskId: "other-cohort",
-                cohortId: "other-cohort",
-                taskRunId: "other-run",
-                taskInboxToken: "other-inbox",
-                createdByTurnId: "turn-2",
+          "eve.workflowTool": {
+            version: 3,
+            runs: Array.from({ length: count }, (_, index) => ({
+              callId: `task_${index}`,
+              toolName: "worker",
+              lifetime: "session" as const,
+              origin: { turnId: crossTurn ? `turn-${index + 1}` : "turn-1", stepIndex: 0 },
+              address: { runId: `run-${index}`, hookToken: `inbox-${index}` },
+              task: {
+                taskId: `task_${index}`,
+                cohortId: "task_0",
                 dispatchContext: { auth: { current: null, initiator: null } },
                 metadata: { kind: "subagent", name: "worker" },
+              },
+            })).concat([
+              {
+                callId: "other-cohort",
+                toolName: "worker",
+                lifetime: "session" as const,
+                origin: { turnId: "turn-2", stepIndex: 0 },
+                address: { runId: "other-run", hookToken: "other-inbox" },
+                task: {
+                  taskId: "other-cohort",
+                  cohortId: "other-cohort",
+                  dispatchContext: { auth: { current: null, initiator: null } },
+                  metadata: { kind: "subagent", name: "worker" },
+                },
               },
             ]),
           },
@@ -506,7 +538,7 @@ function batchingInput(count = 100, crossTurn = false) {
   vi.mocked(routeDeliverToChildren).mockImplementation(
     async ({ delivery, sessionState, serializedContext }) => ({
       kind: "continue",
-      remainder: delivery,
+      remainder: report(delivery),
       sessionState,
       serializedContext,
     }),
@@ -518,6 +550,97 @@ describe("buffered task completion batching", () => {
   beforeEach(() => vi.mocked(routeDeliverToChildren).mockReset());
   afterEach(() => vi.mocked(routeDeliverToChildren).mockReset());
 
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "keeps routed %s remainders behind the cohort barrier",
+    async (status) => {
+      const input = batchingInput(2);
+      const original =
+        status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
+      const admission = input.queue.enqueueDelivery(original);
+      assert(admission !== undefined);
+      const routed = {
+        ...original,
+        payloads: original.payloads.map(({ task: _task, ...payload }) => payload),
+      };
+      input.queue.replaceDelivery(admission.sequence, routed);
+      const last = completion("task_1");
+      input.inbox = createMockInbox([
+        messageRead("still working"),
+        { result: { done: false, value: last } },
+      ]);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { payloads: [{ message: "still working" }] },
+      });
+      expect(input.queue.pendingCount).toBe(1);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: { payloads: [...routed.payloads, ...report(last).payloads] },
+      });
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "auto wakes for a %s outcome while its cross-turn sibling remains unfinished",
+    async (status) => {
+      const input = batchingInput(2, true);
+      await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
+      const first =
+        status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
+      input.queue.enqueueDelivery(first);
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        kind: "turn",
+        delivery: report(first),
+      });
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
+
+  it("auto combines ready siblings without waiting for the remaining task", async () => {
+    const input = batchingInput(3);
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
+    const first = completion("task_0");
+    const second = completion("task_1");
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(second);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: {
+        payloads: [...report(first).payloads, ...report(second).payloads],
+        taskDeliveryIds: [first.taskDeliveryId, second.taskDeliveryId],
+      },
+    });
+    expect(input.queue.pendingCount).toBe(0);
+    input.queue.enqueueDelivery(first);
+    expect(input.queue.pendingCount).toBe(0);
+  });
+
+  it("auto preserves intervening user input and deferred delivery boundaries", async () => {
+    const input = batchingInput(3);
+    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
+    const question = {
+      kind: "deliver",
+      payloads: [{ message: "Alice checks the status." }],
+    } as const;
+    const first = completion("task_0");
+    const second = completion("task_1");
+    input.queue.enqueueDelivery(first);
+    input.queue.enqueueDelivery(question);
+    input.queue.enqueueDelivery(second);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: question,
+    });
+    expect(
+      input.queue.takeNext(new Map(), { taskDeliveryPolicy: "auto", deferDeliveries: true }),
+    ).toBeUndefined();
+    expect(input.queue.pendingCount).toBe(2);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: { payloads: [...report(first).payloads, ...report(second).payloads] },
+    });
+  });
+
   it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
     const input = batchingInput();
     const deliveries = Array.from({ length: 100 }, (_, index) => completion(`task_${index}`));
@@ -528,7 +651,7 @@ describe("buffered task completion batching", () => {
       kind: "turn",
       delivery: {
         taskDeliveryId: "task_0:ready:completed",
-        payloads: deliveries.flatMap((delivery) => delivery.payloads),
+        payloads: deliveries.flatMap((delivery) => report(delivery).payloads),
         deliveryMetadata: deliveries.map((delivery, payloadIndex) => ({
           ...delivery.deliveryMetadata![0],
           payloadIndex,
@@ -536,12 +659,10 @@ describe("buffered task completion batching", () => {
       },
     });
     expect(queue.pendingCount).toBe(0);
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(101);
   });
 
   it.each([
-    ["failed", { ...completion("task_2"), taskDeliveryId: "task_2:ready:failed" }],
-    ["cancelled", { ...completion("task_2"), taskDeliveryId: "task_2:ready:cancelled" }],
     ["input request", { ...completion("task_2"), taskDeliveryId: "task_2:input:request-1" }],
     ["update", { ...completion("task_2"), taskDeliveryId: "task_2:update:1" }],
     ["other cohort", completion("other-cohort")],
@@ -568,7 +689,7 @@ describe("buffered task completion batching", () => {
       const later = completion("task_3");
       const queue = queueOf(first, second, boundary, later);
       const next = await nextTurnDelivery({ ...input, queue });
-      expect(next).toMatchObject({ kind: "turn", delivery: boundary });
+      expect(next).toMatchObject({ kind: "turn", delivery: report(boundary) });
       expect(queue.pendingCount).toBe(3);
     },
   );
@@ -592,14 +713,20 @@ describe("buffered task completion batching", () => {
         delivery: { payloads: [{ message: "user question" }] },
       });
       expect(input.queue.pendingCount).toBe(2);
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+      expect(routeDeliverToChildren).toHaveBeenCalledTimes(3);
 
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: { payloads: [...first.payloads, ...second.payloads, ...last.payloads] },
+        delivery: {
+          payloads: [
+            ...report(first).payloads,
+            ...report(second).payloads,
+            ...report(last).payloads,
+          ],
+        },
       });
       expect(input.queue.pendingCount).toBe(0);
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
+      expect(routeDeliverToChildren).toHaveBeenCalledTimes(5);
     },
   );
 
@@ -611,9 +738,9 @@ describe("buffered task completion batching", () => {
     );
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: deliveries.flatMap((delivery) => delivery.payloads) },
+      delivery: { payloads: deliveries.flatMap((delivery) => report(delivery).payloads) },
     });
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(1);
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(4);
   });
 
   it("routes intervening child settlement before releasing the completion cohort", async () => {
@@ -661,7 +788,7 @@ describe("buffered task completion batching", () => {
         kind: "continue",
         remainder: delivery.payloads.some((payload) => payload.task?.agentRequests !== undefined)
           ? undefined
-          : delivery,
+          : report(delivery),
         sessionState,
         serializedContext,
       }),
@@ -669,11 +796,13 @@ describe("buffered task completion batching", () => {
 
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: [...first.payloads, ...last.payloads] },
+      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
     });
     expect(vi.mocked(routeDeliverToChildren).mock.calls.map(([call]) => call.delivery)).toEqual([
+      first,
       settlement,
-      expect.objectContaining({ payloads: [...first.payloads, ...last.payloads] }),
+      last,
+      expect.objectContaining({ payloads: [...report(first).payloads, ...report(last).payloads] }),
     ]);
     expect(input.queue.pendingCount).toBe(0);
   });
@@ -686,10 +815,13 @@ describe("buffered task completion batching", () => {
     for (const delivery of [first, other, last]) input.queue.enqueueDelivery(delivery);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: [...first.payloads, ...last.payloads] },
+      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
     });
     expect(input.queue.pendingCount).toBe(1);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: other });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: report(other),
+    });
   });
 
   it.each(["clear", "compact", "reset", "session-timeout"] as const)(
@@ -705,7 +837,7 @@ describe("buffered task completion batching", () => {
         kind: kind === "session-timeout" ? "expired" : kind,
       });
       expect(input.queue.pendingCount).toBe(1);
-      expect(routeDeliverToChildren).not.toHaveBeenCalled();
+      expect(routeDeliverToChildren).toHaveBeenCalledOnce();
     },
   );
 
@@ -714,8 +846,45 @@ describe("buffered task completion batching", () => {
     const first = completion("task_0");
     input.queue.enqueueDelivery(first);
     input.inbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({ kind: "turn", delivery: first });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: report(first),
+    });
   });
+
+  it("waits for a recorded cancellation's notification before reporting its cohort", () => {
+    const queue = new SessionInputQueue();
+    const cohorts = new Map([
+      ["task_0", "cohort"],
+      ["task_1", "cohort"],
+    ]);
+    queue.enqueueDelivery(completion("task_0"));
+    expect(queue.takeNext(cohorts)).toBeUndefined();
+    queue.enqueueDelivery(terminalDelivery("task_1", "cancelled"));
+    expect(queue.takeNext(cohorts)).toMatchObject({ kind: "turn" });
+    expect(queue.pendingCount).toBe(0);
+    expect(queue.enqueueDelivery(completion("task_1"))).toBeUndefined();
+  });
+
+  it.each(["failed", "cancelled"] as const)(
+    "does not admit a second terminal notification with a different %s outcome",
+    (status) => {
+      for (const deliveries of [
+        [completion("task_0"), terminalDelivery("task_0", status)],
+        [terminalDelivery("task_0", status), completion("task_0")],
+      ]) {
+        const queue = new SessionInputQueue();
+        const [first, late] = deliveries;
+        if (first === undefined || late === undefined) throw new Error("Expected two deliveries.");
+        expect(queue.enqueueDelivery(first)).toBeDefined();
+        expect(queue.enqueueDelivery(late)).toBeUndefined();
+        expect(queue.pendingCount).toBe(1);
+        expect(queue.takeNext(new Map())).toBeDefined();
+        expect(queue.enqueueDelivery(late)).toBeUndefined();
+        expect(queue.pendingCount).toBe(0);
+      }
+    },
+  );
 
   it("ignores duplicate notifications while waiting for the last sibling", async () => {
     const input = batchingInput(2);
@@ -729,57 +898,37 @@ describe("buffered task completion batching", () => {
     );
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",
-      delivery: { payloads: [...first.payloads, ...last.payloads] },
+      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
     });
   });
 
   it.each(["failed", "cancelled"] as const)(
-    "delivers %s immediately, then releases successful siblings from the settled cohort",
+    "batches %s with successful siblings from the same cohort",
     async (status) => {
       const input = batchingInput(2);
       const first = completion("task_0");
-      const view: TaskView = {
-        taskId: "task_1",
-        metadata: { kind: "subagent", name: "worker" },
-        ...(status === "failed"
-          ? { status, lastOutput: { type: "error", data: "failed" } }
-          : { status }),
-      };
-      const terminal: DeliverHookPayload = {
-        kind: "deliver",
-        taskDeliveryId: `task_1:ready:${status}`,
-        payloads: [{ message: status, task: { views: [view] } }],
-      };
+      const terminal = terminalDelivery("task_1", status);
       for (const delivery of [first, terminal]) input.queue.enqueueDelivery(delivery);
-      vi.mocked(routeDeliverToChildren).mockImplementation(
-        async ({ delivery, sessionState, serializedContext }) => {
-          const snapshot = sessionState.snapshot!;
-          return {
-            kind: "continue",
-            remainder: delivery,
-            serializedContext,
-            sessionState: {
-              ...sessionState,
-              snapshot: {
-                ...snapshot,
-                session: {
-                  ...snapshot.session,
-                  state: cacheTerminalTaskView(snapshot.session.state, view),
-                },
-              },
-            },
-          };
-        },
-      );
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: terminal,
+        delivery: { payloads: [...report(first).payloads, ...report(terminal).payloads] },
       });
-      expect(input.queue.pendingCount).toBe(1);
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
+
+  it.each(["failed", "cancelled"] as const)(
+    "batches an all-%s cohort into one report",
+    async (status) => {
+      const input = batchingInput(2);
+      const first = terminalDelivery("task_0", status);
+      const last = terminalDelivery("task_1", status);
+      for (const delivery of [first, last]) input.queue.enqueueDelivery(delivery);
       await expect(nextTurnDelivery(input)).resolves.toMatchObject({
         kind: "turn",
-        delivery: first,
+        delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
       });
+      expect(input.queue.pendingCount).toBe(0);
     },
   );
 
@@ -790,6 +939,6 @@ describe("buffered task completion batching", () => {
     const next = await nextTurnDelivery({ ...input, queue, inbox: createMockInbox([]) });
     expect(next.kind).toBe("authorization-resume");
     expect(queue.pendingCount).toBe(2);
-    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
   });
 });

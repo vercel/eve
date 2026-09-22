@@ -19,6 +19,50 @@ function lit(screen: MockScreen): boolean {
 }
 
 describe("startCliLiveRow", () => {
+  it("keeps elapsed time moving during quiet installs and resets it between phases", () => {
+    vi.useFakeTimers();
+    const screen = makeScreen();
+    const progress = startCliLiveRow(
+      { log: vi.fn() },
+      { output: screen, elapsed: true, pulseSequence: "00000000" },
+    );
+    progress.update("Installing dependencies", "pnpm");
+    vi.advanceTimersByTime(12_000);
+    expect(screen.snapshot()).toBe("  Installing dependencies pnpm · 12s");
+    screen.resize(30, 10);
+    vi.advanceTimersByTime(1_000);
+    expect(visibleLength(screen.snapshot())).toBeLessThan(30);
+    expect(screen.snapshot().split("\n")).toHaveLength(1);
+    progress.update("Initializing Git");
+    expect(screen.snapshot()).toContain("Initializing Git 0s");
+    progress.stop();
+    expect(screen.snapshot()).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("logs each phase once without cursor controls when animation is disabled", () => {
+    vi.useFakeTimers();
+    const screen = makeScreen();
+    const log = vi.fn();
+    const progress = startCliLiveRow(
+      { log },
+      { output: screen, animate: false, elapsed: true, logPhases: true },
+    );
+    progress.update("Creating agent");
+    progress.update("Installing dependencies", "npm");
+    progress.update("Installing dependencies", "npm");
+    progress.update("Initializing Git");
+    vi.advanceTimersByTime(5_000);
+    progress.stop();
+    expect(log.mock.calls.flat()).toEqual([
+      "Creating agent...",
+      "Installing dependencies...",
+      "Initializing Git...",
+    ]);
+    expect(screen.rawOutput()).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("starts each indicator at the first sequence step", () => {
     vi.useFakeTimers();
     const sequence = "10100000";

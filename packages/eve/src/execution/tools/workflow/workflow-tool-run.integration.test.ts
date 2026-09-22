@@ -601,7 +601,7 @@ describe("workflow tools", () => {
             event.data.result.kind === "tool-result" &&
             event.data.result.toolName === "confirm_deploy",
         );
-        expect(progress).toBeGreaterThanOrEqual(0);
+        expect(progress, JSON.stringify(answered)).toBeGreaterThanOrEqual(0);
         expect(resultIndex).toBeGreaterThan(progress);
         const results = filterEventsByType(answered, "action.result");
         expect(results.map((event) => JSON.stringify(event.data.result.output))).toContainEqual(
@@ -745,7 +745,7 @@ describe("workflow tools", () => {
     });
   }, 60_000);
 
-  it("runs a background workflow tool as its task's executor", async () => {
+  it("runs a session-owned background workflow invocation", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-background",
@@ -789,7 +789,7 @@ describe("workflow tools", () => {
           notifications.push(eventsText(filterEventsByType(woken, "message.received")));
         }
         const text = notifications.join("\n");
-        expect(text).toContain("Review plan:api");
+        expect(text).not.toContain("Review plan:api");
         expect(text).not.toContain("update: planned api");
         expect(text).toContain("is completed");
         expect(text).toContain("plan:api");

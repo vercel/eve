@@ -1,6 +1,5 @@
-export { microsandbox } from "#public/sandbox/backends/microsandbox.js";
-export type {
-  MicrosandboxBootstrapUseOptions,
-  MicrosandboxSandboxCreateOptions,
-  MicrosandboxSessionUseOptions,
-} from "#public/sandbox/microsandbox-sandbox.js";
+export {
+  MicrosandboxSandbox,
+  type MicrosandboxEnvironmentOptions,
+} from "#sandbox/providers/microsandbox.js";
+export type { MicrosandboxSandboxRuntimeOptions } from "#public/sandbox/microsandbox-sandbox.js";

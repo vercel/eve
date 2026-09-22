@@ -119,7 +119,13 @@ export function createCliProgram(
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
       const { json } = actionCommand.opts<{ json?: boolean }>();
-      if (["info", "init"].includes(actionCommand.name()) && !json) logger.log(eveCliBanner());
+      if (
+        !json &&
+        (actionCommand.name() === "info" ||
+          (actionCommand.name() === "init" && actionCommand.parent !== program))
+      ) {
+        logger.log(eveCliBanner());
+      }
     })
     .configureOutput({
       writeErr: (message) => {
@@ -190,6 +196,7 @@ export function createCliProgram(
       parseAgentNamesOption,
     )
     .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option("-n, --non-interactive", "Scaffold the agent without starting development")
     .option(
       "--reasoning <effort>",
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
@@ -204,6 +211,7 @@ export function createCliProgram(
           channelWebNextjs?: boolean;
           model?: string;
           reasoning?: AgentReasoningDefinition;
+          nonInteractive?: boolean;
           yes?: boolean;
         },
       ) => {
@@ -221,6 +229,7 @@ export function createCliProgram(
             channelWebNextjs: options.channelWebNextjs,
             model: options.model,
             reasoning: options.reasoning,
+            nonInteractive: options.nonInteractive,
           },
           undefined,
           (step) => {

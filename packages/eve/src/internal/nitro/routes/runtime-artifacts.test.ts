@@ -66,9 +66,11 @@ describe("resolveNitroCompiledArtifactsSource", () => {
       expect(
         resolveNitroCompiledArtifactsSource({
           kind: "production",
+          sandboxScope: "test-sandbox-scope",
         }),
       ).toEqual({
         kind: "bundled",
+        sandboxScope: "test-sandbox-scope",
       });
     });
   });
@@ -76,8 +78,8 @@ describe("resolveNitroCompiledArtifactsSource", () => {
   it("does not fall back to the authored build path in production", async () => {
     await withScopedRuntimeSession(() => {
       const productionConfig = {
-        appRoot: "/tmp/build-machine-app",
         kind: "production" as const,
+        sandboxScope: "test-sandbox-scope",
       };
       expect(() => resolveNitroCompiledArtifactsSource(productionConfig)).toThrow(
         "requires bundled artifacts",

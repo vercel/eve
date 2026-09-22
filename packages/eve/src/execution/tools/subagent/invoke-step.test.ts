@@ -11,8 +11,7 @@ import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
   AuthKey,
   InitiatorAuthKey,
@@ -41,7 +40,6 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
-vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 const action = {
   callId: "call-1",
   description: "Research",
@@ -252,21 +250,20 @@ describe("owner agent invocation dispatch", () => {
         rootSessionId: "root-session",
         rootTurnId: "root-turn",
       };
-      const indexedSession = recordSessionTask(session as never, {
-        activityWorkIdentity: taskWork,
-        createdByTurnId: "turn-1",
-        dispatchContext: taskDispatchContext,
-        metadata: { kind: taskKind, name: "research" },
-        taskId: "task-1",
-        taskInboxToken: "task-token",
-        taskRunId: "task-run",
+      const indexedSession = registerWorkflowToolRun(session, {
+        callId: "task-1",
+        toolName: { kind: taskKind, name: "research" }.name,
+        lifetime: "session" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "task-run", hookToken: "task-token" },
+        task: {
+          activityWorkIdentity: taskWork,
+          dispatchContext: taskDispatchContext,
+          metadata: { kind: taskKind, name: "research" },
+          taskId: "task-1",
+        },
       });
       vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
-      vi.mocked(readLatestTaskView).mockResolvedValue({
-        metadata: { kind: "subagent", name: "research" },
-        status: "working",
-        taskId: "task-1",
-      });
       vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
         ...prepared,
         auth: creatorAuth,
@@ -341,22 +338,21 @@ describe("owner agent invocation dispatch", () => {
       [AuthKey.name]: null,
       [InitiatorAuthKey.name]: sessionInitiatorAuth,
     };
-    const indexedSession = recordSessionTask(session as never, {
-      createdByTurnId: "turn-1",
-      dispatchContext: {
-        auth: { current: null, initiator: sessionInitiatorAuth },
+    const indexedSession = registerWorkflowToolRun(session, {
+      callId: "task-1",
+      toolName: "research",
+      lifetime: "session" as const,
+      origin: { turnId: "turn-1", stepIndex: 0 },
+      address: { runId: "task-run", hookToken: "task-token" },
+      task: {
+        dispatchContext: {
+          auth: { current: null, initiator: sessionInitiatorAuth },
+        },
+        metadata: { kind: "subagent", name: "research" },
+        taskId: "task-1",
       },
-      metadata: { kind: "subagent", name: "research" },
-      taskId: "task-1",
-      taskInboxToken: "task-token",
-      taskRunId: "task-run",
     });
     vi.mocked(readDurableSession).mockReturnValue(indexedSession as never);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "subagent", name: "research" },
-      status: "working",
-      taskId: "task-1",
-    });
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
       auth: null,
@@ -389,30 +385,29 @@ describe("owner agent invocation dispatch", () => {
     expect(result).toMatchObject({ serializedContext });
   });
 
-  it("rejects only nested dispatch for a legacy task without creator context", async () => {
+  it("rejects missing creator context before dispatching with receiver authentication", async () => {
     vi.mocked(readDurableSession).mockReturnValue({
       ...session,
       state: {
         ...session.state,
-        "eve.tasks": {
-          tasks: [
+        "eve.workflowTool": {
+          version: 3,
+          runs: [
             {
-              createdByTurnId: "turn-1",
-              metadata: { kind: "subagent", name: "research" },
-              taskId: "task-1",
-              taskInboxToken: "task-token",
-              taskRunId: "task-run",
+              callId: "task-1",
+              toolName: "research",
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "task-run", hookToken: "task-token" },
+              task: {
+                metadata: { kind: "subagent", name: "research" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     } as never);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "subagent", name: "research" },
-      status: "working",
-      taskId: "task-1",
-    });
 
     await expect(
       dispatchTaskAgentInvocationStep({
@@ -427,13 +422,7 @@ describe("owner agent invocation dispatch", () => {
         sessionState: { sessionId: "parent" } as never,
         taskId: "task-1",
       }),
-    ).resolves.toMatchObject({
-      kind: "failed",
-      result: {
-        isError: true,
-        output: { code: "AGENT_INVOCATION_AUTH_UNAVAILABLE" },
-      },
-    });
+    ).rejects.toThrow("Corrupt workflow tool run registry");
     expect(prepareOwnerAgentInvocation).not.toHaveBeenCalled();
   });
 
@@ -484,16 +473,36 @@ describe("owner agent invocation dispatch", () => {
 });
 
 describe("task-owned agent settlement", () => {
-  it.each(["parked", "terminal"] as const)("applies a %s child outcome", async (kind) => {
+  it.each(
+    (["parked", "terminal"] as const).flatMap((kind) =>
+      ([undefined, "tool", "subagent"] as const).map((taskKind) => ({ kind, taskKind })),
+    ),
+  )("applies a $kind child outcome under $taskKind ownership", async ({ kind, taskKind }) => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       phase: "claimed" as const,
       ownerId: "task-1",
     };
+    const owner =
+      taskKind === undefined
+        ? session
+        : registerWorkflowToolRun(session, {
+            callId: "call-1",
+            toolName: "research",
+            lifetime: "session",
+            origin: { turnId: "turn", stepIndex: 0 },
+            address: { runId: "run", hookToken: "hook" },
+            task: {
+              taskId: "task-1",
+              metadata: { kind: taskKind, name: "research" },
+              dispatchContext: { auth: { current: null, initiator: null } },
+            },
+          });
     vi.mocked(readDurableSession).mockReturnValue({
-      ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+      ...owner,
+      state: setAgentHandleStore(owner.state, { handles: [claimed] }),
     } as never);
 
     const settled = await settleTaskAgentInvocationStep({
@@ -517,9 +526,17 @@ describe("task-owned agent settlement", () => {
       },
       ownerId: "task-1",
       sessionState: {} as never,
-      taskId: "task-1",
+      taskId: taskKind === undefined ? undefined : "task-1",
     });
 
+    expect(settled.completion).toEqual(
+      taskKind === "subagent"
+        ? undefined
+        : {
+            type: "subagent.completed",
+            data: { callId: "call-1", subagentName: "research", output: "done" },
+          },
+    );
     const handles = getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles ?? [];
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
@@ -529,6 +546,7 @@ describe("task-owned agent settlement", () => {
   it("releases every remaining claim for a completed workflow run", async () => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
@@ -551,6 +569,7 @@ describe("task-owned agent settlement", () => {
   it("parks every remaining claim for a cancelled workflow run", async () => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       ownerId: "workflow-run-1",
       phase: "claimed" as const,
@@ -579,6 +598,7 @@ describe("task-owned agent settlement", () => {
   it("keeps a cancelled parked child resumable after settlement", async () => {
     const claimed = {
       ...availableRecord,
+      callId: "call-1",
       operationId: "operation-1",
       phase: "claimed" as const,
       ownerId: "workflow-run-1",
@@ -611,6 +631,7 @@ describe("task-owned agent settlement", () => {
       sessionState: {} as never,
     });
 
+    expect(settled.completion).toBeUndefined();
     expect(getAgentHandleStore(settled.sessionState.snapshot.session.state)?.handles).toEqual([
       {
         address: availableRecord.address,

@@ -5,7 +5,7 @@ export function createFakeSetupFlowRenderer(
 ): SetupFlowRenderer {
   const {
     readProviderPicker = async () => undefined,
-    readModelEditor = async () => undefined,
+    readModelPicker = async () => undefined,
     ...rest
   } = overrides;
   return {
@@ -14,7 +14,7 @@ export function createFakeSetupFlowRenderer(
     readSelect: async () => undefined,
     readEditableSelect: async () => undefined,
     readProviderPicker,
-    readModelEditor,
+    readModelPicker,
     readText: async () => undefined,
     readAcknowledge: async () => {},
     readChoice: () => ({ choice: Promise.resolve(undefined), close: () => {} }),

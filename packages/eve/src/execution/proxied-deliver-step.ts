@@ -12,7 +12,7 @@ import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
-import { findSessionTaskEntry } from "#tasks/session-index.js";
+import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
   createTaskInputRequestId,
   retireProxyInputRequests,
@@ -61,7 +61,7 @@ export async function routeProxiedDeliverStep(input: {
     const routed = routeDeliverPayload({
       allowRoute: (_requestId, route) =>
         route.taskId === undefined ||
-        findSessionTaskEntry(durableSession.state, route.taskId) !== undefined,
+        findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined,
       payload,
       state: durableSession.state,
     });
@@ -108,13 +108,13 @@ export async function routeProxiedDeliverStep(input: {
     // durable decision, so its view cannot claim the child resumed first.
     const taskId = child.taskId;
     if (taskId !== undefined) {
-      const entry = findSessionTaskEntry(durableSession.state, taskId);
+      const entry = findBackgroundWorkflowToolRun(durableSession.state, taskId);
       if (entry === undefined) {
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
       const delivery = await sendTaskInboundPayload({
-        taskInboxToken: entry.taskInboxToken,
+        taskInboxToken: entry.address.hookToken,
         payload: {
           auth: sourceDelivery.auth,
           childContinuationToken: child.childContinuationToken,

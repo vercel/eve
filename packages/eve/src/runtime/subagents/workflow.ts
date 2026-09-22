@@ -28,5 +28,5 @@ export async function subagentToolExecuteWorkflow(
     outputSchema: input.outputSchema as JsonObject | undefined,
     target: ctx.toolName,
   };
-  return await invokeAgent(ctx, invocation, { invocationId: ctx.callId, returnResult: true });
+  return await invokeAgent(ctx, invocation, { invocationId: ctx.callId });
 }

@@ -26,15 +26,18 @@ export default defineTaskEval({
     dimensions: { transport: "remote" },
   },
   async test(t) {
-    const started = await t.send("TASK-C8-REMOTE-HITL");
+    const started = await t.send("TASK-C8-REMOTE-HITL", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-C8-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: "task-c8-remote-worker",
-        subagentName: "remote-loopback",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: "task-c8-remote-worker",
+          toolName: "remote-loopback",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);

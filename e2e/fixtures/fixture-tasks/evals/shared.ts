@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import type { EveEvalContext, EveEvalSession, EveEvalTurn, InputRequest } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
@@ -96,14 +97,11 @@ export async function waitForTaskInput(
   throw new Error(`Task did not surface input for tool "${toolName}" after five turns.`);
 }
 
-/** Reads the task receipt attached to a background `subagent.completed` event. */
+/** Reads the working task receipt returned by a background tool call. */
 export function requireBackgroundTaskId(turn: EveEvalTurn): string {
-  for (const event of turn.events) {
-    if (event.type === "subagent.completed" && event.data.backgroundTask !== undefined) {
-      return event.data.backgroundTask.taskId;
-    }
-  }
-  throw new Error("Turn completed without a background task receipt.");
+  const receipt = taskReceipts(turn.events)[0];
+  if (receipt === undefined) throw new Error("Turn completed without a background task receipt.");
+  return receipt.taskId;
 }
 
 export function parseToolErrorOutput(output: unknown): unknown {
@@ -142,7 +140,7 @@ export async function sendAndFollowQueuedTurn(
   options: FollowQueuedTurnOptions = {},
 ): Promise<FollowedQueuedTurn> {
   let session = initialSession;
-  let turn = await session.send(message);
+  let turn = await session.send(message, { taskDeliveryPolicy: "cohort" });
   const observedTurns = [turn];
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (options.allowFailedActions !== true) {

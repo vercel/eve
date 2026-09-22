@@ -1,4 +1,4 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { TaskDeliveryPolicy, DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
 import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
@@ -70,10 +70,16 @@ export class SessionInputQueue {
   enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
     const deliveryId = taskDeliveryId(delivery);
     if (deliveryId !== undefined) {
-      if (this.seenTaskDeliveryIds.has(deliveryId) || this.isCancelledTaskDelivery(deliveryId)) {
+      const terminalId = terminalTaskId(delivery);
+      // Competing outcomes for one task must not produce separate cohort reports.
+      const deduplicationId = terminalId === undefined ? deliveryId : `${terminalId}:ready`;
+      if (
+        this.seenTaskDeliveryIds.has(deduplicationId) ||
+        this.isCancelledTaskDelivery(deliveryId)
+      ) {
         return undefined;
       }
-      this.seenTaskDeliveryIds.add(deliveryId);
+      this.seenTaskDeliveryIds.add(deduplicationId);
     }
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
@@ -119,6 +125,15 @@ export class SessionInputQueue {
         candidate.kind === "delivery" && candidate.sequence === sequence,
     );
     return entry?.delivery;
+  }
+
+  /** Task lifecycle effects must be applied even while their cohort report is held. */
+  taskDeliveries(): readonly DeliveryAdmission[] {
+    return this.entries.filter(
+      (entry): entry is QueuedDelivery =>
+        entry.kind === "delivery" &&
+        entry.delivery.payloads.some((payload) => payload.task !== undefined),
+    );
   }
 
   replaceDelivery(sequence: number, delivery: DeliverHookPayload | undefined): void {
@@ -167,6 +182,7 @@ export class SessionInputQueue {
     cohorts: TaskCohorts,
     options?: {
       readonly deferDeliveries?: boolean;
+      readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
       /**
        * Attempt ids of the open authorization challenge. Callbacks for other
        * attempts are stale and dropped; once every expected attempt has
@@ -194,32 +210,33 @@ export class SessionInputQueue {
         };
       }
     }
-    const index = this.nextActionableIndex(cohorts, options?.deferDeliveries === true);
+    const index = this.nextActionableIndex(
+      cohorts,
+      options?.deferDeliveries === true,
+      options?.taskDeliveryPolicy ?? "cohort",
+    );
     if (index < 0) return undefined;
     return this.takeSelectionAt(index, cohorts, options?.freshSequence);
   }
 
-  private nextActionableIndex(cohorts: TaskCohorts, deferDeliveries: boolean): number {
-    const deliveries = this.entries.filter(
-      (entry): entry is QueuedDelivery => entry.kind === "delivery",
-    );
-    const completed = new Set(
-      deliveries.flatMap(({ delivery }) => {
-        const taskId = completionTaskId(delivery);
-        return taskId === undefined ? [] : [taskId];
-      }),
-    );
+  private nextActionableIndex(
+    cohorts: TaskCohorts,
+    deferDeliveries: boolean,
+    taskDeliveryPolicy: TaskDeliveryPolicy,
+  ): number {
     const pendingCohorts = new Set<string>();
-    for (const [taskId, cohort] of cohorts) {
-      if (!cohort.settled && !completed.has(taskId) && !this.cancelledTaskIds.has(taskId)) {
-        pendingCohorts.add(cohort.cohortId);
+    for (const [taskId, cohortId] of cohorts) {
+      // A control step can record cancellation before its notification is admitted.
+      // Wait for that notification too, so it cannot trigger a second cohort report.
+      if (!this.seenTaskDeliveryIds.has(`${taskId}:ready`) && !this.cancelledTaskIds.has(taskId)) {
+        pendingCohorts.add(cohortId);
       }
     }
     return this.entries.findIndex((entry) => {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;
-      const cohort = completionCohort(entry.delivery, cohorts);
-      return cohort === undefined || !pendingCohorts.has(cohort);
+      const cohort = terminalCohort(entry.delivery, cohorts);
+      return taskDeliveryPolicy === "auto" || cohort === undefined || !pendingCohorts.has(cohort);
     });
   }
 
@@ -234,17 +251,17 @@ export class SessionInputQueue {
       if (selected.kind === "control") return { control: selected.control, kind: "control" };
       return { kind: "authorization-resume", payloads: [selected.payload] };
     }
-    const readyCohort = completionCohort(selected.delivery, cohorts);
+    const readyCohort = terminalCohort(selected.delivery, cohorts);
     if (readyCohort !== undefined) {
       const lastSibling = this.entries.findLastIndex(
         (entry) =>
-          entry.kind === "delivery" && completionCohort(entry.delivery, cohorts) === readyCohort,
+          entry.kind === "delivery" && terminalCohort(entry.delivery, cohorts) === readyCohort,
       );
       const boundary = this.entries.findIndex(
         (entry, position) =>
           position > index &&
           position < lastSibling &&
-          (entry.kind !== "delivery" || completionCohort(entry.delivery, cohorts) === undefined),
+          (entry.kind !== "delivery" || terminalCohort(entry.delivery, cohorts) === undefined),
       );
       if (boundary >= 0) return this.takeSelectionAt(boundary, cohorts, freshSequence);
     }
@@ -252,16 +269,15 @@ export class SessionInputQueue {
     const first = this.entries.splice(index, 1)[0]!;
     if (first.kind !== "delivery") throw new Error("Selected a non-delivery entry as a turn.");
     const turnEntries = [first];
-    const cohort = completionCohort(first.delivery, cohorts);
+    const cohort = terminalCohort(first.delivery, cohorts);
     if (cohort !== undefined) {
       const siblings = this.entries.filter(
         (entry): entry is QueuedDelivery =>
-          entry.kind === "delivery" && completionCohort(entry.delivery, cohorts) === cohort,
+          entry.kind === "delivery" && terminalCohort(entry.delivery, cohorts) === cohort,
       );
       turnEntries.push(...siblings);
       this.retain(
-        (entry) =>
-          entry.kind !== "delivery" || completionCohort(entry.delivery, cohorts) !== cohort,
+        (entry) => entry.kind !== "delivery" || terminalCohort(entry.delivery, cohorts) !== cohort,
       );
     } else {
       const authenticated =
@@ -324,9 +340,17 @@ export function isSteeringDelivery(
 }
 
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
-  return entries.length === 1
-    ? entries[0]!.delivery
-    : coalesceDeliveries(entries.map(({ delivery }) => delivery));
+  if (entries.length === 1) return entries[0]!.delivery;
+  const deliveries = entries.map(({ delivery }) => delivery);
+  const taskDeliveryIds = deliveries.flatMap(
+    (delivery) =>
+      delivery.taskDeliveryIds ??
+      (delivery.taskDeliveryId === undefined ? [] : [delivery.taskDeliveryId]),
+  );
+  return {
+    ...coalesceDeliveries(deliveries),
+    taskDeliveryIds: taskDeliveryIds.length > 0 ? taskDeliveryIds : undefined,
+  };
 }
 
 function authorizationAttemptId(payload: DeliverPayload): string | undefined {
@@ -346,13 +370,18 @@ function isTaskDelivery(
   return deliveryId !== undefined && predicate(deliveryId);
 }
 
-function completionCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): string | undefined {
-  const taskId = completionTaskId(delivery);
-  return taskId === undefined ? undefined : cohorts.get(taskId)?.cohortId;
+function terminalCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): string | undefined {
+  const taskId = terminalTaskId(delivery);
+  return taskId === undefined ? undefined : cohorts.get(taskId);
 }
 
-function completionTaskId(delivery: DeliverHookPayload): string | undefined {
-  const suffix = ":ready:completed";
-  if (delivery.caller !== undefined || !delivery.taskDeliveryId?.endsWith(suffix)) return undefined;
-  return delivery.taskDeliveryId.slice(0, -suffix.length);
+function terminalTaskId(delivery: DeliverHookPayload): string | undefined {
+  if (delivery.caller !== undefined) return undefined;
+  for (const status of ["completed", "failed", "cancelled"]) {
+    const suffix = `:ready:${status}`;
+    if (delivery.taskDeliveryId?.endsWith(suffix)) {
+      return delivery.taskDeliveryId.slice(0, -suffix.length);
+    }
+  }
+  return undefined;
 }

@@ -5,7 +5,7 @@ import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.j
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { prepareOwnerAgentInvocation } from "./invoke-preparation.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
@@ -38,7 +38,7 @@ describe("background invocation origin", () => {
   it.each([true, false])(
     "uses the task's creating turn after the parent advances: task=%s",
     async (background) => {
-      const session = recordSessionTask(
+      const session = registerWorkflowToolRun(
         setHarnessEmissionState(
           {
             agent: { dynamicModel: true, system: "", tools: [] },
@@ -50,13 +50,16 @@ describe("background invocation origin", () => {
           { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn-3" },
         ),
         {
-          taskId: "task",
-          taskRunId: "task-run",
-          taskInboxToken: "task-inbox",
-          createdByTurnId: "turn-1",
-          createdByStepIndex: 0,
-          dispatchContext: { auth: { current: null, initiator: null } },
-          metadata: { kind: "subagent", name: "research", agentId: "agent" },
+          callId: "task",
+          toolName: { kind: "subagent", name: "research", agentId: "agent" }.name,
+          lifetime: "session" as const,
+          origin: { turnId: "turn-1", stepIndex: 0 },
+          address: { runId: "task-run", hookToken: "task-inbox" },
+          task: {
+            taskId: "task",
+            dispatchContext: { auth: { current: null, initiator: null } },
+            metadata: { kind: "subagent", name: "research", agentId: "agent" },
+          },
         },
       );
       await prepareOwnerAgentInvocation({

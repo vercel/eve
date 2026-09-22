@@ -26,10 +26,9 @@ import type { EveEvalContext } from "eve/evals";
 //   t1' push a deployment update that adds a skill — skills materialize into
 //       the sandbox workspace resources, so the sandbox version hash rotates
 //       for anything executing the new code
-//   t3  session A no longer sees the file: its next request runs on the new
-//       deployment, whose changed sandbox resources rotate the sandbox key
-//   t4  a NEW session B adopts the new deployment: the added skill loads and
-//       shapes the reply
+//   t3  a new session B adopts the changed sandbox resources and does not see
+//       session A's file
+//   t4  session B loads the added skill and follows its instructions
 //
 // Requires EVE_E2E_REDEPLOY_ALIAS plus Vercel credentials and a linked
 // fixture directory (the e2e-vercel workflow provides all three); skips
@@ -114,9 +113,11 @@ export default defineEval({
       await deployToAlias(t, alias, "skill");
       await waitForAliasToServe(t, `"${SKILL_NAME}"`);
 
-      // t3: the next request is accepted by the new deployment. Its changed
-      // sandbox resources rotate the versioned key, so the old file is absent.
-      const probe = await session.send(
+      // Direct provider resume intentionally rejects session A because its
+      // immutable artifact generation no longer matches this deployment. A
+      // fresh session adopts the changed resources and starts clean.
+      const adopted = await t.session();
+      const probe = await adopted.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
@@ -124,9 +125,6 @@ export default defineEval({
       probe.calledTool("bash", { output: /absent/ });
       probe.messageIncludes("absent");
 
-      // t4: a fresh session adopts the new deployment — the added skill is
-      // advertised and usable.
-      const adopted = await t.session();
       const skill = await adopted.send(
         `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
       );

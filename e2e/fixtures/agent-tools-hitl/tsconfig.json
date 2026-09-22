@@ -9,9 +9,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
+    "declaration": false,
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node", "eve/workflow-modules"],
+    "allowImportingTsExtensions": true
   },
   "include": ["agent/**/*.ts", "evals/**/*.ts"]
 }

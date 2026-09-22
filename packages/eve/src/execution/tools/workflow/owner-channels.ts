@@ -20,11 +20,14 @@ export function createChannelReader<C extends string, T>(
   return { channel, iterator: iterable[Symbol.asyncIterator](), landed: [] };
 }
 
-export type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = {
-  [I in keyof R]: R[I] extends ChannelReader<infer C, infer T>
+type ChannelReadResult<R> =
+  R extends ChannelReader<infer C, infer T>
     ? { readonly channel: C; readonly next: IteratorResult<T> }
     : never;
-}[number];
+
+export type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = ChannelReadResult<
+  R[number]
+>;
 
 /**
  * Channel reads wake the loop with `undefined` after buffering their result;

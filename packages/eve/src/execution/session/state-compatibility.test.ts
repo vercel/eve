@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
 import {
-  cacheTerminalTaskView,
-  getSessionTaskIndex,
-  recordSessionTask,
-} from "#tasks/session-index.js";
+  readWorkflowTaskView,
+  recordWorkflowTaskView,
+  getBackgroundWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { AgentHandle, AgentHandlePhase } from "#subagents/handles/store.js";
@@ -19,31 +20,30 @@ const activity = {
   futureActivity: { label: "Alice's research" },
 };
 const task = {
-  taskId: "task",
-  taskRunId: "run",
-  taskInboxToken: "inbox",
-  createdByTurnId: "turn",
-  metadata,
-  activityWorkIdentity: activity,
-  futureTask: { revision: 2 },
-  executor: { kind: "workflow", data: {}, futureExecutor: true },
-  terminalView: {
+  callId: "task",
+  toolName: metadata.name,
+  lifetime: "session" as const,
+  origin: { turnId: "turn", stepIndex: 0, futureOrigin: true },
+  address: { runId: "run", hookToken: "inbox", futureAddress: true },
+  futureInvocation: true,
+  task: {
     taskId: "task",
     metadata,
-    status: "completed" as const,
-    lastOutput: { type: "result" as const, data: "done", futureOutput: true },
-    usage: {
-      inputTokens: 1,
-      outputTokens: 2,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      futureUsage: true,
+    activityWorkIdentity: activity,
+    futureTask: { revision: 2 },
+    outcome: {
+      status: "completed" as const,
+      lastOutput: { type: "result" as const, data: "done", futureOutput: true },
+      usage: {
+        inputTokens: 1,
+        outputTokens: 2,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        futureUsage: true,
+      },
+      futureView: true,
     },
-    executor: {
-      futureExecutor: true,
-      binding: { kind: "workflow", data: {}, futureBinding: true },
-    },
-    futureView: true,
+    dispatchContext: { auth: { current: null, initiator: null } },
   },
 };
 function checkpoint(state: Record<string, unknown>) {
@@ -98,64 +98,76 @@ function handle(phase: AgentHandlePhase): AgentHandle {
 }
 
 describe("additive durable state", () => {
-  it("preserves task extensions through parsing, replayed creation and terminal updates", () => {
+  it("preserves task extensions through parsing, replayed creation and duplicate terminal deliveries", () => {
     const state = {
-      "eve.tasks": { version: 2, tasks: [task], futureIndex: true },
       authored: { opaque: true },
+      "eve.workflowTool": { version: 3, runs: [task], futureIndex: true },
     };
-    expect(getSessionTaskIndex(restored(state))).toEqual([
-      { ...task, dispatchContext: { legacy: true } },
-    ]);
+    expect(getBackgroundWorkflowToolRuns(restored(state))).toEqual([task]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
-    const updated = recordSessionTask(session(restored(state)), {
-      taskId: "task",
-      taskRunId: "new-run",
-      taskInboxToken: "inbox",
-      createdByTurnId: "turn",
-      dispatchContext: { auth: { current: null, initiator: null } },
-      metadata,
-      activityWorkIdentity: { id: "work", kind: "task", rootSessionId: "root", rootTurnId: "turn" },
-      executor: { kind: "workflow", data: {} },
+    const updated = registerWorkflowToolRun(session(restored(state)), {
+      callId: "task",
+      toolName: metadata.name,
+      lifetime: "session" as const,
+      origin: { turnId: "turn", stepIndex: 0 },
+      address: { runId: "new-run", hookToken: "inbox" },
+      task: {
+        taskId: "task",
+        dispatchContext: { auth: { current: null, initiator: null } },
+        metadata,
+        activityWorkIdentity: {
+          id: "work",
+          kind: "task",
+          rootSessionId: "root",
+          rootTurnId: "turn",
+        },
+      },
     });
-    const saved = cacheTerminalTaskView(updated.state, {
+    const saved = recordWorkflowTaskView(updated.state, {
       taskId: "task",
       metadata,
       status: "completed",
       lastOutput: { type: "result", data: "updated" },
       usage: { inputTokens: 3, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 },
-      executor: { binding: { kind: "workflow", data: {} } },
     });
     expect(restored(saved)).toMatchObject({
       authored: { opaque: true },
-      "eve.tasks": {
+      "eve.workflowTool": {
+        version: 3,
         futureIndex: true,
-        tasks: [
+        runs: [
           {
-            futureTask: { revision: 2 },
-            taskRunId: "new-run",
-            activityWorkIdentity: activity,
-            executor: { futureExecutor: true },
-            terminalView: {
-              futureView: true,
-              lastOutput: { data: "updated", futureOutput: true },
-              usage: { inputTokens: 3, futureUsage: true },
-              executor: { futureExecutor: true, binding: { futureBinding: true } },
+            address: { runId: "new-run", futureAddress: true },
+            origin: { futureOrigin: true },
+            futureInvocation: true,
+            task: {
+              futureTask: { revision: 2 },
+              activityWorkIdentity: activity,
+              outcome: {
+                futureView: true,
+                lastOutput: { data: "done", futureOutput: true },
+                usage: { inputTokens: 1, futureUsage: true },
+              },
             },
           },
         ],
       },
     });
-    expect(isSessionStateIdleForHandoff(checkpoint(restored(saved!)))).toBe(true);
-    const cancelled = cacheTerminalTaskView(saved, {
+    assert(saved !== undefined);
+    expect(isSessionStateIdleForHandoff(checkpoint(restored(saved)))).toBe(true);
+    const cancelled = recordWorkflowTaskView(saved, {
       taskId: "task",
       metadata,
       status: "cancelled",
     });
-    expect(getSessionTaskIndex(restored(cancelled))[0]?.terminalView).toMatchObject({
+    expect(getBackgroundWorkflowToolRuns(restored(cancelled))[0]?.task.outcome).toMatchObject({
       futureView: true,
-      status: "cancelled",
+      status: "completed",
     });
-    expect(getSessionTaskIndex(restored(cancelled))[0]?.terminalView?.lastOutput).toBeUndefined();
+    expect(cancelled).toBe(saved);
+    const [retained] = getBackgroundWorkflowToolRuns(restored(cancelled));
+    assert(retained !== undefined);
+    expect(readWorkflowTaskView(retained.task)?.lastOutput?.data).toBe("done");
   });
 });
 
@@ -164,9 +176,9 @@ describe("handoff state inspection", () => {
     expect(
       isSessionStateIdleForHandoff(
         checkpoint({
-          "eve.tasks": { version: 2, tasks: [task], futureIndex: true },
           "eve.agent.handles": { handles: [], futureStore: true },
           authored: { version: "anything", values: [null, false] },
+          "eve.workflowTool": { version: 3, runs: [task], futureIndex: true },
         }),
       ),
     ).toBe(true);
@@ -203,29 +215,46 @@ describe("handoff state inspection", () => {
     ).toThrow("Corrupt agent handle store");
   });
   it("parses settled entries before checking their terminal status", () => {
-    const incompatible = { ...task, taskInboxToken: 42 };
+    const incompatible = { ...task, address: { ...task.address, hookToken: 42 } };
     expect(() =>
       isSessionStateIdleForHandoff(
-        checkpoint({ "eve.tasks": { version: 2, tasks: [incompatible] } }),
+        checkpoint({
+          "eve.workflowTool": { version: 3, runs: [incompatible] },
+        }),
       ),
-    ).toThrow("Corrupt task index");
+    ).toThrow("Corrupt workflow tool run registry");
   });
   it("does not skip task parsing when another registry is busy", () => {
     expect(() =>
       isSessionStateIdleForHandoff(
         checkpoint({
           "eve.runtime.pendingAuthorization": {},
-          "eve.tasks": { version: 2, tasks: [{ ...task, taskRunId: null }] },
+          "eve.workflowTool": {
+            version: 3,
+            runs: [{ ...task, address: { ...task.address, runId: null } }],
+          },
         }),
       ),
-    ).toThrow("Corrupt task index");
+    ).toThrow("Corrupt workflow tool run registry");
+  });
+  it("validates retained results even when other work prevents handoff", () => {
+    expect(() =>
+      isSessionStateIdleForHandoff(
+        checkpoint({
+          "eve.runtime.pendingAuthorization": {},
+          "eve.workflowTool": {
+            version: 3,
+            runs: [{ ...task, task: { ...task.task, outcome: { status: "completed" } } }],
+          },
+        }),
+      ),
+    ).toThrow("Corrupt workflow task result");
   });
   it.each([
     ["eve.runtime.pendingAuthorization", false],
     ["eve.runtime.pendingInputBatch", {}],
     ["eve.runtime.pendingInputBatches", [null]],
     ["eve.runtime.pendingCoordinationBatch", {}],
-    ["eve.runtime.workflowToolRuns", {}],
     ["eve.runtime.deferredStepInput", {}],
     ["eve.harness.pendingWorkflowInterrupt", {}],
     ["eve.runtime.proxyInputRequests", { malformed: null }],

@@ -20,13 +20,13 @@ export interface InstrumentationLayout {
 export function resolveInstrumentationLayout(input: {
   readonly agentRoot: string;
 }): InstrumentationLayout {
-  const filePath = resolveInstrumentationFile(input.agentRoot);
+  const removedFilePath = findRemovedInstrumentationFile(input.agentRoot);
   const directoryPath = join(input.agentRoot, INSTRUMENTATION_DIRECTORY);
   const hasDirectory = existsSync(directoryPath) && statSync(directoryPath).isDirectory();
 
-  if (filePath !== undefined) {
+  if (removedFilePath !== undefined) {
     throw new Error(
-      `Found removed instrumentation file "${filePath}". Move it into the "${INSTRUMENTATION_DIRECTORY}/" directory as one file per provider. See the instrumentation migration guide.`,
+      `Found removed instrumentation file "${removedFilePath}". Move it into the "${INSTRUMENTATION_DIRECTORY}/" directory as one file per provider. See the instrumentation migration guide.`,
     );
   }
 
@@ -77,10 +77,8 @@ function collectInstrumentationProviderModules(
   );
 }
 
-/**
- * Resolves the removed single `agent/instrumentation` module.
- */
-function resolveInstrumentationFile(agentRoot: string): string | undefined {
+/** Finds the removed single-file layout only so the build can reject it. */
+function findRemovedInstrumentationFile(agentRoot: string): string | undefined {
   for (const extension of INSTRUMENTATION_EXTENSIONS) {
     const candidate = join(agentRoot, `${INSTRUMENTATION_DIRECTORY}${extension}`);
     if (existsSync(candidate)) {

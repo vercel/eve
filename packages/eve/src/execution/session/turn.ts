@@ -31,10 +31,7 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
-import {
-  isInboxSubagentResultFromRecordedWorkflowToolRun,
-  isInboxToolResultFromRecordedWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -145,7 +142,6 @@ export class SessionExecution {
         });
         const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
         await cursor.apply(dispatchResult);
-        await acknowledgeDelegatedTasksStep({ tasks: dispatchResult.pendingTasks });
 
         const runtimeResults = await this.waitForRuntimeActionResults({
           initialAcceptedAtMs,
@@ -234,9 +230,7 @@ export class SessionExecution {
           }
           if (result.kind !== "subagent-result") return false;
           return (
-            (result.origin === "child" &&
-              isInboxSubagentResultFromRunningHandle(snapshot, result)) ||
-            isInboxSubagentResultFromRecordedWorkflowToolRun(snapshot, result)
+            result.origin === "child" && isInboxSubagentResultFromRunningHandle(snapshot, result)
           );
         });
         if (accepted.length > 0) {

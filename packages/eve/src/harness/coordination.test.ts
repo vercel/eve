@@ -3,7 +3,6 @@ import {
   isResultBoundToRunningHandle,
 } from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
-
 import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
   createCoordinationRequestFromToolCall,
@@ -17,7 +16,11 @@ import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
 import { confirmAgentStarted, prepareAgentStart } from "#subagents/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { getWorkflowToolRuns, recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import {
+  getBlockingWorkflowToolRuns,
+  registerWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
+
 import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -239,7 +242,6 @@ describe("createCoordinationRequestFromToolCall", () => {
               description: "Delegate research.",
               inputSchema: jsonSchema({ type: "object" }),
               name: "researcher",
-              resultKind: "subagent" as const,
               workflowId: "workflow://subagent-tool",
             },
           ],
@@ -252,7 +254,6 @@ describe("createCoordinationRequestFromToolCall", () => {
         executeInput: undefined,
         input: { message: "research this" },
         kind: "workflow-task",
-        resultKind: "subagent",
         toolName: "researcher",
         workflowId: "workflow://subagent-tool",
       },
@@ -318,7 +319,6 @@ function createParkedSession(): HarnessSession {
         executeInput: { message: "go", target: "researcher" },
         input: { description: "Research the topic", message: "go" },
         kind: "workflow-task",
-        resultKind: "subagent",
         toolName: "researcher",
         workflowId: "workflow://subagent-tool",
       },
@@ -336,7 +336,6 @@ describe("coordination batch identity", () => {
       executeInput: { message: "go", target: "researcher" },
       input: { message: "go" },
       kind: "workflow-task" as const,
-      resultKind: "subagent" as const,
       toolName: "researcher",
       workflowId: "workflow://subagent-tool",
     };
@@ -380,7 +379,7 @@ function createSessionWithRunningChild(): HarnessSession {
 }
 
 describe("resolvePendingCoordination", () => {
-  it("marks a working task receipt as backgrounded on subagent.completed", async () => {
+  it("does not emit subagent completion for a working task receipt", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const taskId = "task_0123456789abcdef";
 
@@ -412,9 +411,8 @@ describe("resolvePendingCoordination", () => {
       },
     });
 
-    expect(events.find((event) => event.type === "subagent.completed")).toMatchObject({
-      data: { backgroundTask: { status: "working", taskId } },
-    });
+    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: "action.result" }));
     expect(getAgentHandleStore(resolved.session.state)).toBeUndefined();
   });
 
@@ -477,6 +475,29 @@ describe("resolvePendingCoordination", () => {
     expect(getAgentHandleStore(resolved.session.state)).toEqual({ handles: [] });
   });
 
+  it("does not report a cancelled child outcome as successful completion", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    await resolvePendingCoordination({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: createSessionWithRunningChild(),
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            subagentName: "researcher",
+            output: "cancelled",
+            outcome: { kind: "parked", result: { kind: "cancelled" }, usageDelta: ZERO_USAGE },
+          },
+        ],
+      },
+    });
+    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
+  });
+
   it("clears the child's proxy-input entries before settling its handle", async () => {
     const session = upsertProxyInputRequests({
       entries: [
@@ -526,11 +547,12 @@ describe("resolvePendingCoordination", () => {
         },
       ],
     });
-    const withRun = recordWorkflowToolRun(parked, {
+    const withRun = registerWorkflowToolRun(parked, {
       callId: "call-1",
-      hookToken: "eve:workflow-tool-run:op-1",
-      runId: "run-1",
       toolName: "deploy",
+      lifetime: "turn" as const,
+      origin: { turnId: "turn_0", stepIndex: 0 },
+      address: { runId: "run-1", hookToken: "eve:workflow-tool-run:op-1" },
     });
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
     const session = upsertProxyInputRequests({
@@ -564,7 +586,7 @@ describe("resolvePendingCoordination", () => {
     });
 
     expect(resolved.outcome).toBe("resolved");
-    expect(getWorkflowToolRuns(resolved.session.state)).toEqual([]);
+    expect(getBlockingWorkflowToolRuns(resolved.session.state)).toEqual([]);
     expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
   });
 
@@ -758,7 +780,6 @@ describe("resolvePendingCoordination", () => {
           executeInput: { agentId, message: "continue", target: "researcher" },
           input: { agentId, message: "continue" },
           kind: "workflow-task",
-          resultKind: "subagent",
           toolName: "researcher",
           workflowId: "workflow://subagent-tool",
         },
@@ -878,7 +899,6 @@ describe("resolvePendingCoordination", () => {
           executeInput: { agentId, message: "continue", target: "researcher" },
           input: { agentId, message: "continue" },
           kind: "workflow-task",
-          resultKind: "subagent",
           toolName: "researcher",
           workflowId: "workflow://subagent-tool",
         },

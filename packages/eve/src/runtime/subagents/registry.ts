@@ -165,7 +165,6 @@ export function createPreparedRuntimeSubagentTool(
     sourceId: definition.sourceId,
     task: {
       nodeId: definition.nodeId,
-      resultKind: "subagent",
       workflowId: subagentToolExecuteWorkflowReference.workflowId,
     },
   };

@@ -1,29 +1,51 @@
 import type { EveCliSetupFailureCode } from "#cli/telemetry/index.js";
-import type { PackageManagerKind } from "#setup/package-manager.js";
 import { type PackageManagerInstallResult } from "#setup/primitives/index.js";
-import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
+import { sanitizeForTerminal } from "#cli/ui/output.js";
 
-export function installProgressDetail(
-  packageManager: PackageManagerKind,
-  line: ProcessOutputLine,
-): string | undefined {
-  const text = line.text.trim();
-  if (text === "" || packageManager !== "npm") return text || undefined;
+const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
+const INSTALL_OUTPUT_MAX_LINES = 20;
+const INSTALL_OUTPUT_MAX_BYTES = 16 * 1_024;
 
-  const manifest = /^npm silly fetch manifest (.+)$/u.exec(text);
-  if (manifest !== null) return `Resolving ${manifest[1]}`;
+/** Keeps a bounded error tail, falling back to npm detail only when no other output exists. */
+export function createInstallDiagnostics() {
+  const lines: string[] = [];
+  let bytes = 0;
+  let hasUsefulOutput = false;
+  let truncated = false;
 
-  const failedRequest = /^npm http fetch \S+ \S+ attempt (\d+) failed with (\S+)$/u.exec(text);
-  if (failedRequest !== null) {
-    return `npm registry · attempt ${failedRequest[1]} failed: ${failedRequest[2]}`;
-  }
+  return {
+    append(text: string): void {
+      let line = sanitizeForTerminal(text).trimEnd();
+      if (line.trim() === "") return;
+      const noise = NPM_NOISE_LINE.test(line);
+      if (noise && hasUsefulOutput) return;
+      if (!noise && !hasUsefulOutput) {
+        lines.length = 0;
+        bytes = 0;
+        truncated = false;
+        hasUsefulOutput = true;
+      }
 
-  if (line.stream === "stdout" || /^npm (?:error|warn)\b/u.test(text)) return text;
-  return undefined;
+      const encoded = Buffer.from(line);
+      if (encoded.length >= INSTALL_OUTPUT_MAX_BYTES) {
+        let start = encoded.length - INSTALL_OUTPUT_MAX_BYTES + 1;
+        // Keep complete UTF-8 code points while reserving one byte for the newline.
+        while ((encoded[start]! & 0xc0) === 0x80) start += 1;
+        line = encoded.subarray(start).toString("utf8");
+        truncated = true;
+      }
+      lines.push(line);
+      bytes += Buffer.byteLength(line) + 1;
+      while (lines.length > INSTALL_OUTPUT_MAX_LINES || bytes > INSTALL_OUTPUT_MAX_BYTES) {
+        bytes -= Buffer.byteLength(lines.shift()!) + 1;
+        truncated = true;
+      }
+    },
+    result(): { lines: readonly string[]; truncated: boolean } {
+      return { lines, truncated };
+    },
+  };
 }
-
-export const NPM_NOISE_LINE = /^\s*npm (?:silly|verbose|http|timing)\b/u;
-export const INSTALL_OUTPUT_FALLBACK_LINES = 20;
 
 export function packageManagerInstallFailureCode(
   result: PackageManagerInstallResult,

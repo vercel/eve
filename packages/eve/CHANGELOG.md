@@ -1,5 +1,70 @@
 # eve
 
+## 0.64.0
+
+### Minor Changes
+
+- 3be0b74: Add `taskDeliveryPolicy: "auto" | "cohort"` to message sends. New channel sessions default to `"auto"`, allowing independently useful reports or silence until related work settles; schedules default to `"cohort"`, and explicit sends can select or update the session's policy.
+- 49971b7: Replace object-form sandbox definitions with exported provider environments whose `open()` method starts and returns the current eve session's persistent live sandbox. After successful selector initialization, durable boundaries resume directly from immutable provider state without rerunning `defineSandbox()`; provider-specific session capabilities remain precisely typed.
+
+### Patch Changes
+
+- fa92e5e: Route AI SDK provider warnings to eve's diagnostics instead of presenting successful compatibility fallbacks as stderr errors. Existing custom warning handlers and `AI_SDK_LOG_WARNINGS=false` remain respected.
+- 3be0b74: Align the bundled Chat SDK and adapters with version 4.41.0. Chat SDK channel types now reference the installed `chat` package so external adapters and handlers share the same type identity; `chat` is an optional peer for this integration.
+- 3e5ff9f: Fix a Vercel Workflow race where a rejected inline-step preclaim could skip the owner's body, leaving the durable step to fail after exhausting its retry limit without running user code.
+- aceb298: Local self-modification now depends on `eve dev` host facilities instead of request provenance.
+- f2b8792: Pre-approve esbuild install scripts in newly initialized pnpm projects so registry additions that install the Vercel CLI no longer require a separate `pnpm approve-builds` step.
+- b174a62: Remove the redundant Enter badge from searchable setup pickers; the selected-row cursor already indicates the active choice.
+- 9f17453: Clarify that `eve build --skip-sandbox-prewarm` skips sandbox preparation for local and hosted builds. Workspace fixture typechecks now use this mode instead of provisioning sandbox infrastructure.
+- d98edb2: Add `eve init --non-interactive` to scaffold and install an agent without opening the development TUI.
+
+## 0.63.1
+
+### Patch Changes
+
+- de29d28: In the eve TUI, press `Ctrl+Y` to paste text you removed with `Ctrl+K`, `Ctrl+U`, or `Ctrl+W`. Press `Alt+Y` immediately afterward to cycle through earlier removals.
+- 7cfaa6f: Option+Delete on macOS and Alt+Backspace now delete to the previous word boundary in editable eve TUI fields.
+- e110eb2: Allow an active turn to finish its tool-result continuation when an earlier turn's HITL request remains unanswered, while preserving current-turn HITL parking. Partial approval responses remain saved until their batch can resolve; they do not cause an extra model call after an unrelated answer.
+- 56e3510: Keep sessions on their original stream across consecutive deployment handoffs. Intermediate handoffs no longer end the session before the final owner completes it, preventing later handoffs from failing with a fatal Workflow SDK `Hook not found` error.
+- b333e7d: Fix saved-session resume in browsers without `Symbol.dispose`.
+- 3d96b69: Use `spacexai/grok-4.7` as the default model for new projects, agents without an `agent.ts`, and Gateway setup.
+- d88aede: Add eval setup and teardown callbacks with typed context shared by reference across evals and cleanup. Setup returns the context directly before the local agent starts, and teardown runs after shutdown even when setup or the run fails.
+- dea2ced: Upgrade the Workflow runtime and quiet expected inline-step contention while preserving protection against duplicate execution.
+- ffb1276: Fix background subagent calls failing the parent session when typed or wildcard hooks subscribe to subagent events. These hooks now receive the parent session context after workflow step boundaries.
+
+## 0.63.0
+
+### Minor Changes
+
+- d2c92df: Require durable background tools to use `defineWorkflowTool`. Remove background execution from `defineTool` and dynamic tools, including the `TaskExec` and `postMessage` authoring APIs, and deliver each background cohort's completed, failed, and cancelled outcomes in one automatic report.
+  
+  Background invocations share workflow execution and cancellation cleanup. Agent settlement records usage once before its enclosing workflow returns a tool result. Parent sessions retain task outcomes, and late results cannot overwrite a recorded cancellation; channel task views no longer include executor bindings. Background workflow yields are consumed without publishing progress or retaining a task-progress stream.
+  
+  Align `subagent.completed` for blocking and background agents: emit the actual output only after the parent records success. Background receipts remain `action.result` tool outputs; completion events no longer announce admission or wait for cohort reporting.
+  
+  Use task lifecycle values in subagent eval assertions: replace `status: "pending"` with `"working"` and `"rejected"` with `"failed"`. Explicit cancelled child outcomes now retain `"cancelled"` instead of appearing as failures.
+
+### Patch Changes
+
+- a042a9a: Choose a model, speed, and reasoning through separate steps in the terminal UI, with clear defaults and changes applied together after the final choice. The slash menu now puts model selection and session controls first, and a steady Thinking, Generating, or Running label with a blinking dot replaces the animated Working label during turns.
+- f240baa: Fix local development snapshots for extension subagents mounted from hoisted workspace dependencies.
+
+## 0.62.0
+
+### Minor Changes
+
+- 9d394fa: Package self-modification as an extension-owned subagent and retire the legacy scaffolded self-modification capability. Registry installation uses local-only setup, while deployed-aware setup remains available separately.
+- 8e01190: Replace `t.judge.autoevals.*` with `t.judge(...)`, supporting criteria, typed questions, and batches through evaluation models with a default of `typesafe-ai/jev`. Configure provider evaluation model instances instead of language model instances; autoevals is removed while deterministic similarity and Braintrust reporting remain available.
+- fcb3ba2: Make path-named files under `agent/instrumentation/` the supported instrumentation API. Existing `agent/instrumentation.ts` configurations must be split into lifecycle instrumentation, OpenTelemetry destinations, and shared `otel()` settings; extensions that contribute subagents must be rebuilt for the new contract epoch.
+- 804e670: Remove deprecated instrumentation compatibility shapes. Providers now reject the removed `capture` option in favor of `tracePolicy`, destination export policies return object decisions, and flat `instrumentation.ts` modules are no longer discovered.
+
+### Patch Changes
+
+- 9f1d1cf: Polish `eve init` with inline terminal output, timed installation progress, and a quiet transition into chat without automatic login entries in history. Failed installs show bounded diagnostics and recovery instructions; debug logging retains package-manager output.
+- 38ad163: Keep registry installation error traces visible in the dev TUI after an `/add` failure, alongside the per-item recovery guidance.
+- d0d2b5e: Refine the `eve dev` terminal header with a compact `☰eve` mark, clearer metadata separation, and a persistent command hint. `eve dev` no longer shows the startup `/add` tip.
+- 06e17ae: Wrap long setup questions in the `eve dev` terminal UI instead of clipping them at the terminal edge.
+
 ## 0.61.1
 
 ### Patch Changes

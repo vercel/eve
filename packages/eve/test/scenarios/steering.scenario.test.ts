@@ -58,6 +58,12 @@ export default defineAgent({
         expect(steps).toHaveLength(2);
         expect(new Set(steps).size).toBe(steps.length);
         expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+        const contentionLog = "Step execution already in flight in this process";
+        if (leaseSeconds === undefined) {
+          expect(server.stderr()).not.toContain(contentionLog);
+        } else {
+          expect(server.stderr()).toContain(contentionLog);
+        }
       } finally {
         await server.stop();
       }

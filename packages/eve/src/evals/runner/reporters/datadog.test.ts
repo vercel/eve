@@ -68,7 +68,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
     assertions: [
       { name: "succeeded", score: 1, severity: "gate", passed: true },
       { name: "similarity", score: 0.9, severity: "soft", threshold: 0.6, passed: true },
-      { name: "judge.autoevals.closedQA", score: 1, severity: "soft", passed: true },
+      { name: "judge.boolean", score: 1, severity: "soft", passed: true },
     ],
     verdict: "passed",
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -204,7 +204,7 @@ describe("Datadog", () => {
     expect(experiment.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
       expect.objectContaining({ label: "gate_succeeded", value: 1 }),
       expect.objectContaining({ label: "similarity", value: 0.9 }),
-      expect.objectContaining({ label: "judge_autoevals_closedQA", value: 1 }),
+      expect.objectContaining({ label: "judge_boolean", value: 1 }),
       expect.objectContaining({ label: "eve_tool_call_count", value: 1 }),
       expect.objectContaining({ label: "eve_subagent_call_count", value: 0 }),
       expect.objectContaining({ label: "eve_message_count", value: 1 }),

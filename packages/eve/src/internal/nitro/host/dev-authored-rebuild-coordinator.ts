@@ -1,8 +1,6 @@
-import { relative, resolve } from "node:path";
-
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
-import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
+import { prewarmDevelopmentSandboxes } from "#execution/sandbox/development-prewarm.js";
+import { createDevelopmentGenerationArtifactsSource } from "#internal/nitro/host/artifacts-config.js";
 import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
@@ -15,7 +13,6 @@ import {
   activateDevelopmentGeneration,
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
-import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 export type DevelopmentRebuildKind = "structural" | "unchanged" | "runtime";
 
@@ -124,6 +121,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       ) {
         throw new DevelopmentWorkflowWorldChangeRequiresRestartError();
       }
+      await prewarmDevelopmentHost(nextHost);
       const nextHostFingerprint = await computeDevelopmentHostFingerprint(nextHost);
       const nextRuntimeFingerprint = nextHost.generation.fingerprint;
       const hasStructuralChange = nextHostFingerprint !== this.#currentHostFingerprint;
@@ -155,7 +153,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
         this.#commitState(committedHost, nextHostFingerprint, nextRuntimeFingerprint);
         nextHost = undefined;
         environmentReload.commit();
-        startSandboxPrewarmAfterCommit(committedHost, input.changedPaths);
         return { host: committedHost, kind: "runtime" };
       }
 
@@ -167,7 +164,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       });
       nextHost = undefined;
       environmentReload.commit();
-      startSandboxPrewarmAfterCommit(result.host, input.changedPaths);
       return result;
     } catch (error) {
       if (error instanceof PostCommitDevelopmentRebuildError) {
@@ -266,37 +262,15 @@ function retainActiveHostWorkspace(
   };
 }
 
-function startSandboxPrewarmAfterCommit(
-  host: PreparedDevelopmentApplicationHost,
-  changedPaths: readonly string[],
-): void {
-  if (!hasSandboxRelatedChange(host.compileResult.project.agentRoot, changedPaths)) {
-    return;
-  }
-  const artifactsConfig = createDevelopmentNitroArtifactsConfig({
+async function prewarmDevelopmentHost(host: PreparedDevelopmentApplicationHost): Promise<void> {
+  await prewarmDevelopmentSandboxes({
     appRoot: host.appRoot,
-    configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
-  });
-  startDevelopmentSandboxPrewarmInBackground({
-    appRoot: host.appRoot,
-    compiledArtifactsSource: resolveNitroCompiledArtifactsSource(artifactsConfig),
+    compiledArtifactsSource: createDevelopmentGenerationArtifactsSource({
+      appRoot: host.appRoot,
+      configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
+      runtimeAppRoot: host.generation.runtimeAppRoot,
+    }),
     log: (message) => console.log(message),
-  });
-}
-
-function hasSandboxRelatedChange(agentRoot: string, changedPaths: readonly string[]): boolean {
-  return changedPaths.some((path) => {
-    const relativePath = relative(resolve(agentRoot), resolve(path));
-    const segments = relativePath.split(/[\\/]/u);
-    if (segments[0] === ".." || relativePath === "") {
-      return false;
-    }
-    return (
-      segments[0] === "sandbox.ts" ||
-      segments[0] === "sandbox" ||
-      segments[0] === "workspace" ||
-      segments[0] === "skills"
-    );
   });
 }
 

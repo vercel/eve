@@ -61,10 +61,10 @@ function buildRuntimeSubagentRunInput(
   });
 }
 
-function makeInheritingGraph(nodeId: string) {
+function makeInheritingGraph(nodeId: string): import("./tool.js").SubagentSandboxGraph {
   return {
     nodesByNodeId: new Map([
-      [nodeId, { sandboxRegistry: { sandbox: { definition: { inheritsParent: true } } } }],
+      [nodeId, { sandboxRegistry: { sandbox: { definition: { kind: "parent" } } } }],
     ]),
   };
 }

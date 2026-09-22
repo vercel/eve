@@ -3,17 +3,36 @@ title: "Subagents"
 description: "Delegate work to root-agent copies or declared specialists with their own tools and sandbox."
 ---
 
-eve supports two ways to delegate work: the root-only built-in `agent` tool, which starts or continues a copy of the root agent, and declared subagents, which are specialists with their own directories. Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+Use a subagent to run independent work in parallel, narrow the available tools, or give a task to a specialist.
+
+- Use the root-only [built-in `agent` tool](#the-built-in-agent-tool) to start or continue a copy of the root agent that shares its sandbox.
+- Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
+- Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
 ## Completion batching
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
 later user turns join the open cohort while earlier work is still pending or its
-successful results await delivery. eve holds successful completion notifications
+terminal results await delivery. With `taskDeliveryPolicy: "cohort"`, eve holds
+completion, failure, and cancellation notifications
 until every task in that cohort has completed, failed, or been cancelled, then
-delivers the successful results together in one parent turn. Partial completions
+delivers all outcomes together in one parent turn. Partial settlements
 do not invoke the parent model. Work started after the cohort settles forms a new
-cohort. No configuration or debounce timer is required.
+cohort.
+
+New channel sessions default to `"auto"`; schedules default to `"cohort"`.
+Pass `taskDeliveryPolicy` to `send(...)` to select or update the session policy. See
+[Background task results](/docs/channels/overview#background-task-results).
+
+With `"auto"`, a terminal outcome can start a parent turn while other tasks are
+still running. The parent reports independently useful results and stays silent
+when a useful answer depends on unfinished tasks. Ready results may share a turn.
+The reporting context includes the whole cohort and every available output,
+including previously withheld results, for a later combined report.
+
+The setting applies to background tools and built-in, declared, and remote
+subagents owned by the session. Internal subagent sessions use `"cohort"` for
+background work they start.
 
 User messages, input requests, authorization events, failures, and cancellation
 are handled without waiting for the cohort. Child lifecycle events are processed
@@ -197,7 +216,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Tools        | Inherited except root-only    | Own `tools/`                           |
 | Connections  | Inherited                     | Own `connections/`                     |
 | Skills       | Inherited                     | Own `skills/`                          |
-| Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
+| Sandbox      | Reuses the parent sandbox     | Own `sandbox/`, else framework default |
 | Hooks        | Inherited                     | Own `hooks/`                           |
 | Extensions   | Inherited contributions       | Own `extensions/`                      |
 | State        | Fresh                         | Fresh                                  |
@@ -206,7 +225,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 
 For a declared subagent this means authoring or mounting anything the child needs. When two subagents need the same procedure, package the skill in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each subagent. Share typed helpers through `lib/`. The sandbox does not inherit from the parent; eve selects the default sandbox source unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
-The root built-in `agent` tool is the exception. Its children share the root's sandbox and tools because they are copies of the same agent working on the same files.
+The root built-in `agent` tool is the exception. Its children reuse the root's sandbox and tools because they are copies of the same agent working on the same files.
 
 `defineState` is never shared, for either kind. Each child starts with fresh durable state.
 
@@ -233,6 +252,8 @@ By default, a subagent named `researcher` collides with an authored tool named `
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+
+Both blocking and background invocations emit `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. A background working receipt is returned as an `action.result` tool output and does not emit completion. Background completion events do not wait for the cohort report. Failure and cancellation are not successful completion; task notifications retain those outcomes.
 
 Channels with activity reporting attribute the backing agent's tool activity to its background task. Local and remote subagents share the task's progress item rather than adding a separate agent item. Continuing or steering a child with `agentId` attaches its new activity to the new task; the previous task keeps its completed or cancelled status. This applies to the built-in `agent` and declared subagent tools, not to child invocations inside custom workflow tools. Activity reporting is best-effort and does not change task execution or result delivery.
 

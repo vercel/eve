@@ -11,7 +11,7 @@ import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
-import { SESSION_TASKS_STATE_KEY, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { TaskView } from "#tasks/types.js";
 
 const metadata = { kind: "report-probe", name: "report_probe" } as const;
@@ -75,10 +75,10 @@ describe("resolveInitiatingTaskContext", () => {
     expect(
       resolveInitiatingTaskContext({
         state: taskState([
-          taskEntry("task_1", "turn_1", undefined, { data: {}, kind: "workflow-tool" }),
+          taskEntry("task_1", "turn_1"),
           {
-            ...taskEntry("task_2", "turn_2", undefined, { data: {}, kind: "workflow-tool" }),
-            cohortId: "task_1",
+            ...taskEntry("task_2", "turn_2"),
+            task: { ...taskEntry("task_2", "turn_2").task, cohortId: "task_1" },
           },
         ]),
         turnId: "turn_1",
@@ -90,17 +90,71 @@ describe("resolveInitiatingTaskContext", () => {
     });
   });
 
-  it("ignores task records that were not accepted by an executor", () => {
+  it("recognizes an indexed invocation without an executor binding", () => {
     expect(
       resolveInitiatingTaskContext({
         state: taskState([taskEntry("task_1", "turn_1")]),
         turnId: "turn_1",
       }),
-    ).toBeUndefined();
+    ).toMatchObject({ phase: "initiating" });
   });
 });
 
 describe("resolveTaskDeliveryContext", () => {
+  it("auto retains earlier outputs and pending siblings for a later combined report", () => {
+    const first = {
+      taskId: "task_1",
+      status: "completed",
+      metadata,
+      lastOutput: { type: "result", data: "first" },
+    } as const;
+    const second = {
+      ...first,
+      taskId: "task_2",
+      lastOutput: { type: "result", data: "second" },
+    } as const;
+    const state = taskState([
+      taskEntry("task_1", "turn_1", first),
+      {
+        ...taskEntry("task_2", "turn_2", second),
+        task: { ...taskEntry("task_2", "turn_2", second).task, cohortId: "task_1" },
+      },
+      {
+        ...taskEntry("task_3", "turn_3"),
+        task: { ...taskEntry("task_3", "turn_3").task, cohortId: "task_1" },
+      },
+    ]);
+    const result = resolveTaskDeliveryContext({
+      state,
+      taskDeliveryIds: ["task_2:ready:completed"],
+      taskDeliveryPolicy: "auto",
+    });
+    expect(result?.phase).toBe("pending");
+    expect(result?.rootTurnId).toBe("turn_2");
+    expect(JSON.parse(result!.context.slice(TASK_DELIVERY_CONTEXT_LABEL.length))).toEqual({
+      tasks: [
+        { name: metadata.name, output: first.lastOutput, status: "completed", taskId: "task_1" },
+        { name: metadata.name, output: second.lastOutput, status: "completed", taskId: "task_2" },
+        { name: metadata.name, status: "pending", taskId: "task_3" },
+      ],
+    });
+    const batch = resolveTaskDeliveryContext({
+      state,
+      taskDeliveryIds: ["task_2:ready:completed", "task_1:ready:completed"],
+      taskDeliveryPolicy: "auto",
+    });
+    expect(batch).toEqual(result);
+  });
+
+  it("auto keeps an advisory wake pending until the delivered task is terminal", () => {
+    const result = resolveTaskDeliveryContext({
+      state: taskState([taskEntry("task_1", "turn_1")]),
+      taskDeliveryIds: ["task_1:message:1"],
+      taskDeliveryPolicy: "auto",
+    });
+    expect(result?.phase).toBe("pending");
+  });
+
   it("includes completed siblings while a cross-turn cohort is pending", () => {
     const completed = {
       lastOutput: { data: { result: "first" }, type: "result" },
@@ -110,18 +164,25 @@ describe("resolveTaskDeliveryContext", () => {
     } satisfies TaskView;
     const state = taskState([
       taskEntry("task_1", "turn_1", completed),
-      { ...taskEntry("task_2", "turn_2"), cohortId: "task_1" },
+      {
+        ...taskEntry("task_2", "turn_2"),
+        task: { ...taskEntry("task_2", "turn_2").task, cohortId: "task_1" },
+      },
       taskEntry("task_3", "turn_1"),
     ]);
 
-    expect(resolveTaskDeliveryContext({ state, taskDeliveryId: "task_1:ready:completed" })).toEqual(
-      {
-        context:
-          '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
-        phase: "pending",
-        rootTurnId: "turn_1",
-      },
-    );
+    expect(
+      resolveTaskDeliveryContext({
+        state,
+        taskDeliveryIds: ["task_1:ready:completed"],
+        taskDeliveryPolicy: "cohort",
+      }),
+    ).toEqual({
+      context:
+        '[Task state]\n{"tasks":[{"name":"report_probe","status":"completed","taskId":"task_1"},{"name":"report_probe","status":"pending","taskId":"task_2"}]}',
+      phase: "pending",
+      rootTurnId: "turn_1",
+    });
   });
 
   it("includes every output once the parent has received the whole terminal cohort", () => {
@@ -142,9 +203,13 @@ describe("resolveTaskDeliveryContext", () => {
       resolveTaskDeliveryContext({
         state: taskState([
           taskEntry("task_1", "turn_1", first),
-          { ...taskEntry("task_2", "turn_2", second), cohortId: "task_1" },
+          {
+            ...taskEntry("task_2", "turn_2", second),
+            task: { ...taskEntry("task_2", "turn_2", second).task, cohortId: "task_1" },
+          },
         ]),
-        taskDeliveryId: "task_2:ready:completed",
+        taskDeliveryIds: ["task_2:ready:completed"],
+        taskDeliveryPolicy: "cohort",
       }),
     ).toEqual({
       context:
@@ -171,11 +236,15 @@ describe("resolveTaskDeliveryContext", () => {
     const state = taskState([
       taskEntry("task_previous", "turn_1", previous),
       taskEntry("task_failed", "turn_1", failed),
-      { ...taskEntry("task_cancelled", "turn_2", cancelled), cohortId: "task_failed" },
+      {
+        ...taskEntry("task_cancelled", "turn_2", cancelled),
+        task: { ...taskEntry("task_cancelled", "turn_2", cancelled).task, cohortId: "task_failed" },
+      },
     ]);
     const result = resolveTaskDeliveryContext({
       state,
-      taskDeliveryId: "task_cancelled:ready:cancelled",
+      taskDeliveryIds: ["task_cancelled:ready:cancelled"],
+      taskDeliveryPolicy: "cohort",
     });
     expect(result).toMatchObject({ phase: "settled", rootTurnId: "turn_2" });
     expect(JSON.parse(result!.context.slice(`${TASK_DELIVERY_CONTEXT_LABEL}\n`.length))).toEqual({
@@ -190,34 +259,49 @@ describe("resolveTaskDeliveryContext", () => {
     expect(result!.context).not.toContain("createdByTurnId");
   });
 
-  it("returns no context when the delivery is not owned by the session task index", () => {
-    expect(
-      resolveTaskDeliveryContext({
-        state: taskState([taskEntry("task_1", "turn_1")]),
-        taskDeliveryId: "task_unknown:ready:completed",
-      }),
-    ).toBeUndefined();
-  });
+  it.each([{ taskDeliveryIds: [] }, { taskDeliveryIds: ["task_unknown:ready:completed"] }])(
+    "returns no context for missing or unowned deliveries: $taskDeliveryIds",
+    ({ taskDeliveryIds }) => {
+      expect(
+        resolveTaskDeliveryContext({
+          state: taskState([taskEntry("task_1", "turn_1")]),
+          taskDeliveryIds,
+          taskDeliveryPolicy: "cohort",
+        }),
+      ).toBeUndefined();
+    },
+  );
 });
 
 function taskEntry(
   taskId: string,
   createdByTurnId: string,
-  terminalView?: TaskView,
-  executor?: { readonly data: Record<string, never>; readonly kind: string },
-): SessionTaskIndexEntry {
+  outcome?: TaskView,
+): BackgroundWorkflowToolRun {
   return {
-    createdByTurnId,
-    dispatchContext: { auth: { current: null, initiator: null } },
-    executor,
-    metadata,
-    taskId,
-    taskInboxToken: `inbox-${taskId}`,
-    taskRunId: `run-${taskId}`,
-    terminalView,
+    callId: taskId,
+    toolName: metadata.name,
+    lifetime: "session" as const,
+    origin: { turnId: createdByTurnId, stepIndex: 0 },
+    address: { runId: `run-${taskId}`, hookToken: `inbox-${taskId}` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata,
+      taskId,
+      outcome:
+        outcome === undefined
+          ? undefined
+          : {
+              status: outcome.status,
+              lastOutput: outcome.lastOutput,
+              usage: outcome.usage,
+            },
+    },
   };
 }
 
 function taskState(tasks: readonly ReturnType<typeof taskEntry>[]): SessionStateMap {
-  return { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } } as SessionStateMap;
+  return {
+    "eve.workflowTool": { version: 3, runs: tasks },
+  } as SessionStateMap;
 }

@@ -22,6 +22,7 @@ import {
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
+import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
@@ -55,6 +56,7 @@ export interface CompilerArtifactPaths {
   discoveryManifestPath: string;
   discoveryDirectoryPath: string;
   moduleMapPath: string;
+  sandboxPreparedArtifactsPath: string;
 }
 
 /**
@@ -156,6 +158,7 @@ function resolveCompilerArtifactPathsAt(
     discoveryManifestPath: join(discoveryDirectoryPath, "agent-discovery-manifest.json"),
     discoveryDirectoryPath,
     moduleMapPath: join(compileDirectoryPath, "module-map.mjs"),
+    sandboxPreparedArtifactsPath: join(compileDirectoryPath, "sandbox-prepared-artifacts.json"),
   };
 }
 
@@ -261,6 +264,9 @@ export async function writeCompilerArtifacts(
     paths: publishedPaths,
   });
   const metadataJson = serializeArtifactJson(metadata);
+  const sandboxPreparedArtifactsJson = serializeArtifactJson(
+    createSandboxPreparedArtifactsManifest([]),
+  );
 
   await mkdir(paths.discoveryDirectoryPath, {
     recursive: true,
@@ -274,6 +280,7 @@ export async function writeCompilerArtifacts(
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
+    writeFile(paths.sandboxPreparedArtifactsPath, sandboxPreparedArtifactsJson),
   ]);
 
   return {

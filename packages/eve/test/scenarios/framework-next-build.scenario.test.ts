@@ -22,6 +22,7 @@ const NEXT_EVE_MIDDLEWARE_DESCRIPTOR = {
   ...NEXT_EVE_PROXY_DESCRIPTOR,
   files: {
     ...NEXT_EVE_PROXY_DESCRIPTOR.files,
+    "next.config.mjs": `import { withEve } from "eve/next";\n\nexport default withEve({}, { eveBuildCommand: "pnpm exec eve build --skip-sandbox-prewarm" });\n`,
     ".vercel/project.json": `${JSON.stringify(
       {
         orgId: "team_eve_scenario",
@@ -88,6 +89,7 @@ Triage the support queue.
     "next.config.mjs": `import { withEve } from "eve/next";
 
 export default withEve({}, {
+  eveBuildCommand: "pnpm exec eve build --skip-sandbox-prewarm",
   agents: {
     billing: "./agents/billing",
     support: "./agents/support",

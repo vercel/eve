@@ -1,9 +1,9 @@
 ---
 title: "Judge"
-description: "Grade evals with an LLM judge via t.judge.autoevals, set thresholds on the assertion, and configure the judge model."
+description: "Grade evals with evaluation models using criteria, typed questions, or batches, and set thresholds on each assertion."
 ---
 
-When no deterministic [assertion](./assertions) captures what "good" means (factual correctness, summary quality, free-form criteria), grade the run with an LLM judge. The `t.judge.*` assertions are the only model-backed ones, and they use a judge model that is resolved separately from the agent under test. eve only uses it for scoring, never to swap out the agent.
+Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`evaluate` from `eve/ai`](../guides/evaluate#evaluate-inside-a-tool) and defaults to `typesafe-ai/jev`. The judge is separate from the agent under test and is used only for scoring.
 
 ```ts
 import { defineEval } from "eve/evals";
@@ -12,110 +12,153 @@ export default defineEval({
   async test(t) {
     await t.send("Explain quantum tunneling to a 10-year-old.");
     t.succeeded();
-    t.judge.autoevals.closedQA("uses no math beyond arithmetic").atLeast(0.8);
+    t.judge("The response uses no math beyond arithmetic.").atLeast(0.8);
   },
 });
 ```
 
+No judge configuration is required. Configure credentials for the evaluator as described under [Configuring the judge model](#configuring-the-judge-model).
+
 ## The graders
 
-The judges live under `t.judge.autoevals`. The namespace names the [Braintrust autoevals](https://github.com/braintrustdata/autoevals) grader family, so the factuality and closedQA semantics are autoevals', not eve-invented. Each grader scores the most recently settled turn’s assistant message by default and is soft by default (tracked, no gate):
+`t.judge` accepts a criteria string, one typed question, or a batch of named questions. A string becomes a boolean question asking whether the response meets those criteria. A single question returns an assertion handle; a batch returns one handle per question.
 
-| Grader                                   | Grades                                                                                 |
-| ---------------------------------------- | -------------------------------------------------------------------------------------- |
-| `t.judge.autoevals.factuality(expected)` | Factual consistency of the reply against an expected answer (A–E buckets)              |
-| `t.judge.autoevals.summarizes(expected)` | How well the reply summarizes the expected text                                        |
-| `t.judge.autoevals.closedQA(criteria)`   | Whether the reply satisfies a free-form yes/no criterion (no expected answer to match) |
-| `t.judge.autoevals.sql(expected)`        | Semantic equivalence of two SQL statements                                             |
+| Question                     | Assertion score                                                 |
+| ---------------------------- | --------------------------------------------------------------- |
+| Criteria string or `boolean` | The returned probability of true, from 0 to 1                   |
+| `score`                      | The returned rubric position divided by the highest level index |
+| `choice`                     | 1 when the selected option equals `expected`; otherwise 0       |
 
-Judges receive the latest message text from the session whose turn most recently settled as the input prompt. Approval responses and stream reads preserve that prompt. For multipart messages, including `session.sendFile()`, the prompt contains the text parts.
+Boolean scores are model estimates, not guaranteed calibrated confidence. A rubric needs at least two levels, ordered from worst to best. The SDK can return a fractional position on that rubric; eve normalizes it to the 0–1 scale used by assertion thresholds.
 
-A failed `closedQA` assertion prints the input and judge explanation:
-
-```text
-✗ judge.autoevals.closedQA [citation] (0% < 80%): prompt: "Name the source."
-  criteria: "cites a source"
-  response: "It is widely believed."
-  rationale: "The response does not cite a source."
-  choice: "N"
+```ts
+t.judge({
+  type: "score",
+  instructions: "Grade the response's clarity.",
+  criteria: ["Unclear", "Mostly clear", "Clear and concise"],
+})
+  .label("clarity")
+  .atLeast(0.75);
 ```
 
-The reference or criteria is the positional argument. An options object follows:
+Choice questions require an `expected` option key. eve uses that expectation locally for scoring; it does not send it to the evaluator. Instructions and rubric descriptions accept strings, JSON objects, or JSON arrays. Descriptions can also be `null`.
 
-- `on` is the value to grade, defaulting to the most recently settled turn’s assistant message. Pass an intermediate draft or parsed value to grade it instead.
-- `model` and `modelOptions` are a per-call judge override (see below).
+## Choose the value to grade
+
+By default, the evaluator receives `{ input, output }`: the latest prompt and assistant message from the session whose turn most recently settled. Approval responses and stream reads preserve that prompt. For multipart messages, including `session.sendFile()`, the prompt contains the text parts.
+
+Pass `on` to replace the output. JSON values stay structured rather than being converted to strings:
 
 ```ts
 const draft = await t.send("Draft the welcome email.");
-t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
+t.judge("The response has a professional tone.", { on: draft.message }).atLeast(0.6);
 ```
 
-For a multi-turn eval, pass `session.transcript` to grade a session's complete observed conversation instead of only its final reply:
+For a multi-turn eval, pass `session.transcript`:
 
 ```ts
 const { session } = await t.send("My favorite word is marigold. Remember it.");
 await session.send("What is my favorite word?");
-
-t.judge.autoevals
-  .closedQA("The assistant remembers the user's favorite word across turns", {
-    on: session.transcript,
-  })
-  .atLeast(0.8);
+t.judge("The assistant remembers the user's favorite word across turns.", {
+  on: session.transcript,
+}).atLeast(0.8);
 ```
 
-`session.transcript` contains the session's user and assistant messages in turn order. It excludes reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals) for the transcript format and independent sessions.
+The transcript contains user and assistant messages in turn order, excluding reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals).
+
+## Evaluate several questions together
+
+A batch makes one evaluation request against one shared state. Pass `state` to replace the default `{ input, output }` completely. Batch calls use `state` instead of `on`.
+
+```ts
+const judgments = t.judge({
+  state: { response: turn.message ?? "", reference },
+  questions: {
+    accurate: {
+      type: "boolean",
+      instructions: "Is the response consistent with the reference?",
+    },
+    outcome: {
+      type: "choice",
+      instructions: "Classify the response.",
+      criteria: {
+        answered: "Answers the request",
+        declined: "Declines the request",
+      },
+      expected: "answered",
+    },
+  },
+});
+judgments.accurate.atLeast(0.9);
+judgments.outcome.gate();
+```
+
+Keys identify questions and their assertion handles; instructions must explain what to judge. Every question sees the same state. Use separate calls for unrelated inputs. A batch must contain at least one question, and a provider or validation failure fails every assertion in the batch.
 
 ## Soft scoring and thresholds
 
-Judge assertions are soft, so the threshold rides on the assertion handle. There is no separate thresholds map:
+Judges are soft by default:
 
-- **No threshold** is tracked-only. The score lands in reports and artifacts and never fails the eval. Use it to watch a metric without gating on it.
-- `.atLeast(threshold)` is a soft bar. A below-threshold score marks the eval `scored`, fatal only under `eve eval --strict`.
-- `.gate(threshold)` promotes a judge to a hard gate that fails the eval outright.
+- Without a threshold, the score is tracked in reports and artifacts without failing the eval.
+- `.atLeast(threshold)` sets a soft bar. A lower score marks the eval `scored`, fatal only under `eve eval --strict`.
+- `.gate(threshold)` makes a lower score fail the eval outright. An omitted gate threshold is 1.
 
 ```ts
-t.judge.autoevals.closedQA("cites a source"); // tracked, never fails
-t.judge.autoevals.closedQA("cites a source").label("citation").atLeast(0.6);
-t.judge.autoevals.factuality(reference).gate(0.8); // hard gate at 0.8
+t.judge("The response cites a source.");
+t.judge("The response cites a source.").label("citation").atLeast(0.8);
+t.judge("The response cites a source.").gate(0.9);
 ```
 
-A judge runs once per assertion and burns tokens, so reach for one only when nothing deterministic will do. Judge calls start when recorded, and the runner waits for all of them during finalization; assertion handles themselves are intentionally not awaitable.
+A boolean probability need not reach exactly 1 even for a good response, so choose an explicit gate threshold for boolean judgments. Choice scores are binary.
+
+Calls capture their state and questions and start immediately. The runner waits for them during finalization; handles are not awaitable. Each standalone call makes its own request, while a batch shares one request. Eval timeouts cancel pending judgments and stop waiting even if a provider ignores cancellation.
 
 ## Configuring the judge model
 
-The judge model is resolved once when the runner builds `t`. It is **never** the model under test. Three levels resolve innermost-wins:
+Model settings resolve in this order:
 
-1. **Per-call**: `t.judge.autoevals.closedQA("…", { model, modelOptions })`.
-2. **Per-eval**: `defineEval({ judge: { model, modelOptions }, test })`.
-3. **Project default**: `defineEvalConfig({ judge: { model, modelOptions } })` in `evals.config.ts`.
+1. Per-call: `t.judge("…", { model, modelOptions })`.
+2. Per-eval: `defineEval({ judge: { model, modelOptions }, test })`.
+3. Project default: `defineEvalConfig({ judge: { model, modelOptions } })`.
+4. The default model used by `evaluate`, currently `typesafe-ai/jev`.
+
+A per-eval `judge` replaces the project's judge configuration. Per-call fields override the resolved configuration. `judge` and its `model` are optional; deterministic evals make no evaluation requests.
 
 ```ts title="evals/evals.config.ts"
 import { defineEvalConfig } from "eve/evals";
 
 export default defineEvalConfig({
-  judge: { model: "openai/gpt-5.6-luna" }, // the default judge for every eval in this tree
+  judge: { model: "typesafe-ai/jev" },
 });
 ```
 
-```ts title="evals/quantum.eval.ts"
-import { defineEval } from "eve/evals";
+String IDs resolve through the AI SDK default provider, or Vercel AI Gateway when none is configured. Gateway uses `AI_GATEWAY_API_KEY` or Vercel OIDC credentials; eve's existing local Gateway connection is also honored by `evaluate`. An explicit provider evaluation model uses that provider's credentials:
 
-export default defineEval({
-  judge: { model: "anthropic/claude-opus-4.8" }, // a stronger judge for this eval
-  async test(t) {
-    await t.send("Explain quantum tunneling to a 10-year-old.");
-    t.judge.autoevals.factuality(reference).atLeast(0.7);
-    t.judge.autoevals.closedQA("is concise", { model: "anthropic/claude-haiku-4.5" }); // cheaper, per-call
-  },
+```ts
+import { openai } from "@ai-sdk/openai";
+
+t.judge("The response addresses the request.", {
+  model: openai.evaluationModel("gpt-5.6-luna"),
+  modelOptions: { providerOptions: { openai: { reasoningEffort: "high" } } },
 });
 ```
 
-`judge` in `evals.config.ts` is optional, and a tree of fully deterministic evals can omit it. Calling `t.judge.*` with no judge model resolved records a failed gate: the runner scores the assertion after the `test` function runs, the missing model throws, and the eval fails with that message.
+Use the provider's `evaluationModel` factory, not a language model instance. AI SDK supplies evaluation adapters for supported language models. Provider support and the evaluation contract are experimental; see [AI SDK evaluation](https://ai-sdk.dev/docs/ai-sdk-core/evaluation).
 
-A **string model id** (e.g. `"anthropic/claude-opus-4.8"`) routes through the Vercel AI Gateway and needs `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` in the environment. An **AI SDK `LanguageModel` instance** is used directly. With a model configured but no credentials, a judge-backed eval **skips visibly** rather than failing, so the run reports the skip instead of a spurious error. For provider-specific judge settings, use `modelOptions.providerOptions`.
+String model IDs resolve through the default provider's evaluation API. Gateway accepts native evaluation models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-5.6-luna` does not automatically select the OpenAI adapter. Use an evaluation-model instance as shown above for language models.
+
+Missing credentials, invalid answers, unsupported question types, and provider errors become failed gates even for tracked-only judgments. They do not silently skip the eval or select another model. Validation, authentication, and retries use the shared `evaluate` implementation.
+
+## Diagnostics and migration
+
+Reports use `judge.boolean`, `judge.score`, and `judge.choice`; batch assertion names also include their question key. Diagnostics include the captured state, question, and raw answer. Assertion metadata retains the normalized score, model identity, token usage, warnings, and available provider and response metadata. Usage for a batch is marked as shared across its assertions, not a separate charge for each question. Evaluation models do not promise a prose rationale.
+
+The autoevals graders have been removed. Replace `t.judge.autoevals.closedQA(criteria, options)` with `t.judge(criteria, options)`. Scores now represent a probability rather than a binary yes/no answer, so review thresholds against your examples. For factuality, summaries, or SQL equivalence, write an explicit question and include the reference in shared state. No old grader buckets are preserved.
+
+Change configured language model instances to evaluation model instances. `modelOptions.providerOptions`, assertion labels, and threshold methods remain available. [Braintrust reporting](./reporters) continues to accept judge scores independently of the grader implementation.
 
 ## What to read next
 
 - [Assertions](./assertions): deterministic run-level and value assertions
-- [Reporters](./reporters): ship judged scores to Braintrust experiments
-- [Targets](./targets): local vs remote targets for judge-backed evals
+- [Reporters](./reporters): publish scores and inspect results
+- [Targets](./targets): local and remote eval targets

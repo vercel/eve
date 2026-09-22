@@ -8,7 +8,7 @@ const MAX_ERROR_OUTPUT = 2_000;
 type CommandSandbox = Pick<SandboxSession, "run">;
 
 export async function withBrokeredGitHubCredential<T>(
-  sandbox: Pick<SandboxSession, "setNetworkPolicy">,
+  sandbox: Required<Pick<SandboxSession, "setNetworkPolicy">>,
   token: string,
   operation: () => Promise<T>,
 ): Promise<T> {

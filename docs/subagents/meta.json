@@ -1,5 +1,5 @@
 {
   "title": "Subagents",
   "defaultOpen": false,
-  "pages": ["index"]
+  "pages": ["index", "../guides/remote-agents"]
 }

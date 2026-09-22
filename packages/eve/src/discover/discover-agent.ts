@@ -119,13 +119,6 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
   });
   diagnostics.push(...configModuleResult.diagnostics);
 
-  const instrumentationModuleResult = discoverFlatModuleSource({
-    rootEntries,
-    rootPath: agentRoot,
-    slotName: "instrumentation",
-  });
-  diagnostics.push(...instrumentationModuleResult.diagnostics);
-
   const channelsResult = await discoverNamedSourceDirectory({
     directoryName: "channels",
     invalidDirectoryCode: DISCOVER_CHANNELS_DIRECTORY_INVALID,
@@ -187,19 +180,13 @@ export async function discoverAgent(input: DiscoverAgentInput): Promise<Discover
     const instrumentationDirectory = rootEntries.find(
       (entry) => entry.name === "instrumentation" && entry.isDirectory(),
     );
-    if (
-      instrumentationModuleResult.module !== undefined ||
-      instrumentationDirectory !== undefined
-    ) {
+    if (instrumentationDirectory !== undefined) {
       diagnostics.push(
         createDiscoverErrorDiagnostic({
           code: DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED,
           message:
             "An extension may not declare instrumentation providers — process-wide observability belongs to the consuming agent.",
-          sourcePath:
-            instrumentationModuleResult.module === undefined
-              ? join(agentRoot, instrumentationDirectory!.name)
-              : join(agentRoot, instrumentationModuleResult.module.logicalPath),
+          sourcePath: join(agentRoot, instrumentationDirectory.name),
         }),
       );
     }

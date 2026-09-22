@@ -17,14 +17,7 @@ describe("self-modification authored runtime boundary", () => {
       expect(code).not.toContain("createJustBashSandboxBackend");
       expect(code).not.toContain("loadJustBashModule");
       if (entry === "sandbox") {
-        for (const specifier of [
-          "eve/sandbox",
-          "eve/sandbox/just-bash",
-          "eve/sandbox/microsandbox",
-          "eve/sandbox/vercel",
-        ]) {
-          expect(code).toContain(`from "${specifier}"`);
-        }
+        expect(code).toContain('from "eve/self-modification/sandbox"');
       } else {
         expect(code).toContain('from "eve"');
       }

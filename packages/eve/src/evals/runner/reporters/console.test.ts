@@ -25,11 +25,11 @@ describe("Console", () => {
       assertions: [
         {
           message: [
-            'prompt: "Name the source."',
-            'criteria: "cites a source"',
-            'rationale: "No source was cited."',
+            'state: {"input":"Name the source."}',
+            'question: {"type":"boolean","instructions":"cites a source"}',
+            'answer: {"type":"boolean","probability":0}',
           ].join("\n"),
-          name: "judge.autoevals.closedQA",
+          name: "judge.boolean",
           passed: false,
           score: 0,
           severity: "soft",
@@ -50,9 +50,9 @@ describe("Console", () => {
       verdict: "scored",
     });
 
-    expect(lines).toContain('  ✗ judge.autoevals.closedQA (0% < 80%): prompt: "Name the source."');
-    expect(lines).toContain('    criteria: "cites a source"');
-    expect(lines).toContain('    rationale: "No source was cited."');
+    expect(lines).toContain('  ✗ judge.boolean (0% < 80%): state: {"input":"Name the source."}');
+    expect(lines).toContain('    question: {"type":"boolean","instructions":"cites a source"}');
+    expect(lines).toContain('    answer: {"type":"boolean","probability":0}');
   });
 
   it("does not print diagnostics for passing assertions", () => {
@@ -64,7 +64,7 @@ describe("Console", () => {
         {
           message: 'prompt: "Successful prompt details"',
           metadata: { rationale: "Successful rationale details" },
-          name: "judge.autoevals.closedQA",
+          name: "judge.boolean",
           passed: true,
           score: 1,
           severity: "gate",

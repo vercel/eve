@@ -3,13 +3,10 @@
  */
 
 export {
-  type BackgroundToolDefinition,
   type DisabledToolSentinel,
   defineTool,
   disableTool,
   isDisabledToolSentinel,
-  type TaskExec,
-  type TaskReceipt,
   type ToolLabelDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,
@@ -40,6 +37,7 @@ export {
 export {
   defineWorkflowTool,
   type WorkflowStepToolContext,
+  type TaskReceipt,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentInput,

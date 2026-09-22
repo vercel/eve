@@ -1,3 +1,4 @@
+import { getWorkflowToolRuns, readWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -6,16 +7,20 @@ import {
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
+import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { isObject } from "#shared/guards.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
 
 /** Parses retained work with this deployment's code before deciding whether it can move. */
 export function isSessionStateIdleForHandoff(sessionState: DurableSessionState): boolean {
   const { state } = readDurableSession(sessionState);
   // Parse all entries, including terminal tasks, before any busy-work shortcut.
-  const tasks = getSessionTaskIndex(state);
+  const invocations = getWorkflowToolRuns(state);
+  for (const entry of invocations) {
+    if (entry.lifetime === "session") readWorkflowTaskView(entry.task);
+  }
   const handles = getAgentHandleStore(state);
 
   // These registries are deleted when work settles. Their ordinary readers
@@ -28,10 +33,8 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
     "eve.harness.pendingWorkflowInterrupt",
   ];
   if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
-  for (const key of ["eve.runtime.pendingInputBatches", "eve.runtime.workflowToolRuns"]) {
-    const value = state?.[key];
-    if (value !== undefined && (!Array.isArray(value) || value.length > 0)) return false;
-  }
+  const batches = state?.["eve.runtime.pendingInputBatches"];
+  if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
   const proxyRequests = state?.["eve.runtime.proxyInputRequests"];
   if (
     proxyRequests !== undefined &&
@@ -43,7 +46,7 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
       handles.handles.every(
         (handle) => handle.phase === "parked" || handle.phase === "available",
       )) &&
-    tasks.every((task) => task.terminalView !== undefined)
+    invocations.every((entry) => entry.lifetime === "session" && entry.task.outcome !== undefined)
   );
 }
 
@@ -73,7 +76,25 @@ export async function validateSessionCheckpointStep(input: {
   )
     throw new Error("Session checkpoint contains an invalid timeout duration.");
   const context = await deserializeContext(checkpoint.serializedContext);
-  context.require(BundleKey);
+  const bundle = context.require(BundleKey);
+  const session = readDurableSession(checkpoint.sessionState);
+  const sandboxState = session.sandboxState?.session;
+  if (sandboxState !== null && sandboxState !== undefined) {
+    const definition =
+      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.inheritance
+        ?.definition ??
+      getResolvedRuntimeAgentNode(bundle.graph, bundle.nodeId).sandboxRegistry.sandbox.definition;
+    if (definition.kind !== "independent") {
+      throw new Error("Session checkpoint sandbox has no resolved provider.");
+    }
+    const provider = getSandboxEnvironmentRuntime(definition.environment);
+    if (
+      sandboxState.providerName !== provider.providerName ||
+      sandboxState.stateProtocolVersion !== provider.stateProtocolVersion
+    ) {
+      throw new Error("Session checkpoint sandbox provider state is incompatible.");
+    }
+  }
   if (!isSessionStateIdleForHandoff(checkpoint.sessionState)) {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }

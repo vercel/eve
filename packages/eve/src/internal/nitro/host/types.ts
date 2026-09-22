@@ -20,7 +20,7 @@ export interface ApplicationBuildOptions {
    * command.
    */
   readonly publicRoutePrefix?: string;
-  readonly skipVercelSandboxPrewarm: boolean;
+  readonly skipSandboxPrewarm: boolean;
   /** Whether this build is for a member of a top-level `agents/` workspace. */
   readonly workspaceMember?: boolean;
   readonly vercelServiceOutput?: {

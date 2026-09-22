@@ -134,7 +134,6 @@ function createTool(name: string): HarnessToolDefinition {
 function createSubagentTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    resultKind: "subagent",
     workflowId: "workflow//./agent/subagents/researcher//execute",
   };
 }

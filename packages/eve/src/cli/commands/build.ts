@@ -39,10 +39,7 @@ export function registerBuildCommand(input: {
     })
     .description("Build the current eve application.")
     .option("--profile <path>", "Write best-effort timing and output-size profile JSON to a file")
-    .option(
-      "--skip-sandbox-prewarm",
-      "Skip sandbox template prewarm for a Vercel build; output may not be deployable",
-    )
+    .option("--skip-sandbox-prewarm", "Skip sandbox preparation; output may not be deployable")
     .action(async (options: BuildCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
@@ -50,13 +47,15 @@ export function registerBuildCommand(input: {
 
       const projectContext = await input.applicationContext.resolveAgent();
       if (projectContext.kind === "workspace") {
-        if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
+        if (options.profile !== undefined) {
           throw new Error(
-            "Workspace builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",
+            "Workspace builds do not support --profile. Run it from an individual agent directory.",
           );
         }
         const { buildAgentWorkspace } = await import("#internal/vercel/build-agent-workspace.js");
-        const outputDir = await buildAgentWorkspace(projectContext.workspace);
+        const outputDir = await buildAgentWorkspace(projectContext.workspace, {
+          skipSandboxPrewarm: options.skipSandboxPrewarm,
+        });
         input.logger.log(
           renderCliTaggedLine(theme, {
             message: `built output at ${outputDir}`,
@@ -76,12 +75,12 @@ export function registerBuildCommand(input: {
       const buildOptions: {
         profileOutputPath?: string;
         readonly publicRoutePrefix: ApplicationBuildOptions["publicRoutePrefix"];
-        readonly skipVercelSandboxPrewarm: boolean;
+        readonly skipSandboxPrewarm: boolean;
         readonly vercelServiceOutput: ApplicationBuildOptions["vercelServiceOutput"];
         readonly workspaceMember: boolean;
       } = {
         publicRoutePrefix: normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]),
-        skipVercelSandboxPrewarm: options.skipSandboxPrewarm === true,
+        skipSandboxPrewarm: options.skipSandboxPrewarm === true,
         vercelServiceOutput: resolveInternalVercelServiceOutput(input.applicationContext.root),
         workspaceMember:
           projectContext.kind === "workspace-member" ||

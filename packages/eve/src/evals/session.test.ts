@@ -10,11 +10,10 @@ import { EvalSessionManager } from "#evals/session-manager.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 
-const mocks = vi.hoisted(() => ({ closedQA: vi.fn() }));
+const mocks = vi.hoisted(() => ({ evaluate: vi.fn() }));
 
 vi.mock("node:fs/promises", () => ({ readFile: vi.fn() }));
-vi.mock("autoevals", () => ({ ClosedQA: mocks.closedQA }));
-vi.mock("#evals/autoevals-client.js", () => ({ createAutoevalsClient: vi.fn() }));
+vi.mock("#ai/evaluate.js", () => ({ evaluate: mocks.evaluate }));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -38,9 +37,11 @@ describe("eval judge input", () => {
         await session.readTurn();
       }
 
-      context.judge.autoevals.closedQA("answers the user's request");
-      expect(mocks.closedQA).toHaveBeenCalledWith(
-        expect.objectContaining({ input: "Find Bob's order status instead." }),
+      context.judge("answers the user's request");
+      expect(mocks.evaluate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: expect.objectContaining({ input: "Find Bob's order status instead." }),
+        }),
       );
     },
   );
@@ -50,10 +51,12 @@ describe("eval judge input", () => {
     vi.mocked(readFile).mockResolvedValue(Buffer.from("invoice"));
 
     await session.sendFile("Summarize Alice's invoice.", "/invoice.txt", "text/plain");
-    context.judge.autoevals.closedQA("summarizes the invoice");
+    context.judge("summarizes the invoice");
 
-    expect(mocks.closedQA).toHaveBeenCalledWith(
-      expect.objectContaining({ input: "Summarize Alice's invoice." }),
+    expect(mocks.evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ input: "Summarize Alice's invoice." }),
+      }),
     );
   });
 
@@ -70,19 +73,26 @@ describe("eval judge input", () => {
       file,
       { type: "text", text: "List the line items." },
     ]);
-    context.judge.autoevals.closedQA("lists the line items");
-    expect(mocks.closedQA).toHaveBeenLastCalledWith(
-      expect.objectContaining({ input: "Review Alice's invoice.\nList the line items." }),
+    context.judge("lists the line items");
+    expect(mocks.evaluate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        state: expect.objectContaining({ input: "Review Alice's invoice.\nList the line items." }),
+      }),
     );
 
     await session.send([file]);
-    context.judge.autoevals.closedQA("describes the attachment");
-    expect(mocks.closedQA).toHaveBeenLastCalledWith(expect.objectContaining({ input: "" }));
+    context.judge("describes the attachment");
+    expect(mocks.evaluate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ state: expect.objectContaining({ input: "" }) }),
+    );
   });
 });
 
 async function setup() {
-  mocks.closedQA.mockResolvedValue({ name: "ClosedQA", score: 1 });
+  mocks.evaluate.mockResolvedValue({
+    answers: { judgment: { type: "boolean", probability: 1 } },
+    response: { modelId: "test" },
+  });
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     Response.json({ sessionId: "session_1" }, { status: 202 }),
   );

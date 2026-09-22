@@ -15,15 +15,18 @@ export default defineTaskEval({
     dimensions: { transport: "local" },
   },
   async test(t) {
-    const started = await t.send("TASK-A2-CHILD-FAILURE");
+    const started = await t.send("TASK-A2-CHILD-FAILURE", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-A2-CHILD-FAILURE-STARTED");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
       data: {
-        backgroundTask: { status: "working" },
-        callId: CALL_ID,
-        subagentName: "busy-worker",
+        result: {
+          kind: "tool-result",
+          output: { status: "working" },
+          callId: CALL_ID,
+          toolName: "busy-worker",
+        },
       },
     });
     const taskId = requireBackgroundTaskId(started);

@@ -40,11 +40,11 @@ export const SETUP_FLOW_CONFIG = {
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<
     SetupFlowRenderer,
-    "readProviderPicker" | "readModelEditor" | "setNavigation" | "waitForInterrupt"
+    "readProviderPicker" | "readModelPicker" | "setNavigation" | "waitForInterrupt"
   >;
 
 type MuteableSetupRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "setNavigation">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelPicker" | "setNavigation">;
 
 export type OnboardingScreenEvent = {
   screen:
@@ -119,8 +119,8 @@ function muteableRenderer(
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
     readProviderPicker: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
-    readModelEditor: (options) =>
-      isMuted() ? Promise.resolve(undefined) : renderer.readModelEditor(options),
+    readModelPicker: (options) =>
+      isMuted() ? Promise.resolve(undefined) : renderer.readModelPicker(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -286,7 +286,7 @@ async function executeSetupCommand(
           signal,
           chatGptAccountLabel: input.chatGptAccountLabel,
           deps: {
-            pickModelSettings: (request) => renderer.readModelEditor(request),
+            pickModelSettings: (request) => renderer.readModelPicker(request),
           },
         };
         if (input.initialModelStep !== undefined) {

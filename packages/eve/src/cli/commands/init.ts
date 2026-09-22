@@ -10,7 +10,7 @@ import type {
   EveCliSetupStep,
   EveCliSetupTerminalResult,
 } from "#cli/telemetry/index.js";
-import { EVE_WORDMARK } from "#cli/banner.js";
+import { eveCliBanner, EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
@@ -44,12 +44,7 @@ import {
 } from "#setup/scaffold/create/project.js";
 
 import { initAgentDevHandoff } from "./agent-instructions.js";
-import {
-  installProgressDetail,
-  INSTALL_OUTPUT_FALLBACK_LINES,
-  NPM_NOISE_LINE,
-  packageManagerInstallFailureCode,
-} from "./init-install.js";
+import { createInstallDiagnostics, packageManagerInstallFailureCode } from "./init-install.js";
 import {
   addAgentsToWorkspace,
   convertScaffoldToAgentWorkspace,
@@ -274,12 +269,14 @@ async function runInitSteps(input: {
   parentDirectory: string;
   target: string | undefined;
   agentLaunched: boolean;
+  interactive: boolean;
   trackStep?: (step: EveCliSetupStep) => void;
   trackTerminal?: InitTerminalTracker;
 }): Promise<InitResult> {
   const {
     agentLaunched,
     dependencies,
+    interactive,
     logger,
     options,
     parentDirectory,
@@ -292,10 +289,15 @@ async function runInitSteps(input: {
   const evePackage = resolveInitEvePackageOverride();
   const selfModificationEnabled = false;
 
-  let progress = startCliLiveRow(logger);
+  const startedAt = dependencies.now();
+  const progressOptions = {
+    animate: interactive && !agentLaunched && !process.env.CI && process.env.TERM !== "dumb",
+    elapsed: true,
+    logPhases: true,
+  };
+  let progress = startCliLiveRow(logger, progressOptions);
   let activeInitStep: EveCliSetupStep = "scaffold";
   let installFailureCode: EveCliSetupFailureCode | undefined;
-  progress.update("Preparing project");
   try {
     const scaffoldPhase = initTarget.kind === "fresh" ? "creating agent" : "adding agent";
     trackStep?.(activeInitStep);
@@ -387,36 +389,25 @@ async function runInitSteps(input: {
     if (project.kind === "added") {
       progress.stop();
       reportExistingProjectChanges(logger, project);
-      progress = startCliLiveRow(logger);
+      progress = startCliLiveRow(logger, progressOptions);
     }
 
     activeInitStep = "install_dependencies";
     trackStep?.(activeInitStep);
-    progress.update("Installing dependencies", `${project.packageManager} install`);
+    progress.update("Installing dependencies", project.packageManager);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
-    const installFailureOutput: string[] = [];
-    const recentInstallOutput: string[] = [];
+    const diagnostics = createInstallDiagnostics();
     const installResult = await dependencies.runPackageManagerInstall(
       project.packageManager,
       project.projectPath,
       {
         autoApprove: true,
         bypassMinimumReleaseAge: true,
-        progressDetails: process.stdout.isTTY === true && !debug,
+        progressDetails: false,
         onOutput: (line) => {
-          if (line.text.trim() !== "") {
-            recentInstallOutput.push(line.text);
-            if (recentInstallOutput.length > INSTALL_OUTPUT_FALLBACK_LINES) {
-              recentInstallOutput.shift();
-            }
-            if (!NPM_NOISE_LINE.test(line.text)) {
-              installFailureOutput.push(line.text);
-            }
-          }
+          diagnostics.append(line.text);
           if (debug) initLog.debug(line.text);
-          const detail = installProgressDetail(project.packageManager, line);
-          if (detail !== undefined) progress.update("Installing dependencies", detail);
         },
       },
     );
@@ -425,8 +416,8 @@ async function runInitSteps(input: {
       installFailureCode = packageManagerInstallFailureCode(installResult);
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
-      const failureOutput =
-        installFailureOutput.length > 0 ? installFailureOutput : recentInstallOutput;
+      const { lines: failureOutput, truncated } = diagnostics.result();
+      if (truncated) logger.error("Earlier install output omitted; showing the final diagnostics.");
       for (const line of failureOutput) logger.error(line);
       if (failureOutput.length === 0) {
         const message = packageManagerInstallFailureMessage(installResult);
@@ -467,23 +458,22 @@ async function runInitSteps(input: {
     if (project.kind === "created") {
       activeInitStep = "initialize_git";
       trackStep?.(activeInitStep);
-      progress.update("Initializing Git repository");
+      progress.update("Initializing Git");
       initLog.debug("initializing git repository");
+      const gitResult = await dependencies.tryInitializeGit(project.projectPath);
       return {
         ...project,
-        agentElapsedMs,
+        elapsedMs: dependencies.now() - startedAt,
         agentLaunched,
-        gitResult: await dependencies.tryInitializeGit(project.projectPath),
-        installElapsedMs,
+        gitResult,
         selfModificationEnabled,
       };
     }
 
     return {
       ...project,
-      agentElapsedMs,
+      elapsedMs: dependencies.now() - startedAt,
       agentLaunched,
-      installElapsedMs,
       selfModificationEnabled,
     };
   } catch (error) {
@@ -507,6 +497,11 @@ export async function runInitCommand(
   trackStep?: (step: EveCliSetupStep) => void,
   trackTerminal?: InitTerminalTracker,
 ): Promise<void> {
+  const agentLaunched = await dependencies.isCodingAgentLaunch();
+  const interactive = dependencies.hasInteractiveTerminal();
+  if (interactive && !agentLaunched) logger.log("");
+  logger.log(eveCliBanner());
+
   trackStep?.("resolve_target");
   let result: InitResult;
   try {
@@ -525,7 +520,8 @@ export async function runInitCommand(
     }
 
     result = await runInitSteps({
-      agentLaunched: await dependencies.isCodingAgentLaunch(),
+      agentLaunched,
+      interactive,
       dependencies,
       logger,
       options,
@@ -548,19 +544,16 @@ export async function runInitCommand(
   trackStep?.("handoff");
   if (result.kind === "created") {
     logger.log(
-      `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
+      `${pc.green("✓")} Created an ${EVE_WORDMARK} agent in ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
     );
     for (const mutation of result.workspaceRootMutations) {
       logger.log(pc.yellow(`⚠ ${formatWorkspaceRootMutationWarning(mutation)}`));
     }
   } else {
     logger.log(
-      `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.agentElapsedMs)}`)}`,
+      `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
     );
   }
-  logger.log(
-    `${pc.green("✓")} Installed dependencies ${pc.dim(`in ${formatElapsed(result.installElapsedMs)}`)}`,
-  );
   if (result.selfModificationEnabled) {
     logger.log(`${pc.green("✓")} Enabled self-modification`);
   }
@@ -597,17 +590,20 @@ export async function runInitCommand(
     return;
   }
 
-  if (!dependencies.hasInteractiveTerminal()) {
+  if (options.nonInteractive || !interactive) {
     logger.log(agentHandoff);
     return;
   }
 
   // Strictly the eve binary, never the project's dev script, which in an
-  // existing app may start unrelated processes. Exec-style runs do not echo
-  // the command the way run-scripts do, so the handoff line is printed here.
+  // existing app may start unrelated processes.
   const freshScaffold = result.kind === "created";
-  const devArguments = freshScaffold ? [...baseDevArguments, "--onboard"] : baseDevArguments;
-  logger.log(pc.dim("$ eve dev"));
+  const devArguments = [
+    ...(result.packageManager === "pnpm" ? ["--reporter=silent"] : []),
+    ...baseDevArguments,
+    ...(freshScaffold ? ["--onboard"] : []),
+  ];
+  logger.log("");
   if (
     !resultSucceeded(
       await dependencies.spawnPackageManager(

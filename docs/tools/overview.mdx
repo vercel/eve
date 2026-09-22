@@ -121,33 +121,25 @@ receive only the projected text.
 
 ### Background execution
 
-Background execution controls how a tool delivers its result to the parent agent. Durable
-suspension controls whether the executor can pause at a workflow wait and release compute.
-These are independent choices: `execution: "background"` selects the task lifecycle;
-`defineWorkflowTool` with a leading `"use workflow"` directive enables durable suspension.
+Background execution controls how a workflow tool delivers its result to the parent agent.
+Set `execution: "background"` on `defineWorkflowTool`; ordinary `defineTool` calls always finish
+inside the initiating step.
 
-| Definition                                       | Durable waits inside `execute`                                  | Result delivered to the model                                          |
-| ------------------------------------------------ | --------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `defineTool`                                     | No; the executor runs inside the initiating step.               | Executor output after it finishes.                                     |
-| `defineTool` + `execution: "background"`         | No; the initiating step still waits for the executor to finish. | Task receipt, followed by task notifications.                          |
-| `defineWorkflowTool`                             | Yes; the tool call waits while the workflow can suspend.        | Workflow output after it finishes.                                     |
-| `defineWorkflowTool` + `execution: "background"` | Yes; the workflow body can outlive the initiating step.         | Task receipt before the body finishes, followed by task notifications. |
+| Definition                                       | Durable waits inside `execute`                           | Result delivered to the model                                                                          |
+| ------------------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `defineTool`                                     | No; the executor runs inside the initiating step.        | Executor output after it finishes.                                                                     |
+| `defineWorkflowTool`                             | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes.                                                                     |
+| `defineWorkflowTool` + `execution: "background"` | Yes; the workflow body can outlive the initiating step.  | Task receipt before the body finishes; one combined report after all tasks in its cohort are terminal. |
 
-A background tool receives a third `task` argument. Its tool result is the receipt
-`{ status: "working", taskId }`; its eventual output belongs to the task. Use a background
-workflow tool when the conversation should continue while the body waits for a person,
-webhook, or timer. Setting `execution: "background"` on an ordinary tool does not move its
-executor into a separate workflow or make an ordinary Promise a durable wait.
+A background workflow tool's result is the receipt `{ status: "working", taskId }`; its eventual
+output belongs to the task. Use this mode when the conversation should continue while the body
+waits for a person, webhook, or timer.
 
 For background tools, `outputSchema` and `toModelOutput` describe the fixed receipt. The body's
 return value is available through the completed task's output.
 
-`task.delegated()` has been removed. Move external work into a `defineWorkflowTool` executor and
-return its result when it finishes. Rebuild extensions using the removed API after migrating.
-
-`yield task.postMessage(message)` is the only yield that requests a parent-agent turn. Calling
-`task.postMessage` only constructs the message descriptor; you must yield it to send it.
-In a workflow body, keep values needed after a wait in local variables; workflow replay
+The `TaskExec` argument and `task.postMessage` have been removed. Return the terminal result;
+background yields are consumed without publishing progress or retaining a task-progress stream. In a workflow body, keep values needed after a wait in local variables; workflow replay
 reconstructs them across durable waits.
 Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an answer from the human.
 Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,
@@ -157,11 +149,20 @@ After the initiating turn accepts background tasks, eve supplies runtime-authore
 cohort and instructs the model to acknowledge that the work started without waiting for results.
 [Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
 launches keep conditional delivery and send no acknowledgement.
-Later task-triggered parent turns receive fresh state for the same cohort. Once every related
-task is terminal, the state includes their outputs so the model can combine the useful results.
-eve does not instruct the model to stay silent while sibling tasks are pending; a new user
-question can receive an answer while background work continues. [Completion batching](/docs/subagents#completion-batching)
-combines successful results already queued for the parent.
+Channel sessions default to `taskDeliveryPolicy: "auto"`: ready results can invoke
+the parent while other tasks continue. The parent reports independently useful
+results and can stay silent until related work settles. Each reporting context
+includes the whole cohort and available outputs, including previously withheld
+results. Ready results may share a turn.
+Schedules default to `"cohort"`: terminal outcomes wait for overlapping tasks
+to settle, then arrive together. Pass `taskDeliveryPolicy` to `send(...)` to select
+or update the session policy. See
+[Background task results](/docs/channels/overview#background-task-results) and
+[Schedules](/docs/schedules#background-task-results).
+User questions, input requests, and explicit task messages do not wait for the
+cohort under either policy. Failure and cancellation update lifecycle state
+immediately; their automatic reports follow the selected policy.
+See [Completion batching](/docs/subagents#completion-batching).
 
 ### Yield and return
 
@@ -169,19 +170,18 @@ combines successful results already queued for the parent.
 It does not by itself create a durable wait for a person, timer, or external event. The value's
 meaning depends on the tool's execution mode:
 
-| Executor                                         | Ordinary `yield value`                                                                  | Final output                                                                                                      |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `defineTool`, default execution                  | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                        |
-| `defineWorkflowTool`, default execution          | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`.       |
-| Either definition with `execution: "background"` | Stream-only task progress; does not request a parent-agent turn.                        | Explicit return value becomes the task output; no return completes with `null`. The last yield is not a fallback. |
+| Executor                                            | Ordinary `yield value`                                                                  | Final output                                                                                                      |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `defineTool`, default execution                     | Earlier values are `action.partial` snapshots; the final yield becomes the tool result. | Last yielded value; a generator `return` value is ignored.                                                        |
+| `defineWorkflowTool`, default execution             | Every yield is an `action.partial` snapshot.                                            | Explicit return value; falls back to the last yield if the return is `null` or `undefined`, then to `null`.       |
+| `defineWorkflowTool` with `execution: "background"` | Consumed without publishing progress or requesting a parent-agent turn.                 | Explicit return value becomes the task output; no return completes with `null`. The last yield is not a fallback. |
 
-For either kind of background tool, `yield task.postMessage(message)` sends a message to the
-parent agent while the task remains open. Return completes the task; throw fails it. These
-notifications are separate from the original tool call's receipt.
+For a background workflow tool, return completes the task and throw fails it. The automatic
+cohort report is separate from the original tool call's receipt.
 
 Progress snapshots do not enter model history as intermediate tool results. For a default
 executor, the final output selected by the rules above becomes the tool result. For a background
-executor, task messages and completion notifications provide input to later parent-agent turns.
+executor, the terminal cohort report provides input to a later parent-agent turn.
 
 ### Workflows as tools
 

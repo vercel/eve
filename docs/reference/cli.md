@@ -42,7 +42,7 @@ eve collects CLI telemetry by default to improve the command-line interface. Run
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs]
+eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs] [--non-interactive]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -57,13 +57,14 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 
 Existing packages do not need a target-selection prompt: run `eve init` from the project directory or `eve init path/to/app`. New projects in non-interactive environments need a new directory name, such as `eve init my-agent`.
 
-After scaffolding in an interactive human terminal, eve opens the TUI directly. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
+After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type   | Default                    | Description                                                                                                              |
-| ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`      | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>` | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs` | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| Flag                    | Type   | Default                    | Description                                                                                                              |
+| ----------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--model <model>`       | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
+| `--reasoning <effort>`  | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--channel-web-nextjs`  | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| `-n, --non-interactive` | flag   | off                        | Scaffold and install dependencies without starting development.                                                          |
 
 ## `eve extension`
 
@@ -160,7 +161,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 eve build [--profile <path>] [--skip-sandbox-prewarm]
 ```
 
-Compiles and bundles in an invocation-owned directory under `.eve/builds/`, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure.
+Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
 `-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
@@ -169,7 +170,7 @@ keeps a channel's `server-only` imports on the same export used during compilati
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
 | `--profile <path>`       | string | off     | Best-effort versioned JSON report with build-phase timings and final output-size measurements |
-| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox template prewarm for a Vercel build; the output might not be deployable          |
+| `--skip-sandbox-prewarm` | flag   | off     | Skip sandbox preparation; the output might not be deployable                                  |
 
 Use a profile file to establish a repeatable baseline before changing the build pipeline:
 

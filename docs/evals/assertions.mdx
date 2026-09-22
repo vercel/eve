@@ -83,7 +83,11 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks use the shared task status values: `"working"`, `"input_required"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+
+A background subagent that has only returned a working task receipt remains `working`; use `t.calledSubagent(name, { status: "working" })` to assert that delegation. Both blocking and background calls become `completed` when their actual successful result is observed through `subagent.completed`, even when the child session stays available for another call. A rejected dispatch is `failed`; an explicit cancelled child outcome is `cancelled`.
+
+The runner derives these values from captured events. It does not read stored task state, and the current stream does not expose every task transition. A proxied input request alone does not update the subagent call to `input_required`; assert that request with `requireInputRequest`. Check task notifications for background failure and cancellation when no child outcome event is present.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
@@ -162,7 +166,7 @@ Every assertion returns a chainable handle. Severity rides on the assertion, so 
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
 - `.label(name)` adds a stable name when an eval records several assertions from the same family.
 
-The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge.*` assertion are soft. Annotate only when you deviate:
+The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge(...)` assertion are soft. Annotate only when you deviate:
 
 ```ts
 t.calledTool("get_weather").soft(); // record the tool call as a metric, don't gate

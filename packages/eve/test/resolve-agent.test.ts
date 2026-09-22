@@ -42,7 +42,11 @@ describe("resolveAgent", () => {
       ]),
     );
     expect(resolved.sandbox).toMatchObject({
-      backend: expect.objectContaining({ create: expect.any(Function), name: expect.any(String) }),
+      environment: {
+        open: expect.any(Function),
+        provider: expect.any(String),
+      },
+      kind: "independent",
       logicalPath: "sandbox.ts",
     });
     expect(resolved.skills).toContainEqual(

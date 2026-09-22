@@ -5,15 +5,14 @@ import {
 } from "#execution/sandbox/bindings/vercel-credentials.js";
 import type {
   VercelCreateOptions,
-  VercelGetOptions,
   VercelModule,
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export async function deleteVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
-  readonly sandboxModule: VercelModule;
   readonly signal?: AbortSignal;
 }): Promise<void> {
   await stopVercelSandbox(input.sandbox);
@@ -22,26 +21,27 @@ export async function deleteVercelSandbox(input: {
 
 export async function deleteUnusableVercelSandbox(input: {
   readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
-  readonly sandboxModule: VercelModule;
 }): Promise<void> {
   await deleteVercelSandboxRecord(input);
 }
 
 async function deleteVercelSandboxRecord(input: {
   readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
-  readonly sandboxModule: VercelModule;
   readonly signal?: AbortSignal;
 }): Promise<void> {
   const credentials = await resolveVercelSandboxCredentials(input.createOptions);
-  const sandbox = await input.sandboxModule.Sandbox.get({
+  const sandboxModule = await input.loadDeleteSandboxModule();
+  const sandbox = await sandboxModule.Sandbox.get({
     ...credentials,
     fetch: getVercelSandboxFetch(input.createOptions),
     name: input.sandbox.name,
     resume: false,
     signal: input.signal,
-  } as VercelGetOptions);
+  });
   await sandbox.delete({
     deleteOrphanSnapshots: true,
     signal: input.signal,

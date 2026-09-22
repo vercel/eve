@@ -391,7 +391,6 @@ describe("compileAgentManifest source graph", () => {
       rootOnly: true,
       task: {
         nodeId: "__root__",
-        resultKind: "subagent",
         workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
       },
     });

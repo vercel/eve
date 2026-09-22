@@ -295,10 +295,7 @@ function normalizeAllowEntries(
   if (Array.isArray(allow)) {
     return allow.map((domain) => ({ domain, rules: [] }));
   }
-  return Object.entries(allow).map(([domain, rules]) => ({
-    domain,
-    rules: Array.isArray(rules) ? rules : [],
-  }));
+  return Object.entries(allow).map(([domain, rules]) => ({ domain, rules }));
 }
 
 function normalizeTransforms(
@@ -324,16 +321,23 @@ function serializeMicrosandboxNetworkDestination(
     case "any":
       return "any";
     case "cidr":
-      return { cidr: destination.cidr ?? "" };
+      return { cidr: requireDestinationValue(destination.cidr, "CIDR") };
     case "domain":
-      return { domain: destination.domain ?? "" };
+      return { domain: requireDestinationValue(destination.domain, "domain") };
     case "domainSuffix":
-      return { domain_suffix: destination.suffix ?? "" };
+      return { domain_suffix: requireDestinationValue(destination.suffix, "domain suffix") };
     case "group":
-      return { group: destination.group ?? "" };
+      return { group: requireDestinationValue(destination.group, "group") };
     default:
       throw new Error("Unsupported microsandbox network destination kind.");
   }
+}
+
+function requireDestinationValue(value: string | undefined, kind: string): string {
+  if (value === undefined || value.length === 0) {
+    throw new Error(`Microsandbox network destination is missing its ${kind}.`);
+  }
+  return value;
 }
 
 function createPlaceholderHeaders(

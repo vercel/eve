@@ -103,6 +103,12 @@ export function replayDynamicTools(
   if (metadata.length > 0 && scope.sessionId.length === 0) {
     throw new Error("Dynamic tool replay requires a session id.");
   }
+  const background = metadata.find((entry) => entry.execution === "background");
+  if (background !== undefined) {
+    throw new Error(
+      `Dynamic tool "${background.name}" used removed background execution. Move durable background work to a static defineWorkflowTool().`,
+    );
+  }
   return metadata.map((entry) => {
     const owner = { ...entry, ...scope };
     const approvalKeyReference = entry.callbacks.approvalKey;
@@ -142,38 +148,15 @@ export function replayDynamicTools(
     } = {
       availableInSubagents: entry.availableInSubagents,
       description: entry.description,
-      execute:
-        entry.execution === "background"
-          ? createToolExecuteWithAuth({
-              execution: "background",
-              scope: entry.name,
-              execute: (input, context, task) => {
-                if (execute === undefined) {
-                  throw missingCallbackError(entry, "execute");
-                }
-                return callDurableDynamicCallback(
-                  execute,
-                  executeReference.closure,
-                  input,
-                  context,
-                  task,
-                );
-              },
-            })
-          : createToolExecuteWithAuth({
-              scope: entry.name,
-              execute: (input, context) => {
-                if (execute === undefined) {
-                  throw missingCallbackError(entry, "execute");
-                }
-                return callDurableDynamicCallback(
-                  execute,
-                  executeReference.closure,
-                  input,
-                  context,
-                );
-              },
-            }),
+      execute: createToolExecuteWithAuth({
+        scope: entry.name,
+        execute: (input, context) => {
+          if (execute === undefined) {
+            throw missingCallbackError(entry, "execute");
+          }
+          return callDurableDynamicCallback(execute, executeReference.closure, input, context);
+        },
+      }),
       inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,
       execution: entry.execution,

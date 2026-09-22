@@ -79,19 +79,6 @@ describe("contentFilteringProcessor", () => {
     expect(downstream.ended).toEqual([]);
   });
 
-  it.each([
-    [true, 1],
-    [false, 0],
-  ])("preserves the legacy boolean span decision %s", (decision, exported) => {
-    const downstream = recordingProcessor();
-
-    contentFilteringProcessor(downstream, {
-      span: () => decision,
-    }).onEnd(span({ "service.name": "weather" }) as never);
-
-    expect(downstream.ended).toHaveLength(exported);
-  });
-
   it("drops the span when a redaction decision names no direction", () => {
     const downstream = recordingProcessor();
 

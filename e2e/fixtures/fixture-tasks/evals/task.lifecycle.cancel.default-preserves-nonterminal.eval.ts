@@ -10,7 +10,7 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "parked" },
   },
   async test(t) {
-    const started = await t.send("TASK-CANCEL-SETUP");
+    const started = await t.send("TASK-CANCEL-SETUP", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     const taskId = requireBackgroundTaskId(started);
     const blocked = await waitForTaskInput(t, started.session, "release");
@@ -32,7 +32,9 @@ export default defineTaskEval({
     const completed = await waitForTaskNotification(t, blocked.session, taskId, "completed", [
       answered,
     ]);
-    const followUp = await completed.session.send("TASK-CANCEL-VERIFY-NOOP");
+    const followUp = await completed.session.send("TASK-CANCEL-VERIFY-NOOP", {
+      taskDeliveryPolicy: "cohort",
+    });
     followUp.expectOk();
   },
 });

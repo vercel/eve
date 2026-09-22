@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { type EveEvalTurn, type InputRequest } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
@@ -19,10 +20,10 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-FANOUT-PARENT-UPDATES");
+    const started = await t.send("TASK-FANOUT-PARENT-UPDATES", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-FANOUT-STARTED");
-    started.calledSubagent("fanout-worker", { count: FANOUT_SIZE });
+    started.calledSubagent("fanout-worker", { status: "working", count: FANOUT_SIZE });
 
     const taskIds = backgroundTaskIds(started);
     await t.require(
@@ -79,9 +80,5 @@ function collectReleaseRequests(turn: EveEvalTurn, requests: Map<string, InputRe
 }
 
 function backgroundTaskIds(turn: EveEvalTurn): readonly string[] {
-  return turn.events.flatMap((event) =>
-    event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-      ? [event.data.backgroundTask.taskId]
-      : [],
-  );
+  return taskReceipts(turn.events).map(({ taskId }) => taskId);
 }

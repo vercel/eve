@@ -87,7 +87,9 @@ export default defineEval({
       },
     });
 
-    t.calledSubagent("remote-loopback", { count: 3 }).soft().label("no repeated delegation");
+    t.event("subagent.called", { data: { name: "remote-loopback" }, count: 3 })
+      .soft()
+      .label("no repeated delegation");
     t.succeeded();
   },
 });

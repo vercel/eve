@@ -37,19 +37,22 @@ describe("validateSessionCheckpointStep", () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.tasks": {
-          version: 2,
-          tasks: [
+        "eve.workflowTool": {
+          version: 3,
+          runs: [
             {
-              taskId: "task",
-              taskRunId: "run",
-              taskInboxToken: 42,
-              createdByTurnId: "turn",
-              metadata: { kind: "tool", name: "research" },
-              terminalView: {
+              callId: "task",
+              toolName: "research",
+              lifetime: "session" as const,
+              origin: { turnId: "turn", stepIndex: 0 },
+              address: { runId: "run", hookToken: 42 },
+              task: {
                 taskId: "task",
                 metadata: { kind: "tool", name: "research" },
-                status: "cancelled",
+                outcome: {
+                  status: "cancelled",
+                },
+                dispatchContext: { auth: { current: null, initiator: null } },
               },
             },
           ],
@@ -57,18 +60,24 @@ describe("validateSessionCheckpointStep", () => {
       },
     });
     await expect(validateSessionCheckpointStep({ checkpoint: createCheckpoint() })).rejects.toThrow(
-      "Corrupt task index",
+      "Corrupt workflow tool run registry",
     );
   });
 
-  it("rejects a checkpoint written by a different contract version", async () => {
-    const checkpoint: SessionCheckpoint = { ...createCheckpoint(), version: 2 as never };
+  it.each([4, 5, 6, 8])(
+    "rejects checkpoint version %s before reading nested state",
+    async (version) => {
+      const checkpoint = createCheckpoint();
+      // Simulate an incompatible checkpoint received over the wire.
+      Object.assign(checkpoint, { version });
 
-    await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-      /Unsupported session checkpoint version 2.*Start a new session/,
-    );
-    expect(deserializeContextMock).not.toHaveBeenCalled();
-  });
+      await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
+        `Unsupported session checkpoint version ${version}`,
+      );
+      expect(deserializeContextMock).not.toHaveBeenCalled();
+      expect(readDurableSessionMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([undefined, -1, NaN, Infinity, "30000", true])(
     "rejects an invalid renewal duration (%s)",
@@ -84,7 +93,7 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 4,
+    version: 7,
     sessionTimeoutMs: false,
     mode: "conversation",
     serializedContext: {},

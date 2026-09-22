@@ -1,3 +1,7 @@
+import type { SubagentCompletedStreamEvent } from "#protocol/message.js";
+import { ActivityObserverKey } from "#context/keys.js";
+import { projectTaskActivity } from "#execution/tasks/child/notify.js";
+import { submitActivity } from "#execution/submit-activity.js";
 import { contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
@@ -5,10 +9,10 @@ import {
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
+  clearProxyInputRequestsForTask,
   createTaskInputRequestId,
   upsertProxyInputRequestState,
   type ProxyInputRequest,
@@ -20,7 +24,11 @@ import { isInputRequest } from "#shared/input.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
-import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
+import {
+  recordWorkflowTaskView,
+  readWorkflowTaskView,
+  findBackgroundWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import type { TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.parent");
@@ -40,24 +48,12 @@ export async function recordTaskInputRequestStep(input: {
   "use step";
 
   const durableSession = readDurableSession(input.sessionState);
-  const entry = findSessionTaskEntry(durableSession.state, input.request.taskId);
+  const entry = findBackgroundWorkflowToolRun(durableSession.state, input.request.taskId);
   const requests = input.request.requests ?? [input.request.request];
   if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
     return { accepted: false, sessionState: input.sessionState };
   }
-  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  const requestIds = requests.map((request) => request.requestId);
-  if (
-    view?.status !== "input_required" ||
-    view.inputRequests.length !== requestIds.length ||
-    !view.inputRequests.every(
-      (request, index) =>
-        request !== null &&
-        typeof request === "object" &&
-        !Array.isArray(request) &&
-        Reflect.get(request, "requestId") === requestIds[index],
-    )
-  ) {
+  if (readWorkflowTaskView(entry.task) !== undefined) {
     return { accepted: false, sessionState: input.sessionState };
   }
 
@@ -105,7 +101,7 @@ export async function recordTaskInputRequestStep(input: {
   };
 }
 
-/** Caches terminal task views before their workflow runs expire. */
+/** Records child outcomes in the parent; its first terminal decision wins. */
 export async function recordTerminalTaskViewsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -113,16 +109,36 @@ export async function recordTerminalTaskViewsStep(input: {
 }): Promise<{
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly views: readonly TaskView[];
+  readonly subagentCompletions: readonly SubagentCompletedStreamEvent[];
 }> {
   "use step";
   const durableSession = readDurableSession(input.sessionState);
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
+  const subagentCompletions: SubagentCompletedStreamEvent[] = [];
   for (const view of input.views) {
-    if (findSessionTaskEntry(session.state, view.taskId) === undefined) continue;
-    const state = cacheTerminalTaskView(session.state, view);
-    if (state !== session.state) session = { ...session, state };
-    acceptedViews.push(view);
+    const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
+    if (entry === undefined) continue;
+    const state = recordWorkflowTaskView(session.state, view);
+    if (state !== session.state) {
+      session = { ...session, state };
+      if (entry.task.metadata.kind === "subagent" && view.status === "completed") {
+        subagentCompletions.push({
+          type: "subagent.completed",
+          data: {
+            callId: entry.callId,
+            subagentName: entry.toolName,
+            output:
+              typeof view.lastOutput.data === "string"
+                ? view.lastOutput.data
+                : JSON.stringify(view.lastOutput.data),
+          },
+        });
+      }
+    }
+    acceptedViews.push(readWorkflowTaskView(entry.task) ?? view);
+    session = clearProxyInputRequestsForTask(session, view.taskId);
     session = applyTaskAgentHandleCommand(session, {
       kind: "release-owner",
       ownerId: view.taskId,
@@ -137,7 +153,7 @@ export async function recordTerminalTaskViewsStep(input: {
     session === durableSession
       ? input.sessionState
       : replaceDurableSessionSnapshot({ session, state: input.sessionState });
-  return { serializedContext, sessionState };
+  return { serializedContext, sessionState, views: acceptedViews, subagentCompletions };
 }
 
 async function settleBackgroundTaskActions(input: {
@@ -148,6 +164,23 @@ async function settleBackgroundTaskActions(input: {
   if (input.views.length === 0) return input.serializedContext;
   try {
     const ctx = await deserializeContext(input.serializedContext);
+    const observer = ctx.get(ActivityObserverKey);
+    const settledAt = new Date().toISOString();
+    const events = input.views.flatMap((view) => {
+      const entry = findBackgroundWorkflowToolRun(input.session.state, view.taskId);
+      return projectTaskActivity({
+        activityObserver:
+          observer === undefined
+            ? undefined
+            : {
+                sink: observer.sink,
+                workIdentity: entry?.task.activityWorkIdentity,
+              },
+        settledAt,
+        view,
+      });
+    });
+    await submitActivity({ events, sink: observer?.sink });
     const bundle = ctx.get(BundleKey);
     if (bundle === undefined) return input.serializedContext;
     const instrumentation = bindSessionInstrumentation({

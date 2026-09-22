@@ -74,7 +74,6 @@ describe("dynamic subagent lifecycle", () => {
       {
         description: expect.stringContaining("Research the request."),
         name: "researcher",
-        resultKind: "subagent",
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
@@ -185,7 +184,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
-    expect(buildDynamicSubagentTools(ctx)[0]?.resultKind).toBe("subagent");
+    expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
 
     await dispatchDynamicSubagentEvent({
       ctx,
@@ -194,7 +193,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
-    expect(buildDynamicSubagentTools(ctx)[0]?.resultKind).toBe("subagent");
+    expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
   });
 
   it("exposes a dynamic selection without root configuration", async () => {
@@ -328,7 +327,6 @@ describe("dynamic subagent lifecycle", () => {
       {
         description: expect.stringContaining("Research on the remote deployment."),
         name: "researcher",
-        resultKind: "subagent",
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toMatchObject({

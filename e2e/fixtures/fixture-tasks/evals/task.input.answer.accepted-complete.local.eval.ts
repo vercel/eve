@@ -13,11 +13,13 @@ export default defineTaskEval({
     dimensions: { transport: "local" },
   },
   async test(t) {
-    const started = await t.send("TASK-HITL-ROUTING");
+    const started = await t.send("TASK-HITL-ROUTING", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "approval-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "approval-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 

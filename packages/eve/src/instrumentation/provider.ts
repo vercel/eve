@@ -10,7 +10,7 @@
 // from the bus that feeds it.
 import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
-import type { InstrumentationCapture, TraceCapturePolicy } from "#shared/trace-policy.js";
+import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 
 export type { JsonValue } from "#shared/json.js";
 
@@ -73,7 +73,6 @@ export type {
   InstrumentationMemoryRecord,
 } from "#instrumentation/memory.js";
 export type {
-  InstrumentationCapture,
   TraceCaptureContext,
   TraceCapturePolicy,
   TracePolicyDecision,
@@ -156,8 +155,6 @@ export type ProviderEvents = {
  * completion order.
  */
 export interface ProviderDefinition {
-  /** @deprecated Use `tracePolicy`. Ignored when `tracePolicy` is also set. */
-  readonly capture?: InstrumentationCapture;
   /**
    * Whether this provider receives events and which content directions they
    * include. Defaults to emitting every audience, with content only for public

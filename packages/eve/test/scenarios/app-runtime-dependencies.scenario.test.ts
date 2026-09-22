@@ -20,7 +20,7 @@ const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = {
-  skipVercelSandboxPrewarm: false,
+  skipSandboxPrewarm: false,
 } as const;
 
 async function readJavaScriptModulesRecursively(rootDirectory: string): Promise<string> {
@@ -411,11 +411,10 @@ describe("app runtime dependency tracing", () => {
           join(appRoot, "agent", "sandbox.ts"),
           [
             'import { defineSandbox } from "eve/sandbox";',
-            'import { justbash } from "eve/sandbox/just-bash";',
+            'import { JustBashSandbox } from "eve/sandbox/just-bash";',
             "",
-            "export default defineSandbox({",
-            "  backend: justbash(),",
-            "});",
+            "export const environment = JustBashSandbox.environment();",
+            "export default defineSandbox(() => environment.open());",
             "",
           ].join("\n"),
         );

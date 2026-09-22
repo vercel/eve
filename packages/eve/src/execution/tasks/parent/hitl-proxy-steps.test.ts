@@ -1,6 +1,9 @@
+import {
+  recordWorkflowTaskView,
+  getBackgroundWorkflowToolRuns,
+} from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
@@ -8,13 +11,14 @@ import {
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
+import {
+  getProxyInputRequests,
+  upsertProxyInputRequestState,
+} from "#harness/proxy-input-requests.js";
 
 const flushInstrumentation = vi.hoisted(() => vi.fn());
 const publishBackgroundTaskSettlements = vi.hoisted(() => vi.fn());
@@ -23,7 +27,6 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
-vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 vi.mock("#instrumentation/runtime.js", () => ({
   bindSessionInstrumentation: vi.fn(),
 }));
@@ -74,31 +77,28 @@ describe("recordTaskInputRequestStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
-          tasks: [
+        "eve.workflowTool": {
+          version: 3,
+          runs: [
             {
-              createdByTurnId: "turn-1",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "tool", name: "export" },
-              taskId: "task-1",
-              taskInboxToken: "task-token",
-              taskRunId: "task-run",
+              callId: "task-1",
+              toolName: "export",
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "task-run", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata: { kind: "tool", name: "export" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     });
   });
 
-  it("records a generic workflow answer route after matching the task view", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      inputRequests: [request.request],
-      metadata: { kind: "tool", name: "export" },
-      status: "input_required",
-      taskId: "task-1",
-    });
-
+  it("records a generic workflow answer route for a parent-owned task", async () => {
     const result = await recordTaskInputRequestStep({ request, sessionState });
 
     expect(result).toMatchObject({
@@ -116,12 +116,16 @@ describe("recordTaskInputRequestStep", () => {
     });
   });
 
-  it("rejects a request that does not match the task's outstanding batch", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      inputRequests: [{ ...request.request, requestId: "other" }],
-      metadata: { kind: "tool", name: "export" },
-      status: "input_required",
-      taskId: "task-1",
+  it("rejects a late input request after parent settlement", async () => {
+    const session = readDurableSession(sessionState);
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...session,
+      state: recordWorkflowTaskView(session.state, {
+        lastOutput: { data: "done", type: "result" },
+        metadata: { kind: "tool", name: "export" },
+        status: "completed",
+        taskId: "task-1",
+      }),
     });
 
     await expect(recordTaskInputRequestStep({ request, sessionState })).resolves.toEqual({
@@ -138,18 +142,22 @@ describe("recordTaskInputRequestStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.tasks": {
-            tasks: [
+          "eve.workflowTool": {
+            version: 3,
+            runs: [
               {
-                createdByTurnId: "turn-1",
-                dispatchContext: { auth: { current: null, initiator: null } },
-                metadata: { kind: "tool", name: "export" },
-                taskId: "task-1",
-                taskInboxToken: "task-token",
-                taskRunId: "task-run",
+                callId: "task-1",
+                toolName: "export",
+                lifetime: "session" as const,
+                origin: { turnId: "turn-1", stepIndex: 0 },
+                address: { runId: "task-run", hookToken: "task-token" },
+                task: {
+                  dispatchContext: { auth: { current: null, initiator: null } },
+                  metadata: { kind: "tool", name: "export" },
+                  taskId: "task-1",
+                },
               },
             ],
-            version: 2,
           },
         },
         {
@@ -175,12 +183,6 @@ describe("recordTaskInputRequestStep", () => {
       replyTo: remoteReplyTo,
       request: { ...request.request, requestId: "remote-req" },
     };
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      inputRequests: [remoteRequest.request],
-      metadata: { kind: "tool", name: "export" },
-      status: "input_required",
-      taskId: "task-1",
-    });
 
     const result = await recordTaskInputRequestStep({ request: remoteRequest, sessionState });
 
@@ -202,7 +204,7 @@ describe("recordTerminalTaskViewsStep", () => {
     } as never);
   });
 
-  it("caches an owned terminal view and releases the task's agent lease", async () => {
+  it("records an owned outcome and releases its agent lease and input routes", async () => {
     vi.mocked(readDurableSession).mockReturnValue({
       agent: { system: "" },
       continuationToken: "parent-token",
@@ -210,18 +212,28 @@ describe("recordTerminalTaskViewsStep", () => {
       sessionId: "parent-session",
       state: setAgentHandleStore(
         {
-          "eve.tasks": {
-            tasks: [
+          "eve.workflowTool": {
+            version: 3,
+            runs: [
               {
-                createdByTurnId: "turn-1",
-                dispatchContext: { auth: { current: null, initiator: null } },
-                metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
-                taskId: "task-1",
-                taskInboxToken: "task-token",
-                taskRunId: "task-run",
+                callId: "task-1",
+                toolName: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" }
+                  .name,
+                lifetime: "session" as const,
+                origin: { turnId: "turn-1", stepIndex: 0 },
+                address: { runId: "task-run", hookToken: "task-token" },
+                task: {
+                  dispatchContext: { auth: { current: null, initiator: null } },
+                  metadata: {
+                    agentId: "agent-1",
+                    kind: "subagent",
+                    mode: "local",
+                    name: "research",
+                  },
+                  taskId: "task-1",
+                },
               },
             ],
-            version: 2,
           },
         },
         {
@@ -248,6 +260,20 @@ describe("recordTerminalTaskViewsStep", () => {
       taskId: "task-1",
     };
 
+    const current = readDurableSession(sessionState);
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...current,
+      state: upsertProxyInputRequestState({
+        state: current.state,
+        forChildContinuationToken: "question-hook",
+        entries: [
+          [
+            "task-1:question",
+            { childContinuationToken: "question-hook", kind: "question", taskId: "task-1" },
+          ],
+        ],
+      }),
+    });
     const result = await recordTerminalTaskViewsStep({
       serializedContext: {},
       sessionState,
@@ -255,7 +281,12 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     const state = result.sessionState.snapshot.session.state;
 
-    expect(getSessionTaskIndex(state)[0]?.terminalView).toEqual(view);
+    expect(getBackgroundWorkflowToolRuns(state)[0]?.task.outcome).toEqual({
+      status: view.status,
+      lastOutput: view.lastOutput,
+    });
+    expect(getProxyInputRequests(state).size).toBe(0);
+    expect(result.sessionState.hasProxyInputRequests).toBe(false);
     expect(getAgentHandleStore(state)?.handles).toEqual([
       expect.objectContaining({ phase: "available" }),
     ]);
@@ -278,18 +309,22 @@ describe("recordTerminalTaskViewsStep", () => {
       history: [],
       sessionId: "parent-session",
       state: {
-        "eve.tasks": {
-          tasks: [
+        "eve.workflowTool": {
+          version: 3,
+          runs: [
             {
-              createdByTurnId: "turn-1",
-              dispatchContext: { auth: { current: null, initiator: null } },
-              metadata: { kind: "tool", name: "export" },
-              taskId: "task-1",
-              taskInboxToken: "task-token",
-              taskRunId: "task-run",
+              callId: "task-1",
+              toolName: "export",
+              lifetime: "session" as const,
+              origin: { turnId: "turn-1", stepIndex: 0 },
+              address: { runId: "task-run", hookToken: "task-token" },
+              task: {
+                dispatchContext: { auth: { current: null, initiator: null } },
+                metadata: { kind: "tool", name: "export" },
+                taskId: "task-1",
+              },
             },
           ],
-          version: 2,
         },
       },
     });
@@ -306,6 +341,7 @@ describe("recordTerminalTaskViewsStep", () => {
       views: [view],
     });
 
+    expect(result.subagentCompletions).toEqual([]);
     expect(bindSessionInstrumentation).toHaveBeenCalledWith({
       agentName: "parent-agent",
       ctx: expect.any(ContextContainer),

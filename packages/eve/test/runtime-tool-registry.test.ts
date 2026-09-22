@@ -139,7 +139,6 @@ describe("createRuntimeToolRegistry", () => {
     const prepared = registry.preparedTools[0];
     expect(prepared?.task).toEqual({
       nodeId: "__root__",
-      resultKind: "subagent",
       workflowId: subagentToolExecuteWorkflowReference.workflowId,
     });
     expect(prepared?.behavior?.handling).toEqual({

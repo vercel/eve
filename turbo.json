@@ -86,6 +86,7 @@
     },
     "test:scenario": {
       "cache": false,
+      "env": ["EVE_SANDBOX_IMAGE_TAG"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!.eve/**",

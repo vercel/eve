@@ -273,21 +273,6 @@ interface StreamActionEmissionOptions {
   readonly tools: HarnessToolMap;
 }
 
-function readSubagentBackgroundTaskReceipt(
-  result: RuntimeToolResultActionResult,
-  tools: HarnessToolMap | undefined,
-): { readonly status: "working"; readonly taskId: string } | undefined {
-  if (result.isError === true || tools?.get(result.toolName)?.resultKind !== "subagent") {
-    return undefined;
-  }
-  if (typeof result.output !== "object" || result.output === null || Array.isArray(result.output)) {
-    return undefined;
-  }
-  const status = Reflect.get(result.output, "status");
-  const taskId = Reflect.get(result.output, "taskId");
-  return status === "working" && typeof taskId === "string" ? { status, taskId } : undefined;
-}
-
 /**
  * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
  * events.
@@ -439,18 +424,6 @@ async function consumeStreamContent(
       return;
     }
     emittedActionResultCallIds.add(result.callId);
-    const backgroundTask = readSubagentBackgroundTaskReceipt(result, options?.tools);
-    if (backgroundTask !== undefined) {
-      await emitFn({
-        data: {
-          backgroundTask,
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.toolName,
-        },
-        type: "subagent.completed",
-      });
-    }
     const resultPresentation =
       result.isError === true
         ? undefined

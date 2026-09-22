@@ -342,17 +342,20 @@ async function addProductionRegistryItem(
     throw new Error(`No official eve registry item is published at "${address}".`);
   }
   const sandbox = await context.getSandbox();
-  const result = await withSelfModificationWorkspaceLock(`sandbox:${sandbox.id}`, async () => {
-    const workspace = await readPreparedSelfModificationWorkspace({ ...deployed, sandbox });
-    return await installProductionRegistryItem({
-      address,
-      answers: continuation.answers,
-      installed: continuation.installed,
-      sandbox,
-      signal: context.abortSignal,
-      workspace,
-    });
-  });
+  const result = await withSelfModificationWorkspaceLock(
+    `sandbox:${context.session.id}`,
+    async () => {
+      const workspace = await readPreparedSelfModificationWorkspace({ ...deployed, sandbox });
+      return await installProductionRegistryItem({
+        address,
+        answers: continuation.answers,
+        installed: continuation.installed,
+        sandbox,
+        signal: context.abortSignal,
+        workspace,
+      });
+    },
+  );
   if (result.kind === "completed") return { address, ...result, status: "completed" };
   if (result.kind === "input-required") return { address, ...result, status: "input-required" };
   if (result.kind === "external-action-required")

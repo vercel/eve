@@ -5,7 +5,6 @@ import {
   requireTaskView,
   sendAndFollowQueuedTurn,
   waitForTaskInput,
-  waitForTaskStatus,
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
@@ -18,12 +17,14 @@ export default defineTaskEval({
     dimensions: { transport: "local", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-CANCEL-SETUP");
+    const started = await t.send("TASK-CANCEL-SETUP", { taskDeliveryPolicy: "cohort" });
     started.expectOk();
     started.messageIncludes("TASK-CANCEL-READY");
-    started.event("subagent.completed", {
+    started.event("action.result", {
       count: 1,
-      data: { backgroundTask: { status: "working" }, subagentName: "fanout-worker" },
+      data: {
+        result: { kind: "tool-result", output: { status: "working" }, toolName: "fanout-worker" },
+      },
     });
     const taskId = requireBackgroundTaskId(started);
 
@@ -42,12 +43,12 @@ export default defineTaskEval({
       ),
     );
 
-    const verified = await waitForTaskStatus(
+    // Cancellation is retained by the parent before the control call returns.
+    // The next turn must observe it without retrying a child-state read.
+    const { turn: verified } = await sendAndFollowQueuedTurn(
       t,
+      `TASK-CANCEL-VERIFY ${taskId}`,
       cancelled.session,
-      "TASK-CANCEL-VERIFY",
-      taskId,
-      "cancelled",
     );
     verified.expectOk();
     verified.messageIncludes("TASK-CANCEL-STATUS");

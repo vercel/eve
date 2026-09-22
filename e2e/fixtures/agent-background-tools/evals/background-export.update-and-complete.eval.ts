@@ -2,9 +2,11 @@ import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 import { defaultMessageReducer } from "eve/client";
 
+const RESULT = "EXPORT-COMPLETE";
+
 export default defineEval({
   description:
-    "An authored background defineTool yields state and progress, explicitly posts a message, then completes; the parent sees both.",
+    "A background workflow streams progress and delivers one terminal report to the parent.",
   async test(t) {
     const started = await t.send("BACKGROUND-EXPORT-START");
     const conversation = started.session;
@@ -18,19 +20,8 @@ export default defineEval({
     const sessionId = conversation.sessionId;
     if (sessionId === undefined) throw new Error("Eval has no parent session id.");
 
-    const updateLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(started.session, "update wait"),
-    });
-    const updateTurn = await updateLive.result();
-    updateTurn.expectOk();
-    updateTurn.messageIncludes("BACKGROUND-EXPORT-UPDATE-RECEIVED");
-    updateTurn.event("message.received", {
-      data: (data) => data.kind === "execution.background_task",
-      count: 1,
-    });
-
     const doneLive = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(updateLive.session, "completion wait"),
+      startIndex: requireStreamIndex(started.session, "completion wait"),
     });
     const doneTurn = await doneLive.result();
     doneTurn.expectOk();
@@ -40,8 +31,24 @@ export default defineEval({
       count: 1,
     });
 
+    await t.require(
+      doneTurn.events,
+      satisfies(
+        (events: typeof doneTurn.events) =>
+          events.some(
+            (event) =>
+              event.type === "message.received" &&
+              messageText(event.data.message).includes(
+                `Background task ${taskId} (export) is completed.`,
+              ) &&
+              messageText(event.data.message).includes(RESULT),
+          ),
+        "parent receives the executor completion with task identity",
+      ),
+    );
+
     const reducer = defaultMessageReducer();
-    const projection = [...started.events, ...updateTurn.events, ...doneTurn.events].reduce(
+    const projection = [...started.events, ...doneTurn.events].reduce(
       (data, event) => reducer.reduce(data, event),
       reducer.initial(),
     );
@@ -60,6 +67,10 @@ export default defineEval({
         "frontend projection keeps the background result without rendering runtime task input",
       ),
     );
+    doneTurn.event("turn.started", { count: 1 });
+    doneTurn.notEvent("message.received", {
+      data: (data) => messageText(data.message).includes("PROGRESS"),
+    });
     t.noFailedActions();
   },
 });
@@ -77,4 +88,19 @@ function requireStreamIndex(
   const streamIndex = session.state?.streamIndex;
   if (streamIndex === undefined) throw new Error(`${operation} has no session stream index.`);
   return streamIndex;
+}
+
+function messageText(message: unknown): string {
+  if (typeof message === "string") return message;
+  if (!Array.isArray(message)) return "";
+  return message
+    .flatMap((part) =>
+      part !== null &&
+      typeof part === "object" &&
+      Reflect.get(part, "type") === "text" &&
+      typeof Reflect.get(part, "text") === "string"
+        ? [Reflect.get(part, "text") as string]
+        : [],
+    )
+    .join("\n");
 }

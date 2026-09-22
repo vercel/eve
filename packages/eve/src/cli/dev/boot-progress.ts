@@ -10,7 +10,7 @@ export function createDevBootProgressReporter(
   return (event) => {
     switch (event.type) {
       case "phase-started":
-        row?.update("Building your agent", event.phase);
+        row?.update("Starting your agent");
         devBootLog.debug(event.phase);
         return;
       case "phase-finished":

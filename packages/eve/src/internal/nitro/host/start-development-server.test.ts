@@ -199,12 +199,12 @@ vi.mock("#discover/project.js", () => ({
   resolveDiscoveryProject: mocks.resolveDiscoveryProject,
 }));
 
-vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
-  resolveNitroCompiledArtifactsSource: mocks.resolveNitroCompiledArtifactsSource,
+vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
+  createDevelopmentGenerationArtifactsSource: () => mocks.resolveNitroCompiledArtifactsSource(),
 }));
 
 vi.mock("#execution/sandbox/development-prewarm.js", () => ({
-  startDevelopmentSandboxPrewarmInBackground: mocks.startDevelopmentSandboxPrewarmInBackground,
+  prewarmDevelopmentSandboxes: mocks.startDevelopmentSandboxPrewarmInBackground,
 }));
 
 vi.mock("#execution/sandbox/bindings/local.js", () => ({

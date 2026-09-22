@@ -1,8 +1,8 @@
+import { recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readDurableSession } from "#execution/durable-session-store.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { setAgentHandleStore } from "#subagents/handles/store.js";
 
@@ -10,7 +10,6 @@ vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
   ...(await importOriginal()),
   readDurableSession: vi.fn(),
 }));
-vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
 
 const sessionState = createTestSessionState({
   continuationToken: "parent-token",
@@ -36,18 +35,22 @@ const hookPayload = {
   subagentName: "research",
 };
 const taskIndex = {
-  "eve.tasks": {
-    tasks: [
+  "eve.workflowTool": {
+    version: 3,
+    runs: [
       {
-        createdByTurnId: "turn-1",
-        dispatchContext: { auth: { current: null, initiator: null } },
-        metadata: { kind: "tool", name: "export" },
-        taskId: "task-1",
-        taskInboxToken: "task-token",
-        taskRunId: "task-run",
+        callId: "task-1",
+        toolName: "export",
+        lifetime: "session" as const,
+        origin: { turnId: "turn-1", stepIndex: 0 },
+        address: { runId: "task-run", hookToken: "task-token" },
+        task: {
+          dispatchContext: { auth: { current: null, initiator: null } },
+          metadata: { kind: "tool", name: "export" },
+          taskId: "task-1",
+        },
       },
     ],
-    version: 2,
   },
 };
 
@@ -78,11 +81,6 @@ describe("acceptTaskAuthorizationEventStep", () => {
         ownerId: "task-1",
       },
     ]);
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      metadata: { kind: "tool", name: "export" },
-      status: "working",
-      taskId: "task-1",
-    });
   });
 
   it("accepts an authorization event from the task's claimed child agent", async () => {
@@ -92,7 +90,6 @@ describe("acceptTaskAuthorizationEventStep", () => {
         sessionState,
       }),
     ).resolves.toBe(true);
-    expect(readLatestTaskView).toHaveBeenCalledWith({ taskRunId: "task-run" });
   });
 
   it("accepts the owning workflow tool's event without an agent handle", async () => {
@@ -148,11 +145,15 @@ describe("acceptTaskAuthorizationEventStep", () => {
   });
 
   it("rejects an authorization event once the task is terminal", async () => {
-    vi.mocked(readLatestTaskView).mockResolvedValue({
-      lastOutput: { data: "done", type: "result" },
-      metadata: { kind: "tool", name: "export" },
-      status: "completed",
-      taskId: "task-1",
+    const session = readDurableSession(sessionState);
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...session,
+      state: recordWorkflowTaskView(session.state, {
+        lastOutput: { data: "done", type: "result" },
+        metadata: { kind: "tool", name: "export" },
+        status: "completed",
+        taskId: "task-1",
+      }),
     });
 
     await expect(

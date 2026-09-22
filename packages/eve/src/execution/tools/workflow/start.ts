@@ -1,6 +1,6 @@
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
-import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import type {
@@ -54,7 +54,6 @@ export async function startWorkflowTask(input: {
       executeInput: task.executeInput,
       input: task.input,
       owner: input.owner,
-      resultKind: task.resultKind,
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },
         id: session.sessionId,
@@ -66,11 +65,11 @@ export async function startWorkflowTask(input: {
       workflowId: task.workflowId,
     });
     return {
-      session: recordWorkflowToolRun(session, {
+      session: registerWorkflowToolRun(session, {
         callId: task.callId,
-        hookToken: started.hookToken,
-        resultKind: task.resultKind ?? "tool",
-        runId: started.runId,
+        lifetime: "turn",
+        origin: { turnId: batchEvent.turnId, stepIndex: batchEvent.stepIndex },
+        address: started,
         toolName: task.toolName,
       }),
     };

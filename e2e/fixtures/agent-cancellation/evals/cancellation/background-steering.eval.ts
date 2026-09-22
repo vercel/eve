@@ -1,3 +1,4 @@
+import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import { defineEval, type EveEvalTurn } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
@@ -165,11 +166,7 @@ export default cases.map(({ parentActive, steering, description }) =>
 
         const firstChildTurn = await child.result();
         const receipts = parentTurns.flatMap((turn) =>
-          turn.events.flatMap((event) =>
-            event.type === "subagent.completed" && event.data.backgroundTask !== undefined
-              ? [event.data.backgroundTask.taskId]
-              : [],
-          ),
+          taskReceipts(turn.events).map(({ taskId }) => taskId),
         );
         await t.require(new Set(receipts).size, equals(1));
         if (steering) {

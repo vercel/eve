@@ -39,8 +39,11 @@ describe("Vercel package deployment target", () => {
     ).resolves.toEqual({ sourceSha: sha, ref: "main", origin: "https://pkg.eve.dev" });
   });
 
-  test("publishes same-repository pull requests from the system PR ID", async () => {
-    const fetchImplementation = vi.fn().mockResolvedValue(githubResponse(currentPull));
+  test.each([
+    ["main-based", currentPull],
+    ["stacked", { ...currentPull, base: { ref: "feature/base" } }],
+  ])("publishes %s same-repository pull requests from the system PR ID", async (_, pull) => {
+    const fetchImplementation = vi.fn().mockResolvedValue(githubResponse(pull));
     await expect(resolveDeploymentTarget(baseEnv, fetchImplementation)).resolves.toEqual({
       sourceSha: sha,
       ref: "123",
@@ -53,15 +56,18 @@ describe("Vercel package deployment target", () => {
   });
 
   test("resolves a PR when its branch deployment started before the PR existed", async () => {
-    const fetchImplementation = vi.fn().mockResolvedValue(githubResponse([currentPull]));
+    const fetchImplementation = vi
+      .fn()
+      .mockResolvedValue(githubResponse([{ ...currentPull, base: { ref: "feature/base" } }]));
     await expect(
       resolveDeploymentTarget({ ...baseEnv, VERCEL_GIT_PULL_REQUEST_ID: "" }, fetchImplementation),
     ).resolves.toEqual({ sourceSha: sha, ref: "123", origin: "https://pkg.eve.dev" });
     const [url] = fetchImplementation.mock.calls[0];
     expect(url).toContain("head=vercel%3Afeature%2Fpackage");
+    expect(url).not.toContain("base=");
   });
 
-  test("rejects local, fork, direct branch, stale, and non-main PR deployments", async () => {
+  test("rejects local, fork, direct branch, and stale PR deployments", async () => {
     await expect(resolveDeploymentTarget({})).resolves.toBeUndefined();
     await expect(
       resolveDeploymentTarget({ ...baseEnv, VERCEL_GIT_REPO_OWNER: "alice" }),
@@ -75,7 +81,6 @@ describe("Vercel package deployment target", () => {
 
     for (const pull of [
       { ...currentPull, state: "closed" },
-      { ...currentPull, base: { ref: "release" } },
       { ...currentPull, head: { ...currentPull.head, sha: "b".repeat(40) } },
     ]) {
       await expect(

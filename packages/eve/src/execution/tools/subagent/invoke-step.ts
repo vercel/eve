@@ -10,7 +10,11 @@ import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-ag
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
-import { createSubagentCalledEvent, type SubagentCalledStreamEvent } from "#protocol/message.js";
+import {
+  createSubagentCalledEvent,
+  type SubagentCalledStreamEvent,
+  type SubagentCompletedStreamEvent,
+} from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -22,7 +26,6 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import {
   getAgentHandleStore,
   writeHandles,
@@ -39,8 +42,11 @@ import {
   AGENT_UNREACHABLE,
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
-import { findSessionTaskEntry } from "#tasks/session-index.js";
-import { isTerminalTaskStatus } from "#tasks/types.js";
+import {
+  readWorkflowTaskView,
+  findBackgroundWorkflowToolRun,
+  type TaskAgentDispatchContext,
+} from "#harness/workflow-tool-runs.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   clearProxyInputRequestsForChild,
@@ -62,7 +68,6 @@ import {
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
-import type { TaskAgentDispatchContext } from "#tasks/session-index.js";
 
 export type AgentInvocationDispatchResult =
   | {
@@ -349,18 +354,15 @@ export async function dispatchTaskAgentInvocationStep(
   let taskDispatchContext: TaskAgentDispatchContext | undefined;
   if (input.taskId !== undefined) {
     const session = readDurableSession(input.sessionState);
-    const entry = findSessionTaskEntry(session.state, input.taskId);
+    const entry = findBackgroundWorkflowToolRun(session.state, input.taskId);
     if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
-    const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-    if (view === undefined || isTerminalTaskStatus(view.status)) {
+    const view = readWorkflowTaskView(entry.task);
+    if (view !== undefined) {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
-    if ("legacy" in entry.dispatchContext) {
-      return missingTaskDispatchContext(input);
-    }
-    taskDispatchContext = entry.dispatchContext;
-    if (entry.metadata.kind === "subagent") {
-      activityWorkIdentity = entry.activityWorkIdentity;
+    taskDispatchContext = entry.task.dispatchContext;
+    if (entry.task.metadata.kind === "subagent") {
+      activityWorkIdentity = entry.task.activityWorkIdentity;
     }
   }
   const dispatched = await dispatchAgentInvocation({
@@ -373,26 +375,6 @@ export async function dispatchTaskAgentInvocationStep(
         : applyTaskDispatchContext(input.serializedContext, taskDispatchContext),
   });
   return dispatched;
-}
-
-function missingTaskDispatchContext(
-  input: Parameters<typeof dispatchTaskAgentInvocationStep>[0],
-): TaskAgentInvocationDispatchResult {
-  return {
-    kind: "failed",
-    result: {
-      callId: input.request.invocationId,
-      isError: true,
-      kind: "subagent-result",
-      origin: "dispatch",
-      output: {
-        code: "AGENT_INVOCATION_AUTH_UNAVAILABLE",
-        message: "The background task predates captured authentication context.",
-      },
-      subagentName: input.request.input.target,
-    },
-    sessionState: input.sessionState,
-  };
 }
 
 function applyTaskDispatchContext(
@@ -416,19 +398,34 @@ function applyTaskDispatchContext(
 
 /** Applies an owner-scoped child settlement to the parent session's canonical state. */
 export async function settleTaskAgentInvocationStep(input: {
-  readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
 }): Promise<{
+  readonly settled: boolean;
+  readonly completion?: SubagentCompletedStreamEvent;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }> {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
+  const handles = getAgentHandleStore(durable.state)?.handles ?? [];
+  const handle = handles.find(
+    (candidate) =>
+      candidate.phase === "claimed" &&
+      candidate.ownerId === input.ownerId &&
+      candidate.callId === input.result.callId,
+  );
+  if (handle?.phase !== "claimed") {
+    return {
+      settled: false,
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
   const serializedContext = await flushAgentInvocationTraces(
     settleAgentInvocationTrace({
       acceptedAtMs: Date.now(),
@@ -437,17 +434,6 @@ export async function settleTaskAgentInvocationStep(input: {
       sessionId: durable.sessionId,
     }),
   );
-  const handles = getAgentHandleStore(durable.state)?.handles ?? [];
-  const candidates = handles.filter(
-    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
-  );
-  const handle =
-    candidates.find(
-      (candidate) => candidate.phase === "claimed" && candidate.callId === input.result.callId,
-    ) ?? (candidates.length === 1 ? candidates[0] : undefined);
-  if (handle?.phase !== "claimed") {
-    return { serializedContext, sessionState: input.sessionState };
-  }
 
   const nextHandles =
     input.result.outcome.kind === "terminal"
@@ -480,16 +466,38 @@ export async function settleTaskAgentInvocationStep(input: {
           : session
         : clearProxyInputRequestsForTask(session, input.taskId);
   }
-  if (input.accumulateUsage !== false) {
-    session = setTurnUsageState(
-      session,
-      accumulateSessionUsage({
-        previous: getTurnUsageState(session.state),
-        usage: input.result.outcome.usageDelta,
-      }),
-    );
-  }
+  session = setTurnUsageState(
+    session,
+    accumulateSessionUsage({
+      previous: getTurnUsageState(session.state),
+      usage: input.result.outcome.usageDelta,
+    }),
+  );
+  const task =
+    input.taskId === undefined
+      ? undefined
+      : findBackgroundWorkflowToolRun(session.state, input.taskId);
+  // A generated subagent task completes when the parent records its task outcome.
+  // Nested agents inside authored background workflows settle independently of that task.
+  const isTaskAgent =
+    task?.task.metadata.kind === "subagent" && task.callId === input.result.callId;
+  const completion: SubagentCompletedStreamEvent | undefined =
+    input.result.outcome.result.kind !== "succeeded" || isTaskAgent
+      ? undefined
+      : {
+          type: "subagent.completed",
+          data: {
+            callId: input.result.callId,
+            subagentName: input.result.subagentName,
+            output:
+              typeof input.result.output === "string"
+                ? input.result.output
+                : JSON.stringify(input.result.output),
+          },
+        };
   return {
+    settled: true,
+    completion,
     serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };

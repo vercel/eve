@@ -11,7 +11,6 @@ import {
 } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
-
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
@@ -35,6 +34,7 @@ import {
   SessionDynamicSubagentSelectionsKey,
   StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
+  TaskDeliveryPolicyKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
@@ -80,7 +80,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { recordSessionTask } from "#tasks/session-index.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
@@ -302,14 +302,17 @@ const analysisTaskAnnouncement =
   '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}';
 
 function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): HarnessSession {
-  return recordSessionTask(session, {
-    createdByTurnId: activeTurnId(getHarnessEmissionState(session.state)),
-    dispatchContext: { auth: { current: null, initiator: null } },
-    executor: { data: {}, kind: "workflow-tool" },
-    metadata: { kind: "report-probe", name: taskId },
-    taskId,
-    taskInboxToken: `token-${taskId}`,
-    taskRunId: `run-${taskId}`,
+  return registerWorkflowToolRun(session, {
+    callId: taskId,
+    toolName: { kind: "report-probe", name: taskId }.name,
+    lifetime: "session" as const,
+    origin: { turnId: activeTurnId(getHarnessEmissionState(session.state)), stepIndex: 0 },
+    address: { runId: `run-${taskId}`, hookToken: `token-${taskId}` },
+    task: {
+      dispatchContext: { auth: { current: null, initiator: null } },
+      metadata: { kind: "report-probe", name: taskId },
+      taskId,
+    },
   });
 }
 
@@ -355,7 +358,6 @@ function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
         description: "Delegate to a subagent.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "delegate",
-        resultKind: "subagent",
         workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
@@ -871,6 +873,90 @@ function createGatewayModelCallError(input: {
 }
 
 describe("createToolLoopHarness", () => {
+  it("keeps a scheduled task session alive across individual results until all tasks settle", async () => {
+    const { SessionInputQueue } = await import("#execution/session/input-queue.js");
+    const { getSessionTaskCohorts } = await import("#tasks/session-task-cohorts.js");
+    const { recordWorkflowTaskView, findBackgroundWorkflowToolRun } =
+      await import("#harness/workflow-tool-runs.js");
+    const { resolveTaskDeliveryContext } = await import("#tasks/delivery-context.js");
+    const { backgroundToolExecutionProvider } =
+      await import("#execution/tasks/parent/tool-execution.js");
+    const schema = {
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+      type: "object",
+    } as const;
+    let session = recordBackgroundTask(
+      recordBackgroundTask(createTestSession({ outputSchema: schema }), "A"),
+      "B",
+    );
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery({
+      kind: "deliver",
+      taskDeliveryId: "A:ready:completed",
+      payloads: [{ message: "A completed" }],
+    });
+    expect(
+      queue.takeNext(getSessionTaskCohorts(session.state), { taskDeliveryPolicy: "cohort" }),
+    ).toBeUndefined();
+    expect(
+      queue.takeNext(getSessionTaskCohorts(session.state), { taskDeliveryPolicy: "auto" })?.kind,
+    ).toBe("turn");
+    session = {
+      ...session,
+      state: recordWorkflowTaskView(session.state, {
+        taskId: "A",
+        metadata: { kind: "report-probe", name: "A" },
+        status: "completed",
+        lastOutput: { type: "result", data: "Report A" },
+      }),
+    };
+    const report = resolveTaskDeliveryContext({
+      state: session.state,
+      taskDeliveryIds: ["A:ready:completed"],
+      taskDeliveryPolicy: "auto",
+    })!;
+    const ctx = new ContextContainer();
+    ctx.set(ScheduleIdKey, "scheduled-report");
+    ctx.set(TurnTaskDeliveryKey, report.phase);
+    const scope = await backgroundToolExecutionProvider.create(ctx, session);
+    if (scope === undefined) throw new Error("Expected background executor");
+    ctx.set(BackgroundToolExecutorKey, scope.value);
+    expect(scope.value.hasPendingTasks?.()).toBe(true);
+    setupMockAgent(finalOutputResult("Report A", { summary: "Report A" }));
+    const runStep = createToolLoopHarness(createTestConfig("task"));
+    const result = await contextStorage.run(ctx, () =>
+      runStep(session, { message: "A completed", context: [report.context] }),
+    );
+    expect(findBackgroundWorkflowToolRun(result.session.state, "B")?.task.outcome).toBeUndefined();
+    expect(result.next).toBeNull();
+
+    session = {
+      ...result.session,
+      state: recordWorkflowTaskView(result.session.state, {
+        taskId: "B",
+        metadata: { kind: "report-probe", name: "B" },
+        status: "completed",
+        lastOutput: { type: "result", data: "Report B" },
+      }),
+    };
+    const finalReport = resolveTaskDeliveryContext({
+      state: session.state,
+      taskDeliveryIds: ["B:ready:completed"],
+      taskDeliveryPolicy: "auto",
+    })!;
+    ctx.set(TurnTaskDeliveryKey, finalReport.phase);
+    const finalScope = await backgroundToolExecutionProvider.create(ctx, session);
+    if (finalScope === undefined) throw new Error("Expected background executor");
+    ctx.set(BackgroundToolExecutorKey, finalScope.value);
+    expect(finalScope.value.hasPendingTasks?.()).toBe(false);
+    setupMockAgent(finalOutputResult("Report B", { summary: "Report B" }));
+    const finalResult = await contextStorage.run(ctx, () =>
+      runStep(session, { message: "B completed", context: [finalReport.context] }),
+    );
+    expect(finalResult.next).toEqual({ done: true, output: { summary: "Report B" } });
+  });
+
   it("uses one projected history view for step consumers while preserving raw history", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -1243,6 +1329,7 @@ describe("createToolLoopHarness", () => {
               execution: "background" as const,
               inputSchema: jsonSchema({ type: "object" }),
               name: "background_work",
+              workflowId: "workflow//test//background_work",
             },
           ],
         ]),
@@ -1843,7 +1930,6 @@ describe("createToolLoopHarness", () => {
         callId: "call-1",
         input: { message: "delegate from child" },
         kind: "workflow-task",
-        resultKind: "subagent",
         toolName: "delegate",
       }),
     ]);
@@ -4173,7 +4259,6 @@ describe("createToolLoopHarness", () => {
             description: "Delegate to a subagent.",
             inputSchema: jsonSchema({ type: "object" }),
             name: "delegate",
-            resultKind: "subagent",
             workflowId: "workflow//./agent/subagents/researcher//execute",
           },
         ],
@@ -4230,7 +4315,6 @@ describe("createToolLoopHarness", () => {
             description: "Delegate to a subagent.",
             inputSchema: jsonSchema({ type: "object" }),
             name: "delegate",
-            resultKind: "subagent",
             workflowId: "workflow//./agent/subagents/researcher//execute",
           },
         ],
@@ -11697,9 +11781,9 @@ describe("createToolLoopHarness", () => {
       const attemptCompleted = vi.fn();
       const hooks = createInstrumentationHooks([
         {
-          capture: "content",
           events: { "step.attempt.completed": attemptCompleted },
           name: "analytics",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
         },
       ]);
       const runStep = createToolLoopHarness(
@@ -11739,7 +11823,12 @@ describe("createToolLoopHarness", () => {
         recordOutputs: true,
         tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
       });
-      const hooks = createInstrumentationHooks([{ capture: "content", name: "analytics" }]);
+      const hooks = createInstrumentationHooks([
+        {
+          name: "analytics",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+        },
+      ]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
           instrumentation: bindHookInstrumentation(hooks, undefined, true),
@@ -13232,6 +13321,46 @@ describe("createToolLoopHarness", () => {
         { kind: "user" as const, role: "user", content: "What is 7 times 8?" },
       ]);
     });
+
+    it.each(["pending", "settled"] as const)(
+      "auto permits a silent %s result turn",
+      async (phase) => {
+        setupMockAgent({
+          finishReason: "stop",
+          response: { messages: [{ role: "assistant", content: EMPTY_DELIVERY_SENTINEL }] },
+          text: EMPTY_DELIVERY_SENTINEL,
+          toolCalls: [],
+          toolResults: [],
+        });
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskDeliveryKey, phase);
+        ctx.set(TaskDeliveryPolicyKey, "auto");
+        const { emit, events } = createEventCollector();
+        const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+        const result = await contextStorage.run(ctx, () =>
+          runStep(
+            createTestSession(),
+            markFrameworkStepInput(
+              { message: "Background task A completed." },
+              "execution.background_task",
+            ),
+          ),
+        );
+        expect(result.next).toBeNull();
+        expect(getLastAgentSettings().messages).toContainEqual(
+          expect.objectContaining({
+            content: expect.stringContaining("previously withheld results"),
+          }),
+        );
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "message.completed",
+            data: expect.objectContaining({ message: null }),
+          }),
+        );
+        expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+      },
+    );
 
     it("adds settled task-delivery guidance to a top-level framework wake", async () => {
       setupMockAgent(defaultModelResult());

@@ -7,7 +7,6 @@ import { isObject } from "#shared/guards.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
-import { getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import type { PreparedLegacySession } from "./prepare-step.js";
@@ -38,7 +37,14 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
   }
   const world = await getWorld();
   const state = prepared.originalSession.state;
-  const runIds = new Set(getWorkflowToolRuns(state).map((run) => run.runId));
+  const runIds = new Set<string>();
+  // Import cancels discoverable work even when the old registry cannot pass current validation.
+  const waitingRuns = state?.["eve.runtime.workflowToolRuns"];
+  if (Array.isArray(waitingRuns)) {
+    for (const entry of waitingRuns) {
+      if (isObject(entry) && typeof entry.runId === "string") runIds.add(entry.runId);
+    }
+  }
   const handles = state?.["eve.agent.handles"];
   if (isObject(handles) && Array.isArray(handles.handles)) {
     for (const handle of handles.handles) {

@@ -7,6 +7,42 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
+  if (hookScenario !== undefined) {
+    const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];
+    if (request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT")) {
+      const audit = request.toolResults.find((entry) => entry.name === "read_subagent_hooks");
+      return audit === undefined
+        ? { toolCalls: [{ name: "read_subagent_hooks", input: {} }] }
+        : JSON.stringify(audit.output);
+    }
+    const tool =
+      mode === "direct"
+        ? "workflow-marker"
+        : mode === "waiting"
+          ? "blocking_agent"
+          : "background_agent";
+    if (!request.toolResults.some((entry) => entry.name === tool)) {
+      return {
+        toolCalls: [
+          {
+            name: tool,
+            input:
+              mode === "direct" ? { message: "Alice's hook audit" } : { service: "hook-audit" },
+          },
+        ],
+      };
+    }
+    const delivery = [...request.userMessages]
+      .reverse()
+      .find((entry) => entry.startsWith("[Task state]\n") || entry.startsWith("Background task "));
+    const result = request.toolResults.find((entry) => entry.name === tool);
+    return (
+      delivery ??
+      (typeof result?.output === "string" ? result.output : JSON.stringify(result?.output))
+    );
+  }
+
   const message =
     [...request.userMessages]
       .reverse()
@@ -83,9 +119,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }`;
   }
 
-  if (message.includes("WORKFLOW-REPORT-PROGRESS")) {
-    return "WORKFLOW-REPORT-UPDATE-RECEIVED";
-  }
   if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {
     return "WORKFLOW-REPORT-DONE";
   }

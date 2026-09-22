@@ -1,3 +1,4 @@
+import { isJsonObjectValue } from "#shared/json.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
@@ -838,14 +839,9 @@ export class EveTUIRunner {
     this.#replaceAgentInfo(this.#agentInfo);
     this.#paintSetupAttention();
     this.#renderer.setStartupPhase?.(undefined);
-    if (initialAgentOnboarding) {
-      this.#renderStartupCommandInvocation(
-        { type: "extension", name: "login", argument: "" },
-        "startup",
-        startupOutcome?.tone,
-      );
+    if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.tone === "error") {
+      this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
     }
-    this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
 
     while (true) {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
@@ -1799,20 +1795,6 @@ export class EveTUIRunner {
     return await handler.handle(command, context);
   }
 
-  #renderStartupCommandInvocation(
-    command: Extract<PromptCommand, { type: "extension" }>,
-    trigger: "startup" | "command",
-    tone?: "success" | "error",
-  ): void {
-    if (trigger !== "startup") return;
-
-    const state = this.#remoteConnection?.current().connection.state;
-    const status =
-      tone === "error" || state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
-    const argument = command.argument.length === 0 ? "" : ` ${command.argument}`;
-    this.#renderer.renderCommandInvocation?.(`/${command.name}${argument}`, status);
-  }
-
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
@@ -2447,6 +2429,17 @@ async function* eveEventsToTUIStream(
 
       case "action.result": {
         const resultEvent = event as ActionResultStreamEvent;
+        const result = resultEvent.data.result;
+        const output = "output" in result ? result.output : undefined;
+        if (
+          resultEvent.data.status === "completed" &&
+          isJsonObjectValue(output) &&
+          output.status === "working" &&
+          typeof output.taskId === "string" &&
+          typeof output.agentId === "string"
+        ) {
+          onSubagentBackgrounded?.(result.callId);
+        }
         if (resultEvent.data.result.kind !== "tool-result") {
           break;
         }

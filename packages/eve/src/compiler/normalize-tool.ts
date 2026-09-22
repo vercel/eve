@@ -102,6 +102,18 @@ export async function compileToolEntry(
   }
 
   const workflowId = readWorkflowFunctionId(entry.definition.execute);
+  if (
+    entry.definition.execution === "background" &&
+    workflowId === undefined &&
+    !(
+      entry.definition.behavior?.handling?.kind === "dispatch" &&
+      entry.definition.behavior.handling.action === "self-agent"
+    )
+  ) {
+    throw new Error(
+      `Background tool "${source.logicalPath}" must use defineWorkflowTool(). defineTool() tools run in the foreground.`,
+    );
+  }
   const shape = {
     lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
     suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
