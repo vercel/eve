@@ -6,15 +6,20 @@ on:
       - ".github/workflows/eve-code-benchmark.yml"
       - ".github/scripts/resolve-benchmark-request*"
       - "packages/eve-code/**"
+  # Every eve-code change on main publishes a fresh result per harness, so PRs
+  # compare their HEAD against the latest main as the baseline.
+  push:
+    branches: [main]
+    paths:
+      - "packages/eve-code/**"
   issue_comment:
     types: [created]
   workflow_dispatch:
     inputs:
       harness:
-        description: Harness to benchmark on SWE-lean
-        type: choice
-        default: eve-code
-        options: [eve-code, codex, opencode, claude-code, pi, hermes, oracle]
+        description: Comma-separated harnesses to benchmark on SWE-lean
+        type: string
+        default: eve-code,opencode,pi
 
 # OIDC alternative: add `id-token: write` here and omit `vercel-token` below
 # after configuring a matching Vercel team OIDC policy.
@@ -36,6 +41,7 @@ jobs:
     outputs:
       run: ${{ steps.request.outputs.run }}
       harness: ${{ steps.request.outputs.harness }}
+      slug: ${{ steps.request.outputs.slug }}
       sha: ${{ steps.request.outputs.sha }}
       pr: ${{ steps.request.outputs.pr }}
     steps:
@@ -58,10 +64,12 @@ jobs:
     needs: request
     if: needs.request.outputs.run == 'true'
     concurrency:
-      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.harness }}
+      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.slug }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    # Every trial runs in parallel, so a run lasts about as long as its slowest
+    # trial (15-minute agent timeout plus preparation and verification).
+    timeout-minutes: 90
     steps:
       # vercel/eve is public and eve-bench is private; GitHub never lets a public
       # repository `uses:` a private action, so fetch main with a read-only deploy
@@ -74,7 +82,7 @@ jobs:
           ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
           path: .eve-bench-action
           persist-credentials: false
-      - name: Run selected harness
+      - name: Run selected harnesses
         uses: ./.eve-bench-action
         with:
           harness: ${{ needs.request.outputs.harness }}
@@ -84,12 +92,13 @@ jobs:
           dataset: swe-lean
           model: ${{ vars.EVE_CODE_BENCH_MODEL || 'google/gemini-3.8-flash' }}
           attempts: "1"
-          concurrency: "4"
+          # Per harness: one sandbox per task, so all trials start at once.
+          concurrency: "8"
           native-build: "false"
           # Baselines and cross-harness references resolve automatically from the
           # durable result store; only dispatch/push/schedule runs publish to it.
           blob-token: ${{ secrets.EVE_BENCH_BLOB_READ_WRITE_TOKEN }}
-          artifact-name: swe-lean-${{ needs.request.outputs.harness }}
+          artifact-name: swe-lean-${{ needs.request.outputs.slug }}
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           github-token: ${{ github.token }}
           vercel-token: ${{ secrets.VERCEL_TOKEN }}

@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { BENCHMARK_HARNESSES, resolveBenchmarkRequest } from "./resolve-benchmark-request.mjs";
+import {
+  BENCHMARK_HARNESSES,
+  DEFAULT_HARNESSES,
+  resolveBenchmarkRequest,
+} from "./resolve-benchmark-request.mjs";
+
+const defaults = { harness: "eve-code,opencode,pi", slug: "eve-code+opencode+pi" };
 
 const sha = "a".repeat(40);
 const pull = {
@@ -55,15 +61,16 @@ function fixture({
 
 const resolve = (input) => resolveBenchmarkRequest(input);
 
-test("automatic PR runs select only eve-code at the exact current PR head", async () => {
+test("automatic PR runs compare eve-code with opencode and pi at the exact current PR head", async () => {
+  assert.deepEqual(DEFAULT_HARNESSES, ["eve-code", "opencode", "pi"]);
   const input = fixture({ eventName: "pull_request" });
-  assert.deepEqual(await resolve(input), { harness: "eve-code", sha, pr: "42" });
+  assert.deepEqual(await resolve(input), { ...defaults, sha, pr: "42" });
   assert.deepEqual(input.calls, [["pull", { owner: "vercel", repo: "eve", pull_number: 42 }]]);
 });
 
-test("bare comment command reruns eve-code at the PR head, not default-branch github.sha", async () => {
+test("bare comment command reruns the default harnesses at the PR head, not default-branch github.sha", async () => {
   const input = fixture();
-  assert.deepEqual(await resolve(input), { harness: "eve-code", sha, pr: "42" });
+  assert.deepEqual(await resolve(input), { ...defaults, sha, pr: "42" });
   assert.deepEqual(input.calls[0], [
     "permission",
     { owner: "vercel", repo: "eve", username: "alice" },
@@ -74,11 +81,24 @@ for (const harness of BENCHMARK_HARNESSES) {
   test(`a comment can select ${harness} independently`, async () => {
     assert.deepEqual(await resolve(fixture({ body: `/benchmark ${harness}` })), {
       harness,
+      slug: harness,
       sha,
       pr: "42",
     });
   });
 }
+
+test("a comment can select several harnesses, comma- or space-separated, deduplicated in order", async () => {
+  for (const body of [
+    "/benchmark pi,eve-code",
+    "/benchmark pi eve-code",
+    "/benchmark pi, eve-code,pi",
+  ]) {
+    const result = await resolve(fixture({ body }));
+    assert.equal(result.harness, "pi,eve-code");
+    assert.equal(result.slug, "pi+eve-code");
+  }
+});
 
 for (const permission of ["read", "triage", "none"]) {
   test(`${permission} permission cannot launch a benchmark`, async () => {
@@ -90,7 +110,7 @@ for (const permission of ["read", "triage", "none"]) {
 
 for (const permission of ["write", "maintain", "admin"]) {
   test(`${permission} permission can request a benchmark`, async () => {
-    assert.equal((await resolve(fixture({ permission }))).harness, "eve-code");
+    assert.equal((await resolve(fixture({ permission }))).harness, defaults.harness);
   });
 }
 
@@ -131,6 +151,8 @@ test("invalid or injected commands never become action inputs", async () => {
     "/benchmark codex; echo nope",
     "/benchmark codex\necho nope",
     "/benchmark codex extra",
+    "/benchmark codex,",
+    "/benchmark codex;pi",
   ]) {
     await assert.rejects(
       resolve(fixture({ body })),
@@ -171,13 +193,25 @@ test("a superseded pull_request event cannot run or cancel the current benchmark
   assert.equal(await resolve(input), null);
 });
 
-test("manual dispatch defaults to eve-code and validates an explicit harness", async () => {
+test("manual dispatch defaults to the default harnesses and validates an explicit list", async () => {
   const input = fixture({ eventName: "workflow_dispatch" });
-  assert.deepEqual(await resolve(input), { harness: "eve-code", sha: input.context.sha, pr: "" });
+  assert.deepEqual(await resolve(input), { ...defaults, sha: input.context.sha, pr: "" });
   input.context.payload.inputs.harness = "codex";
   assert.equal((await resolve(input)).harness, "codex");
+  input.context.payload.inputs.harness = "codex, pi";
+  assert.equal((await resolve(input)).harness, "codex,pi");
   input.context.payload.inputs.harness = "missing";
   await assert.rejects(resolve(input), /Supported benchmark harnesses/u);
+});
+
+test("pushes to main publish the default harnesses at the pushed commit", async () => {
+  const input = fixture({ eventName: "push" });
+  assert.deepEqual(await resolve(input), { ...defaults, sha: input.context.sha, pr: "" });
+  assert.deepEqual(input.calls, []);
+});
+
+test("other events never run a benchmark", async () => {
+  assert.equal(await resolve(fixture({ eventName: "schedule" })), null);
 });
 
 test("workflow names and concurrency preserve independent authorized harness runs", async () => {
@@ -194,8 +228,12 @@ test("workflow names and concurrency preserve independent authorized harness run
   );
   assert.match(
     workflow,
-    /group: eve-code-.*needs\.request\.outputs\.pr.*needs\.request\.outputs\.harness/u,
+    /group: eve-code-.*needs\.request\.outputs\.pr.*needs\.request\.outputs\.slug/u,
   );
+  assert.match(workflow, /artifact-name: swe-lean-\$\{\{ needs\.request\.outputs\.slug \}\}/u);
+  assert.match(workflow, /push:\n\s+branches: \[main\]/u);
+  // One sandbox per task and harness: all eight SWE-lean trials start at once.
+  assert.match(workflow, /concurrency: "8"/u);
   assert.match(workflow, /agent-ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
 });
 

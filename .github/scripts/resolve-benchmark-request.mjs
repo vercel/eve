@@ -8,9 +8,25 @@ export const BENCHMARK_HARNESSES = [
   "oracle",
 ];
 
+/** Harnesses compared on every automatic run; eve-code against opencode and pi. */
+export const DEFAULT_HARNESSES = ["eve-code", "opencode", "pi"];
+
+function parseHarnesses(value) {
+  const harnesses = [...new Set(value.split(/[ ,]+/u).filter(Boolean))];
+  const unknown = harnesses.filter((harness) => !BENCHMARK_HARNESSES.includes(harness));
+  if (!harnesses.length || unknown.length) {
+    throw new Error(`Supported benchmark harnesses: ${BENCHMARK_HARNESSES.join(", ")}.`);
+  }
+  return harnesses;
+}
+
+function request(harnesses, sha, pr) {
+  return { harness: harnesses.join(","), slug: harnesses.join("+"), sha, pr };
+}
+
 export async function resolveBenchmarkRequest({ github, context }) {
   const { payload, eventName, repo, sha } = context;
-  let harness = "eve-code";
+  let harnesses = DEFAULT_HARNESSES;
   let number = payload.pull_request?.number;
 
   if (eventName === "issue_comment") {
@@ -22,22 +38,19 @@ export async function resolveBenchmarkRequest({ github, context }) {
       username: payload.comment.user.login,
     });
     if (!["admin", "maintain", "write"].includes(data.permission)) return null;
-    const command = /^\/benchmark(?:\s+([a-z-]+))?$/u.exec(body);
-    if (!command) throw new Error("Use /benchmark or /benchmark <harness>.");
-    harness = command[1] ?? harness;
+    const command = /^\/benchmark(?: +([a-z-]+(?:[ ,]+[a-z-]+)*))?$/u.exec(body);
+    if (!command) throw new Error("Use /benchmark or /benchmark <harness>[,<harness>...].");
+    if (command[1]) harnesses = parseHarnesses(command[1]);
     number = payload.issue.number;
   } else if (eventName === "workflow_dispatch") {
-    harness = payload.inputs?.harness || harness;
-  } else if (eventName !== "pull_request") {
+    if (payload.inputs?.harness) harnesses = parseHarnesses(payload.inputs.harness);
+  } else if (eventName !== "pull_request" && eventName !== "push") {
     return null;
   }
 
-  if (!BENCHMARK_HARNESSES.includes(harness)) {
-    throw new Error(`Supported benchmark harnesses: ${BENCHMARK_HARNESSES.join(", ")}.`);
-  }
   if (!number) {
     if (!/^[a-f0-9]{40}$/u.test(sha)) throw new Error("Benchmark source must be an exact commit.");
-    return { harness, sha, pr: "" };
+    return request(harnesses, sha, "");
   }
 
   const { data: pull } = await github.rest.pulls.get({ ...repo, pull_number: number });
@@ -51,5 +64,5 @@ export async function resolveBenchmarkRequest({ github, context }) {
     return null;
   if (eventName === "pull_request" && pull.head.sha !== payload.pull_request.head.sha) return null;
   if (!/^[a-f0-9]{40}$/u.test(pull.head.sha)) throw new Error("PR head must be an exact commit.");
-  return { harness, sha: pull.head.sha, pr: String(number) };
+  return request(harnesses, pull.head.sha, String(number));
 }
