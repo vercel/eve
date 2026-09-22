@@ -11,8 +11,7 @@ export default defineEval({
     const launch = (await t.send(nestedMessage("parent", key))).expectOk();
     launch.requireToolCall("remote-loopback", { output: { status: "working" } });
     const detectorId = await childSession(t, launch.sessionId, "remote-loopback");
-    const detector = await t.target.attachSession(detectorId);
-    detector.succeeded();
+    const detector = (await t.target.watchTurn(detectorId).result()).expectOk();
     detector.requireToolCall("agent", { output: { status: "working" } });
     detector.notEvent("subagent.completed");
     const workerId = await childSession(t, detectorId, "agent");
@@ -42,11 +41,10 @@ export default defineEval({
     const worker = (await t.target.watchTurn(workerId).result()).expectOk();
     worker.calledTool("verification_gate", { count: 1, status: "completed" });
     worker.messageIncludes(NESTED_FINAL);
-    if (detector.state === undefined) throw new Error("Detector has no stream cursor.");
     const detectorFinal = (
       await t.target
         .watchTurn(detectorId, {
-          startIndex: detector.state.streamIndex,
+          startIndex: detector.session.state.streamIndex,
         })
         .result()
     ).expectOk();
