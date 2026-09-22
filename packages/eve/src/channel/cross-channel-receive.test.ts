@@ -6,6 +6,8 @@ import {
   type CrossChannelTarget,
   type CrossChannelToFn,
 } from "#channel/cross-channel-receive.js";
+import { TaskDeliveryPolicyKey } from "#context/keys.js";
+import { buildRunContext } from "#execution/runtime-context.js";
 import type { Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import type { SlackChannel, SlackReceiveTarget } from "#public/channels/slack/slackChannel.js";
@@ -76,6 +78,28 @@ function makeChannel(name: string): {
 }
 
 describe("createCrossChannelToFn", () => {
+  it("defaults to auto when both the sender and receiver omit the task policy", async () => {
+    const runtime = makeRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
+    vi.mocked(runtime.createSession).mockImplementation(async (run) => {
+      const context = buildRunContext({ bundle: {} as never, run });
+      expect(context.get(TaskDeliveryPolicyKey)).toBe("auto");
+      return { sessionId: "sess_1" } as never;
+    });
+    const channel = makeChannel("reports");
+    channel.receive.mockImplementation((input, { from }) =>
+      from("alice").send(input.message, { auth: input.auth }),
+    );
+
+    const session = await createCrossChannelToFn(runtime, [channel.target])(
+      channel.definition,
+      {},
+    ).send("Prepare reports", { auth: null });
+
+    expect(runtime.createSession).toHaveBeenCalledOnce();
+    expect(session.id).toBe("sess_1");
+  });
+
   it("carries a cross-channel send policy through the receiver's local send", async () => {
     const runtime = makeRuntime();
     vi.mocked(runtime.dispatchContinuation).mockResolvedValue({
