@@ -813,6 +813,28 @@ describe("application Nitro creation", () => {
     );
   });
 
+  it("prunes lazy development preparation only from production builds", async () => {
+    const productionNitroStub = createNitroStub();
+    const devNitroStub = createNitroStub({ dev: true });
+    createNitroMock.mockResolvedValueOnce(productionNitroStub.nitro);
+    createNitroMock.mockResolvedValueOnce(devNitroStub.nitro);
+
+    const { createDevelopmentApplicationNitro, createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const productionHost = await createPreparedHost();
+    await createProductionApplicationNitro(productionHost, createProductionOptions(productionHost));
+    await createDevelopmentApplicationNitro(await createPreparedHost());
+
+    const productionPlugins = createNitroMock.mock.calls[0]?.[0].rollupConfig.plugins;
+    const developmentPlugins = createNitroMock.mock.calls[1]?.[0].rollupConfig.plugins;
+    expect(productionPlugins.map((plugin: { name: string }) => plugin.name)).toContain(
+      "eve-hosted-development-runtime-prune",
+    );
+    expect(developmentPlugins.map((plugin: { name: string }) => plugin.name)).not.toContain(
+      "eve-hosted-development-runtime-prune",
+    );
+  });
+
   it("includes the sandbox shutdown plugin only for production builds", async () => {
     const productionNitroStub = createNitroStub();
     const devNitroStub = createNitroStub();
