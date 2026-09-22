@@ -5,6 +5,8 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 
+import { ensurePnpmOptionalDependencyDefaults } from "#setup/primitives/pm/pnpm-build-policy.js";
+
 import { EVE_DEV_ENV_FLAG, isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 export { EVE_DEV_ENV_FLAG, isEveDevEnvironment };
@@ -64,8 +66,12 @@ const pendingOptionalPackageInstalls = new Map<string, Promise<void>>();
 export async function installPackageIntoProject(input: {
   readonly appRoot: string;
   readonly packageName: string;
+  readonly ignoredOptionalDependencies?: readonly string[];
 }): Promise<void> {
   const packageManager = detectProjectPackageManager(input.appRoot);
+  if (packageManager === "pnpm" && input.ignoredOptionalDependencies?.length) {
+    await ensurePnpmOptionalDependencyDefaults(input.appRoot, input.ignoredOptionalDependencies);
+  }
   const args = [...INSTALL_ARGUMENTS[packageManager], input.packageName];
 
   console.info(
@@ -110,6 +116,7 @@ export async function loadOptionalEnginePackage<T>(input: {
   readonly importInstalledModule?: () => Promise<T>;
   readonly importModule: () => Promise<T>;
   readonly installPackageName?: string;
+  readonly ignoredOptionalDependencies?: readonly string[];
   readonly missingMessage: string;
   readonly packageName: string;
 }): Promise<T> {
@@ -148,6 +155,7 @@ export async function loadOptionalEnginePackage<T>(input: {
         await installPackageIntoProject({
           appRoot: input.appRoot,
           packageName: input.installPackageName ?? input.packageName,
+          ignoredOptionalDependencies: input.ignoredOptionalDependencies,
         });
       });
     } catch (installError) {

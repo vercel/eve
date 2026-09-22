@@ -69,6 +69,7 @@ async function loadJustBashModule(input: {
         "with eve. Install it in your application (for example `pnpm add -D just-bash`), or use " +
         "DockerSandbox or DefaultSandbox instead.",
       packageName: JUST_BASH_PACKAGE_NAME,
+      ignoredOptionalDependencies: ["@mongodb-js/zstd", "node-liblzma"],
     })
     .catch((error: unknown) => {
       justBashModulePromise = undefined;

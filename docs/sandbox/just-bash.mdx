@@ -15,4 +15,10 @@ export default defineSandbox(() => environment.open());
 
 just-bash can prepare and persist its virtual filesystem. It cannot use OCI images or Dockerfiles, does not run native processes, and provides no network isolation. The session does not expose `setNetworkPolicy()`.
 
+## Automatic installation
+
+During `eve dev`, eve installs the missing `just-bash` package into your application unless you set `autoInstall: false` in the environment options. Other environments require you to install the package yourself.
+
+For pnpm projects, automatic installation adds `@mongodb-js/zstd` and `node-liblzma` to `ignoredOptionalDependencies` in the owning `pnpm-workspace.yaml` when they have no explicit package policy. These optional native codecs are not needed for basic shell and filesystem operations. Commands that require those codecs may be unavailable without them. eve preserves existing package-specific build decisions and does not automatically approve build scripts.
+
 See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

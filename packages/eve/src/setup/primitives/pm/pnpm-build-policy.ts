@@ -1,10 +1,7 @@
 import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  findClaimingAncestorPnpmWorkspaceRoot,
-  PNPM_WORKSPACE_PATH,
-} from "#setup/primitives/pm/pnpm.js";
+import { findClaimingAncestorPnpmWorkspaceRoot, PNPM_WORKSPACE_PATH } from "./pnpm.js";
 
 export type PnpmBuildPolicyAction = "ignore-optional" | "allow-builds";
 
@@ -150,6 +147,35 @@ export function withPnpmBuildPolicy(
   }
   while (lines.at(-1) === "") lines.pop();
   return `${lines.join("\n")}\n`;
+}
+
+/** Adds optional-package defaults without replacing the application's explicit decisions. */
+export function withPnpmOptionalDependencyDefaults(
+  source: string,
+  packages: readonly string[],
+): string {
+  const lines = source.replace(/\r\n/gu, "\n").split("\n");
+  const decisions = [
+    policyEntries(lines, "allowBuilds", "mapping"),
+    policyEntries(lines, "ignoredOptionalDependencies", "sequence"),
+    policyEntries(lines, "onlyBuiltDependencies", "sequence"),
+    policyEntries(lines, "ignoredBuiltDependencies", "sequence"),
+  ];
+  const missing = packages.filter((name) => !decisions.some((entries) => entries.has(name)));
+  return missing.length === 0 ? source : withPnpmBuildPolicy(source, missing, "ignore-optional");
+}
+
+/** Prepares defaults in the owning workspace before installing an optional engine. */
+export async function ensurePnpmOptionalDependencyDefaults(
+  appRoot: string,
+  packages: readonly string[],
+): Promise<void> {
+  const filePath = join(await owningPnpmWorkspaceRoot(appRoot), PNPM_WORKSPACE_PATH);
+  const source = await readWorkspacePolicy(filePath);
+  const next = withPnpmOptionalDependencyDefaults(source, packages);
+  if (next === source) return;
+  await writeFile(filePath, next, "utf8");
+  console.info(`[eve:dev] updated optional dependency defaults in "${filePath}".`);
 }
 
 async function readWorkspacePolicy(filePath: string): Promise<string> {

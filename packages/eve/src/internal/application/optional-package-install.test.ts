@@ -5,11 +5,17 @@ import { PassThrough } from "node:stream";
 import { Worker } from "node:worker_threads";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ensurePnpmOptionalDependencyDefaults } from "#setup/primitives/pm/pnpm-build-policy.js";
+
 import {
   EVE_DEV_ENV_FLAG,
   installPackageIntoProject,
   loadOptionalEnginePackage,
 } from "#internal/application/optional-package-install.js";
+
+vi.mock("#setup/primitives/pm/pnpm-build-policy.js", () => ({
+  ensurePnpmOptionalDependencyDefaults: vi.fn(async () => {}),
+}));
 
 vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
@@ -352,6 +358,60 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe("installPackageIntoProject", () => {
+  it("prepares declared pnpm defaults before installation", async () => {
+    mockedExistsSync.mockImplementation((path) => path === "/repo/pnpm-lock.yaml");
+    const packages = ["@mongodb-js/zstd", "node-liblzma"];
+    await installPackageIntoProject({
+      appRoot: "/repo/app",
+      packageName: "just-bash",
+      ignoredOptionalDependencies: packages,
+    });
+    expect(ensurePnpmOptionalDependencyDefaults).toHaveBeenCalledWith("/repo/app", packages);
+    expect(
+      vi.mocked(ensurePnpmOptionalDependencyDefaults).mock.invocationCallOrder[0],
+    ).toBeLessThan(mockedSpawn.mock.invocationCallOrder[0]!);
+  });
+
+  it("does not write pnpm configuration for another package manager", async () => {
+    await installPackageIntoProject({
+      appRoot: "/repo/app",
+      packageName: "just-bash",
+      ignoredOptionalDependencies: ["node-liblzma"],
+    });
+    expect(ensurePnpmOptionalDependencyDefaults).not.toHaveBeenCalled();
+  });
+
+  it("does not install if policy preparation fails", async () => {
+    mockedExistsSync.mockImplementation((path) => path === "/repo/pnpm-lock.yaml");
+    vi.mocked(ensurePnpmOptionalDependencyDefaults).mockRejectedValueOnce(
+      new Error("Unsupported policy"),
+    );
+    await expect(
+      installPackageIntoProject({
+        appRoot: "/repo/app",
+        packageName: "just-bash",
+        ignoredOptionalDependencies: ["node-liblzma"],
+      }),
+    ).rejects.toThrow("Unsupported policy");
+    expect(mockedSpawn).not.toHaveBeenCalled();
+  });
+
+  it("keeps package-manager failures fatal after preparing defaults", async () => {
+    mockedExistsSync.mockImplementation((path) => path === "/repo/pnpm-lock.yaml");
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => child.emit("close", 1));
+      return child;
+    });
+    await expect(
+      installPackageIntoProject({
+        appRoot: "/repo/app",
+        packageName: "just-bash",
+        ignoredOptionalDependencies: ["node-liblzma"],
+      }),
+    ).rejects.toThrow("exit 1");
+  });
+
   it("uses the project's package manager", async () => {
     mockedExistsSync.mockImplementation((path) => path === "/repo/pnpm-lock.yaml");
 

@@ -99,6 +99,7 @@ export interface SandboxProviderHost {
     readonly autoInstall: boolean;
     readonly importModule: () => Promise<T>;
     readonly installPackageName?: string;
+    readonly ignoredOptionalDependencies?: readonly string[];
     readonly missingMessage: string;
     readonly packageName: string;
   }): Promise<T>;
