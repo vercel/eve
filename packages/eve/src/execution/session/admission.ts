@@ -11,6 +11,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { findRunningAgentHandle } from "#subagents/handles/query.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 
@@ -104,6 +105,10 @@ export async function applySessionCancellation(
   },
 ): Promise<void> {
   if (command.tasks === true) {
+    // Cancelling this session's work must not wake it with that work's outcomes.
+    // Reject queued and in-flight notifications before sending cancellation.
+    const tasks = getBackgroundTasks(input.cursor.sessionState.snapshot.session.state);
+    for (const task of tasks.query({ state: "working" })) input.queue.cancelTask(task.taskId);
     const cancelled = await cancelAllIndexedSessionTasksStep({
       serializedContext: input.cursor.serializedContext,
       sessionState: input.cursor.sessionState,

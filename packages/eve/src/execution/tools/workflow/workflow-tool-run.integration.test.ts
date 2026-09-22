@@ -763,6 +763,18 @@ describe("workflow tools", () => {
         // The held step can finish only after its abort signal fires or its 60s timer expires.
         // Finishing within 15s proves cancellation reached the yielded child's work.
         expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
+
+        // This input follows the cancellation notification in the child's inbox.
+        // It must be the next turn, without a task notification waking the child first.
+        await resumeSessionInbox(sessionCommandHookToken(child.runId), {
+          kind: "send",
+          payload: { message: "Hello again" },
+        });
+        const next = await stream.nextTurn();
+        expect(
+          filterEventsByType(next, "message.received").map((event) => event.data.message),
+        ).toEqual(["Hello again"]);
+        expect(filterEventsByType(next, "turn.failed")).toHaveLength(0);
       } finally {
         stream.dispose();
         if (nestedRunId !== undefined) {
