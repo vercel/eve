@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,6 +64,33 @@ describe("resolveEveDestinationPrefix", () => {
       }),
     ).rejects.toThrow(`Run eve build from ${appRoot} before starting Next.js.`);
     expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("starts a managed production agent once when its destination resolves repeatedly", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const appRoot = await createTempAppRoot();
+    await mkdir(join(appRoot, ".output", "server"), {
+      recursive: true,
+    });
+    await writeFile(join(appRoot, ".output", "server", "index.mjs"), "// built agent\n");
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValue(child);
+    const input = {
+      appRoot,
+      phase: "phase-production-server",
+      productionDestinationPrefix: "http://127.0.0.1:4274",
+      productionServerOrigin: "http://127.0.0.1:4274",
+    };
+
+    const firstDestination = resolveEveDestinationPrefix(input);
+    await vi.waitFor(() => {
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+    });
+    child.stdout.emit("data", Buffer.from("Listening on: http://127.0.0.1:4274/\n"));
+
+    await expect(firstDestination).resolves.toBe("http://127.0.0.1:4274");
+    await expect(resolveEveDestinationPrefix(input)).resolves.toBe("http://127.0.0.1:4274");
+    expect(spawnMock).toHaveBeenCalledTimes(1);
   });
 
   it("ignores non-server URLs in dev server output while waiting for the listening URL", async () => {
