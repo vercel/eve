@@ -22,7 +22,7 @@ const colorQuestion = {
 describe("askQuestion", () => {
   it("defines a blocking workflow tool that asks through ctx.ask()", async () => {
     const definition = askQuestion();
-    const ask = vi.fn().mockResolvedValue({ optionId: "2", status: "answered" });
+    const ask = vi.fn().mockResolvedValue({ optionId: "Blue", status: "answered" });
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toBe(ASK_QUESTION_TOOL_DESCRIPTION);
@@ -59,6 +59,12 @@ describe("askQuestion", () => {
     expect(
       ASK_QUESTION_INPUT_SCHEMA.safeParse({ ...colorQuestion, questions: [colorQuestion] }).success,
     ).toBe(false);
+    expect(
+      ASK_QUESTION_INPUT_SCHEMA.safeParse({
+        options: [colorQuestion.options[1], colorQuestion.options[1]],
+        question: "Blue or blue?",
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -69,8 +75,8 @@ describe("toAskQuestionRequest", () => {
       dismissible: true,
       display: "select",
       options: [
-        { description: "Warm and bold.", id: "1", label: "Red (Recommended)" },
-        { description: "Calm and cool.", id: "2", label: "Blue" },
+        { description: "Warm and bold.", id: "Red (Recommended)", label: "Red (Recommended)" },
+        { description: "Calm and cool.", id: "Blue", label: "Blue" },
       ],
       prompt: "Which color should the banner use?",
     });
@@ -85,21 +91,21 @@ describe("toAskQuestionRequest", () => {
 
 describe("toAskQuestionOutput", () => {
   it("returns the chosen label or the user's own words", () => {
-    expect(toAskQuestionOutput(colorQuestion, { optionId: "1", status: "answered" })).toEqual({
+    expect(toAskQuestionOutput({ optionId: "Red (Recommended)", status: "answered" })).toEqual({
       answer: "Red (Recommended)",
       status: "answered",
     });
-    expect(toAskQuestionOutput(colorQuestion, { status: "answered", text: "Green" })).toEqual({
+    expect(toAskQuestionOutput({ status: "answered", text: "Green" })).toEqual({
       answer: "Green",
       status: "answered",
     });
   });
 
   it("passes through dismissed and unavailable answers", () => {
-    expect(toAskQuestionOutput(colorQuestion, { status: "dismissed" })).toEqual({
+    expect(toAskQuestionOutput({ status: "dismissed" })).toEqual({
       status: "dismissed",
     });
-    expect(toAskQuestionOutput(colorQuestion, { status: "unavailable" })).toEqual({
+    expect(toAskQuestionOutput({ status: "unavailable" })).toEqual({
       status: "unavailable",
     });
   });

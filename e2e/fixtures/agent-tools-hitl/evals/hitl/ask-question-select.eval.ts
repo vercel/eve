@@ -20,7 +20,7 @@ export default defineEval({
 
     const request = session.requireInputRequest({
       display: (value) => value === undefined || value === "select",
-      optionIds: ["1", "2"],
+      optionIds: (ids) => ids.length === 2,
       toolName: "ask_question",
     });
     const blue = request.options?.find((option) => /\bblue\b/i.test(option.label));

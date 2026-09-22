@@ -92,7 +92,7 @@ describe("MCP agent channel", () => {
         });
         expect(hidden.isError).toBe(true);
 
-        const responses = [{ optionId: "1", requestId }];
+        const responses = [{ optionId: "Yes", requestId }];
         await expect(
           callTool(server.url, "alice", "modern", "agent_update", {
             invocationId,

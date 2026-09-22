@@ -28,6 +28,9 @@ export const ASK_QUESTION_INPUT_SCHEMA = z.strictObject({
     .array(ASK_QUESTION_OPTION_SCHEMA)
     .min(2)
     .max(3)
+    .refine((options) => new Set(options.map((option) => option.label)).size === options.length, {
+      message: "Option labels must be unique.",
+    })
     .describe(
       'Two or three mutually exclusive choices, recommended option first. Omit for an open-ended question. Never include an "Other" option.',
     )

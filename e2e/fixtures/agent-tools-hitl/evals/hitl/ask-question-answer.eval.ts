@@ -13,7 +13,7 @@ export default defineEval({
     );
     const choice = session.requireInputRequest({
       display: "select",
-      optionIds: ["1", "2"],
+      optionIds: ["Staging", "Production"],
       prompt: "Where should Alice ship first?",
       toolName: "ask_question",
     });
@@ -21,7 +21,7 @@ export default defineEval({
       throw new Error("ask_question must ask a question that accepts free text.");
     }
 
-    const chosen = await session.respond([{ optionId: "2", requestId: choice.requestId }]);
+    const chosen = await session.respond([{ optionId: "Production", requestId: choice.requestId }]);
     chosen.expectOk();
     chosen.calledTool("ask_question", { count: 1, status: "completed" });
     chosen.messageIncludes('"answer":"Production"');

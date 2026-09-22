@@ -10,14 +10,17 @@ export async function executeAskQuestionTool(
   "use workflow";
 
   const answer = await ctx.ask(toAskQuestionRequest(input));
-  return toAskQuestionOutput(input, answer);
+  return toAskQuestionOutput(answer);
 }
 
-/** Free text is always allowed, so the model never needs an "Other" option. */
+/**
+ * Free text is always allowed, so the model never needs an "Other" option.
+ * Labels double as option ids so a late answer still reads as the label.
+ */
 export function toAskQuestionRequest(input: AskQuestionInput): ToolInputRequest {
-  const options = input.options?.map((option, index) => ({
+  const options = input.options?.map((option) => ({
     description: option.description,
-    id: String(index + 1),
+    id: option.label,
     label: option.label,
   }));
   return {
@@ -29,13 +32,7 @@ export function toAskQuestionRequest(input: AskQuestionInput): ToolInputRequest 
   };
 }
 
-/** Reports the chosen label rather than an internal option id. */
-export function toAskQuestionOutput(
-  input: AskQuestionInput,
-  answer: ToolInputResponse,
-): AskQuestionOutput {
+export function toAskQuestionOutput(answer: ToolInputResponse): AskQuestionOutput {
   if (answer.status !== "answered") return { status: answer.status };
-  const option =
-    answer.optionId === undefined ? undefined : input.options?.[Number(answer.optionId) - 1];
-  return { answer: option?.label ?? answer.text ?? "", status: "answered" };
+  return { answer: answer.optionId ?? answer.text ?? "", status: "answered" };
 }

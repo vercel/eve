@@ -310,6 +310,9 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 - The request belongs to the run, not the turn. It stays answerable until it is answered or the run
   ends. In a background tool that means long after the turn that started it.
 - A request is answered once. Ask again for the next answer.
+- Choose option `id`s that read well on their own, such as `approve` or the option's label. A
+  response carries only the `id`. If a person answers after the request has already resolved, for
+  example from an old Slack menu, the agent receives the `id` as a new message, not the label.
 - Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
 - Several requests may be outstanding at once.
 - A response never steers. A new human message that does not answer a pending request follows the
