@@ -12,19 +12,6 @@ describe("createCompiledSandboxProviderPrunePlugin", () => {
     expect(source).toContain("prepare: options.prepare");
   });
 
-  it("prunes lazy development preparation from hosted bundles", () => {
-    const plugin = createCompiledSandboxProviderPrunePlugin();
-    const resolved = plugin.resolveId?.(
-      "/repo/packages/eve/dist/src/execution/sandbox/development-lazy-prewarm.js",
-      undefined,
-    );
-    if (resolved == null) throw new Error("Expected lazy prewarm to resolve to a hosted stub.");
-    const id = typeof resolved === "object" ? resolved.id : resolved;
-    expect(plugin.load?.(id)).toBe(
-      "export async function ensureDevelopmentSandboxesPrepared() {}\n",
-    );
-  });
-
   it("replaces local provider constructors with hosted stubs", () => {
     const plugin = createCompiledSandboxProviderPrunePlugin();
     const source = plugin.load?.("/repo/packages/eve/src/sandbox/providers/microsandbox.ts");

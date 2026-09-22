@@ -2,7 +2,6 @@ const PRUNED_DEFAULT_SANDBOX_MODULE_ID = "\0eve-pruned-default-sandbox-provider"
 const PRUNED_LOCAL_SANDBOX_MODULE_ID = "\0eve-pruned-local-sandbox-providers";
 const PRUNED_LOCAL_SANDBOX_PROVIDER_MODULE_ID = "\0eve-pruned-local-sandbox-provider-constructors";
 const PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID = "\0eve-pruned-optional-engine-install";
-const PRUNED_DEVELOPMENT_LAZY_PREWARM_MODULE_ID = "\0eve-pruned-development-lazy-prewarm";
 const DEFAULT_PROVIDER_SOURCE_RE = /(?:^|[/\\#])sandbox[/\\]providers[/\\]default\.(?:js|ts)$/;
 const LOCAL_BINDING_SOURCE_RE =
   /[/\\]bindings[/\\](?:docker|just-bash|local|microsandbox)\.(?:js|ts)$/;
@@ -10,8 +9,6 @@ const LOCAL_PROVIDER_SOURCE_RE =
   /(?:^|[/\\#])sandbox[/\\]providers[/\\](?:docker|just-bash|microsandbox)\.(?:js|ts)$/;
 const OPTIONAL_ENGINE_INSTALL_SOURCE_RE =
   /[/\\]internal[/\\]application[/\\]optional-package-install\.(?:js|ts)$/;
-const DEVELOPMENT_LAZY_PREWARM_SOURCE_RE =
-  /[/\\]execution[/\\]sandbox[/\\]development-lazy-prewarm\.(?:js|ts)$/;
 
 interface BundlerPluginShape {
   readonly enforce?: "pre";
@@ -47,12 +44,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
           'export function defineDefaultSandboxProvider() { return { name: "default", environment }; }',
           "",
         ].join("\n");
-      }
-      if (
-        id === PRUNED_DEVELOPMENT_LAZY_PREWARM_MODULE_ID ||
-        DEVELOPMENT_LAZY_PREWARM_SOURCE_RE.test(sourcePath)
-      ) {
-        return "export async function ensureDevelopmentSandboxesPrepared() {}\n";
       }
       if (
         id === PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID ||
@@ -117,9 +108,6 @@ export function createCompiledSandboxProviderPrunePlugin(): BundlerPluginShape {
       }
       if (OPTIONAL_ENGINE_INSTALL_SOURCE_RE.test(sourcePath)) {
         return PRUNED_OPTIONAL_ENGINE_INSTALL_MODULE_ID;
-      }
-      if (DEVELOPMENT_LAZY_PREWARM_SOURCE_RE.test(sourcePath)) {
-        return PRUNED_DEVELOPMENT_LAZY_PREWARM_MODULE_ID;
       }
       if (!LOCAL_BINDING_SOURCE_RE.test(sourcePath)) return null;
       return PRUNED_LOCAL_SANDBOX_MODULE_ID;
