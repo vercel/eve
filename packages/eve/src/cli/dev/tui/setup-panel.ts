@@ -480,7 +480,7 @@ function searchFilter(
 /**
  * Whether a select renders as the railed searchable list — the one component
  * behind the model catalog, team, and project pickers: `▏`-railed rows, an
- * inverse cursor row trailed by the `↵` badge, and a rail-led filter line.
+ * inverse cursor row, and a rail-led filter line.
  */
 function isRailedSearch(presentation: SelectPresentation): boolean {
   return (
@@ -666,10 +666,9 @@ function appendSelectOptionRows(input: {
     };
     if (editingKey) rowOption.hint = undefined;
     const railed = isRailedSearch(presentation);
-    // Railed lists carry the Enter affordance on the cursor row by default;
-    // an explicit cursorBadge (the provider picker's `↵ change`) still wins.
-    const rowBadge =
-      state.cursorBadge ?? (railed && !isTrailingTaskAction ? enterBadge(theme) : undefined);
+    // Railed lists already mark their cursor with `›`; only an explicit badge
+    // such as the provider picker's `↵ change` adds an extra affordance.
+    const rowBadge = state.cursorBadge;
     const badge = isCursor && rowBadge !== undefined ? ` ${rowBadge}` : "";
     rows.push(
       `  ${optionRow({

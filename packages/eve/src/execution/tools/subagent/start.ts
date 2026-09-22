@@ -43,6 +43,7 @@ export async function startSubagent(input: {
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
   readonly activityObserver?: ActivityObserverConfig & {

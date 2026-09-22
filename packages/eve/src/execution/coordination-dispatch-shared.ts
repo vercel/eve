@@ -86,6 +86,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   /** Number of local children sharing the parent's remaining token quota. */
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;

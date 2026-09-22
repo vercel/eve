@@ -70,34 +70,78 @@ describe("installLocalDevCapabilityEnvironment", () => {
 });
 
 describe("getLocalDevCapability", () => {
-  it("is absent without both the dev environment and a local request", async () => {
-    expect(getLocalDevCapability(environment())).toBeUndefined();
-    await withClient("127.0.0.1", () => {
-      expect(getLocalDevCapability({})).toBeUndefined();
-      expect(getLocalDevCapability({ EVE_DEV_APP_ROOT: APP_ROOT })).toBeUndefined();
-      expect(getLocalDevCapability({ EVE_DEV_CONTROL_URL: SERVER_URL })).toBeUndefined();
+  it("is absent without both host facilities", () => {
+    expect(getLocalDevCapability({})).toBeUndefined();
+    expect(getLocalDevCapability({ EVE_DEV_APP_ROOT: APP_ROOT })).toBeUndefined();
+    expect(getLocalDevCapability({ EVE_DEV_CONTROL_URL: SERVER_URL })).toBeUndefined();
+    expect(
+      getLocalDevCapability({ EVE_DEV_APP_ROOT: "", EVE_DEV_CONTROL_URL: SERVER_URL }),
+    ).toBeUndefined();
+    expect(
+      getLocalDevCapability({ EVE_DEV_APP_ROOT: APP_ROOT, EVE_DEV_CONTROL_URL: "" }),
+    ).toBeUndefined();
+  });
+
+  it("is available on a host with both facilities without a request scope", () => {
+    expect(getLocalDevCapability(environment())).toMatchObject({
+      appRoot: APP_ROOT,
+      interactiveClient: false,
     });
   });
 
-  it("is scoped to a parent-verified loopback client", async () => {
+  it("does not make source access depend on the peer address or provenance", async () => {
     await withClient("127.0.0.1", () => {
-      expect(getLocalDevCapability(environment())?.appRoot).toBe(APP_ROOT);
+      expect(getLocalDevCapability(environment())?.interactiveClient).toBe(false);
     });
     await withClient("203.0.113.7", () => {
-      expect(getLocalDevCapability(environment())).toBeUndefined();
+      expect(getLocalDevCapability(environment())).toMatchObject({
+        appRoot: APP_ROOT,
+        interactiveClient: false,
+      });
     });
-  });
 
-  it("follows the request into nested authored execution contexts", async () => {
-    await withClient("127.0.0.1", async () => {
-      const nestedContext = new ContextContainer();
-      await contextStorage.run(nestedContext, () => {
-        expect(getLocalDevCapability(environment())?.appRoot).toBe(APP_ROOT);
+    await withLocalDevRequestScope(new Request(SERVER_URL), async () => {
+      expect(getLocalDevCapability(environment())).toMatchObject({
+        appRoot: APP_ROOT,
+        interactiveClient: false,
       });
     });
   });
 
-  it("survives durable workflow context serialization", async () => {
+  it("inherits a verified dev-TUI hint into nested authored execution contexts", async () => {
+    await withClient(
+      "127.0.0.1",
+      async () => {
+        const nestedContext = new ContextContainer();
+        await contextStorage.run(nestedContext, () => {
+          expect(getLocalDevCapability(environment())).toMatchObject({
+            appRoot: APP_ROOT,
+            interactiveClient: true,
+          });
+        });
+      },
+      true,
+    );
+  });
+
+  it("keeps source access while a direct remote request clears the dev-TUI hint", async () => {
+    await withClient(
+      "127.0.0.1",
+      async () => {
+        expect(getLocalDevCapability(environment())?.interactiveClient).toBe(true);
+        await withClient("203.0.113.7", () => {
+          expect(getLocalDevCapability(environment())).toMatchObject({
+            appRoot: APP_ROOT,
+            interactiveClient: false,
+          });
+        });
+        expect(getLocalDevCapability(environment())?.interactiveClient).toBe(true);
+      },
+      true,
+    );
+  });
+
+  it("preserves a verified dev-TUI hint through durable context serialization", async () => {
     await withClient(
       "127.0.0.1",
       async () => {
@@ -116,38 +160,41 @@ describe("getLocalDevCapability", () => {
     );
   });
 
-  it("invalidates durable provenance when the dev host secret rotates", async () => {
-    await withClient("127.0.0.1", async () => {
-      const active = contextStorage.getStore();
-      expect(active).toBeDefined();
-      const restored = await deserializeContext(serializeContext(active!));
-      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = "replacement-secret";
+  it("invalidates a rotated or tampered dev-TUI hint without revoking source access", async () => {
+    await withClient(
+      "127.0.0.1",
+      async () => {
+        const active = contextStorage.getStore();
+        expect(active).toBeDefined();
+        const serialized = serializeContext(active!);
+        const restored = await deserializeContext(serialized);
+        process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = "replacement-secret";
 
-      await contextStorage.run(restored, () => {
-        expect(getLocalDevCapability(environment())).toBeUndefined();
-      });
-    });
+        await contextStorage.run(restored, () => {
+          expect(getLocalDevCapability(environment())).toMatchObject({
+            appRoot: APP_ROOT,
+            interactiveClient: false,
+          });
+        });
+
+        serialized["eve.internal.localDevRequest"] = {
+          address: "127.0.0.1",
+          interactiveClient: true,
+          signature: "forged",
+        };
+        const tampered = await deserializeContext(serialized);
+        await contextStorage.run(tampered, () => {
+          expect(getLocalDevCapability(environment())).toMatchObject({
+            appRoot: APP_ROOT,
+            interactiveClient: false,
+          });
+        });
+      },
+      true,
+    );
   });
 
-  it("rejects tampered durable local provenance", async () => {
-    await withClient("127.0.0.1", async () => {
-      const active = contextStorage.getStore();
-      expect(active).toBeDefined();
-      const serialized = serializeContext(active!);
-      serialized["eve.internal.localDevRequest"] = {
-        address: "127.0.0.1",
-        interactiveClient: true,
-        signature: "forged",
-      };
-      const restored = await deserializeContext(serialized);
-
-      await contextStorage.run(restored, () => {
-        expect(getLocalDevCapability(environment())).toBeUndefined();
-      });
-    });
-  });
-
-  it("reports whether the requesting local client is interactive", async () => {
+  it("reports whether a verified originating local client is interactive", async () => {
     await withClient("::1", () => {
       expect(getLocalDevCapability(environment())?.interactiveClient).toBe(false);
     });
@@ -177,17 +224,13 @@ describe("withSuspendedSource", () => {
     return fetchMock.mock.calls.map((call) => new URL(String(call[0])).pathname);
   }
 
-  it("suspends the watcher around the task and resumes it afterwards", async () => {
+  it("suspends the watcher around host-side work and resumes it afterwards", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ revision: "r2" }), { status: 200 }));
     const order: string[] = [];
-    const result = await withClient(
-      "127.0.0.1",
-      async () =>
-        await getLocalDevCapability(environment())?.withSuspendedSource(async () => {
-          order.push(...requestedPaths());
-          return "installed";
-        }),
-    );
+    const result = await getLocalDevCapability(environment())!.withSuspendedSource(async () => {
+      order.push(...requestedPaths());
+      return "installed";
+    });
 
     expect(result).toBe("installed");
     expect(order).toEqual(["/eve/v1/dev/runtime-artifacts/suspend"]);
@@ -200,13 +243,9 @@ describe("withSuspendedSource", () => {
   it("resumes even when the task throws", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ revision: "r2" }), { status: 200 }));
     await expect(
-      withClient(
-        "127.0.0.1",
-        async () =>
-          await getLocalDevCapability(environment())?.withSuspendedSource(async () => {
-            throw new Error("install failed");
-          }),
-      ),
+      getLocalDevCapability(environment())!.withSuspendedSource(async () => {
+        throw new Error("install failed");
+      }),
     ).rejects.toThrow("install failed");
 
     expect(requestedPaths()).toEqual([
@@ -219,12 +258,9 @@ describe("withSuspendedSource", () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
     const task = vi.fn();
 
-    await expect(
-      withClient(
-        "127.0.0.1",
-        async () => await getLocalDevCapability(environment())?.withSuspendedSource(task),
-      ),
-    ).rejects.toThrow(/Could not pause the eve development server/u);
+    await expect(getLocalDevCapability(environment())!.withSuspendedSource(task)).rejects.toThrow(
+      /Could not pause the eve development server/u,
+    );
     expect(task).not.toHaveBeenCalled();
   });
 
@@ -238,11 +274,7 @@ describe("withSuspendedSource", () => {
       return Promise.resolve(new Response(JSON.stringify({ revision: "r2" }), { status: 200 }));
     });
 
-    await withClient(
-      "127.0.0.1",
-      async () =>
-        await getLocalDevCapability(environment())?.withSuspendedSource(async () => undefined),
-    );
+    await getLocalDevCapability(environment())!.withSuspendedSource(async () => undefined);
 
     expect(requestedPaths()).toEqual([
       "/eve/v1/dev/runtime-artifacts/suspend",

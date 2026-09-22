@@ -309,7 +309,7 @@ The info route belongs to the selected `channels/eve.ts` source and uses its res
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, an `eve dev` or `vercel dev` server authenticates local requests, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, `localDev()` accepts requests to an `eve dev` or `vercel dev` server, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 

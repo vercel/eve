@@ -382,6 +382,15 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("-y, --yes");
     expect(help).toContain("--model <model>");
     expect(help).toContain("--reasoning <effort>");
+    expect(help).toContain("-n, --non-interactive");
+  });
+
+  it("does not print the boot banner because interactive onboarding owns its header", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+
+    await runCli(["init", "my-agent"], logger);
+
+    expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining("☰eve"));
   });
 
   it("forwards model settings to the init command", async () => {
@@ -402,6 +411,30 @@ describe("eve init compatibility flags", () => {
         channelWebNextjs: undefined,
         model: "openai/gpt-5.6-sol",
         reasoning: "high",
+        nonInteractive: undefined,
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  it("forwards -n to the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", "my-agent", "-n"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: undefined,
+        reasoning: undefined,
+        nonInteractive: true,
       },
       undefined,
       expect.any(Function),

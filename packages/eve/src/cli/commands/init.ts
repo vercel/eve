@@ -590,7 +590,7 @@ export async function runInitCommand(
     return;
   }
 
-  if (!interactive) {
+  if (options.nonInteractive || !interactive) {
     logger.log(agentHandoff);
     return;
   }
