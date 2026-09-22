@@ -18,13 +18,14 @@ import type { RunMode } from "#shared/run-mode.js";
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
- * The shared workflow tool run registry replaces the separate task and waiting-run records.
+ * Version 8 carries the input queue's cancellation decisions to the successor.
  */
-export const SESSION_CHECKPOINT_VERSION = 7;
+export const SESSION_CHECKPOINT_VERSION = 8;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
+  readonly cancelledTaskIds: readonly string[];
   readonly capabilities?: SessionCapabilities;
   readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
@@ -56,7 +57,10 @@ export type SessionTransferOutcome =
     };
 
 export interface SessionHandoffInput {
-  readonly checkpoint: Omit<SessionCheckpoint, "serializedContext" | "sessionState" | "version">;
+  readonly checkpoint: Omit<
+    SessionCheckpoint,
+    "serializedContext" | "sessionState" | "version" | "cancelledTaskIds"
+  >;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;
   readonly isInitialOwner: boolean;
@@ -87,7 +91,7 @@ export class SessionHandoff {
    */
   async tryTransfer(
     selection: TurnSelection,
-    state: Pick<SessionCheckpoint, "serializedContext" | "sessionState">,
+    state: Pick<SessionCheckpoint, "serializedContext" | "sessionState" | "cancelledTaskIds">,
   ): Promise<SessionTransferOutcome> {
     const { deploymentId, inbox } = this.input;
     const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);

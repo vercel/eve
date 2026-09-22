@@ -294,18 +294,13 @@ describe("recordTerminalTaskViewsStep", () => {
     expect(result.subagentCompletions).toHaveLength(1);
 
     vi.mocked(readDurableSession).mockReturnValue(result.sessionState.snapshot.session);
-    const suppressed = await recordTerminalTaskViewsStep({
+    const repeated = await recordTerminalTaskViewsStep({
       serializedContext: {},
       sessionState: result.sessionState,
       views: [view],
-      notifications: "suppressed",
     });
-    expect(suppressed.subagentCompletions).toEqual([]);
-    expect(suppressed.views).toEqual([view]);
-    expect(
-      getBackgroundWorkflowToolRuns(suppressed.sessionState.snapshot.session.state)[0]?.task
-        .notifications,
-    ).toBe("suppressed");
+    expect(repeated.subagentCompletions).toEqual([]);
+    expect(repeated.views).toEqual([view]);
   });
 
   it("settles instrumentation from an accepted terminal task view", async () => {

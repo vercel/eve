@@ -106,7 +106,6 @@ export async function recordTerminalTaskViewsStep(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly views: readonly TaskView[];
-  readonly notifications?: "suppressed";
 }): Promise<{
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -121,9 +120,7 @@ export async function recordTerminalTaskViewsStep(input: {
   for (const view of input.views) {
     const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
     if (entry === undefined) continue;
-    const recorded = recordWorkflowTaskView(session.state, view, {
-      notifications: input.notifications,
-    });
+    const recorded = recordWorkflowTaskView(session.state, view);
     session = { ...session, state: recorded.state };
     if (
       recorded.settled &&

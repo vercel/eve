@@ -909,7 +909,7 @@ describe("createToolLoopHarness", () => {
         metadata: { kind: "report-probe", name: "A" },
         status: "completed",
         lastOutput: { type: "result", data: "Report A" },
-      }),
+      }).state,
     };
     const report = resolveTaskDeliveryContext({
       state: session.state,
@@ -938,7 +938,7 @@ describe("createToolLoopHarness", () => {
         metadata: { kind: "report-probe", name: "B" },
         status: "completed",
         lastOutput: { type: "result", data: "Report B" },
-      }),
+      }).state,
     };
     const finalReport = resolveTaskDeliveryContext({
       state: session.state,

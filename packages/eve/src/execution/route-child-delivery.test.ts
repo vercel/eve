@@ -1,6 +1,8 @@
+import { SessionInputQueue } from "#execution/session/input-queue.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { registerWorkflowToolRun, recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import {
@@ -67,7 +69,7 @@ const taskRequest = {
 describe("task HITL delivery routing", () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it("consumes late task reports from restored cancellation state without suppressing user input", async () => {
+  it("settles late reports before the queue discards cancelled task notifications", async () => {
     const session = registerWorkflowToolRun(state(false).snapshot.session, {
       callId: "call-1",
       toolName: "worker",
@@ -89,12 +91,7 @@ describe("task HITL delivery routing", () => {
       snapshot: {
         session: {
           ...session,
-          state: JSON.parse(
-            JSON.stringify(
-              recordWorkflowTaskView(session.state, cancelled, { notifications: "suppressed" })
-                .state,
-            ),
-          ),
+          state: JSON.parse(JSON.stringify(recordWorkflowTaskView(session.state, cancelled).state)),
         },
       },
     });
@@ -109,85 +106,99 @@ describe("task HITL delivery routing", () => {
       serializedContext: {},
       sessionWritable: new WritableStream<Uint8Array>(),
     };
-    const outcome = await routeDeliverToChildren({
-      ...context,
-      delivery: {
-        kind: "deliver",
-        taskDeliveryId: "task-1:ready:completed",
-        payloads: [{ message: "Late completion", task: { views: [cancelled] } }],
-      },
+    const previousQueue = new SessionInputQueue();
+    previousQueue.cancelTask("task-1");
+    const queue = new SessionInputQueue(
+      JSON.parse(JSON.stringify(previousQueue.getCancelledTaskIds())),
+    );
+    async function routeQueued(delivery: DeliverHookPayload) {
+      const admitted = queue.enqueueDelivery(delivery);
+      assert(admitted);
+      const routed = await routeDeliverToChildren({ ...context, delivery });
+      assert(routed.kind === "continue");
+      queue.replaceDelivery(admitted.sequence, routed.remainder);
+      return queue.delivery(admitted.sequence);
+    }
+    const outcome = await routeQueued({
+      kind: "deliver",
+      taskDeliveryId: "task-1:ready:completed",
+      payloads: [
+        {
+          message: "Late completion",
+          task: {
+            views: [
+              {
+                ...cancelled,
+                status: "completed",
+                lastOutput: { type: "result", data: "Late result" },
+              },
+            ],
+          },
+        },
+      ],
     });
     expect(recordTerminalTaskViewsStep).toHaveBeenCalledOnce();
-    expect(outcome).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(outcome).toBeUndefined();
     vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
       settled: false,
       sessionState,
       serializedContext: {},
     });
-    const settlement = await routeDeliverToChildren({
-      ...context,
-      delivery: {
-        kind: "deliver",
-        taskDeliveryId: "task-1:agent:run-1:settled",
-        payloads: [
-          {
-            task: {
-              agentRequests: [
-                {
-                  taskId: "task-1",
-                  replyTo: "settlement-reply",
-                  request: {
-                    kind: "agent-settled",
-                    result: {
-                      callId: "child-call",
-                      kind: "subagent-result",
-                      origin: "child",
-                      subagentName: "worker",
-                      output: "",
-                      outcome: {
-                        kind: "parked",
-                        result: { kind: "cancelled" },
-                        usageDelta: {
-                          inputTokens: 0,
-                          outputTokens: 0,
-                          cacheReadTokens: 0,
-                          cacheWriteTokens: 0,
-                        },
+    const settlement = await routeQueued({
+      kind: "deliver",
+      taskDeliveryId: "task-1:agent:run-1:settled",
+      payloads: [
+        {
+          task: {
+            agentRequests: [
+              {
+                taskId: "task-1",
+                replyTo: "settlement-reply",
+                request: {
+                  kind: "agent-settled",
+                  result: {
+                    callId: "child-call",
+                    kind: "subagent-result",
+                    origin: "child",
+                    subagentName: "worker",
+                    output: "",
+                    outcome: {
+                      kind: "parked",
+                      result: { kind: "cancelled" },
+                      usageDelta: {
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        cacheReadTokens: 0,
+                        cacheWriteTokens: 0,
                       },
                     },
                   },
                 },
-              ],
-            },
+              },
+            ],
           },
-        ],
-      },
+        },
+      ],
     });
-    expect(settlement).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(settlement).toBeUndefined();
     expect(resumeHookStep).toHaveBeenCalledWith(
       "settlement-reply",
       { kind: "agent-settled", callId: "child-call" },
       { ifPresent: true },
     );
-    const update = await routeDeliverToChildren({
-      ...context,
-      delivery: {
+    expect(
+      queue.enqueueDelivery({
         kind: "deliver",
         taskDeliveryId: "task-1:update:1",
         payloads: [{ message: "Still working" }],
-      },
-    });
-    expect(update).toMatchObject({ kind: "continue", remainder: undefined });
-    const user = await routeDeliverToChildren({
-      ...context,
-      delivery: {
-        kind: "deliver",
-        payloads: [{ message: "New request" }],
-      },
+      }),
+    ).toBeUndefined();
+    const user = await routeQueued({
+      kind: "deliver",
+      payloads: [{ message: "New request" }],
     });
     expect(user).toMatchObject({
-      kind: "continue",
-      remainder: { payloads: [{ message: "New request" }] },
+      payloads: [{ message: "New request" }],
     });
   });
 

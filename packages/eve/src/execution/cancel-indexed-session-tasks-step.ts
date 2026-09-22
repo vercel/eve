@@ -17,7 +17,7 @@ const log = createLogger("execution.cancel-indexed-session-tasks");
 export async function cancelAllIndexedSessionTasksStep(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<SessionStateTransition> {
+}): Promise<SessionStateTransition & { readonly views: readonly TaskView[] }> {
   "use step";
 
   let durable;
@@ -27,7 +27,7 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     logError(log, "failed to read the session for indexed task cancellation", error, {
       parentSessionId: input.sessionState.sessionId,
     });
-    return { sessionState: input.sessionState };
+    return { sessionState: input.sessionState, views: [] };
   }
 
   let entries;
@@ -37,9 +37,9 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     logError(log, "failed to read the task index", error, {
       parentSessionId: durable.sessionId,
     });
-    return { sessionState: input.sessionState };
+    return { sessionState: input.sessionState, views: [] };
   }
-  if (entries.length === 0) return { sessionState: input.sessionState };
+  if (entries.length === 0) return { sessionState: input.sessionState, views: [] };
   if (input.serializedContext === undefined) {
     throw new Error("Indexed task cancellation requires serialized runtime context.");
   }
@@ -70,13 +70,10 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     }
   }
   // Session finalization closes the inbox before cancellation, so it cannot
-  // rely on child notifications to record outcomes or settle activity. Retain
-  // their suppressed disposition here so replay and late reports cannot wake
-  // the cancelled session invocation.
+  // rely on child notifications to record outcomes or settle activity.
   return await recordTerminalTaskViewsStep({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
     views,
-    notifications: "suppressed",
   });
 }

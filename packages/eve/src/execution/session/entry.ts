@@ -192,6 +192,7 @@ async function bootHandoffOwner(
     inbox,
     session: {
       anchor: { kind: "successor" },
+      cancelledTaskIds: checkpoint.cancelledTaskIds,
       caller: input.delivery.caller,
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,

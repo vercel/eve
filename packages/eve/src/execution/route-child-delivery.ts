@@ -1,5 +1,4 @@
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
-import { suppressesTaskNotification } from "#harness/workflow-tool-runs.js";
 import { formatTaskNotification } from "#tasks/notification.js";
 import type { TaskView } from "#tasks/types.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
@@ -118,14 +117,6 @@ export async function routeDeliverToChildren(input: {
       });
       serializedContext = emitted.serializedContext;
     }
-  }
-
-  // Settlement acknowledgements above still run. Only the model-facing delivery
-  // is revoked when the owning session cancelled this task.
-  if (
-    suppressesTaskNotification(sessionState.snapshot.session.state, input.delivery.taskDeliveryId)
-  ) {
-    return { kind: "continue", remainder: undefined, serializedContext, sessionState };
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];

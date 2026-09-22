@@ -109,6 +109,7 @@ export async function applySessionCancellation(
       sessionState: input.cursor.sessionState,
     });
     await input.cursor.apply(cancelled);
+    for (const view of cancelled.views) input.queue.cancelTask(view.taskId);
   }
   if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
 }

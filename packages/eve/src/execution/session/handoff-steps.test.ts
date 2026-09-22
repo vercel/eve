@@ -64,7 +64,18 @@ describe("validateSessionCheckpointStep", () => {
     );
   });
 
-  it.each([4, 5, 6, 8])(
+  it.each([undefined, null, [123], [""]])(
+    "rejects invalid cancellation state %j",
+    async (cancelledTaskIds) => {
+      const checkpoint = createCheckpoint();
+      Object.assign(checkpoint, { cancelledTaskIds });
+      await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
+        "invalid task cancellation state",
+      );
+    },
+  );
+
+  it.each([4, 5, 6, 7, 9])(
     "rejects checkpoint version %s before reading nested state",
     async (version) => {
       const checkpoint = createCheckpoint();
@@ -93,7 +104,8 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 7,
+    version: 8,
+    cancelledTaskIds: [],
     sessionTimeoutMs: false,
     mode: "conversation",
     serializedContext: {},

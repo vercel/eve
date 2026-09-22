@@ -44,6 +44,7 @@ export type SessionAnchor =
 
 export interface SessionBoot {
   readonly anchor: SessionAnchor;
+  readonly cancelledTaskIds?: readonly string[];
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
@@ -196,7 +197,7 @@ async function runSessionLoop(
   },
 ): Promise<SessionLoopOutcome> {
   const { cursor, handoff, inbox, progress } = deps;
-  const queue = new SessionInputQueue();
+  const queue = new SessionInputQueue(boot.cancelledTaskIds);
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -248,6 +249,7 @@ async function runSessionLoop(
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
     const transfer = await handoff.tryTransfer(next, {
+      cancelledTaskIds: queue.getCancelledTaskIds(),
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     });

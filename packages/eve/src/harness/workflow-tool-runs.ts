@@ -25,8 +25,6 @@ export interface WorkflowTaskPayload {
   readonly cohortId?: string;
   /** Parent-owned outcome. Read through readWorkflowTaskView before consuming it. */
   readonly outcome?: unknown;
-  /** Session cancellation revokes model notifications without discarding settlement data. */
-  readonly notifications?: "suppressed";
 }
 
 /** Settled task data; identity and metadata belong to the owning task. */
@@ -153,7 +151,6 @@ function isWorkflowToolRun(value: unknown): value is WorkflowToolRun {
     isTaskMetadata(task.metadata) &&
     isTaskAgentDispatchContext(task.dispatchContext) &&
     (task.cohortId === undefined || isNonEmptyString(task.cohortId)) &&
-    (task.notifications === undefined || task.notifications === "suppressed") &&
     (task.activityWorkIdentity === undefined ||
       parseActivityWorkIdentityV1(task.activityWorkIdentity) !== undefined)
   );
@@ -287,19 +284,6 @@ export function getBackgroundWorkflowToolRuns(
   );
 }
 
-/** Delivery disposition belongs to the retained task, including after workflow replay. */
-export function suppressesTaskNotification(
-  state: SessionStateMap | undefined,
-  deliveryId: string | undefined,
-): boolean {
-  if (deliveryId === undefined) return false;
-  return getBackgroundWorkflowToolRuns(state).some(
-    ({ task }) =>
-      task.notifications === "suppressed" &&
-      (deliveryId === task.taskId || deliveryId.startsWith(`${task.taskId}:`)),
-  );
-}
-
 /** Read-only parent view: tasks without a recorded terminal outcome are working. */
 export function getBackgroundTasks(state: SessionStateMap | undefined) {
   return {
@@ -383,7 +367,6 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
           cohortId: previous.task.cohortId,
           dispatchContext: previous.task.dispatchContext,
           outcome: previous.task.outcome ?? entry.task.outcome,
-          notifications: previous.task.notifications ?? entry.task.notifications,
         },
       };
     } else {
@@ -413,11 +396,10 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
 }
 
-/** Records the first terminal outcome; notification-only changes are not new settlements. */
+/** Records the first terminal outcome and distinguishes it from repeated or late reports. */
 export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
-  options?: { readonly notifications?: "suppressed" },
 ): {
   readonly state: SessionStateMap | undefined;
   readonly view: TaskView;
@@ -438,22 +420,20 @@ export function recordWorkflowTaskView(
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
   const previous = readWorkflowTaskView(entry.task);
   // Parent delivery order decides settlement. Replays and late outcomes cannot replace it.
-  const notifications = options?.notifications ?? entry.task.notifications;
-  if (previous !== undefined && notifications === entry.task.notifications) {
+  if (previous !== undefined) {
     return { state, view: previous, settled: false };
   }
   runs[index] = {
     ...entry,
     task: {
       ...entry.task,
-      outcome: previous === undefined ? outcome : entry.task.outcome,
-      notifications,
+      outcome,
     },
   };
   return {
     state: writeRegistry(state, { ...registry, runs }),
-    view: previous ?? view,
-    settled: previous === undefined,
+    view,
+    settled: true,
   };
 }
 

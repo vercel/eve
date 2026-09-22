@@ -5,7 +5,6 @@ import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-sess
 import {
   getBackgroundWorkflowToolRuns,
   readWorkflowTaskView,
-  suppressesTaskNotification,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
@@ -49,15 +48,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
         readWorkflowTaskView(entry.task),
       ),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
-    expect(
-      suppressesTaskNotification(
-        result.sessionState?.snapshot.session.state,
-        "task-1:ready:cancelled",
-      ),
-    ).toBe(true);
-    expect(
-      suppressesTaskNotification(result.sessionState?.snapshot.session.state, "task-2:update:1"),
-    ).toBe(true);
+    expect(result.views).toEqual([cancelledView(task1), cancelledView(task2)]);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
     expect(cancelOwnedTaskMock).toHaveBeenNthCalledWith(1, {
       cancelOwnedWork: expect.any(Function),
@@ -73,21 +64,19 @@ describe("cancelAllIndexedSessionTasksStep", () => {
     });
   });
 
-  it("does not suppress notifications for a task whose cancellation failed", async () => {
+  it("returns only tasks whose cancellation succeeded", async () => {
     cancelOwnedTaskMock.mockRejectedValueOnce(new Error("Cancellation unavailable"));
     const result = await cancelAllIndexedSessionTasksStep({
       serializedContext: {},
       sessionState: makeSessionState([indexedTask("failed-cancel"), indexedTask("cancelled")]),
     });
-    const state = result.sessionState?.snapshot.session.state;
-    expect(suppressesTaskNotification(state, "failed-cancel:ready:failed")).toBe(false);
-    expect(suppressesTaskNotification(state, "cancelled:ready:cancelled")).toBe(true);
+    expect(result.views.map((view) => view.taskId)).toEqual(["cancelled"]);
   });
 
   it("does not require runtime context when no tasks are indexed", async () => {
     await expect(
       cancelAllIndexedSessionTasksStep({ sessionState: makeSessionState([]) }),
-    ).resolves.toEqual({ sessionState: makeSessionState([]) });
+    ).resolves.toEqual({ sessionState: makeSessionState([]), views: [] });
 
     expect(deserializeContextMock).not.toHaveBeenCalled();
     expect(cancelOwnedTaskMock).not.toHaveBeenCalled();

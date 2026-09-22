@@ -1,3 +1,4 @@
+import { TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { assert, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,6 +26,7 @@ beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
   vi.mocked(cancelAllIndexedSessionTasksStep).mockReset();
   vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
+    views: [],
     sessionState,
   }));
 });
@@ -270,6 +272,70 @@ describe("nextTurnDelivery", () => {
       sessionState: input.cursor.sessionState,
     });
   });
+
+  it.each(["auto", "cohort"] as const)(
+    "routes late settlement without waking cancelled tasks under %s",
+    async (taskDeliveryPolicy) => {
+      const cancelled: TaskView = {
+        taskId: "cancelled-task",
+        status: "cancelled",
+        metadata: { kind: "subagent", name: "worker" },
+      };
+      const late: DeliverHookPayload = {
+        kind: "deliver",
+        taskDeliveryId: "cancelled-task:ready:completed",
+        payloads: [
+          {
+            message: "Late result",
+            task: {
+              views: [
+                {
+                  ...cancelled,
+                  status: "completed",
+                  lastOutput: { type: "result", data: "Late result" },
+                },
+              ],
+            },
+          },
+        ],
+      };
+      const inbox = createMockInbox([
+        cancelRead({ tasks: true }),
+        { result: { done: false, value: late } },
+        messageRead("New request"),
+      ]);
+      const input = { ...waitInput(inbox), expectedAttemptIds: undefined };
+      await input.cursor.apply({
+        serializedContext: { [TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME]: taskDeliveryPolicy },
+      });
+      vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
+        views: [cancelled],
+        sessionState,
+      }));
+      vi.mocked(routeDeliverToChildren).mockImplementation(
+        async ({ delivery, sessionState, serializedContext }) => ({
+          kind: "continue",
+          sessionState,
+          serializedContext,
+          remainder: {
+            ...delivery,
+            payloads: delivery.payloads.map(({ task: _task, ...payload }) => payload),
+          },
+        }),
+      );
+
+      const next = await nextTurnDelivery(input);
+      expect(next).toMatchObject({
+        kind: "turn",
+        delivery: { payloads: [{ message: "New request" }] },
+      });
+      expect(routeDeliverToChildren).toHaveBeenCalledWith(
+        expect.objectContaining({ delivery: late }),
+      );
+      expect(input.queue.isTaskCancelled("cancelled-task")).toBe(true);
+      expect(input.queue.pendingCount).toBe(0);
+    },
+  );
 
   it("resumes authorization after a consumed no-op cancel", async () => {
     // A cancel with no active turn is consumed without producing a parent
