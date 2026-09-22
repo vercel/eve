@@ -47,6 +47,17 @@ describe.sequential("Next.js proxy with generated eve service", () => {
 
     expect(deploymentFixture.deploymentUrl).toMatch(/^https:\/\//u);
   });
+
+  it("serves a custom channel route outside the eve protocol prefix", async () => {
+    if (deploymentFixture === undefined) {
+      throw new Error("Expected Vercel deployment fixture to be initialized.");
+    }
+
+    const response = await fetch(new URL("/.well-known/ucp", deploymentFixture.deploymentUrl));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ucp: true });
+  });
 });
 
 function hasEnvironmentVariable(name: string): boolean {
