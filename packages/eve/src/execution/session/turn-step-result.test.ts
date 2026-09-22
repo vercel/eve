@@ -50,7 +50,10 @@ describe("delegated turn completion", () => {
       "conversation",
       {},
     );
-    expect(parked).toMatchObject({ action: "park", completion: { notifyCaller: false } });
+    expect(parked).toMatchObject({
+      action: "park",
+      settled: { output: "Verification is running.", notifyCaller: false },
+    });
     const checkpoint = { ...pending, state: parked.sessionState.snapshot.session.state };
     expect(takeSessionUsageDelta(checkpoint).delta.inputTokens).toBe(100);
 
@@ -74,9 +77,10 @@ describe("delegated turn completion", () => {
     );
     expect(settled).toMatchObject({
       action: "park",
-      completion: {
+      settled: {
         notifyCaller: true,
-        result: { output: "VERIFIED", usage: { inputTokens: 150 } },
+        output: "VERIFIED",
+        usage: { inputTokens: 150 },
       },
     });
     expect(
@@ -103,7 +107,7 @@ describe("delegated turn completion", () => {
         "conversation",
         {},
       ),
-    ).toMatchObject({ action: "park", completion: { notifyCaller: false } });
+    ).toMatchObject({ action: "park", settled: { notifyCaller: false } });
   });
 
   it.each(["failed", "cancelled"] as const)(
@@ -129,7 +133,7 @@ describe("delegated turn completion", () => {
         ),
       ).toMatchObject({
         action: "park",
-        completion: { notifyCaller: true, result: { output: "Unable to verify." } },
+        settled: { notifyCaller: true, output: "Unable to verify." },
       });
     },
   );
@@ -148,7 +152,7 @@ describe("delegated turn completion", () => {
       ),
     ).toMatchObject({
       action: "park",
-      completion: { notifyCaller: true, result: { isError: true, output: "Model failed" } },
+      settled: { notifyCaller: true, isError: true, output: "Model failed" },
     });
   });
 });

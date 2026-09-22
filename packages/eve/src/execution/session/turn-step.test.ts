@@ -2355,7 +2355,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "park",
-      completion: { notifyCaller: true, result: { output: "settled answer" } },
+      settled: { notifyCaller: true, output: "settled answer" },
     });
   });
 
@@ -2387,7 +2387,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "park",
-      completion: { notifyCaller: true, result: { output: "settled answer" } },
+      settled: { notifyCaller: true, output: "settled answer" },
     });
   });
 
@@ -2438,12 +2438,10 @@ describe("turnStep", () => {
 
     expect(first).toMatchObject({
       action: "park",
-      completion: {
+      settled: {
         notifyCaller: true,
-        result: {
-          output: "first answer",
-          usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 40 },
-        },
+        output: "first answer",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 40 },
       },
     });
     if (first.action !== "park") throw new Error("expected park");
@@ -2474,12 +2472,10 @@ describe("turnStep", () => {
 
     expect(second).toMatchObject({
       action: "park",
-      completion: {
+      settled: {
         notifyCaller: true,
-        result: {
-          output: "second answer",
-          usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 50, outputTokens: 20 },
-        },
+        output: "second answer",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 50, outputTokens: 20 },
       },
     });
   });
@@ -2524,7 +2520,7 @@ describe("turnStep", () => {
     expect(result).toMatchObject({
       action: "park",
       hasPendingInputBatch: true,
-      completion: { notifyCaller: true, result: { output: "settled while approval remains open" } },
+      settled: { notifyCaller: true, output: "settled while approval remains open" },
     });
   });
 
@@ -2610,7 +2606,7 @@ describe("turnStep", () => {
 
     expect(result.action).toBe("park");
     if (result.action === "park") {
-      expect(result.completion).toBeUndefined();
+      expect(result.settled).toBeUndefined();
     }
   });
 

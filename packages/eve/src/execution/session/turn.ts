@@ -91,7 +91,7 @@ export class SessionExecution {
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
-      const turnCompleted = result.action === "park" && result.completion !== undefined;
+      const turnCompleted = result.action === "park" && result.settled !== undefined;
 
       if (hasBackgroundTasks) {
         if (result.backgroundTaskState === undefined) {
@@ -169,7 +169,7 @@ export class SessionExecution {
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
           kind: "park",
-          completion: result.completion,
+          settled: result.settled,
         };
       }
 

@@ -60,7 +60,7 @@ function sessionAwaitingCallerNotification() {
     "conversation",
     {},
   );
-  expect(parked).toMatchObject({ action: "park", completion: { notifyCaller: false } });
+  expect(parked).toMatchObject({ action: "park", settled: { notifyCaller: false } });
   return parked.sessionState;
 }
 

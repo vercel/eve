@@ -40,11 +40,6 @@ interface DurableStepResultFields {
   readonly sessionState: DurableSessionState;
 }
 
-/** Marks an ended model turn and whether its result should notify the caller. */
-export type TurnCompletion =
-  | { readonly notifyCaller: false }
-  | { readonly notifyCaller: true; readonly result: SettledTurn };
-
 /** Result returned by a session-mutating turn step. */
 export type DurableStepResult = (
   | {
@@ -61,7 +56,7 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
-      readonly completion?: TurnCompletion;
+      readonly settled?: SettledTurn & { readonly notifyCaller: boolean };
     }
 ) &
   DurableStepResultFields;
@@ -79,5 +74,5 @@ export type TurnOutcome =
       readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
-      readonly completion?: TurnCompletion;
+      readonly settled?: SettledTurn & { readonly notifyCaller: boolean };
     };

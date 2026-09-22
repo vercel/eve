@@ -509,7 +509,7 @@ describe("SessionExecution background task checkpoints", () => {
         hasPendingInputBatch: false,
         serializedContext: input.serializedContext,
         sessionState: input.sessionState,
-        completion: { notifyCaller: true, result: { output: "Done." } },
+        settled: { notifyCaller: true, output: "Done." },
       }));
 
     await expect(
@@ -518,7 +518,7 @@ describe("SessionExecution background task checkpoints", () => {
       }),
     ).resolves.toMatchObject({
       kind: "park",
-      completion: { notifyCaller: true, result: { output: "Done." } },
+      settled: { notifyCaller: true, output: "Done." },
     });
 
     expect(turnStep).toHaveBeenCalledTimes(1);
@@ -526,13 +526,13 @@ describe("SessionExecution background task checkpoints", () => {
   });
 
   it.each([
-    { backgroundTasks: false, completion: { notifyCaller: true, result: { output: "Done." } } },
-    { backgroundTasks: true, completion: { notifyCaller: true, result: { output: "Done." } } },
-    { backgroundTasks: false, completion: { notifyCaller: false } },
-    { backgroundTasks: true, completion: { notifyCaller: false } },
+    { backgroundTasks: false, settled: { notifyCaller: true, output: "Done." } },
+    { backgroundTasks: true, settled: { notifyCaller: true, output: "Done." } },
+    { backgroundTasks: false, settled: { notifyCaller: false, output: "Still working." } },
+    { backgroundTasks: true, settled: { notifyCaller: false, output: "Still working." } },
   ] as const)(
-    "preserves the completed turn when cancellation races its checkpoint (notify caller: $completion.notifyCaller, background tasks: $backgroundTasks)",
-    async ({ backgroundTasks, completion }) => {
+    "preserves the completed turn when cancellation races its checkpoint (notify caller: $settled.notifyCaller, background tasks: $backgroundTasks)",
+    async ({ backgroundTasks, settled }) => {
       const followUp: DeliverHookPayload = {
         kind: "deliver",
         payloads: [{ message: "Follow up after completion." }],
@@ -569,7 +569,7 @@ describe("SessionExecution background task checkpoints", () => {
             hasPendingInputBatch: false,
             serializedContext: input.serializedContext,
             sessionState: completedState,
-            completion,
+            settled,
             ...(backgroundTasks
               ? {
                   backgroundTaskState: state("http:background"),
@@ -587,7 +587,7 @@ describe("SessionExecution background task checkpoints", () => {
         });
       await expect(execution.runTurn(undefined)).resolves.toMatchObject({
         kind: "park",
-        completion,
+        settled,
       });
       expect(execution.cursor.sessionState).toBe(completedState);
       expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
