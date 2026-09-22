@@ -47,7 +47,7 @@ describe("Web setup", () => {
           {
             value: "vercel",
             label: "Vercel services",
-            hint: "Recommended. Web Chat and agents deploy as separate services.",
+            hint: "(Recommended) Web Chat and agents deploy as separate services.",
             featured: undefined,
           },
           {

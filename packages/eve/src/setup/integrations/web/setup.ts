@@ -80,7 +80,7 @@ export async function prepareWebSetup(
         {
           id: "vercel",
           label: "Vercel services",
-          hint: "Recommended. Web Chat and agents deploy as separate services.",
+          hint: "(Recommended) Web Chat and agents deploy as separate services.",
           value: "vercel" as const,
         },
         {
