@@ -18,9 +18,12 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }
     const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];
     if (auditing) {
-      const audit = request.toolResults.find((entry) => entry.name === "read_subagent_hooks");
+      const auditTool = request.lastUserMessage?.includes("DYNAMIC-SKILL-CONTEXT")
+        ? "read_dynamic_skill_context"
+        : "read_subagent_hooks";
+      const audit = request.toolResults.find((entry) => entry.name === auditTool);
       return audit === undefined
-        ? { toolCalls: [{ name: "read_subagent_hooks", input: {} }] }
+        ? { toolCalls: [{ name: auditTool, input: {} }] }
         : JSON.stringify(audit.output);
     }
     const tool =
