@@ -9,7 +9,6 @@ packages:
 
 allowBuilds:
   "@google/genai": false # No-op preinstall.
-  "@parcel/watcher": false # Builds from source only when explicitly requested.
   braintrust: false # Installs an optional CLI binary; the SDK does not need it.
   bufferutil: false # The package already includes the supported prebuilt bindings.
   core-js-pure: false # Not needed at runtime; avoids unapproved lifecycle scripts.
