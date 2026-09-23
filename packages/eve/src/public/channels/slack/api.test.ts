@@ -8,6 +8,7 @@ import {
   resolveSlackBotToken,
   type SlackBotTokenContext,
 } from "#public/channels/slack/api.js";
+import { resolveSlackTransportOptions } from "#public/channels/slack/transport.js";
 
 interface FetchCall {
   url: string;
@@ -997,5 +998,40 @@ describe("Slack bot token context", () => {
 
     expect(token).toBe("xoxb-legacy");
     expect(botToken).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("api transport options", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+  const okFetch = () => vi.fn<typeof fetch>(async () => Response.json({ ok: true }));
+
+  it("calls Slack's own host when api is omitted", async () => {
+    const globalFetch = okFetch();
+    vi.stubGlobal("fetch", globalFetch);
+
+    await callSlackApi({ body: {}, botToken: "xoxb-test", operation: "auth.test" });
+
+    expect(String(globalFetch.mock.calls[0]?.[0])).toBe("https://slack.com/api/auth.test");
+  });
+
+  it("sends the call to the configured base on api.fetch", async () => {
+    const globalFetch = okFetch();
+    vi.stubGlobal("fetch", globalFetch);
+    const apiFetch = okFetch();
+
+    await callSlackApi({
+      api: resolveSlackTransportOptions({
+        apiBaseUrl: "http://localhost:3000/api/slack",
+        fetch: apiFetch,
+      }),
+      body: {},
+      botToken: "xoxb-test",
+      operation: "auth.test",
+    });
+
+    expect(String(apiFetch.mock.calls[0]?.[0])).toBe("http://localhost:3000/api/slack/auth.test");
+    expect(globalFetch).not.toHaveBeenCalled();
   });
 });

@@ -4199,6 +4199,63 @@ describe("slackChannel() HITL interaction pipeline", () => {
   });
 });
 
+describe("slackChannel() api option", () => {
+  it("sends every handle's call to the configured base and never to the global fetch", async () => {
+    const globalFetch = vi.fn();
+    vi.stubGlobal("fetch", globalFetch);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    const apiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({ ok: true, ts: "1700000001.000001" }),
+    );
+    const channel = slackChannel({
+      api: {
+        apiBaseUrl: "http://localhost:3000/api/slack",
+        fetch: apiFetch,
+      },
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention: () => ({ auth: null }),
+      onInteraction: async (_action, ctx) => {
+        await ctx.slack.request("auth.test", {});
+      },
+      onShortcut: async (_shortcut, ctx) => {
+        await ctx.slack.request("auth.test", {});
+      },
+    });
+
+    await firePost(channel, buildSignedRequest({ body: buildMentionBody().body }));
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada", team_id: "T01" },
+        channel: { id: "C01" },
+        message: { ts: "1700000000.000010", thread_ts: "1700000000.000001", blocks: [] },
+        actions: [{ action_id: "custom", value: "v" }],
+      }),
+    );
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "message_action",
+        callback_id: "summarize_message",
+        trigger_id: "trigger-123",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        message: { text: "summarize this", ts: "1700000000.000010" },
+      }),
+    );
+
+    const urls = apiFetch.mock.calls.map((call) => String(call[0]));
+    expect(globalFetch).not.toHaveBeenCalled();
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.filter((url) => !url.startsWith("http://localhost:3000/api/slack/"))).toEqual([]);
+  });
+});
+
 describe("slackChannel() webhookVerifier credentials path", () => {
   const ORIGINAL_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
   const ORIGINAL_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;

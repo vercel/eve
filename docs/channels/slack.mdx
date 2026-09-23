@@ -402,11 +402,13 @@ messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
 ```ts
-import { callSlackApi } from "eve/channels/slack";
+import { callSlackApi, resolveSlackTransportOptions } from "eve/channels/slack";
 import { connectSlackCredentials } from "@vercel/connect/eve";
 
 const { botToken } = connectSlackCredentials("slack/my-agent");
+const api = resolveSlackTransportOptions({ apiBaseUrl: process.env.SLACK_API_BASE_URL });
 const response = await callSlackApi({
+  api,
   botToken,
   context: { teamId: "T0123456789" },
   operation: "reactions.get",
@@ -418,8 +420,36 @@ if (!response.ok) throw new Error(String(response.error));
 `callSlackApi` resolves function-form tokens (secret managers, Connect
 rotation) with the supplied `context` at call time and form-encodes the body — the only safe default,
 since Slack's JSON support is partial (`conversations.replies` rejects
-JSON). `resolveSlackBotToken` materializes a `SlackBotToken` to a string
-when you need the bearer token itself.
+JSON). It has no channel to inherit
+[`api`](#point-the-channel-at-a-different-slack-api-host) from, so pass the same one the
+channel was given, through `resolveSlackTransportOptions` — that is where the bases are
+checked and resolved. An `apiBaseUrl` of `undefined` keeps Slack's own host.
+
+`resolveSlackBotToken` materializes a `SlackBotToken` to a string when you need the
+bearer token itself.
+
+### Point the channel at a different Slack API host
+
+```ts
+slackChannel({
+  api: {
+    apiBaseUrl: "http://localhost:3000/api/slack",
+    fetch: (input, init) => {
+      const proxyKey = process.env.SLACK_PROXY_KEY;
+      if (proxyKey === undefined) throw new Error("SLACK_PROXY_KEY is required.");
+      const headers = new Headers(init?.headers);
+      headers.set("x-proxy-key", proxyKey);
+      return fetch(input, { ...init, headers });
+    },
+    fileBaseUrl: "http://localhost:3000/files",
+  },
+  credentials: { botToken: process.env.SLACK_BOT_TOKEN },
+});
+```
+
+The bases say where a call may go. `apiBaseUrl` is the base Slack Web API method names resolve against, and defaults to `https://slack.com/api/`. `fileBaseUrl` adds a base for attachment downloads and falls back to `apiBaseUrl`: a download URL under it is fetched with the bot token, in addition to `files.slack.com` and Enterprise Grid file URLs. Every other URL passes through to the model provider unchanged. Both bases must be absolute `http:` or `https:` URLs carrying no query string or fragment; `slackChannel()` throws on one that is not, naming the option. A missing trailing slash is added, so `https://sim.example/api` sends `chat.postMessage` to `https://sim.example/api/chat.postMessage`.
+
+`api.fetch` says how the traffic travels. It replaces the global `fetch` for every Slack Web API call and every attachment download, Slack's own file hosts included — use it to attach the per-call header a host behind an authenticating proxy requires.
 
 ### Delivery
 
@@ -520,6 +550,8 @@ To post without invoking the model, use `ctx.thread.post(...)` in an inbound Sla
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
 Private file downloads resolve credentials from the session's app installation workspace and require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments.
+
+Downloads cover Slack's own file hosts plus URLs under a configured [`api.fileBaseUrl`](#point-the-channel-at-a-different-slack-api-host), and travel on `api.fetch` when one is configured.
 
 Staged files live in the session sandbox under `/workspace/attachments`. Session history keeps a reference to that path, not a second copy of the Slack file. If the backend can no longer reattach the original sandbox, eve cannot restore the attachment bytes from history; later turns receive a missing-file result. Store files outside the sandbox when the agent must retain them independently of sandbox availability.
 

@@ -10,6 +10,10 @@ import {
 } from "#public/channels/slack/api.js";
 import type { SlackAttachment, SlackMessage } from "#public/channels/slack/inbound.js";
 import {
+  isConfiguredSlackFileUrl,
+  type SlackTransportOptions,
+} from "#public/channels/slack/transport.js";
+import {
   evaluateFilePart,
   formatUploadPolicyViolation,
   isUploadsDisabled,
@@ -163,21 +167,23 @@ export function buildSlackTurnMessage(
  * Creates a `fetchFile` function for the Slack channel.
  *
  * Returns `null` for URLs that don't belong to Slack so they pass
- * through to the model provider unchanged. Fetches Slack file URLs
- * with the bot token.
+ * through to the model provider unchanged. Fetches Slack file URLs, and
+ * URLs under a configured `api.fileBaseUrl`, with the bot token, on
+ * `api.fetch` when one is configured.
  */
 export function createSlackFetchFile(input: {
+  readonly api?: SlackTransportOptions;
   readonly botToken?: SlackBotToken;
 }): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
   return async (url, context) => {
-    if (!isSlackFileUrl(url)) {
+    if (!isConfiguredSlackFileUrl(input.api, url) && !isSlackFileUrl(url)) {
       return null;
     }
     const installationTeamId = context?.state.installationTeamId;
     const token = await resolveSlackBotToken(input.botToken, {
       teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
     });
-    const response = await fetch(url, {
+    const response = await (input.api?.fetch ?? fetch)(url, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
