@@ -3,32 +3,26 @@ import { resolve } from "node:path";
 import { importInstalledEnginePackage } from "#internal/application/optional-package-import.js";
 import type { SandboxProviderHost } from "#shared/sandbox-provider.js";
 
-export function createSandboxProviderHost(input: {
-  readonly appRoot: string;
-  readonly loadOptionalPackage?: typeof import("#internal/application/optional-package-install.js").loadOptionalEnginePackage;
-}): SandboxProviderHost {
+export function createSandboxProviderHost(appRoot: string): SandboxProviderHost {
   return {
-    async loadOptionalPackage(request) {
-      if (input.loadOptionalPackage !== undefined) {
-        return await input.loadOptionalPackage({ ...request, appRoot: input.appRoot });
-      }
+    async loadOptionalPackage(input) {
       try {
-        return await request.importModule();
+        return await input.importModule();
       } catch (importError) {
         try {
           return await importInstalledEnginePackage({
-            appRoot: input.appRoot,
-            packageName: request.packageName,
+            appRoot,
+            packageName: input.packageName,
           });
         } catch (installedImportError) {
-          throw new Error(request.missingMessage, {
+          throw new Error(input.missingMessage, {
             cause: new AggregateError([importError, installedImportError]),
           });
         }
       }
     },
     resolveProjectPath(path) {
-      return resolve(input.appRoot, path);
+      return resolve(appRoot, path);
     },
   };
 }

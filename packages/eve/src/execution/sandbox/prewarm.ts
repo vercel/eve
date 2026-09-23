@@ -3,7 +3,6 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
-import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
 import {
   createSandboxProviderResources,
   type SandboxPreparedArtifact,
@@ -24,7 +23,7 @@ import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createSandboxProviderFiles } from "#execution/sandbox/provider-files.js";
-import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
+import { createDevelopmentSandboxProviderHost } from "#execution/sandbox/provider-host-development.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import type { RuntimeRegisteredSandbox } from "#runtime/sandbox/registry.js";
 import type { SandboxPreparedArtifactEntry } from "#shared/sandbox-prepared-artifacts.js";
@@ -215,10 +214,7 @@ async function collectPrewarmTargets(input: {
       targets.push({
         context: {
           files: createSandboxProviderFiles(sandboxRoot),
-          host: createSandboxProviderHost({
-            appRoot: input.appRoot,
-            loadOptionalPackage: loadOptionalEnginePackage,
-          }),
+          host: createDevelopmentSandboxProviderHost(input.appRoot),
           resources: createSandboxProviderResources({
             resourcesKey: workspaceResourceRoot.contentHash,
             resourcesPath:

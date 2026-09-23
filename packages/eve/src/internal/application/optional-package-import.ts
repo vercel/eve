@@ -1,6 +1,6 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Imports an optional engine from the application without installing it. */
@@ -36,10 +36,7 @@ function findInstalledPackageRoot(input: {
 }): string {
   const packagePathSegments = input.packageName.split("/");
   const checkedPaths: string[] = [];
-  let current = resolve(input.appRoot);
-  try {
-    current = realpathSync.native(current);
-  } catch {}
+  let current = input.appRoot;
 
   for (;;) {
     const packageRoot = join(current, "node_modules", ...packagePathSegments);
