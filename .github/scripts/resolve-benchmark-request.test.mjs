@@ -252,6 +252,7 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /blob-token: \$\{\{ secrets\.EVE_BENCH_BLOB_READ_WRITE_TOKEN \}\}/u);
   assert.doesNotMatch(workflow, /artifact-id/u);
   assert.match(workflow, /dataset: swe-lean\n/u);
+  assert.match(workflow, /contenders: eve-code@baseline,eve-code@head\n/u);
   assert.doesNotMatch(workflow, /^\s+task:/mu);
   assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);
 });

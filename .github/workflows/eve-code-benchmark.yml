@@ -90,6 +90,8 @@ jobs:
           agent-path: packages/eve-code
           agent-ref: ${{ needs.request.outputs.sha }}
           dataset: swe-lean
+          # The PR comment's ranking tables show these plus each dimension's winner.
+          contenders: eve-code@baseline,eve-code@head
           model: ${{ vars.EVE_CODE_BENCH_MODEL || 'google/gemini-3.8-flash' }}
           attempts: "1"
           # Per harness: one sandbox per task, so all trials start at once.
