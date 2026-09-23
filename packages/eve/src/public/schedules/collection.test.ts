@@ -84,6 +84,8 @@ describe("inMemoryScheduleProvider", () => {
       state: "active",
     });
     expect(created).not.toHaveProperty("input");
+    expect(created.scheduleId).toMatch(/^mem_[0-9a-f]{64}$/u);
+    expect(created.scheduleId).not.toContain("principal_1");
     await expect(provider.get(providerContext("get_1"), created.name)).resolves.toEqual(created);
 
     timestamp += 1_000;
@@ -108,6 +110,21 @@ describe("inMemoryScheduleProvider", () => {
     });
     await expect(provider.delete(providerContext("delete_1"), created.name)).resolves.toBe(true);
     await expect(provider.get(providerContext("get_2"), created.name)).resolves.toBeNull();
+  });
+
+  it("does not reveal raw scope keys in public schedule IDs", async () => {
+    const provider = inMemoryScheduleProvider();
+    const context = {
+      ...providerContext("create_private"),
+      namespace: "eve-private-user-identity",
+    };
+    const created = await provider.create(context, {
+      expression: { type: "cron", cron: "0 9 * * *" },
+      input: { query: "test" },
+      name: "reminder",
+    });
+    expect(created.scheduleId).toMatch(/^mem_[0-9a-f]{64}$/u);
+    expect(created.scheduleId).not.toContain(context.namespace);
   });
 
   it("isolates namespaces and reuses committed operation results", async () => {

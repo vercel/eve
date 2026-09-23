@@ -1,5 +1,5 @@
 ---
-issue: TBD
+issue: "None (maintainer-requested prototype; no tracking issue)"
 status: proposed
 last_updated: "2026-09-20"
 ---
@@ -49,8 +49,8 @@ at build time. Runtime-created instances target that consumer's agent-scoped
 topic. When an occurrence arrives, eve validates it and enters the existing
 `ScheduleDispatcher`. This provides first-class dynamic scheduling without
 exposing the Vercel SDK as an eve API or moving recurrence, polling, and leasing
-into eve. It also creates a path to remove the database-backed minute poller
-currently required by the `@v` agent.
+into eve. It also offers a migration path for applications that currently
+manage scheduled tasks with a database-backed minute poller.
 
 ### Public API at a glance
 
@@ -86,11 +86,10 @@ while the prototype has more than one implementation.
 
 ## Product findings
 
-Vercel Schedules is the successor to Vercel Cron Jobs. The reviewed product
-sources are the feature-gated docs at commit
-`7a4d2ceddb96308dc3affa8d1c8dbf3d5bcf2333` in `~/src/front`, the schedule
-service in `~/src/api`, and the project Schedules inventory in `~/src/front`.
-The public URLs return 404 while the `enable-schedules-docs` flag is disabled.
+Vercel Schedules adds runtime-created schedules alongside Vercel Cron Jobs.
+The product details here reflect the Schedules SDK and product behavior
+reviewed for this prototype; availability and limits may change before general
+release.
 
 ### Static and dynamic schedules
 
@@ -177,9 +176,9 @@ The returned SDK resource describes expression, target, state, timestamps, and
 schedule identity, but does not include the configured payload. That omission
 matters for eve: a generated `list_schedules` tool can show cadence and state,
 but cannot show or edit a previously stored agent prompt or typed input without
-replacing it from information supplied by the caller. `@v` cannot fully replace
-its schedule store until Vercel provides authorized payload readback or an
-explicit metadata field suitable for that management experience.
+replacing it from information supplied by the caller. Applications that need
+to display or edit existing prompts cannot replace their own schedule store
+until Vercel provides authorized payload readback or equivalent metadata.
 
 ### Dispatch and observability
 
@@ -208,7 +207,7 @@ The estimate accounts for timezone and DST but may precede actual delivery by
 the jitter window. The inventory intentionally has no target error rate because
 successful dispatch does not establish successful function or agent execution.
 
-The attached discussion adds an eve-specific observability requirement: link
+A future observability integration should link
 an Agent Run that created or changed a dynamic schedule to that schedule, and
 link each schedule occurrence to the Agent Run it triggered. These links must
 use safe identifiers and existing run access controls; prompts, payloads, raw
@@ -484,8 +483,8 @@ $eve.schedule_created_by   wrun_…
 The project Schedules inventory can then link a schedule to the Agent Run that
 created or changed it, while a triggered Agent Run links back to its schedule
 and occurrence. Apply the same run masking and access controls noted in the
-attached thread. Never index the prompt, payload, namespace, scope, destination,
-or principal attributes.
+existing run access controls. Never index the prompt, payload, namespace,
+scope, destination, or principal attributes.
 
 Emit metrics for control-plane operations, fire-to-queue latency,
 queue-to-admission latency, duplicate admission, schema rejection, poison
@@ -493,89 +492,14 @@ acknowledgement, and durable session outcome. Keep target execution failures
 separate from platform dispatch status, matching the dashboard's current
 observability distinction.
 
-## `@v` adoption
+## Migration boundary
 
-The `@v` implementation is the migration acceptance case. It currently owns:
-
-- personal and channel-shared scope and authorization;
-- recurring cron plus timezone and one-time schedules;
-- active, paused, completed, and deleted state;
-- prompt, Slack destination, owner/last-editor identity, and visibility;
-- a PostgreSQL due index, `SKIP LOCKED` claims, occurrence dedupe rows, stale
-  claim cleanup, and a one-minute poller;
-- create/read/update/delete and run-now tools;
-- autonomous run instructions and Slack delivery.
-
-Adopt in two stages:
-
-1. Add a dynamic `workflows` collection and Vercel-backed cadence in shadow
-   mode. Keep PostgreSQL authoritative for the UI, public workflow catalog, and
-   readable prompts while comparing expected and actual occurrences without
-   starting duplicate sessions.
-2. After payload readback or equivalent schedule metadata is available, make
-   the provider authoritative for cadence and typed input. Replace the custom
-   tools with generated tools, migrate rows inactive-first, compare expressions
-   and timezone, enable them, and remove `dynamic-tasks.ts`, `nextRunAt`, claim
-   leases, recurrence calculation, and occurrence dispatch rows.
-
-Keep a reversible old UUID → `(namespace, name, scheduleId)` mapping during
-rollout. Preserve observable behavior rather than database internals:
-owner-scoped management, channel-shared workflows, one-time and recurring
-schedules, pause/resume, invoke-now, safe auth reconstruction, conditional empty
-delivery, and run provenance.
-
-## Implementation sequence
-
-1. Add `defineScheduleCollection(...)`, `ScheduleProvider`,
-   `vercelScheduleProvider()`, and `inMemoryScheduleProvider()` contracts and
-   compatibility fixtures without changing `defineSchedule(...)`.
-2. Resolve product blockers with the Schedules team: authorized payload or
-   metadata readback and replay-safe/idempotent create and invoke semantics.
-3. Implement scope locking, opaque namespace derivation, the in-memory
-   provider, derived management tools, dispatch validation, and occurrence
-   admission dedupe.
-4. Add the Vercel provider around `@vercel/schedules` with OIDC and precise
-   setup errors. Keep third-party types behind eve-owned interfaces.
-5. Add conditional Nitro output for one private queue consumer per agent with
-   at least one Vercel-backed collection.
-6. Route dynamic occurrences through the collection-aware
-   `ScheduleDispatcher`, add structured provenance, and implement finite retry
-   and poison handling.
-7. Add Agent Runs links and safe Workflow attributes, then update
-   `docs/schedules.mdx` and replace the current dynamic-scheduling workaround.
-8. Shadow and migrate `@v`; remove its poller only after timing,
-   authorization, and duplicate-admission metrics are clean.
-9. Evaluate static Vercel Schedules in a separate follow-up; do not include
-   that migration in the prototype.
-
-## Validation
-
-The prototype is ready when tests cover:
-
-- existing static schedule compilation and execution remaining unchanged;
-- dynamic cron and one-time local datetime behavior, including DST gaps and
-  repeated times;
-- create/list/get/update/enable/disable/delete through principal and channel
-  scopes, including cross-scope IDOR attempts;
-- provider-level invoke for manual testing without a default model-facing tool;
-- mutation replay, especially create and invoke, without duplicate resources or
-  occurrences;
-- duplicate queue delivery admitting exactly one durable occurrence;
-- malformed and oversized payloads, schema drift, bounded retries, and
-  content-free diagnostics;
-- production-only behavior, Preview diagnostics, redeploys, old deployment
-  retries, and multi-agent service topic isolation;
-- conditional consumer output: present for a Vercel-backed collection and
-  absent otherwise;
-- collection execution, cross-channel handoff, conditional delivery, and task
-  mode;
-- explicit unsupported-provider errors outside Vercel and `eve dev`;
-- deterministic `eve dev` CRUD and manual invocation without Vercel
-  credentials;
-- creator → schedule and occurrence → Agent Run links without sensitive indexed
-  data;
-- an `@v` migration fixture for personal, channel-shared, recurring with DST,
-  one-time, pause/resume, update, delete, invoke-now, and empty delivery.
+Applications with their own schedule store can adopt Vercel-backed cadence
+while keeping existing authorization, readable prompts, and destination
+policies in their own data model. Removing a poller requires a separate
+migration after payload readback, replay safety, and run provenance can preserve
+those behaviors. The prototype does not migrate existing applications or
+change static schedules.
 
 ## Rejected alternatives
 

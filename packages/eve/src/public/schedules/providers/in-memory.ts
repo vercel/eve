@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   ScheduleCreate,
   ScheduleExpression,
@@ -205,7 +207,7 @@ function scheduleKey(context: ScheduleProviderContext, name: string): string {
 }
 
 function createScheduleId(context: ScheduleProviderContext, name: string): string {
-  return `mem_${Buffer.from(scheduleKey(context, name), "utf8").toString("base64url")}`;
+  return `mem_${createHash("sha256").update(scheduleKey(context, name)).digest("hex")}`;
 }
 
 function normalizeLimit(limit: number | undefined): number {

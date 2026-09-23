@@ -430,6 +430,41 @@ describe("compileAgentManifest source graph", () => {
     expect(order).toContain("tool");
   });
 
+  it("materializes schedule factories once per compile", async () => {
+    const staticFactory = vi.fn(() =>
+      defineSchedule({ cron: "0 9 * * *", markdown: "Run the report." }),
+    );
+    const collectionFactory = vi.fn(() =>
+      defineScheduleCollection({
+        inputSchema: z.object({ query: z.string() }),
+        provider: inMemoryScheduleProvider(),
+        run() {},
+        scope: "test",
+        tools: true,
+      }),
+    );
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: defineAgent({ model: "openai/gpt-5.4" }) }),
+      },
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({ default: staticFactory }),
+      },
+      {
+        logicalPath: "schedules/queries.ts",
+        loadNamespace: async () => ({ default: collectionFactory }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.schedules).toHaveLength(1);
+    expect(compiled.scheduleCollections).toHaveLength(1);
+    expect(staticFactory).toHaveBeenCalledOnce();
+    expect(collectionFactory).toHaveBeenCalledOnce();
+  });
+
   it("classifies compile and runtime usage from normalized authored semantics", async () => {
     const sourceRegistry = registry([
       {
