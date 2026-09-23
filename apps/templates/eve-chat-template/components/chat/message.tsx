@@ -5,6 +5,7 @@
 import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
 import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -22,11 +23,13 @@ export type AgentInputResponse = {
 };
 
 export function AgentMessage({
+  activityAfter,
   canRespond,
   isStreaming,
   message,
   onInputResponses,
 }: {
+  readonly activityAfter?: ReactNode;
   readonly canRespond: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
@@ -55,6 +58,7 @@ export function AgentMessage({
         )}
       >
         <AgentMessageParts
+          activityAfter={activityAfter}
           canRespond={canRespond}
           isUser={isUser}
           lastTextIndex={lastTextIndex}
@@ -69,6 +73,7 @@ export function AgentMessage({
 }
 
 function AgentMessageParts({
+  activityAfter,
   canRespond,
   isUser,
   lastTextIndex,
@@ -77,6 +82,7 @@ function AgentMessageParts({
   parts,
   showCaret,
 }: {
+  readonly activityAfter?: ReactNode;
   readonly canRespond: boolean;
   readonly isUser: boolean;
   readonly lastTextIndex: number;
@@ -85,38 +91,13 @@ function AgentMessageParts({
   readonly parts: readonly EveMessagePart[];
   readonly showCaret: boolean;
 }) {
-  const elements: ReactNode[] = [];
-  let pendingTools: EveDynamicToolPart[] = [];
-
-  const flushTools = (isSettled: boolean) => {
-    if (pendingTools.length === 0) {
-      return;
-    }
-
-    const partsForGroup = pendingTools;
-
-    elements.push(
-      <ToolGroup
-        canRespond={canRespond}
-        isSettled={isSettled}
-        key={`tools:${partsForGroup.map((part) => part.toolCallId).join(":")}`}
-        onInputResponses={onInputResponses}
-        parts={partsForGroup}
-      />,
-    );
-    pendingTools = [];
-  };
-
-  parts.forEach((part, index) => {
-    if (part.type === "dynamic-tool") {
-      pendingTools.push(part);
-      return;
-    }
-
-    flushTools(true);
+  const activity = parts.filter(
+    (part): part is ActivityPart => part.type === "dynamic-tool" || part.type === "reasoning",
+  );
+  const text = parts.flatMap((part, index) => {
+    if (part.type === "dynamic-tool" || part.type === "reasoning") return [];
     const key = partKey(part, index);
-
-    elements.push(
+    return [
       <AgentMessagePart
         isUser={isUser}
         key={key}
@@ -124,12 +105,23 @@ function AgentMessageParts({
         showCaret={showCaret && index === lastTextIndex}
         streamKey={`${messageId}:${key}`}
       />,
-    );
+    ];
   });
 
-  flushTools(!showCaret);
+  if (activity.length === 0 && !activityAfter) return text;
 
-  return elements;
+  return [
+    ...text,
+    <ActivityGroup
+      canRespond={canRespond}
+      isSettled={!showCaret}
+      key={`activity:${messageId}`}
+      onInputResponses={onInputResponses}
+      parts={activity}
+    >
+      {activityAfter}
+    </ActivityGroup>,
+  ];
 }
 
 function AgentMessagePart({
@@ -153,7 +145,7 @@ function AgentMessagePart({
         <AssistantTextPart showCaret={showCaret} streamKey={streamKey} text={part.text} />
       );
     case "reasoning":
-      return <ReasoningPart isStreaming={part.state === "streaming"} text={part.text} />;
+      return null;
     case "dynamic-tool":
       return null;
   }
@@ -314,31 +306,74 @@ function nextStreamingText(current: string, target: string, catchUp = false) {
   return target.slice(0, current.length + Math.min(remaining, step));
 }
 
-function ReasoningPart({
-  isStreaming,
-  text,
-}: {
-  readonly isStreaming: boolean;
-  readonly text: string;
-}) {
-  const [open, setOpen] = useState(isStreaming);
+export type ActivityPart = Extract<EveMessagePart, { type: "dynamic-tool" | "reasoning" }>;
 
-  useEffect(() => {
-    if (isStreaming) {
-      setOpen(true);
-    }
-  }, [isStreaming]);
+export function ActivityContent({
+  canRespond,
+  isSettled,
+  onInputResponses,
+  parts,
+}: {
+  readonly canRespond: boolean;
+  readonly isSettled: boolean;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly parts: readonly ActivityPart[];
+}) {
+  return (
+    <div className="space-y-2">
+      {parts.map((part, index) =>
+        part.type === "reasoning" ? (
+          <div className="text-sm leading-6" key={partKey(part, index)}>
+            <p className="mb-1 text-xs text-muted-foreground/70">Reasoning</p>
+            <Markdown>{part.text}</Markdown>
+          </div>
+        ) : (
+          <ToolGroup
+            canRespond={canRespond}
+            isSettled={isSettled}
+            key={part.toolCallId}
+            onInputResponses={onInputResponses}
+            parts={[part]}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+function ActivityGroup({
+  canRespond,
+  children,
+  isSettled,
+  onInputResponses,
+  parts,
+}: {
+  readonly canRespond: boolean;
+  readonly children?: ReactNode;
+  readonly isSettled: boolean;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly parts: readonly ActivityPart[];
+}) {
+  const isWorking =
+    !isSettled || parts.some((part) => part.type === "reasoning" && part.state === "streaming");
+  const [open, setOpen] = useState(false);
 
   return (
-    <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
-        <span className={isStreaming ? "shimmer-text" : undefined}>
-          {isStreaming ? "Thinking..." : "Reasoning"}
-        </span>
-        <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
+    <Collapsible className="mx-3 mt-2" onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+        {isWorking ? <Shimmer duration={1}>Working…</Shimmer> : <span>Show activity</span>}
+        <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
-        <Markdown>{text}</Markdown>
+      <CollapsibleContent className="mt-2 ml-1 border-l border-border/60 pl-3 text-muted-foreground">
+        {parts.length > 0 ? (
+          <ActivityContent
+            canRespond={canRespond}
+            isSettled={isSettled}
+            onInputResponses={onInputResponses}
+            parts={parts}
+          />
+        ) : null}
+        {children}
       </CollapsibleContent>
     </Collapsible>
   );

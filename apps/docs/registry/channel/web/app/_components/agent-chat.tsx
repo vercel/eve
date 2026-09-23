@@ -3,7 +3,7 @@
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -23,6 +23,7 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
+import { SubagentTraces, useSubagentTraces } from "@/components/chat/subagent-traces";
 
 const AGENT_NAME = "eve-agent";
 
@@ -72,6 +73,7 @@ export function AgentChat({
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
+  const subagentTraces = useSubagentTraces(agent.events);
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -148,18 +150,28 @@ export function AgentChat({
               showPendingThinking &&
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
-                <AgentMessage
-                  canRespond={!isBusy && !isResuming}
-                  isStreaming={
-                    agent.status === "streaming" && index === agent.data.messages.length - 1
-                  }
-                  key={message.id}
-                  message={message}
-                  onInputResponses={(inputResponses) => {
-                    setCancellationError(undefined);
-                    return agent.respond(inputResponses);
-                  }}
-                />
+                <Fragment key={message.id}>
+                  <AgentMessage
+                    activityAfter={
+                      message.role === "assistant" ? (
+                        <SubagentTraces
+                          traces={subagentTraces.filter(
+                            (trace) => trace.parentTurnId === message.metadata?.turnId,
+                          )}
+                        />
+                      ) : undefined
+                    }
+                    canRespond={!isBusy && !isResuming}
+                    isStreaming={
+                      agent.status === "streaming" && index === agent.data.messages.length - 1
+                    }
+                    message={message}
+                    onInputResponses={(inputResponses) => {
+                      setCancellationError(undefined);
+                      return agent.respond(inputResponses);
+                    }}
+                  />
+                </Fragment>
               ),
             )}
             {showPendingThinking ? <PendingThinking /> : null}
