@@ -45,7 +45,11 @@ describe("delegated turn completion", () => {
   it("defers caller notification while a task is working and reports accumulated usage with the final result", () => {
     const pending = startWorker(withUsage(session(), 100), "worker-1");
     const parked = resolveSessionStepResult(
-      { next: null, session: pending, settledTurn: { output: "Verification is running." } },
+      {
+        next: null,
+        session: pending,
+        settledTurn: { notifyCaller: true, output: "Verification is running." },
+      },
       {},
       "conversation",
       {},
@@ -70,7 +74,7 @@ describe("delegated turn completion", () => {
       150,
     );
     const settled = resolveSessionStepResult(
-      { next: null, session: completed, settledTurn: { output: "VERIFIED" } },
+      { next: null, session: completed, settledTurn: { notifyCaller: true, output: "VERIFIED" } },
       {},
       "conversation",
       {},
@@ -102,7 +106,11 @@ describe("delegated turn completion", () => {
     };
     expect(
       resolveSessionStepResult(
-        { next: null, session: partiallyCompleted, settledTurn: { output: "Still working." } },
+        {
+          next: null,
+          session: partiallyCompleted,
+          settledTurn: { notifyCaller: true, output: "Still working." },
+        },
         {},
         "conversation",
         {},
@@ -126,7 +134,11 @@ describe("delegated turn completion", () => {
       };
       expect(
         resolveSessionStepResult(
-          { next: null, session: finished, settledTurn: { output: "Unable to verify." } },
+          {
+            next: null,
+            session: finished,
+            settledTurn: { notifyCaller: true, output: "Unable to verify." },
+          },
           {},
           "conversation",
           {},
@@ -144,7 +156,7 @@ describe("delegated turn completion", () => {
         {
           next: null,
           session: startWorker(session(), "worker-1"),
-          settledTurn: { isError: true, output: "Model failed" },
+          settledTurn: { notifyCaller: true, isError: true, output: "Model failed" },
         },
         {},
         "conversation",

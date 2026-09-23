@@ -2881,7 +2881,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: { title: "Done" } });
+    expect(result.settledTurn).toEqual({ notifyCaller: true, output: { title: "Done" } });
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -2947,7 +2947,7 @@ describe("createToolLoopHarness", () => {
     );
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: { summary: "Pending" } });
+    expect(result.settledTurn).toEqual({ notifyCaller: true, output: { summary: "Pending" } });
     expect(result.session.outputSchema).toBe(schema);
     expect(events.some((event) => event.type === "result.completed")).toBe(false);
     expect(events.at(-1)?.type).toBe("session.waiting");
@@ -3064,6 +3064,7 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toBeNull();
     expect(result.settledTurn).toEqual({
+      notifyCaller: true,
       isError: true,
       output: "The agent could not produce a result matching the requested schema.",
     });
@@ -3277,7 +3278,10 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "What's the weather in NY?" });
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: "It is 41 F in New York right now." });
+    expect(result.settledTurn).toEqual({
+      notifyCaller: true,
+      output: "It is 41 F in New York right now.",
+    });
     expect(result.session.history).toEqual([
       { content: "What's the weather in NY?", kind: "user" as const, role: "user" },
       {
@@ -3485,7 +3489,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session);
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: "The result is 42." });
+    expect(result.settledTurn).toEqual({ notifyCaller: true, output: "The result is 42." });
     expect(result.session.history).toEqual([
       { content: "prior message", kind: "user" as const, role: "user" },
       { content: "The result is 42.", role: "assistant" },
@@ -4918,7 +4922,11 @@ describe("createToolLoopHarness", () => {
     // session parks (`next: null`) so the user can follow up in the
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
+    expect(result.settledTurn).toEqual({
+      notifyCaller: true,
+      isError: true,
+      output: "Model blew up",
+    });
     expect(result.session.outputSchema).toBeUndefined();
 
     const types = events.map((e) => e.type);
@@ -4970,6 +4978,7 @@ describe("createToolLoopHarness", () => {
 
       expect(result.next).toBeNull();
       expect(result.settledTurn).toEqual({
+        notifyCaller: true,
         isError: true,
         output: expect.stringContaining(hint),
       });
@@ -13746,7 +13755,11 @@ describe("boundary event failures", () => {
         message: "Denied request",
       });
       expect(result.next).toBeNull();
-      expect(result.settledTurn).toEqual({ isError: true, output: "admission denied" });
+      expect(result.settledTurn).toEqual({
+        notifyCaller: true,
+        isError: true,
+        output: "admission denied",
+      });
       expect(result.session.outputSchema).toBeUndefined();
       expect(ToolLoopAgent).not.toHaveBeenCalled();
       expect(events.filter((event) => event.type === "turn.failed")).toMatchObject([

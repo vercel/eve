@@ -55,7 +55,11 @@ function sessionAwaitingCallerNotification() {
     },
   });
   const parked = resolveSessionStepResult(
-    { next: null, session: pending, settledTurn: { output: "Verification is running." } },
+    {
+      next: null,
+      session: pending,
+      settledTurn: { notifyCaller: true, output: "Verification is running." },
+    },
     {},
     "conversation",
     {},

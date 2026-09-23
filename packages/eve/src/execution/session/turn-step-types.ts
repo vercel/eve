@@ -56,7 +56,7 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
-      readonly settled?: SettledTurn & { readonly notifyCaller: boolean };
+      readonly settled?: SettledTurn;
     }
 ) &
   DurableStepResultFields;
@@ -74,5 +74,5 @@ export type TurnOutcome =
       readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
-      readonly settled?: SettledTurn & { readonly notifyCaller: boolean };
+      readonly settled?: SettledTurn;
     };
