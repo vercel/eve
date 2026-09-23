@@ -1,3 +1,4 @@
+import { throwIfAborted } from "#client/abort-signal.js";
 import { Client } from "#client/client.js";
 import type {
   ActiveTurn,
@@ -490,7 +491,7 @@ export class EveAgentStore<TData> {
         }),
         input.signal,
       );
-      input.signal?.throwIfAborted();
+      throwIfAborted(input.signal);
     }
     if (this.#session === undefined) {
       if (this.#client === undefined) {
@@ -500,7 +501,7 @@ export class EveAgentStore<TData> {
         throw new Error("Cannot answer an input request before the session starts.");
       }
       const created = await this.#client.sessions.create({ ...input, message: input.message });
-      input.signal?.throwIfAborted();
+      throwIfAborted(input.signal);
       this.#session = created.session;
       this.#callbacks.onSessionChange?.(created.session.state);
       this.#publish();
