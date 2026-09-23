@@ -1,6 +1,6 @@
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 import type {
   InternalSandboxSession,
-  NetworkPolicySandboxSession,
   SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,

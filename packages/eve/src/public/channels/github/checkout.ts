@@ -1,3 +1,4 @@
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 import {
   getGitHubPullRequest,
   getGitHubRepository,
@@ -10,7 +11,7 @@ import {
 } from "#public/channels/github/auth.js";
 import { gitHubGitBrokerNetworkPolicy, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
-import type { NetworkPolicySandboxSession, SandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const DEFAULT_CHECKOUT_PATH = "/workspace";
 const DEFAULT_CHECKOUT_DEPTH = 1;

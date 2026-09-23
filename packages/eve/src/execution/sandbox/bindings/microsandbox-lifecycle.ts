@@ -1,3 +1,4 @@
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -59,10 +60,7 @@ import {
   type SandboxProviderPrepareContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import type {
-  InternalSandboxSession,
-  NetworkPolicySandboxSession,
-} from "#shared/sandbox-session.js";
+import type { InternalSandboxSession } from "#shared/sandbox-session.js";
 
 type LiveMicrosandboxOptions = ResolvedMicrosandboxOptions & MicrosandboxSandboxRuntimeOptions;
 

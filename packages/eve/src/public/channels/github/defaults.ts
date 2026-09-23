@@ -1,3 +1,4 @@
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
@@ -19,10 +20,7 @@ import type {
 } from "#public/channels/github/githubChannel.js";
 import { splitGitHubCommentBody } from "#public/channels/github/limits.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type {
-  NetworkPolicySandboxSession,
-  RuntimeSandboxSession,
-} from "#shared/sandbox-session.js";
+import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("github.defaults");

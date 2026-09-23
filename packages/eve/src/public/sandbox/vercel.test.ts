@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { SessionContext } from "#context/session-context.js";
 import type { RuntimeSandboxSessionFor } from "#public/definitions/sandbox.js";
-import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 import { Drive, VercelSandbox } from "#public/sandbox/vercel.js";
 describe("VercelSandbox", () => {
   it("creates environments", () => {

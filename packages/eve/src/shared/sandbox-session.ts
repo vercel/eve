@@ -1,7 +1,6 @@
 import type { Experimental_SandboxSession as AiSdkSandbox } from "ai";
 
 import type { SandboxDeleteOptions } from "#shared/sandbox-provider.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 /**
  * Options for running one command in a sandbox. Shape mirrors the AI
@@ -115,12 +114,6 @@ export interface SandboxSession extends Pick<
    * Relative paths resolve from `/workspace`; absolute paths pass through.
    */
   removePath(options: SandboxRemovePathOptions): Promise<void>;
-}
-
-/** Sandbox session capability exposed by environments with mutable networking. */
-export interface NetworkPolicySandboxSession extends SandboxSession {
-  /** Applies a firewall policy to the live sandbox. */
-  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 }
 
 export interface RuntimeSandboxSession extends SandboxSession {

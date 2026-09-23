@@ -1,4 +1,4 @@
-import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 import { randomUUID } from "node:crypto";
 
 import {

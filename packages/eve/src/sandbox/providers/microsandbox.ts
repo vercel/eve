@@ -9,7 +9,7 @@ import type {
 } from "#public/sandbox/microsandbox-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
-import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
+import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 
 export type MicrosandboxEnvironmentOptions = MicrosandboxSandboxCreateOptions;
 
