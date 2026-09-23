@@ -1869,6 +1869,18 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps a running command pending when an idle session stream closes", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.6 default");
+    await renderer.renderIdleStream(streamOf([]));
+    renderer.renderCommandResult("", "success", "Model set to anthropic/claude-opus-4.6 default");
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^✓ Model set to anthropic\/claude-opus-4.6 default$/m);
+    expect(snapshot).not.toContain("/model anthropic");
+  });
+
   it("replaces a settled command with its dimmed summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add connection/notion");
@@ -5498,6 +5510,23 @@ describe("TerminalRenderer command typeahead", () => {
     // Down moved /model → /reset; history recall would have submitted the
     // earlier prompt instead.
     expect(await second).toBe("/reset");
+    renderer.shutdown();
+  });
+
+  it("leaves drawer commands out of prompt history", async () => {
+    const { input, renderer } = makeRenderer();
+
+    for (const text of ["an earlier prompt", "/model anthropic/claude-opus-4.6 default"]) {
+      const prompt = renderer.readPrompt();
+      input.type(text);
+      input.enter();
+      await prompt;
+    }
+
+    const recalled = renderer.readPrompt();
+    input.up();
+    input.enter();
+    expect(await recalled).toBe("an earlier prompt");
     renderer.shutdown();
   });
 

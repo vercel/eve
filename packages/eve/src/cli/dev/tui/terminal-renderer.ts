@@ -24,6 +24,7 @@ import {
   argumentTypeaheadFor,
   argumentTypeaheadLoadingLabel,
   argumentTypeaheadQuery,
+  isArgumentTypeaheadCommand,
   moveArgumentTypeaheadSelection,
   renderArgumentSuggestions,
   selectedArgumentSuggestion,
@@ -1048,7 +1049,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
             if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
             this.#argumentTypeahead = undefined;
-            this.#promptHistory.add(prompt);
+            // Recalling a drawer command reopens its drawer, which takes over
+            // ↑/↓ and would trap history navigation at that entry.
+            const submitted = parsePromptCommand(prompt);
+            if (submitted?.type !== "extension" || !isArgumentTypeaheadCommand(submitted.name)) {
+              this.#promptHistory.add(prompt);
+            }
             this.#inputActive = false;
             this.#stopCaretBlink();
             this.#status = STATUS.processing;
@@ -3735,7 +3741,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#provisionalSubagentCallIds.has(block.subagentCallId)) ||
         block.status === "approval" ||
         block.status === "running" ||
-        (block.kind === "connection-auth" && block.live)
+        (block.kind === "connection-auth" && block.live) ||
+        // A command's echo settles only with its own outcome.
+        block === this.#pendingCommandEcho
       ) {
         continue;
       }
