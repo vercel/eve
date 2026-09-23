@@ -1,7 +1,10 @@
+import type { SessionStateMap } from "#harness/types.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
+import { isSettledTaskDelivery } from "#tasks/notification.js";
 import type { TaskDeliveryPolicy, DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
-import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
+import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
 
@@ -53,29 +56,24 @@ export type SessionInputSelection =
  * Ordered, admitted session input, plus the idempotency and cancellation
  * facts for task deliveries this owner has seen. Entries are private; callers
  * receive typed admission and selection values. Everything here is rebuilt
- * deterministically on replay. Handoff carries cancellation decisions so
- * late reports cannot wake a successor owner either.
+ * deterministically on replay. Indexed task outcomes live in session state.
  */
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
-  private readonly cancelledTaskIds: Set<string>;
+  private readonly cancelledTaskIds = new Set<string>();
   private readonly seenTaskDeliveryIds = new Set<string>();
   private nextSequence = 0;
-
-  constructor(cancelledTaskIds: readonly string[] = []) {
-    this.cancelledTaskIds = new Set(cancelledTaskIds);
-  }
-
-  getCancelledTaskIds(): readonly string[] {
-    return [...this.cancelledTaskIds];
-  }
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
   /** Cancellation discards model notifications, but admits task lifecycle effects. */
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+  enqueueDelivery(
+    delivery: DeliverHookPayload,
+    state?: SessionStateMap,
+  ): DeliveryAdmission | undefined {
+    if (isSettledTaskDelivery(delivery, state) && !hasTaskLifecycleData(delivery)) return undefined;
     const deliveryId = taskDeliveryId(delivery);
     if (deliveryId !== undefined) {
       const terminalId = terminalTaskId(delivery);
@@ -169,6 +167,16 @@ export class SessionInputQueue {
     );
   }
 
+  /** Discard queued reports after cancellation; retain lifecycle packets for acknowledgement. */
+  discardSettledTaskNotifications(state: SessionStateMap | undefined): void {
+    this.retain(
+      (entry) =>
+        entry.kind !== "delivery" ||
+        !isSettledTaskDelivery(entry.delivery, state) ||
+        hasTaskLifecycleData(entry.delivery),
+    );
+  }
+
   takeSteering(
     admitted: ReadonlySet<number>,
     callerCallId: string | undefined,
@@ -190,7 +198,7 @@ export class SessionInputQueue {
   }
 
   takeNext(
-    cohorts: TaskCohorts,
+    state: SessionStateMap | undefined,
     options?: {
       readonly deferDeliveries?: boolean;
       readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
@@ -221,8 +229,19 @@ export class SessionInputQueue {
         };
       }
     }
+    const cohorts = getSessionTaskCohorts(state);
+    const pendingCohorts = new Set(
+      getBackgroundTasks(state)
+        .query({ state: "working" })
+        .filter(
+          ({ taskId }) =>
+            !this.seenTaskDeliveryIds.has(`${taskId}:ready`) && !this.cancelledTaskIds.has(taskId),
+        )
+        .map(({ taskId }) => cohorts.get(taskId)!),
+    );
     const index = this.nextActionableIndex(
       cohorts,
+      pendingCohorts,
       options?.deferDeliveries === true,
       options?.taskDeliveryPolicy ?? "cohort",
     );
@@ -232,17 +251,10 @@ export class SessionInputQueue {
 
   private nextActionableIndex(
     cohorts: TaskCohorts,
+    pendingCohorts: ReadonlySet<string>,
     deferDeliveries: boolean,
     taskDeliveryPolicy: TaskDeliveryPolicy,
   ): number {
-    const pendingCohorts = new Set<string>();
-    for (const [taskId, cohortId] of cohorts) {
-      // A control step can record cancellation before its notification is admitted.
-      // Wait for that notification too, so it cannot trigger a second cohort report.
-      if (!this.seenTaskDeliveryIds.has(`${taskId}:ready`) && !this.cancelledTaskIds.has(taskId)) {
-        pendingCohorts.add(cohortId);
-      }
-    }
     return this.entries.findIndex((entry) => {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;

@@ -1,5 +1,5 @@
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
-import { formatTaskNotification } from "#tasks/notification.js";
+import { formatTaskNotification, isSettledTaskDelivery } from "#tasks/notification.js";
 import type { TaskView } from "#tasks/types.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
@@ -117,6 +117,13 @@ export async function routeDeliverToChildren(input: {
       });
       serializedContext = emitted.serializedContext;
     }
+  }
+
+  if (
+    payload.task !== undefined &&
+    isSettledTaskDelivery(input.delivery, input.sessionState.snapshot.session.state)
+  ) {
+    return { kind: "continue", remainder: undefined, serializedContext, sessionState };
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];

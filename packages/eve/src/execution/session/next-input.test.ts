@@ -1,4 +1,5 @@
-import { TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { applySessionCancellation } from "#execution/session/admission.js";
+import { recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { assert, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,7 +27,6 @@ beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
   vi.mocked(cancelAllIndexedSessionTasksStep).mockReset();
   vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
-    views: [],
     sessionState,
   }));
 });
@@ -273,69 +273,49 @@ describe("nextTurnDelivery", () => {
     });
   });
 
-  it.each(["auto", "cohort"] as const)(
-    "routes late settlement without waking cancelled tasks under %s",
-    async (taskDeliveryPolicy) => {
-      const cancelled: TaskView = {
-        taskId: "cancelled-task",
-        status: "cancelled",
-        metadata: { kind: "subagent", name: "worker" },
-      };
-      const late: DeliverHookPayload = {
-        kind: "deliver",
-        taskDeliveryId: "cancelled-task:ready:completed",
-        payloads: [
-          {
-            message: "Late result",
-            task: {
-              views: [
-                {
-                  ...cancelled,
-                  status: "completed",
-                  lastOutput: { type: "result", data: "Late result" },
-                },
-              ],
-            },
+  it("discards a held completion when session cancellation records the remaining task", async () => {
+    const input = batchingInput(2);
+    const session = input.cursor.sessionState.snapshot.session;
+    const completed = recordWorkflowTaskView(session.state, {
+      taskId: "task_0",
+      metadata: { kind: "subagent", name: "worker" },
+      status: "completed",
+      lastOutput: { type: "result", data: "done" },
+    }).state;
+    await input.cursor.apply({
+      sessionState: {
+        ...input.cursor.sessionState,
+        snapshot: { session: { ...session, state: completed } },
+      },
+    });
+    input.queue.enqueueDelivery(report(completion("task_0")));
+    vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
+      sessionState: {
+        ...sessionState,
+        snapshot: {
+          session: {
+            ...sessionState.snapshot.session,
+            state: recordWorkflowTaskView(sessionState.snapshot.session.state, {
+              taskId: "task_1",
+              metadata: { kind: "subagent", name: "worker" },
+              status: "cancelled",
+            }).state,
           },
-        ],
-      };
-      const inbox = createMockInbox([
-        cancelRead({ tasks: true }),
-        { result: { done: false, value: late } },
-        messageRead("New request"),
-      ]);
-      const input = { ...waitInput(inbox), expectedAttemptIds: undefined };
-      await input.cursor.apply({
-        serializedContext: { [TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME]: taskDeliveryPolicy },
-      });
-      vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
-        views: [cancelled],
-        sessionState,
-      }));
-      vi.mocked(routeDeliverToChildren).mockImplementation(
-        async ({ delivery, sessionState, serializedContext }) => ({
-          kind: "continue",
-          sessionState,
-          serializedContext,
-          remainder: {
-            ...delivery,
-            payloads: delivery.payloads.map(({ task: _task, ...payload }) => payload),
-          },
-        }),
-      );
+        },
+      },
+    }));
 
-      const next = await nextTurnDelivery(input);
-      expect(next).toMatchObject({
-        kind: "turn",
-        delivery: { payloads: [{ message: "New request" }] },
-      });
-      expect(routeDeliverToChildren).toHaveBeenCalledWith(
-        expect.objectContaining({ delivery: late }),
-      );
-      expect(input.queue.isTaskCancelled("cancelled-task")).toBe(true);
-      expect(input.queue.pendingCount).toBe(0);
-    },
-  );
+    await applySessionCancellation({ kind: "cancel", tasks: true }, input);
+
+    expect(input.queue.pendingCount).toBe(0);
+    expect(input.queue.isTaskCancelled("task_0")).toBe(false);
+    expect(input.queue.isTaskCancelled("task_1")).toBe(false);
+    input.inbox = createMockInbox([messageRead("New request")]);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: { payloads: [{ message: "New request" }] },
+    });
+  });
 
   it("resumes authorization after a consumed no-op cancel", async () => {
     // A cancel with no active turn is consumed without producing a parent
@@ -698,7 +678,7 @@ describe("buffered task completion batching", () => {
       delivery: question,
     });
     expect(
-      input.queue.takeNext(new Map(), { taskDeliveryPolicy: "auto", deferDeliveries: true }),
+      input.queue.takeNext(undefined, { taskDeliveryPolicy: "auto", deferDeliveries: true }),
     ).toBeUndefined();
     expect(input.queue.pendingCount).toBe(2);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
@@ -918,18 +898,16 @@ describe("buffered task completion batching", () => {
     });
   });
 
-  it("waits for a recorded cancellation's notification before reporting its cohort", () => {
-    const queue = new SessionInputQueue();
-    const cohorts = new Map([
-      ["task_0", "cohort"],
-      ["task_1", "cohort"],
-    ]);
-    queue.enqueueDelivery(completion("task_0"));
-    expect(queue.takeNext(cohorts)).toBeUndefined();
-    queue.enqueueDelivery(terminalDelivery("task_1", "cancelled"));
-    expect(queue.takeNext(cohorts)).toMatchObject({ kind: "turn" });
-    expect(queue.pendingCount).toBe(0);
-    expect(queue.enqueueDelivery(completion("task_1"))).toBeUndefined();
+  it("releases a cohort when cancellation is already recorded without waiting for its echo", () => {
+    const input = batchingInput(2);
+    const state = recordWorkflowTaskView(input.cursor.sessionState.snapshot.session.state, {
+      taskId: "task_1",
+      metadata: { kind: "subagent", name: "worker" },
+      status: "cancelled",
+    }).state;
+    input.queue.enqueueDelivery(completion("task_0"));
+    expect(input.queue.takeNext(state)).toMatchObject({ kind: "turn" });
+    expect(input.queue.pendingCount).toBe(0);
   });
 
   it.each(["failed", "cancelled"] as const)(
@@ -945,7 +923,7 @@ describe("buffered task completion batching", () => {
         expect(queue.enqueueDelivery(first)).toBeDefined();
         expect(queue.enqueueDelivery(late)).toBeUndefined();
         expect(queue.pendingCount).toBe(1);
-        expect(queue.takeNext(new Map())).toBeDefined();
+        expect(queue.takeNext(undefined)).toBeDefined();
         expect(queue.enqueueDelivery(late)).toBeUndefined();
         expect(queue.pendingCount).toBe(0);
       }

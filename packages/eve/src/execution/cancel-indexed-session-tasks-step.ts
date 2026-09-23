@@ -17,7 +17,7 @@ const log = createLogger("execution.cancel-indexed-session-tasks");
 export async function cancelAllIndexedSessionTasksStep(input: {
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<SessionStateTransition & { readonly views: readonly TaskView[] }> {
+}): Promise<SessionStateTransition> {
   "use step";
 
   let durable;
@@ -27,7 +27,7 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     logError(log, "failed to read the session for indexed task cancellation", error, {
       parentSessionId: input.sessionState.sessionId,
     });
-    return { sessionState: input.sessionState, views: [] };
+    return { sessionState: input.sessionState };
   }
 
   let entries;
@@ -37,9 +37,9 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     logError(log, "failed to read the task index", error, {
       parentSessionId: durable.sessionId,
     });
-    return { sessionState: input.sessionState, views: [] };
+    return { sessionState: input.sessionState };
   }
-  if (entries.length === 0) return { sessionState: input.sessionState, views: [] };
+  if (entries.length === 0) return { sessionState: input.sessionState };
   if (input.serializedContext === undefined) {
     throw new Error("Indexed task cancellation requires serialized runtime context.");
   }

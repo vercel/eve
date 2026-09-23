@@ -69,12 +69,6 @@ export async function validateSessionCheckpointStep(input: {
       `Unsupported session checkpoint version ${JSON.stringify(checkpoint.version)}; this deployment reads version ${SESSION_CHECKPOINT_VERSION}. Start a new session on this deployment.`,
     );
   }
-  if (
-    !Array.isArray(checkpoint.cancelledTaskIds) ||
-    !checkpoint.cancelledTaskIds.every((taskId) => typeof taskId === "string" && taskId.length > 0)
-  ) {
-    throw new Error("Session checkpoint contains invalid task cancellation state.");
-  }
   const timeout = checkpoint.sessionTimeoutMs;
   if (
     timeout !== false &&

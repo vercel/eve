@@ -875,7 +875,6 @@ function createGatewayModelCallError(input: {
 describe("createToolLoopHarness", () => {
   it("keeps a scheduled task session alive across individual results until all tasks settle", async () => {
     const { SessionInputQueue } = await import("#execution/session/input-queue.js");
-    const { getSessionTaskCohorts } = await import("#tasks/session-task-cohorts.js");
     const { recordWorkflowTaskView, findBackgroundWorkflowToolRun } =
       await import("#harness/workflow-tool-runs.js");
     const { resolveTaskDeliveryContext } = await import("#tasks/delivery-context.js");
@@ -896,12 +895,8 @@ describe("createToolLoopHarness", () => {
       taskDeliveryId: "A:ready:completed",
       payloads: [{ message: "A completed" }],
     });
-    expect(
-      queue.takeNext(getSessionTaskCohorts(session.state), { taskDeliveryPolicy: "cohort" }),
-    ).toBeUndefined();
-    expect(
-      queue.takeNext(getSessionTaskCohorts(session.state), { taskDeliveryPolicy: "auto" })?.kind,
-    ).toBe("turn");
+    expect(queue.takeNext(session.state, { taskDeliveryPolicy: "cohort" })).toBeUndefined();
+    expect(queue.takeNext(session.state, { taskDeliveryPolicy: "auto" })?.kind).toBe("turn");
     session = {
       ...session,
       state: recordWorkflowTaskView(session.state, {

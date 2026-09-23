@@ -371,7 +371,7 @@ describe("SessionExecution background task checkpoints", () => {
     ).resolves.toEqual({ cancelled: true, kind: "park" });
 
     expect(inbox.restore).not.toHaveBeenCalled();
-    expect(queue.takeNext(new Map())).toMatchObject({ delivery: followUp, kind: "turn" });
+    expect(queue.takeNext(undefined)).toMatchObject({ delivery: followUp, kind: "turn" });
   });
 
   it("steers a continuing turn with user input while retaining background notifications for cohort routing", async () => {

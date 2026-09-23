@@ -161,7 +161,6 @@ describe("session owner starts", () => {
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
       version: 8,
-      cancelledTaskIds: [],
       mode: "conversation",
       serializedContext: {},
       sessionState: { continuationToken: "continuation-1", sessionId: "session-1" },

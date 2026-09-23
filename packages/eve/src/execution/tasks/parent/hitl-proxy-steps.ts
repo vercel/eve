@@ -109,6 +109,7 @@ export async function recordTerminalTaskViewsStep(input: {
 }): Promise<{
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** Newly recorded terminal outcomes eligible for model notification. */
   readonly views: readonly TaskView[];
   readonly subagentCompletions: readonly SubagentCompletedStreamEvent[];
 }> {
@@ -116,6 +117,7 @@ export async function recordTerminalTaskViewsStep(input: {
   const durableSession = readDurableSession(input.sessionState);
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
+  const settledViews: TaskView[] = [];
   const subagentCompletions: SubagentCompletedStreamEvent[] = [];
   for (const view of input.views) {
     const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
@@ -140,6 +142,7 @@ export async function recordTerminalTaskViewsStep(input: {
       });
     }
     acceptedViews.push(recorded.view);
+    if (recorded.settled) settledViews.push(recorded.view);
     session = clearProxyInputRequestsForTask(session, view.taskId);
     session = applyTaskAgentHandleCommand(session, {
       kind: "release-owner",
@@ -155,7 +158,7 @@ export async function recordTerminalTaskViewsStep(input: {
     session === durableSession
       ? input.sessionState
       : replaceDurableSessionSnapshot({ session, state: input.sessionState });
-  return { serializedContext, sessionState, views: acceptedViews, subagentCompletions };
+  return { serializedContext, sessionState, views: settledViews, subagentCompletions };
 }
 
 async function settleBackgroundTaskActions(input: {

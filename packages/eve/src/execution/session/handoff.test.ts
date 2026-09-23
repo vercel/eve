@@ -44,8 +44,7 @@ describe("SessionHandoff", () => {
       checkpoint: expect.objectContaining({
         mode: "conversation",
         sessionTimeoutMs: 60_000,
-        version: 8,
-        cancelledTaskIds: ["cancelled-task"],
+        version: 7,
       }),
       delivery: trigger.delivery,
       targetDeploymentId: "deployment-b",
@@ -202,7 +201,6 @@ function state(
   } = {},
 ) {
   return {
-    cancelledTaskIds: ["cancelled-task"],
     serializedContext: input.serializedContext ?? {},
     sessionState: {
       continuationToken: input.continuationToken ?? "",

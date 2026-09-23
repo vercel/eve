@@ -48,7 +48,6 @@ describe("cancelAllIndexedSessionTasksStep", () => {
         readWorkflowTaskView(entry.task),
       ),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
-    expect(result.views).toEqual([cancelledView(task1), cancelledView(task2)]);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
     expect(cancelOwnedTaskMock).toHaveBeenNthCalledWith(1, {
       cancelOwnedWork: expect.any(Function),
@@ -64,19 +63,23 @@ describe("cancelAllIndexedSessionTasksStep", () => {
     });
   });
 
-  it("returns only tasks whose cancellation succeeded", async () => {
+  it("leaves a task working when cancellation fails", async () => {
     cancelOwnedTaskMock.mockRejectedValueOnce(new Error("Cancellation unavailable"));
     const result = await cancelAllIndexedSessionTasksStep({
       serializedContext: {},
       sessionState: makeSessionState([indexedTask("failed-cancel"), indexedTask("cancelled")]),
     });
-    expect(result.views.map((view) => view.taskId)).toEqual(["cancelled"]);
+    expect(
+      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map(
+        ({ task }) => readWorkflowTaskView(task)?.status ?? "working",
+      ),
+    ).toEqual(["working", "cancelled"]);
   });
 
   it("does not require runtime context when no tasks are indexed", async () => {
     await expect(
       cancelAllIndexedSessionTasksStep({ sessionState: makeSessionState([]) }),
-    ).resolves.toEqual({ sessionState: makeSessionState([]), views: [] });
+    ).resolves.toEqual({ sessionState: makeSessionState([]) });
 
     expect(deserializeContextMock).not.toHaveBeenCalled();
     expect(cancelOwnedTaskMock).not.toHaveBeenCalled();

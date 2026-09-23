@@ -69,7 +69,7 @@ const taskRequest = {
 describe("task HITL delivery routing", () => {
   beforeEach(() => vi.resetAllMocks());
 
-  it("settles late reports before the queue discards cancelled task notifications", async () => {
+  it("acknowledges late settlement after restoring only the recorded task outcome", async () => {
     const session = registerWorkflowToolRun(state(false).snapshot.session, {
       callId: "call-1",
       toolName: "worker",
@@ -96,7 +96,7 @@ describe("task HITL delivery routing", () => {
       },
     });
     vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
-      views: [cancelled],
+      views: [],
       subagentCompletions: [],
       sessionState,
       serializedContext: {},
@@ -106,13 +106,9 @@ describe("task HITL delivery routing", () => {
       serializedContext: {},
       sessionWritable: new WritableStream<Uint8Array>(),
     };
-    const previousQueue = new SessionInputQueue();
-    previousQueue.cancelTask("task-1");
-    const queue = new SessionInputQueue(
-      JSON.parse(JSON.stringify(previousQueue.getCancelledTaskIds())),
-    );
+    const queue = new SessionInputQueue();
     async function routeQueued(delivery: DeliverHookPayload) {
-      const admitted = queue.enqueueDelivery(delivery);
+      const admitted = queue.enqueueDelivery(delivery, sessionState.snapshot.session.state);
       assert(admitted);
       const routed = await routeDeliverToChildren({ ...context, delivery });
       assert(routed.kind === "continue");
@@ -187,11 +183,14 @@ describe("task HITL delivery routing", () => {
       { ifPresent: true },
     );
     expect(
-      queue.enqueueDelivery({
-        kind: "deliver",
-        taskDeliveryId: "task-1:update:1",
-        payloads: [{ message: "Still working" }],
-      }),
+      queue.enqueueDelivery(
+        {
+          kind: "deliver",
+          taskDeliveryId: "task-1:update:1",
+          payloads: [{ message: "Still working" }],
+        },
+        sessionState.snapshot.session.state,
+      ),
     ).toBeUndefined();
     const user = await routeQueued({
       kind: "deliver",
@@ -290,7 +289,7 @@ describe("task HITL delivery routing", () => {
     expect(recordTerminalTaskViewsStep).toHaveBeenCalledOnce();
   });
 
-  it("uses the parent's cancelled outcome when a late child reports success", async () => {
+  it("consumes a late outcome without notifying the model again", async () => {
     const cancelled = {
       taskId: "task-1",
       metadata: { kind: "tool", name: "export" },
@@ -298,7 +297,7 @@ describe("task HITL delivery routing", () => {
     };
     vi.mocked(recordTerminalTaskViewsStep).mockResolvedValue({
       subagentCompletions: [],
-      views: [cancelled],
+      views: [],
       serializedContext: {},
       sessionState: state(false),
     });
@@ -323,7 +322,7 @@ describe("task HITL delivery routing", () => {
     });
     expect(result).toMatchObject({
       kind: "continue",
-      remainder: { payloads: [{ message: "Background task task-1 (export) is cancelled." }] },
+      remainder: undefined,
     });
   });
 

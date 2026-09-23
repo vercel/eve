@@ -300,7 +300,7 @@ describe("recordTerminalTaskViewsStep", () => {
       views: [view],
     });
     expect(repeated.subagentCompletions).toEqual([]);
-    expect(repeated.views).toEqual([view]);
+    expect(repeated.views).toEqual([]);
   });
 
   it("settles instrumentation from an accepted terminal task view", async () => {
