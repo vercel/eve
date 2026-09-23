@@ -127,15 +127,20 @@ describe("ask_question answer delivery", () => {
           (event) =>
             event.data.result.kind === "tool-result" && event.data.result.toolName === "whoami",
         );
+        const resumedTurnStart = turnStarts[0];
 
         expect({
           resumedTurnStarts: turnStarts.map((event) => event.data.turnId),
+          resumedTurnStartSequence: resumedTurnStart?.data.sequence,
           whoamiDelivery: whoami?.data.result.output,
+          whoamiSequence: whoami?.data.sequence,
           whoamiTurnId: whoami?.data.turnId,
         }).toMatchObject({
           resumedTurnStarts: [expect.stringMatching(/^turn_\d+$/u)],
+          resumedTurnStartSequence: 1,
           whoamiDelivery: { delivery: "answer" },
-          whoamiTurnId: expect.stringMatching(/^turn_\d+$/u),
+          whoamiSequence: 1,
+          whoamiTurnId: resumedTurnStart?.data.turnId,
         });
       } catch (error) {
         throw new Error(

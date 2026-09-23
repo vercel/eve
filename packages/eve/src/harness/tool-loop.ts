@@ -1022,7 +1022,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
-    if (emit && (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput))) {
+    const startsTurnFromRuntimeResults =
+      emissionState.turnId === "" && (effectiveStepInput?.runtimeActionResults?.length ?? 0) > 0;
+    if (
+      emit &&
+      (hasStepInput(effectiveStepInput) ||
+        hasStepInput(coordinated.stepInput) ||
+        startsTurnFromRuntimeResults)
+    ) {
       if (store !== undefined) {
         prepareDynamicInstructionPreamble(
           store,
