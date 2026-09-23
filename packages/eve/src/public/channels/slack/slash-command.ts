@@ -1,6 +1,7 @@
 import { type parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { createLogger } from "#internal/logging.js";
+import type { SlackTransport } from "#public/channels/slack/api-transport.js";
 import { buildSlackWorkspaceHandle } from "#public/channels/slack/api.js";
 import type {
   SlackChannelConfig,
@@ -19,6 +20,7 @@ export function dispatchSlashCommand(
   payload: SlashCommandPayload,
   ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
   config: SlackChannelConfig,
+  transport: SlackTransport,
 ): void {
   const command = parseSlashCommandPayload(payload);
   const onSlashCommand = config.onSlashCommand;
@@ -31,7 +33,7 @@ export function dispatchSlashCommand(
 
   const commandCtx: SlackSlashCommandContext = {
     slack: buildSlackWorkspaceHandle({
-      botToken: config.credentials?.botToken,
+      transport,
       installationTeamId: command.teamId,
       teamId: command.teamId,
     }),

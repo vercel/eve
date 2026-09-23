@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createSlackTransport } from "#public/channels/slack/api-transport.js";
 import {
   buildSlackTurnMessage,
   collectInboundFileParts,
@@ -160,7 +161,9 @@ describe("createSlackFetchFile", () => {
       }),
     );
 
-    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const fetchFile = createSlackFetchFile({
+      transport: createSlackTransport({ botToken: "xoxb-test-token" }),
+    });
     const result = await fetchFile("https://files.slack.com/a/b/cat.png");
 
     expect(result).not.toBeNull();
@@ -181,7 +184,9 @@ describe("createSlackFetchFile", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 }));
 
-    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const fetchFile = createSlackFetchFile({
+      transport: createSlackTransport({ botToken: "xoxb-test-token" }),
+    });
     const url = "https://vercel.enterprise.slack.com/files/U123/F123/story.md";
 
     await fetchFile(url);
@@ -197,7 +202,9 @@ describe("createSlackFetchFile", () => {
       .mockResolvedValue(new Response(new Uint8Array([0]), { status: 200 }));
 
     const tokenFn = vi.fn(async (_context: { readonly teamId?: string }) => "xoxb-rotated-token");
-    const fetchFile = createSlackFetchFile({ botToken: tokenFn });
+    const fetchFile = createSlackFetchFile({
+      transport: createSlackTransport({ botToken: tokenFn }),
+    });
 
     await fetchFile("https://files.slack.com/x", {
       state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
@@ -219,7 +226,9 @@ describe("createSlackFetchFile", () => {
     "https://vercel.enterprise.slack.com/not-files/U123/F123/story.md",
   ])("returns null for non-Slack URL %s", async (url) => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const fetchFile = createSlackFetchFile({
+      transport: createSlackTransport({ botToken: "xoxb-test-token" }),
+    });
     const result = await fetchFile(url);
 
     expect(result).toBeNull();
@@ -231,7 +240,9 @@ describe("createSlackFetchFile", () => {
       new Response("forbidden", { status: 403, statusText: "Forbidden" }),
     );
 
-    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const fetchFile = createSlackFetchFile({
+      transport: createSlackTransport({ botToken: "xoxb-test-token" }),
+    });
 
     const result = fetchFile("https://files.slack.com/locked.csv?sig=PRIVATE");
     await expect(result).rejects.toThrow("HTTP 403");
@@ -246,7 +257,9 @@ describe("createSlackFetchFile", () => {
       }),
     );
 
-    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+    const fetchFile = createSlackFetchFile({
+      transport: createSlackTransport({ botToken: "xoxb-test-token" }),
+    });
 
     const result = fetchFile("https://files.slack.com/locked.png?sig=PRIVATE");
     await expect(result).rejects.toThrow(/files:read.*reinstall/is);

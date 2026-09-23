@@ -23,10 +23,14 @@ import type {
   ValidatedInputResponse,
 } from "#shared/input.js";
 import {
+  createSlackTransport,
+  type SlackBotToken,
+  type SlackTransport,
+} from "#public/channels/slack/api-transport.js";
+import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
   slackContinuationToken,
-  type SlackBotToken,
   type SlackHandle,
   type SlackThread,
   type SlackWorkspaceHandle,
@@ -129,13 +133,7 @@ export interface SlackChannelContext extends SlackContext {
  */
 export interface SlackEventContext extends SlackChannelContext, ChannelContinuationOps {}
 
-export type {
-  SlackApiResponse,
-  SlackBotToken,
-  SlackHandle,
-  SlackThread,
-  SlackWorkspaceHandle,
-} from "#public/channels/slack/api.js";
+export type { SlackHandle, SlackThread, SlackWorkspaceHandle } from "#public/channels/slack/api.js";
 export type { SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 
 type SlackEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
@@ -829,10 +827,10 @@ const clearSlackTurnState: NonNullable<SlackChannelEvents["turn.started"]> = asy
 function rebuildSlackContext(
   state: SlackChannelState,
   session: SessionHandle,
-  credentials: SlackChannelCredentials | undefined,
+  transport: SlackTransport,
 ): SlackChannelContext {
   const { thread, slack } = buildSlackBinding({
-    botToken: credentials?.botToken,
+    transport,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
     installationTeamId: state.installationTeamId ?? undefined,
@@ -870,9 +868,11 @@ export interface SlackChannel extends Channel<
  */
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
-  const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
+  // Built once, so every outbound call shares one token binding.
+  const transport = createSlackTransport({ botToken: config.credentials?.botToken });
+  const slackFetchFile = createSlackFetchFile({ transport });
   const activityRenderers = buildSlackActivityRenderers({
-    botToken: config.credentials?.botToken,
+    transport,
     renderers: config.activity?.renderers ?? [],
   });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
@@ -977,7 +977,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     audience: ({ state }) => state.audience ?? "unknown",
 
     context(state, session) {
-      return rebuildSlackContext(state, session, config.credentials);
+      return rebuildSlackContext(state, session, transport);
     },
 
     deliver(payload, channel) {
@@ -1012,7 +1012,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           return handleInteractionPost(
             body,
             { from, resolveSession, waitUntil },
-            { config, onInputResponse },
+            { config, onInputResponse, transport },
           );
         }
         return handleEventPost({
@@ -1021,6 +1021,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           resolveSession,
           waitUntil,
           config,
+          transport,
           uploadPolicy,
           handledEvents,
           headers: req.headers,
@@ -1029,7 +1030,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     ],
 
     receive(input, { from }) {
-      return receiveOnSlack(input, { from, credentials: config.credentials });
+      return receiveOnSlack(input, { from, transport });
     },
 
     events: mergedEvents,
@@ -1068,7 +1069,7 @@ async function receiveOnSlack(
   },
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
-    readonly credentials: SlackChannelCredentials | undefined;
+    readonly transport: SlackTransport;
     /** Installation workspace inherited from an inbound trigger. */
     readonly installationTeamId?: string;
     /** Slack team id seeded into session state, when the trigger carried one. */
@@ -1098,7 +1099,7 @@ async function receiveOnSlack(
   let threadTs = requestedThreadTs;
   if (initialMessage) {
     const { thread } = buildSlackBinding({
-      botToken: deps.credentials?.botToken,
+      transport: deps.transport,
       channelId,
       threadTs: "",
       installationTeamId,
@@ -1187,6 +1188,8 @@ async function handleEventPost(input: {
   readonly headers: Headers;
   readonly waitUntil: (task: Promise<unknown>) => void;
   readonly config: SlackChannelConfig;
+  /** The channel's bound Slack Web API transport. */
+  readonly transport: SlackTransport;
   readonly uploadPolicy: UploadPolicy;
   readonly handledEvents: Set<string>;
 }): Promise<Response> {
@@ -1228,6 +1231,7 @@ async function handleEventPost(input: {
       const dispatchMessageWith =
         (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
           dispatchSlackMessage({
+            transport: input.transport,
             appId,
             botUserId,
             receivingBotUserId,
@@ -1246,6 +1250,7 @@ async function handleEventPost(input: {
       if (handler !== undefined) {
         dispatch = () =>
           dispatchSlackMessage({
+            transport: input.transport,
             appId,
             botUserId,
             receivingBotUserId,
@@ -1275,6 +1280,7 @@ async function handleEventPost(input: {
       if (botUserId === undefined || !message.text.includes(`<@${botUserId}`)) {
         dispatch = () =>
           dispatchSlackMessage({
+            transport: input.transport,
             appId,
             botUserId,
             receivingBotUserId,
@@ -1298,9 +1304,9 @@ async function handleEventPost(input: {
   if (dispatch === null && onEvent !== undefined) {
     dispatch = () =>
       dispatchSlackEvent({
+        transport: input.transport,
         from: input.from,
         resolveSession: input.resolveSession,
-        credentials: config.credentials,
         envelope,
         handler: onEvent,
         installationTeamId,
@@ -1342,6 +1348,7 @@ function isSelfAuthoredSlackMessage(
 }
 
 async function dispatchSlackMessage(input: {
+  readonly transport: SlackTransport;
   readonly appId: string | undefined;
   readonly botUserId: string | undefined;
   readonly receivingBotUserId: string | undefined;
@@ -1357,8 +1364,8 @@ async function dispatchSlackMessage(input: {
 }): Promise<void> {
   const continuationToken = slackContinuationToken(input.message.channelId, input.message.threadTs);
   const { thread, slack } = buildSlackBinding({
+    transport: input.transport,
     appId: input.appId,
-    botToken: input.credentials?.botToken,
     botUserId: input.botUserId,
     channelId: input.message.channelId,
     threadTs: input.message.threadTs,
@@ -1442,9 +1449,9 @@ async function dispatchSlackMessage(input: {
 
 /** Runs a generic Events API handler with an imperative Slack operation surface. */
 async function dispatchSlackEvent(input: {
+  readonly transport: SlackTransport;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
-  readonly credentials: SlackChannelCredentials | undefined;
   readonly envelope: SlackEventEnvelope;
   readonly handler: NonNullable<SlackChannelConfig["onEvent"]>;
   readonly installationTeamId: string | undefined;
@@ -1474,7 +1481,7 @@ async function dispatchSlackEvent(input: {
         { auth, message, target, title, taskDeliveryPolicy },
         {
           from: input.from,
-          credentials: input.credentials,
+          transport: input.transport,
           installationTeamId: input.installationTeamId,
           teamId,
           ...(typeof input.envelope.event.user === "string"
@@ -1483,7 +1490,7 @@ async function dispatchSlackEvent(input: {
         },
       ),
     slack: buildSlackWorkspaceHandle({
-      botToken: input.credentials?.botToken,
+      transport: input.transport,
       installationTeamId: input.installationTeamId,
       teamId,
     }),

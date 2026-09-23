@@ -1,4 +1,3 @@
-import { callSlackApi } from "#public/channels/slack/api.js";
 import { buildAnsweredBlocks, isHitlAction } from "#public/channels/slack/hitl.js";
 import {
   SLACK_CARD_SUBTEXT_MAX_LENGTH,
@@ -183,15 +182,14 @@ async function updateAnsweredCard(input: {
   readonly installationTeamId?: string;
   readonly messageTs: string;
 }): Promise<void> {
-  await callSlackApi({
-    botToken: input.deps.config.credentials?.botToken,
-    context: { teamId: input.installationTeamId },
-    operation: "chat.update",
-    body: {
+  await input.deps.transport.call(
+    "chat.update",
+    {
       channel: input.channelId,
       ts: input.messageTs,
       blocks: input.blocks,
       text: `Answered: ${input.answerLabel}`,
     },
-  });
+    { teamId: input.installationTeamId },
+  );
 }

@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Card, CardText } from "#compiled/chat/index.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
-  buildSlackBinding,
   callSlackApi,
+  createSlackTransport,
   resolveSlackBotToken,
   type SlackBotTokenContext,
-} from "#public/channels/slack/api.js";
+} from "#public/channels/slack/api-transport.js";
+import { buildSlackBinding } from "#public/channels/slack/api.js";
 
 interface FetchCall {
   url: string;
@@ -144,7 +145,7 @@ describe("SlackHandle.uploadFiles", () => {
 
   it("runs the 3-step Slack upload flow per file", async () => {
     const { slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: "T01",
@@ -186,7 +187,7 @@ describe("SlackHandle.uploadFiles", () => {
 
   it("returns an empty result for zero files", async () => {
     const { slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -199,7 +200,7 @@ describe("SlackHandle.uploadFiles", () => {
 
   it("accepts options.channelId and options.threadTs overrides", async () => {
     const { slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -229,7 +230,7 @@ describe("SlackHandle.uploadFiles", () => {
     );
 
     const { slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -255,7 +256,7 @@ describe("SlackThread.post with files", () => {
 
   it("{ markdown, files } posts markdown before uploading files", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -291,7 +292,7 @@ describe("SlackThread.post with files", () => {
 
   it("{ text, files } keeps a single Slack upload comment", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -315,7 +316,7 @@ describe("SlackThread.post with files", () => {
 
   it("{ card, files } posts the card via chat.postMessage and uploads files separately", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -354,7 +355,7 @@ describe("Slack outbound text", () => {
 
   it("preserves literal at-prefixed tokens in markdown and text posts", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -379,7 +380,7 @@ describe("Slack outbound text", () => {
 
   it("preserves literal at-prefixed tokens in file upload comments", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -413,7 +414,7 @@ describe("SlackThread.refresh", () => {
 
   it("hydrates recent messages with the eve-owned Slack thread shape", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1700000000.000001",
       teamId: undefined,
@@ -472,7 +473,7 @@ describe("SlackThread.refresh", () => {
     vi.stubGlobal("fetch", mock.fetch);
 
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1700000000.000001",
       teamId: undefined,
@@ -519,7 +520,7 @@ describe("SlackThread.refresh", () => {
     vi.stubGlobal("fetch", mock.fetch);
 
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1700000000.000001",
       teamId: undefined,
@@ -547,7 +548,7 @@ describe("SlackThread.refresh", () => {
       });
     });
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -577,7 +578,7 @@ describe("SlackThread.refresh", () => {
 
   it("starts a new request after the previous refresh completes", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -596,7 +597,7 @@ describe("SlackThread.refresh", () => {
 
   it("preserves loaded messages when a later refresh fails", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -648,7 +649,7 @@ describe("SlackThread.refresh", () => {
     });
     const { thread } = buildSlackBinding({
       appId: "A_SELF",
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       botUserId: "U_SELF",
       channelId: "C01",
       threadTs: "1.0",
@@ -676,7 +677,7 @@ describe("SlackThread.listParticipants", () => {
     ]);
     vi.stubGlobal("fetch", mock.fetch);
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -705,7 +706,7 @@ describe("SlackThread.postEphemeral", () => {
 
   it("posts via chat.postEphemeral with user / channel / thread_ts", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -737,7 +738,7 @@ describe("SlackThread.postDirectMessage", () => {
 
   it("opens the IM conversation and posts to it without a thread_ts", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -774,7 +775,7 @@ describe("auto-anchor on first post", () => {
   it("first chat.postMessage on an unanchored binding adopts its own ts as the thread root", async () => {
     const anchors: string[] = [];
     const { thread, slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
@@ -799,7 +800,7 @@ describe("auto-anchor on first post", () => {
 
   it("subsequent posts thread under the anchored ts", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
@@ -819,7 +820,7 @@ describe("auto-anchor on first post", () => {
   it("does not anchor when the binding already has a threadTs", async () => {
     const anchors: string[] = [];
     const { thread, slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1700000000.000999",
       teamId: undefined,
@@ -837,7 +838,7 @@ describe("auto-anchor on first post", () => {
   it("does not anchor on postEphemeral", async () => {
     const anchors: string[] = [];
     const { thread, slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
@@ -855,7 +856,7 @@ describe("auto-anchor on first post", () => {
   it("anchors before uploading files for a markdown post", async () => {
     const anchors: string[] = [];
     const { thread, slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
@@ -884,7 +885,7 @@ describe("auto-anchor on first post", () => {
   it("does not anchor on an upload-only text/file post", async () => {
     const anchors: string[] = [];
     const { thread, slack } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
@@ -904,7 +905,7 @@ describe("auto-anchor on first post", () => {
 
   it("enables startTyping after a post anchors the thread", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,
@@ -927,7 +928,7 @@ describe("auto-anchor on first post", () => {
 
   it("sends assistant status as plain text", async () => {
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "1.0",
       teamId: undefined,
@@ -947,7 +948,7 @@ describe("auto-anchor on first post", () => {
   it("invokes onThreadTsChanged exactly once even on concurrent first-posts", async () => {
     const anchors: string[] = [];
     const { thread } = buildSlackBinding({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       channelId: "C01",
       threadTs: "",
       teamId: undefined,

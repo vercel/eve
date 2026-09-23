@@ -5,7 +5,7 @@ import type {
   ActivitySnapshotV1,
   ActivityWorkStateV1,
 } from "#protocol/activity.js";
-import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
+import type { SlackApiCaller, SlackTransport } from "#public/channels/slack/api-transport.js";
 import {
   createSlackPlanRenderer,
   SLACK_ACTIVITY_PLAN_RENDERER_ID,
@@ -104,9 +104,11 @@ export function hasSlackActivityStatus(
 }
 
 export function buildSlackActivityRenderers(input: {
-  readonly botToken: SlackBotToken | undefined;
+  /** The channel's bound Slack Web API transport. */
+  readonly transport: SlackTransport;
   readonly renderers: readonly SlackActivityRenderer[];
 }): readonly ChannelActivityRenderer[] {
+  const { call } = input.transport;
   const ids = new Set<string>();
   return input.renderers.map((renderer) => {
     if (renderer[SLACK_ACTIVITY_RENDERER] !== true) {
@@ -116,13 +118,13 @@ export function buildSlackActivityRenderers(input: {
       throw new TypeError(`Duplicate Slack activity renderer "${renderer.id}".`);
     ids.add(renderer.id);
     if (renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID) {
-      return createSlackActivityRenderer(input.botToken);
+      return createSlackActivityRenderer(call);
     }
     if (renderer.id === SLACK_ACTIVITY_PLAN_RENDERER_ID) {
-      return createSlackPlanRenderer(input.botToken);
+      return createSlackPlanRenderer(call);
     }
     if (renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID) {
-      return createSlackStatusRenderer(input.botToken);
+      return createSlackStatusRenderer(call);
     }
     assertCustomSlackActivityRenderer(renderer);
     return createCustomSlackActivityRenderer(renderer);
@@ -203,7 +205,7 @@ function experimentalSlackActivityDestination(
   };
 }
 
-function createSlackStatusRenderer(botToken: SlackBotToken | undefined): ChannelActivityRenderer {
+function createSlackStatusRenderer(call: SlackApiCaller): ChannelActivityRenderer {
   return {
     id: SLACK_ACTIVITY_STATUS_RENDERER_ID,
     async dispose({ destination, state }) {
@@ -212,14 +214,11 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
       const installationTeamId = destination["installationTeamId"];
       const threadTs = destination["threadTs"];
       if (typeof channelId !== "string" || typeof threadTs !== "string" || threadTs === "") return;
-      const response = await callSlackApi({
-        body: { channel_id: channelId, status: "", thread_ts: threadTs },
-        botToken,
-        context: {
-          teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
-        },
-        operation: "assistant.threads.setStatus",
-      });
+      const response = await call(
+        "assistant.threads.setStatus",
+        { channel_id: channelId, status: "", thread_ts: threadTs },
+        { teamId: typeof installationTeamId === "string" ? installationTeamId : undefined },
+      );
       if (response.ok !== true)
         throw new Error(`Slack status disposal failed: ${response.error ?? "unknown_error"}`);
     },
@@ -233,13 +232,8 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
       if (isSlackStatusState(state) && state.status === status) return state;
       const body: Record<string, unknown> = { channel_id: channelId, status, thread_ts: threadTs };
       if (status !== "") body.loading_messages = [status];
-      const response = await callSlackApi({
-        body,
-        botToken,
-        context: {
-          teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
-        },
-        operation: "assistant.threads.setStatus",
+      const response = await call("assistant.threads.setStatus", body, {
+        teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
       });
       if (response.ok !== true) {
         throw new Error(
@@ -251,7 +245,7 @@ function createSlackStatusRenderer(botToken: SlackBotToken | undefined): Channel
   };
 }
 
-function createSlackActivityRenderer(botToken: SlackBotToken | undefined): ChannelActivityRenderer {
+function createSlackActivityRenderer(call: SlackApiCaller): ChannelActivityRenderer {
   return {
     id: SLACK_ACTIVITY_MESSAGE_RENDERER_ID,
     async dispose() {},
@@ -272,7 +266,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
         const current =
           previous[rootTurnId] ??
           (await recoverActivityMessage({
-            botToken,
+            call,
             channelId,
             installationTeamId,
             rootTurnId,
@@ -283,7 +277,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
           continue;
         }
         let response = await writeActivityMessage({
-          botToken,
+          call,
           channelId,
           current,
           installationTeamId,
@@ -297,7 +291,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
           response.error === "message_not_found"
         ) {
           response = await writeActivityMessage({
-            botToken,
+            call,
             channelId,
             installationTeamId,
             rootTurnId,
@@ -320,7 +314,7 @@ function createSlackActivityRenderer(botToken: SlackBotToken | undefined): Chann
 }
 
 async function writeActivityMessage(input: {
-  readonly botToken: SlackBotToken | undefined;
+  readonly call: SlackApiCaller;
   readonly channelId: string;
   readonly current?: { readonly ts: string };
   readonly installationTeamId: unknown;
@@ -328,29 +322,27 @@ async function writeActivityMessage(input: {
   readonly text: string;
   readonly threadTs: string;
 }) {
-  return await callSlackApi({
-    body:
-      input.current === undefined
-        ? {
-            channel: input.channelId,
-            metadata: {
-              event_payload: { root_turn_id: input.rootTurnId },
-              event_type: "eve_progress",
-            },
-            text: input.text,
-            thread_ts: input.threadTs,
-          }
-        : { channel: input.channelId, text: input.text, ts: input.current.ts },
-    botToken: input.botToken,
-    context: {
+  return await input.call(
+    input.current === undefined ? "chat.postMessage" : "chat.update",
+    input.current === undefined
+      ? {
+          channel: input.channelId,
+          metadata: {
+            event_payload: { root_turn_id: input.rootTurnId },
+            event_type: "eve_progress",
+          },
+          text: input.text,
+          thread_ts: input.threadTs,
+        }
+      : { channel: input.channelId, text: input.text, ts: input.current.ts },
+    {
       teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
     },
-    operation: input.current === undefined ? "chat.postMessage" : "chat.update",
-  });
+  );
 }
 
 async function recoverActivityMessage(input: {
-  readonly botToken: SlackBotToken | undefined;
+  readonly call: SlackApiCaller;
   readonly channelId: string;
   readonly installationTeamId: unknown;
   readonly rootTurnId: string;
@@ -366,13 +358,8 @@ async function recoverActivityMessage(input: {
       ts: input.threadTs,
     };
     if (cursor !== undefined) body.cursor = cursor;
-    const response = await callSlackApi({
-      body,
-      botToken: input.botToken,
-      context: {
-        teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
-      },
-      operation: "conversations.replies",
+    const response = await input.call("conversations.replies", body, {
+      teamId: typeof input.installationTeamId === "string" ? input.installationTeamId : undefined,
     });
     if (response.ok !== true || !Array.isArray(response.messages)) return undefined;
     for (const message of response.messages) {

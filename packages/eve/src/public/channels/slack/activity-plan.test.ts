@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import { createSlackTransport } from "#public/channels/slack/api-transport.js";
 import {
   buildSlackActivityRenderers,
   experimental_slackActivityPlan,
@@ -57,7 +58,7 @@ describe("Slack activity plan", () => {
       }),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityPlan()],
     })[0]!;
     const started = reduceActivityBatch(createActivitySnapshot(), {

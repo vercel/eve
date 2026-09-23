@@ -3,11 +3,8 @@ import type { FilePart, TextPart, UserContent } from "ai";
 import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
-import {
-  resolveSlackBotToken,
-  type SlackBotToken,
-  type SlackThread,
-} from "#public/channels/slack/api.js";
+import type { SlackTransport } from "#public/channels/slack/api-transport.js";
+import type { SlackThread } from "#public/channels/slack/api.js";
 import type { SlackAttachment, SlackMessage } from "#public/channels/slack/inbound.js";
 import {
   evaluateFilePart,
@@ -167,14 +164,15 @@ export function buildSlackTurnMessage(
  * with the bot token.
  */
 export function createSlackFetchFile(input: {
-  readonly botToken?: SlackBotToken;
+  /** The channel's bound Slack Web API transport. */
+  readonly transport: SlackTransport;
 }): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
   return async (url, context) => {
     if (!isSlackFileUrl(url)) {
       return null;
     }
     const installationTeamId = context?.state.installationTeamId;
-    const token = await resolveSlackBotToken(input.botToken, {
+    const token = await input.transport.resolveToken({
       teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
     });
     const response = await fetch(url, {

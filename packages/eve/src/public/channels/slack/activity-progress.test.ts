@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import { createSlackTransport } from "#public/channels/slack/api-transport.js";
 import {
   activityMessages,
   buildSlackActivityRenderers,
@@ -233,7 +234,7 @@ describe("Slack activity activity", () => {
       }),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityTree()],
     })[0]!;
     const state = await renderer.render({
@@ -283,7 +284,7 @@ describe("Slack activity activity", () => {
       }),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityTree()],
     })[0]!;
     const state = await renderer.render({
@@ -302,7 +303,7 @@ describe("Slack activity activity", () => {
       vi.fn(async () => Response.json({ ok: true, ts: "1700.1" })),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: tokenContext,
+      transport: createSlackTransport({ botToken: tokenContext }),
       renderers: [experimental_slackActivityTree()],
     })[0]!;
 
@@ -341,7 +342,7 @@ describe("Slack activity activity", () => {
       }),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityTree()],
     })[0]!;
     await renderer.render({
@@ -387,7 +388,7 @@ describe("Slack activity activity", () => {
       }),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityTree()],
     })[0]!;
     await renderer.render({
@@ -416,7 +417,7 @@ describe("Slack activity activity", () => {
       }),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityTree()],
     })[0]!;
     await renderer.render({
@@ -434,7 +435,7 @@ describe("Slack activity activity", () => {
 
   it("composes activity and status with isolated renderer state", () => {
     const renderers = buildSlackActivityRenderers({
-      botToken: "xoxb-test",
+      transport: createSlackTransport({ botToken: "xoxb-test" }),
       renderers: [experimental_slackActivityStatus(), experimental_slackActivityTree()],
     });
     expect(renderers.map((renderer) => renderer.id)).toEqual([

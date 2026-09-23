@@ -12,11 +12,10 @@ import {
 
 import { createLogger } from "#internal/logging.js";
 import { isSlackResponseError } from "#public/channels/slack/api-errors.js";
+import type { SlackTransport } from "#public/channels/slack/api-transport.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
-  callSlackApi,
-  resolveSlackBotToken,
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
@@ -232,6 +231,8 @@ function readInstallationTeamId(value: unknown): string | undefined {
 /** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
   readonly config: SlackChannelConfig;
+  /** The channel's bound Slack Web API transport. */
+  readonly transport: SlackTransport;
   readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
 }
 
@@ -269,7 +270,7 @@ export async function handleInteractionPost(
   }
 
   if (payload.kind === "slash_command") {
-    dispatchSlashCommand(payload, ctx, deps.config);
+    dispatchSlashCommand(payload, ctx, deps.config, deps.transport);
     return new Response(null, { status: 200 });
   }
 
@@ -328,7 +329,7 @@ export async function handleInteractionPost(
     if (customActions.length > 0) {
       const actionUser = customActions[0]!.user;
       const { thread, slack } = buildSlackBinding({
-        botToken: deps.config.credentials?.botToken,
+        transport: deps.transport,
         channelId: interaction.channelId,
         threadTs: interaction.threadTs,
         installationTeamId: interaction.installationTeamId,
@@ -440,7 +441,7 @@ function dispatchShortcut(
   }
 
   const shortcutCtx: SlackShortcutContext = buildShortcutContext({
-    config: deps.config,
+    transport: deps.transport,
     installationTeamId,
     teamId: shortcut.teamId,
   });
@@ -448,13 +449,13 @@ function dispatchShortcut(
 }
 
 function buildShortcutContext(input: {
-  readonly config: SlackChannelConfig;
+  readonly transport: SlackTransport;
   readonly installationTeamId: string | undefined;
   readonly teamId: string | undefined;
 }): SlackShortcutContext {
   return {
     slack: buildSlackWorkspaceHandle({
-      botToken: input.config.credentials?.botToken,
+      transport: input.transport,
       installationTeamId: input.installationTeamId,
       teamId: input.teamId,
     }),
@@ -564,20 +565,16 @@ async function openFreeformModal(input: {
 
   const promptText = readPromptTextFromBlocks(input.interaction.messageBlocks);
   const view = buildFreeformModalView({ metadata, prompt: promptText });
-  const token = await resolveSlackBotToken(input.deps.config.credentials?.botToken, {
+  const call = await input.deps.transport.bindToken({
     teamId: input.interaction.installationTeamId,
   });
 
   // Slack retries a click whose acknowledgement is not a 2xx, so a modal
   // that fails to open is logged and the click still acknowledged; a call
   // that never reached Slack is rethrown and fails the request. The token
-  // above resolves outside the try so a throwing resolver joins that case.
+  // binds outside the try so a throwing resolver joins that case.
   try {
-    await callSlackApi({
-      botToken: token,
-      operation: "views.open",
-      body: { trigger_id: triggerId, view },
-    });
+    await call("views.open", { trigger_id: triggerId, view });
   } catch (error) {
     if (!isSlackResponseError(error)) throw error;
     log.error("Slack views.open failed", { error });

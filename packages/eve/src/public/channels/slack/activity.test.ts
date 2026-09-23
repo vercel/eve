@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
+import { createSlackTransport } from "#public/channels/slack/api-transport.js";
 import {
   buildSlackActivityRenderers,
   experimental_slackActivityRenderer,
@@ -66,7 +67,10 @@ describe("Slack status activity", () => {
       render,
       dispose,
     });
-    const [renderer] = buildSlackActivityRenderers({ botToken: undefined, renderers: [custom] });
+    const [renderer] = buildSlackActivityRenderers({
+      transport: createSlackTransport({}),
+      renderers: [custom],
+    });
     const activitySnapshot = snapshot([
       { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
     ]);
@@ -241,7 +245,7 @@ describe("Slack status activity", () => {
       vi.fn(async () => Response.json({ ok: true })),
     );
     const renderer = buildSlackActivityRenderers({
-      botToken: tokenContext,
+      transport: createSlackTransport({ botToken: tokenContext }),
       renderers: [experimental_slackActivityStatus()],
     })[0]!;
 
@@ -261,7 +265,7 @@ describe("Slack status activity", () => {
     const fetchMock = vi.fn(async () => Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
     const renderer = buildSlackActivityRenderers({
-      botToken: undefined,
+      transport: createSlackTransport({}),
       renderers: [experimental_slackActivityStatus()],
     })[0]!;
     const active = snapshot([
@@ -287,7 +291,7 @@ describe("Slack status activity", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     const renderer = buildSlackActivityRenderers({
-      botToken: undefined,
+      transport: createSlackTransport({}),
       renderers: [experimental_slackActivityStatus()],
     })[0]!;
     await renderer.dispose?.({

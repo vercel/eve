@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger } from "#internal/logging.js";
+import type { SlackTransport } from "#public/channels/slack/api-transport.js";
 import { buildSlackBinding } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import { deriveHitlResponse } from "#public/channels/slack/hitl.js";
@@ -30,6 +31,7 @@ export async function authorizeInputResponse(input: {
   readonly channelId: string;
   readonly deps: {
     readonly config: SlackChannelConfig;
+    readonly transport: SlackTransport;
     readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
   };
   readonly installationTeamId: string | null | undefined;
@@ -45,7 +47,7 @@ export async function authorizeInputResponse(input: {
     userName: input.submission.user.username ?? input.submission.user.name,
   });
   const { thread, slack } = buildSlackBinding({
-    botToken: input.deps.config.credentials?.botToken,
+    transport: input.deps.transport,
     channelId: input.channelId,
     threadTs: input.threadTs,
     installationTeamId: input.installationTeamId ?? undefined,
