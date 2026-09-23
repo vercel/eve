@@ -19,6 +19,7 @@ import {
   resolveInstalledPackageInfo,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { AI_SDK_HARNESS_ADAPTER_TRACE_PATTERN } from "#internal/ai-sdk-harness-adapter-package.js";
 import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import type {
   PreparedApplicationHost,
@@ -725,7 +726,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("leaves Nitro to classify unconfigured hosted dependencies", async () => {
+  it("leaves Nitro to classify unconfigured hosted dependencies other than harness adapters", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -735,7 +736,9 @@ describe("application Nitro creation", () => {
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([
+      AI_SDK_HARNESS_ADAPTER_TRACE_PATTERN,
+    ]);
   });
 
   it("includes the workflow sandbox runtime plugin only for generated-program tools", async () => {
