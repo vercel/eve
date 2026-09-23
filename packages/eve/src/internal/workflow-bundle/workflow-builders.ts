@@ -1,5 +1,4 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
@@ -136,19 +135,6 @@ function toRealPath(path: string): string {
     return realpathSync(path);
   } catch {
     return resolve(path);
-  }
-}
-
-// Reads the manifest directly: applications need not declare a `version`,
-// which the package-specifier cache requires.
-export function isAuthoredApplicationRoot(appRoot: string): boolean {
-  const packageJsonPath = join(appRoot, "package.json");
-  if (!existsSync(packageJsonPath)) return false;
-  try {
-    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
-    return parsed.name !== EVE_PACKAGE_NAME;
-  } catch {
-    return false;
   }
 }
 
@@ -513,8 +499,4 @@ function isRootEntrypointFile(filePath: string, pkg: PackageInfo): boolean {
   );
 
   return rootCandidates.includes(relativeFilePath);
-}
-
-export async function readSourceFile(path: string): Promise<string> {
-  return await readFile(path, "utf8");
 }

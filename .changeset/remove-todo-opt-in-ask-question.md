@@ -1,9 +1,0 @@
----
-"eve": minor
----
-
-Remove the `todo` tool, its `eve/tools/todo` export, and the dev TUI todo panel; delete any `agent/tools/todo.ts`, including one that exports `disableTool()`, which now fails the build because there is no default `todo` tool to disable. Compaction no longer resets `write_file` read tracking, so a file read before compaction can be overwritten without re-reading it; stale-read detection still rejects the write if the file changed since that read.
-
-`ask_question` is no longer a default tool and is now an ordinary workflow tool built on `ctx.ask()`. Add it with `eve add tool/ask_question`, or change an existing `agent/tools/ask_question.ts` to `import { askQuestion } from "eve/tools/ask_question"; export default askQuestion();`. The model now asks one `question` with up to three `{ label, description }` options, can always receive a free-text answer, and gets back `{ status: "answered", answer }` with the chosen label or the user's words. In sessions that cannot request input, the tool is still available and returns `{ status: "unavailable" }`. If you disabled `ask_question` with `disableTool()`, delete that file; it now fails the build for the same reason.
-
-`ctx.ask()` now resolves to `{ status: "answered", optionId?, text? }`, `{ status: "dismissed" }`, or `{ status: "unavailable" }`; check `status` before reading `optionId`. It returns `unavailable` immediately when the session cannot request input. A plain-text message answers a blocking tool's `ctx.ask()` question when it is the only pending question and the message matches an option or the question allows free text. Pass `dismissible: true` to resolve the question as `dismissed` when the user sends an unrelated message instead. An `ask_question` request's `requestId` is no longer its tool call ID; use `action.callId` to relate a request to its tool call.

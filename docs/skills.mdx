@@ -84,6 +84,8 @@ Supporting files are for the model. After loading a skill, the model reads its r
 
 To serve a different skill per principal, tenant, or channel (the caller's own team playbook, say), wrap `defineSkill` in a `defineDynamic` resolver keyed on `ctx.session.auth`. See [Dynamic capabilities](./guides/dynamic-capabilities).
 
+Subagent lifecycle events do not re-run skill resolvers. The parent's resolved dynamic skills remain available when it resumes after delegation.
+
 ## What to read next
 
 - [Connections](./connections): add tools from external MCP and OpenAPI servers

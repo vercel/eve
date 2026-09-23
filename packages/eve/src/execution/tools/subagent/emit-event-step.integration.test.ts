@@ -1,7 +1,14 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { ContextContainer, loadContext } from "#context/container.js";
-import { AuthKey, SessionIdKey, SessionKey, SessionTitleKey } from "#context/keys.js";
+import {
+  AuthKey,
+  DynamicSkillManifestKey,
+  SandboxKey,
+  SessionIdKey,
+  SessionKey,
+  SessionTitleKey,
+} from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
@@ -55,8 +62,18 @@ it.each(
     const ctx = new ContextContainer();
     ctx.set(SessionIdKey, "parent");
     ctx.set(AuthKey, null);
+    ctx.set(DynamicSkillManifestKey, {
+      policy: [
+        {
+          name: "policy",
+          description: "Parent delegation policy",
+          markdown: "Delegate carefully.",
+        },
+      ],
+    });
     // SessionKey is virtual: a production deserializer cannot restore it.
     expect(ctx.has(SessionKey)).toBe(false);
+    expect(ctx.has(SandboxKey)).toBe(false);
     ctx.set(ChannelKey, {
       kind: "test",
       state: {},
@@ -120,6 +137,9 @@ it.each(
       const result = await emitted;
       expect(result.serializedContext[SessionTitleKey.name]).toBe("Research event received");
       expect(result.serializedContext[SessionKey.name]).toBeUndefined();
+      expect(result.serializedContext[DynamicSkillManifestKey.name]).toEqual(
+        ctx.require(DynamicSkillManifestKey),
+      );
       expect(ctx.require(ChannelKey).state).toEqual({ delivered: true });
       expect(calls).toEqual([
         "adapter",

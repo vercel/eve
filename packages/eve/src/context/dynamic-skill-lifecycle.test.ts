@@ -64,13 +64,14 @@ function createCtx(authoredSkillNames: readonly string[] = []) {
   });
   ctx.set(StaticModelReferenceKey, { id: "openai/gpt-5.5" });
   ctx.set(SessionIdKey, "test-session");
-  ctx.set(SandboxKey, {
+  const access = {
     captureState: async () => ({ session: state.session }),
     get,
     stop: async () => {},
-  });
+  };
+  ctx.setVirtualContext(SandboxKey, access);
   ctx.set(BundleKey, createMockBundle(authoredSkillNames));
-  return { ctx, get, sandbox, state };
+  return { access, ctx, get, sandbox, state };
 }
 
 function createResolver(
@@ -117,6 +118,53 @@ function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
 }
 
 describe("dispatchDynamicSkillEvent", () => {
+  it.each(["subagent.called", "subagent.completed", "turn.completed"] as const)(
+    "does not access the sandbox to rebuild announcements on %s",
+    async (type) => {
+      const ctx = new ContextContainer();
+      const manifest = {
+        policy: [{ name: "policy", description: "Tenant policy", markdown: "Tenant policy" }],
+      };
+      ctx.set(DynamicSkillManifestKey, manifest);
+
+      await dispatchDynamicSkillEvent({
+        ctx,
+        event: { type, data: {} } as UnstampedMessageStreamEvent,
+        messages: [],
+        resolvers: [],
+      });
+
+      expect(ctx.get(DynamicSkillManifestKey)).toEqual(manifest);
+      expect(ctx.has(PendingSkillAnnouncementKey)).toBe(false);
+    },
+  );
+
+  it("restores the skill announcement at the next model step without resolving skills again", async () => {
+    const { access, ctx } = createCtx();
+    const handler = vi.fn(() => makeSkill("Tenant policy"));
+    const resolver = createResolver("policy", handler);
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: makeEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    const announcement = ctx.get(PendingSkillAnnouncementKey);
+    expect(announcement).toContain("policy: Tenant policy");
+    ctx.clearVirtualContext();
+    ctx.setVirtualContext(SandboxKey, access);
+
+    await dispatchDynamicSkillEvent({
+      ctx,
+      event: { type: "step.started", data: {} } as UnstampedMessageStreamEvent,
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(PendingSkillAnnouncementKey)).toBe(announcement);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("announces when all dynamic skills are withdrawn without opening the sandbox", async () => {
     const { ctx, get } = createCtx();
     let enabled = true;

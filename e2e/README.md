@@ -84,7 +84,7 @@ pnpm test:e2e
 
 Vercel e2e uses the same fixture evals against immutable preview deployment
 URLs. All fixture deployments link to the same Vercel project id; isolation
-comes from the deployment URL returned by `vc deploy --prebuilt`.
+comes from the deployment URL returned by `vercel deploy --prebuilt`.
 
 One-time project setup:
 
@@ -93,15 +93,22 @@ One-time project setup:
   project's Preview environment.
 - Provide `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` in CI.
 
+The repository does not install the Vercel CLI. Locally, any global `vercel`
+install works. CI installs the latest native binary:
+
+```sh
+npm install --global --force --allow-scripts=@vercel/vc-native @vercel/vc-native
+```
+
 Run a fixture against Vercel from its directory:
 
 ```sh
-vc link --yes --project "$VERCEL_PROJECT_ID"
-vc env pull --yes --environment=preview
+vercel link --yes --project "$VERCEL_PROJECT_ID"
+vercel env pull --yes --environment=preview
 VERCEL=1 VERCEL_ENV=preview VERCEL_TARGET_ENV=preview \
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
   pnpm exec eve build
-DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview \
+DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
   --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" | tail -n 1)"
 npx eve eval --strict --url "$DEPLOYMENT_URL"
 ```
@@ -119,7 +126,7 @@ instruction-only redeploy preserves the sandbox workspace, a resource-changing
 redeploy rotates it, and a new session loads the new deployment's skill.
 
 The eval redeploys from inside its test body: it mutates the agent source,
-runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
+runs `eve build` + `vercel deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.
 Because immutable deployment URLs never change what they serve, the eval
 must run against the alias — the `e2e-vercel` workflow sets
@@ -212,7 +219,7 @@ mock-compatible evals:
 
 ```sh
 pnpm exec eve build
-DEPLOYMENT_URL="$(vc deploy --prebuilt --yes --target=preview \
+DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
   --env "EVE_E2E_MODEL=mock" | tail -n 1)"
 npx eve eval --strict --exclude-tag real-model \
   --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"

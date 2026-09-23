@@ -62,6 +62,7 @@ import {
   type PromptCommand,
   type PromptCommandSpec,
 } from "./prompt-commands.js";
+import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
 import {
   createRemoteConnectionController,
   type RemoteConnectionController,
@@ -470,6 +471,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Catalog entries available to inline `/model` and `/add` completion. */
+  argumentSuggestions?: (command: "model" | "add") => Promise<readonly PromptArgumentSuggestion[]>;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Remote target and mutable OIDC token source, when connected through `--url`. */
@@ -2069,6 +2072,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     contextSize: options.contextSize,
     logs: options.logs,
     availablePromptCommands: options.availablePromptCommands,
+    argumentSuggestions: options.argumentSuggestions,
     input: options.userInput,
     output: options.screen,
     diagnostics: options.diagnostics,
