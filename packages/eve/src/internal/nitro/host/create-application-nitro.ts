@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
+import { AI_SDK_HARNESS_ADAPTER_TRACE_PATTERN } from "#internal/ai-sdk-harness-adapter-package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
   resolvePackageRoot,
@@ -95,7 +96,7 @@ function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
 function collectHostedTraceDependencies(
   preparedHost: PreparedApplicationHost,
   configuredOptionalEnginePackages: readonly string[],
-): string[] {
+): Array<string | RegExp> {
   const extensionExternalDependencies = new Set(
     collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
   );
@@ -110,7 +111,8 @@ function collectHostedTraceDependencies(
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
-  const merged = new Set<string>([
+  const merged = new Set<string | RegExp>([
+    AI_SDK_HARNESS_ADAPTER_TRACE_PATTERN,
     // Optional engine packages (just-bash, microsandbox) join the
     // externalize-and-trace path only when the compiled sandbox config
     // selects their backend — the app's opt-in. Otherwise
@@ -123,7 +125,8 @@ function collectHostedTraceDependencies(
   ]);
   return [...merged].filter(
     (dependencyName) =>
-      dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
+      typeof dependencyName !== "string" ||
+      (dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`),
   );
 }
 

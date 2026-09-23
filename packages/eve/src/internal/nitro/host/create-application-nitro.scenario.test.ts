@@ -933,6 +933,31 @@ describe("application Nitro creation", () => {
     );
   });
 
+  it("traces imported AI SDK harness adapter packages", async () => {
+    const nitroStub = createNitroStub();
+    createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
+
+    const { createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+    const preparedHost = await createPreparedHost();
+
+    await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
+
+    const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps as unknown[];
+    const adapterPattern = traceDeps.find(
+      (dependency): dependency is RegExp =>
+        dependency instanceof RegExp &&
+        dependency.test("/workspace/node_modules/@ai-sdk/harness-codex/dist/index.js"),
+    );
+    expect(adapterPattern).toBeDefined();
+    expect(
+      adapterPattern?.test("C:\\workspace\\node_modules\\@ai-sdk\\harness-codex\\dist\\index.js"),
+    ).toBe(true);
+    expect(adapterPattern?.test("/workspace/node_modules/@ai-sdk/harness/dist/index.js")).toBe(
+      false,
+    );
+  });
+
   it("transforms the modules imported by the Nitro step entry", async () => {
     const nitroBuildDir = await mkdtemp(join(tmpdir(), "eve-nitro-build-"));
     const nitroStub = createNitroStub({
