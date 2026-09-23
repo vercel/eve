@@ -105,16 +105,6 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   /**
-   * Returns the AI SDK `ToolSet` produced by `@ai-sdk/mcp`'s
-   * `toolsFromDefinitions()`. Each entry is a full SDK `Tool` with
-   * `inputSchema`, `description`, and `execute` already set.
-   */
-  async getTools(): Promise<ToolSet> {
-    const cache = await this.#ensureTools();
-    return cache.tools;
-  }
-
-  /**
    * Executes a named tool through the AI SDK's tool executor, which
    * handles the JSON-RPC `tools/call` internally.
    *

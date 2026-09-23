@@ -4,8 +4,8 @@ description: "Configure OpenTelemetry destinations, content capture, and third-p
 url: "/observability/otel"
 ---
 
-`eve dev` records local traces automatically. You do not need `otel()` or
-`localTraces()` to use this default.
+`eve dev` records local traces by default. Use `otel()` for process-wide
+settings and `otelIntegration()` for third-party destinations.
 
 ## Configure OpenTelemetry
 
@@ -128,6 +128,11 @@ import { disableInstrumentation } from "eve/instrumentation";
 export default disableInstrumentation();
 ```
 
+## Enable tracing on Vercel
+
+For Agent Runs sampling defaults and existing-deployment setup, see
+[Enable tracing on Vercel](./agent-runs#enable-tracing-on-vercel).
+
 ## Filter a destination
 
 `otelIntegration()` and `localTraces()` accept one
@@ -156,33 +161,9 @@ A throwing `span` callback drops the span from this destination. Return
 `{ replace: true, value }` from `attribute` to retain, remove, or change
 one attribute.
 
-### Redact content from local traces
-
-Return a redaction decision to further narrow what the local trace destination
-receives after the process-wide `otel({ tracePolicy })` has admitted a trace.
-For example, keep spans in the local trace viewer while redacting their inputs
-and outputs unless the session is public:
-
-```ts title="agent/instrumentation/local.ts"
-import { localTraces } from "eve/instrumentation/otel";
-
-export default localTraces({
-  exportPolicy: {
-    span: ({ audience }) =>
-      audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
-  },
-});
-```
-
-Input redaction removes eve's known prompt, instruction, document, and
-tool-argument attributes. Output redaction removes response, reasoning,
-tool-result, exception, and status attributes. Redaction narrows only this
-destination; it does not mutate spans sent to another destination. Policies run
-in array order, and each policy receives the facade produced by the policies
-before it.
-
 ## What to read next
 
 - [Instrumentation](/docs/observability/instrumentation): handle eve lifecycle events.
+- [Agent Runs](./agent-runs): configure Vercel's built-in trace destination.
 - [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
 - [Local development](../guides/dev-tui): inspect local traces in the TUI.

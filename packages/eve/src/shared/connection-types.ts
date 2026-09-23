@@ -6,8 +6,6 @@
  * protocol-specific implementation such as MCP.
  */
 
-import type { ToolSet } from "ai";
-
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { JsonValue } from "#shared/json.js";
@@ -469,5 +467,4 @@ export interface ConnectionClient {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
-  getTools(): Promise<ToolSet>;
 }

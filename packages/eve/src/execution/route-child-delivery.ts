@@ -116,6 +116,7 @@ export async function routeDeliverToChildren(input: {
         sessionState,
       });
       serializedContext = emitted.serializedContext;
+      sessionState = emitted.sessionState;
     }
   }
 

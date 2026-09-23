@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.65.0",
+  "version": "0.66.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -344,6 +344,30 @@
       "import": "./dist/src/self-modification/sandbox.js",
       "default": "./dist/src/self-modification/sandbox.js"
     },
+    "./extensions/code": {
+      "eve-source": "./dist/src/extensions/code/extension/extension.js",
+      "types": "./dist/src/extensions/code/extension/extension.d.ts",
+      "import": "./dist/src/extensions/code/extension/extension.js",
+      "default": "./dist/src/extensions/code/extension/extension.js"
+    },
+    "./extensions/code/tools": {
+      "eve-source": "./dist/src/extensions/code/tools.js",
+      "types": "./dist/src/extensions/code/tools.d.ts",
+      "import": "./dist/src/extensions/code/tools.js",
+      "default": "./dist/src/extensions/code/tools.js"
+    },
+    "./extensions/code/sandbox": {
+      "eve-source": "./dist/src/extensions/code/extension/lib/sandbox.js",
+      "types": "./dist/src/extensions/code/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/extensions/code/extension/lib/sandbox.js",
+      "default": "./dist/src/extensions/code/extension/lib/sandbox.js"
+    },
+    "./extensions/code/prwatch": {
+      "eve-source": "./dist/src/extensions/code/extension/lib/prwatch.js",
+      "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
+      "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
+      "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -491,6 +515,7 @@
     "@ai-sdk/otel": "catalog:",
     "@ai-sdk/provider": "catalog:",
     "@ai-sdk/provider-utils": "catalog:",
+    "@cfworker/json-schema": "4.1.1",
     "@chat-adapter/slack": "4.41.0",
     "@chat-adapter/state-memory": "4.41.0",
     "@chat-adapter/twilio": "4.41.0",
@@ -511,6 +536,7 @@
     "@types/react": "catalog:",
     "@types/react-test-renderer": "19.1.0",
     "@vercel/blob": "2.8.0",
+    "@vercel/connect": "catalog:",
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
@@ -588,6 +614,9 @@
     "builtInExtensions": {
       "./self-modification": {
         "dist": "./dist/src/self-modification/extension"
+      },
+      "./extensions/code": {
+        "dist": "./dist/src/extensions/code/extension"
       }
     }
   }

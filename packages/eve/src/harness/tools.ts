@@ -15,6 +15,7 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
@@ -74,7 +75,7 @@ export function buildToolSet(input: {
     const aiTool = tool({
       description: definition.description,
       execute: wrapToolExecute(definition, backgroundBatch),
-      inputSchema: definition.inputSchema,
+      inputSchema: toModelSchema(definition.inputSchema, "input"),
       ...(definition.execution === "background"
         ? {
             onInputAvailable: ({
@@ -95,7 +96,7 @@ export function buildToolSet(input: {
             },
           }
         : {}),
-      outputSchema: definition.outputSchema,
+      outputSchema: toModelSchema(definition.outputSchema, "output"),
       ...(definition.execute !== undefined
         ? {
             toModelOutput: async ({

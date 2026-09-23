@@ -10,7 +10,7 @@ Connections live under `agent/connections/`. A static connection's runtime name 
 
 ## MCP connections
 
-Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model.
+Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model. Each tool's JSON Schema reaches the model as published, minus any arguments you supply with `toolCall.providedArguments`, and eve checks the model's arguments against it before it calls the server.
 
 Read [MCP connections](/docs/connections/mcp) for `defineMcpClientConnection`, transport requirements, and MCP tool filters.
 

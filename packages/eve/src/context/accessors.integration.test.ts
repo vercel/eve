@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/sandbox.js";
+import { VercelSandbox } from "#public/sandbox/vercel.js";
 
 /**
  * Integration coverage for {@link buildCallbackContext} — the single
@@ -12,8 +12,7 @@ import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/
  *
  * Each case runs in-memory through the AppHarness.
  * `runtime.runAsSession(init, fn)` binds the authored context and
- * invokes `fn`. `mockSkill()` owns its own tmpdir cleanup via an
- * internally-registered `afterEach`.
+ * invokes `fn`.
  */
 
 describe("buildCallbackContext – session", () => {
@@ -100,6 +99,33 @@ describe("buildCallbackContext – getSandbox", () => {
     expect(sandbox.commandLog).toEqual(["echo ready"]);
   });
 
+  it("accepts the configured sandbox environment", async () => {
+    const environment = VercelSandbox.environment();
+    const sandbox = mockSandbox();
+    const runtime = await createTestRuntime();
+
+    const live = await runtime.runAsSession(
+      { sandboxAccess: { ...sandbox.access, environment } },
+      async () => await buildCallbackContext().getSandbox(environment),
+    );
+
+    expect(live).toBeDefined();
+  });
+
+  it("rejects a sandbox environment that is not active for the session", async () => {
+    const environment = VercelSandbox.environment();
+    const otherEnvironment = VercelSandbox.environment();
+    const sandbox = mockSandbox();
+    const runtime = await createTestRuntime();
+
+    await expect(
+      runtime.runAsSession(
+        { sandboxAccess: { ...sandbox.access, environment } },
+        async () => await buildCallbackContext().getSandbox(otherEnvironment),
+      ),
+    ).rejects.toThrow("The requested sandbox environment is not active for the current session.");
+  });
+
   it("passes file operations through the expanded session surface", async () => {
     const sandbox = mockSandbox({
       id: "sbx_public_sandbox_file",
@@ -154,53 +180,5 @@ describe("buildCallbackContext – getSandbox", () => {
     });
 
     expect(deletions).toBe(1);
-  });
-});
-
-describe("buildCallbackContext – getSkill", () => {
-  it("throws when no authored runtime context is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active eve context");
-  });
-
-  it("throws when authored runtime execution does not include skill access", async () => {
-    const runtime = await createTestRuntime();
-
-    await expect(
-      runtime.runAsSession({}, () => buildCallbackContext().getSkill("semantic-model")),
-    ).rejects.toThrow("eve sandbox runtime access is unavailable in the current async context.");
-  });
-
-  it("resolves visible skill files across async boundaries", async () => {
-    const skill = await mockSkill({
-      name: "semantic-model",
-      description: "Inspect the semantic model.",
-      markdown: "Inspect the semantic model.",
-      references: { "catalog.yml": "entities: []\n" },
-    });
-
-    const sandbox = mockSandbox({
-      initialFiles: {
-        "/workspace/skills/semantic-model/SKILL.md": "Inspect the semantic model.",
-        "/workspace/skills/semantic-model/references/catalog.yml": "entities: []\n",
-      },
-    });
-    const runtime = await createTestRuntime({ skills: [skill.source] });
-
-    const result = await runtime.runAsSession({ sandbox }, async () => {
-      await Promise.resolve();
-      const ctx = buildCallbackContext();
-
-      return {
-        skill: ctx.getSkill("semantic-model"),
-        text: await ctx.getSkill("semantic-model").file("references/catalog.yml").text(),
-      };
-    });
-
-    expect(result.skill.name).toBe("semantic-model");
-    await expect(result.skill.file("SKILL.md").text()).resolves.toBe("Inspect the semantic model.");
-    await expect(result.skill.file("references/catalog.yml").text()).resolves.toBe(
-      "entities: []\n",
-    );
-    expect(result.text).toBe("entities: []\n");
   });
 });

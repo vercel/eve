@@ -43,7 +43,7 @@ describe("taskCancel.outputSchema", () => {
   it("preserves the broad task-control output contract", () => {
     expect(taskCancel.outputSchema).toBe(TASK_VIEWS_OUTPUT_SCHEMA);
     expect(
-      TASK_VIEWS_OUTPUT_SCHEMA.parse({
+      TASK_VIEWS_OUTPUT_SCHEMA["~standard"].validate({
         tasks: [
           {
             inputRequests: [{ prompt: "Choose" }],
@@ -54,6 +54,6 @@ describe("taskCancel.outputSchema", () => {
           },
         ],
       }),
-    ).toMatchObject({ tasks: [{ status: "working", taskId: "task-1" }] });
+    ).toMatchObject({ value: { tasks: [{ status: "working", taskId: "task-1" }] } });
   });
 });

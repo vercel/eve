@@ -11,12 +11,15 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
 const SELF_MODIFICATION_AGENT = "self-modification__agent";
 const CLEANUP_TIMEOUT_MS = 30_000;
+const REBUILD_TIMEOUT_MS = 30_000;
+const REBUILD_POLL_INTERVAL_MS = 100;
 const LOCK_DIRECTORY = ".eve-self-modification-eval.lock";
 // Each eval entry bundles its relative imports separately. Share the lock across those copies.
 const shared = globalThis as typeof globalThis & {
@@ -93,12 +96,19 @@ export class SelfModificationHarness {
   readonly #t: EveEvalContext;
   readonly #sourceRoot: string;
   readonly #backupRoot: string;
+  readonly #projectFiles: ReadonlyMap<string, Buffer | undefined>;
   readonly #turns = new Set<EveEvalLiveTurn>();
 
-  private constructor(t: EveEvalContext, sourceRoot: string, backupRoot: string) {
+  private constructor(
+    t: EveEvalContext,
+    sourceRoot: string,
+    backupRoot: string,
+    projectFiles: ReadonlyMap<string, Buffer | undefined>,
+  ) {
     this.#t = t;
     this.#sourceRoot = sourceRoot;
     this.#backupRoot = backupRoot;
+    this.#projectFiles = projectFiles;
   }
 
   static async create(
@@ -119,7 +129,23 @@ export class SelfModificationHarness {
     try {
       await options.onBackupCreated?.(backupRoot);
       await cp(sourceRoot, join(backupRoot, "agent"), { recursive: true, verbatimSymlinks: true });
-      return new SelfModificationHarness(t, sourceRoot, backupRoot);
+      const projectRoot = dirname(sourceRoot);
+      const projectFiles = new Map<string, Buffer | undefined>();
+      for (const path of [
+        join(projectRoot, ".env.local"),
+        join(projectRoot, ".env.example"),
+        join(projectRoot, "package.json"),
+        resolve(projectRoot, "../../../pnpm-lock.yaml"),
+      ]) {
+        projectFiles.set(
+          path,
+          await readFile(path).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return undefined;
+            throw error;
+          }),
+        );
+      }
+      return new SelfModificationHarness(t, sourceRoot, backupRoot, projectFiles);
     } catch (error) {
       await rm(backupRoot, { recursive: true, force: true });
       throw error;
@@ -168,8 +194,48 @@ export class SelfModificationHarness {
       ),
       continuation?.result().then((turn) => turn.expectOk()),
     ]);
-    this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
+    this.#t.calledSubagent(SELF_MODIFICATION_AGENT, { status: "working" });
     return { child, parent, session: liveParent.session };
+  }
+
+  /** Approves the registry install on the parent and observes the resumed child turn. */
+  async approveRegistry(run: SelfModificationRun): Promise<EveEvalTurn> {
+    const toolName = "registry_add";
+    const liveParent = this.#t.target.watchTurn(run.session.sessionId, {
+      startIndex: run.session.state.streamIndex,
+    });
+    this.#turns.add(liveParent);
+    const approval = await liveParent.waitForEvent("input.requested", {
+      data: { requests: [{ action: { kind: "tool-call", toolName } }] },
+    });
+    const requests = approval.data.requests.filter(
+      (request) => request.action.kind === "tool-call" && request.action.toolName === toolName,
+    );
+    if (requests.length !== 1) {
+      throw new Error(`Expected one pending ${toolName} approval, found ${requests.length}.`);
+    }
+    (await liveParent.result()).expectOk();
+    const session = liveParent.session;
+    session.requireInputRequest({ toolName });
+    const childSessionId = run.child.sessionId;
+    const previousChild = [...this.#turns]
+      .reverse()
+      .find((turn) => turn.sessionId === childSessionId);
+    if (previousChild === undefined) throw new Error("Missing registry child session cursor.");
+    const child = this.#t.target.watchTurn(childSessionId, {
+      startIndex: previousChild.session.state.streamIndex,
+    });
+    this.#turns.add(child);
+    const responses = session.pendingInputRequests.map((request) => ({
+      optionId: "approve",
+      requestId: request.requestId,
+    }));
+    const parent = await session.startRespond(responses);
+    this.#turns.add(parent);
+    const [childTurn, parentTurn] = await Promise.all([child.result(), parent.result()]);
+    childTurn.expectOk();
+    parentTurn.expectOk();
+    return childTurn;
   }
 
   followUp(session: EveEvalSession, prompt: string): Promise<EveEvalTurn> {
@@ -188,6 +254,43 @@ export class SelfModificationHarness {
       throw new Error("Self-modification rebuild did not return a runtime revision.");
     }
     this.#t.log(`Self-modification runtime revision: ${body.revision}`);
+  }
+
+  async runtimeRevision(): Promise<string> {
+    const revision = await this.#readRuntimeRevision();
+    if (revision === undefined)
+      throw new Error("Could not read the current authored runtime revision.");
+    return revision;
+  }
+
+  async waitForRebuild(previousRevision: string): Promise<string> {
+    const deadline = Date.now() + REBUILD_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      this.#t.signal.throwIfAborted();
+      const revision = await this.#readRuntimeRevision();
+      if (revision !== undefined && revision !== previousRevision) {
+        this.#t.log(`Self-modification runtime revision: ${revision}`);
+        return revision;
+      }
+      await delay(REBUILD_POLL_INTERVAL_MS, undefined, { signal: this.#t.signal });
+    }
+    throw new Error(`Authored runtime did not rebuild within ${REBUILD_TIMEOUT_MS}ms.`);
+  }
+
+  async #readRuntimeRevision(): Promise<string | undefined> {
+    try {
+      const response = await this.#t.target.fetch("/eve/v1/dev/runtime-artifacts", {
+        signal: this.#t.signal,
+      });
+      if (!response.ok) return undefined;
+      const body = (await response.json()) as { revision?: unknown };
+      return typeof body.revision === "string" && body.revision.length > 0
+        ? body.revision
+        : undefined;
+    } catch {
+      this.#t.signal.throwIfAborted();
+      return undefined;
+    }
   }
 
   async assertOnlyChanged(sourcePaths: readonly string[]): Promise<void> {
@@ -257,6 +360,10 @@ export class SelfModificationHarness {
         recursive: true,
         verbatimSymlinks: true,
       });
+      for (const [path, content] of this.#projectFiles) {
+        if (content === undefined) await rm(path, { force: true });
+        else await writeFile(path, content);
+      }
     } finally {
       await this.#post(`resume?lease=${lease}`, signal);
     }

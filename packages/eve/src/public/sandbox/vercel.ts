@@ -1,3 +1,12 @@
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+
+/** Live sandbox capabilities exposed by a Vercel environment. */
+export interface VercelSandboxSession extends SandboxSession {
+  /** Applies a firewall policy to the live Vercel Sandbox. */
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+}
+
 export {
   VercelSandbox,
   type VercelSandboxEnvironmentOptions,

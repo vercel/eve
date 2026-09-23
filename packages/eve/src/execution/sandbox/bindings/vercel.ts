@@ -1,4 +1,7 @@
-import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,
@@ -82,7 +85,7 @@ export function createVercelSandboxProvider(
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
-  MutableNetworkSandboxSession
+  NetworkPolicySandboxSession
 > {
   const { prepare, ...authoredCreateOptions } = environmentOptions ?? {};
   return createVercelSandbox({ createOptions: authoredCreateOptions, prepare });
@@ -103,7 +106,7 @@ export function createVercelSandbox(
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
-  MutableNetworkSandboxSession
+  NetworkPolicySandboxSession
 > {
   const loadSandboxModule =
     input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
@@ -536,7 +539,7 @@ function createHandle(input: {
   readonly createOptions: VercelCreateOptions;
   readonly loadDeleteSandboxModule: () => Promise<VercelModule>;
   readonly sandbox: VercelSandbox;
-}): SandboxProviderHandle<MutableNetworkSandboxSession> {
+}): SandboxProviderHandle<NetworkPolicySandboxSession> {
   const { sandbox } = input;
   return {
     sandbox: buildSandboxSession(

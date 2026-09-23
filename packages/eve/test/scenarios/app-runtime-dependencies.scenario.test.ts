@@ -810,7 +810,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).toContain(
       "Execute a shell command in the shared workspace environment.",
     );
-    expect(serverModuleSource).toContain("The dynamic skill");
+    expect(serverModuleSource).toContain("is an installed connection, not a skill.");
     expect(serverModuleSource).toContain("URL must start with https://");
   }, 30_000);
 

@@ -105,7 +105,6 @@ import template from "../../prompts/template.txt?raw";
 | --------------------------- | ---------------------------------------------------------------------------- |
 | `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)         |
 | `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute but preserves durable state   |
-| `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |
 | `ctx.requireAuth(provider)` | Evict and re-authorize an inline provider, commonly after a downstream `401` |
 
@@ -139,7 +138,7 @@ Tool definitions accept `availableInSubagents: false` to restrict the tool to to
 | `eve/context`                                                          | `defineState`, session and state types                                                                                         |
 | `eve/sandbox`                                                          | `defineSandbox`, provider environments, and sandbox session types                                                              |
 | `eve/instrumentation`                                                  | `defineInstrumentation`, `disableInstrumentation`, `isChannel`, lifecycle provider types                                       |
-| `eve/instrumentation/otel`                                             | `otel`, `otelIntegration`, `localTraces`, OpenTelemetry policy types                                                           |
+| `eve/instrumentation/otel`                                             | `otel`, `otelIntegration`, `localTraces`, `agentRuns`, OpenTelemetry policy types                                              |
 | `eve/local-dev`                                                        | `getLocalDevCapability`, `LocalDevCapability`                                                                                  |
 | [`eve/models`](../guides/evaluate)                                     | Automatic model selection with `auto`                                                                                          |
 | `eve/models/openai`                                                    | `openai`, `chatgpt`, deprecated `experimental_chatgpt`                                                                         |

@@ -108,6 +108,25 @@ async function assertTreeRestored(root) {
   await assert.rejects(readFile(join(root, "unexpected.txt")));
 }
 
+test("close restores registry installer project files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-project-"));
+  await mkdir(join(root, "agent"));
+  await writeFile(join(root, ".env.example"), "EXISTING=original\n");
+  await writeFile(join(root, "package.json"), '{"name":"original"}\n');
+  const harness = await SelfModificationHarness.create(context(targetFor()), join(root, "agent"));
+  try {
+    await writeFile(join(root, ".env.example"), "EXISTING=changed\n");
+    await writeFile(join(root, ".env.local"), "BROWSER_USE_API_KEY=\n");
+    await writeFile(join(root, "package.json"), '{"name":"changed"}\n');
+    await harness.close();
+    assert.equal(await readFile(join(root, ".env.example"), "utf8"), "EXISTING=original\n");
+    assert.equal(await readFile(join(root, "package.json"), "utf8"), '{"name":"original"}\n');
+    await assert.rejects(readFile(join(root, ".env.local")), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("close retires every session before restoring the complete source tree", async () => {
   const child = liveTurn("child");
   const verification = liveTurn("verification");
@@ -334,6 +353,25 @@ test("a failed eval restores source, releases its checkout lock, and preserves t
   assert.equal(await readFile(join(root, "agent", "instructions.md"), "utf8"), "baseline");
   await assert.rejects(readFile(join(root, "agent", "tools", "unexpected.ts")));
   await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
+});
+
+test("waitForRebuild polls until the authored runtime revision changes", async () => {
+  await withHarness(async ({ harness, target, close }) => {
+    let reads = 0;
+    const fetch = target.fetch;
+    target.fetch = async (path, options) => {
+      if (path === "/eve/v1/dev/runtime-artifacts") {
+        reads += 1;
+        return response({ revision: reads < 3 ? "before" : "after" });
+      }
+      return fetch(path, options);
+    };
+
+    const previous = await harness.runtimeRevision();
+    assert.equal(await harness.waitForRebuild(previous), "after");
+    assert.equal(reads, 3);
+    await close();
+  });
 });
 
 test("apply rejects a rebuild response without a runtime revision", async () => {

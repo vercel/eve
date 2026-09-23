@@ -11,9 +11,11 @@ import {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { createLogger } from "#internal/logging.js";
+import { isSlackResponseError } from "#public/channels/slack/api-errors.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
+  callSlackApi,
   resolveSlackBotToken,
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
@@ -181,10 +183,6 @@ function extractActionLabel(action: Record<string, unknown>): string | undefined
   return undefined;
 }
 
-function findPromptBlock(blocks: readonly unknown[]): unknown {
-  return findPromptBlocks(blocks)[0];
-}
-
 function findPromptBlocks(blocks: readonly unknown[]): unknown[] {
   const promptBlocks: unknown[] = [];
   for (const block of blocks) {
@@ -203,7 +201,7 @@ function findPromptBlocks(blocks: readonly unknown[]): unknown[] {
 }
 
 function readPromptTextFromBlocks(blocks: readonly unknown[]): string | undefined {
-  const prompt = findPromptBlock(blocks) as { text?: unknown } | undefined;
+  const prompt = findPromptBlocks(blocks)[0] as { text?: unknown } | undefined;
   const text = readSlackTextObject(prompt?.text);
   return text.length > 0 ? text : undefined;
 }
@@ -570,16 +568,19 @@ async function openFreeformModal(input: {
     teamId: input.interaction.installationTeamId,
   });
 
-  const response = await fetch("https://slack.com/api/views.open", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json; charset=utf-8",
-    },
-    body: JSON.stringify({ trigger_id: triggerId, view }),
-  });
-  if (!response.ok) {
-    log.error("Slack views.open returned non-2xx", { status: response.status });
+  // Slack retries a click whose acknowledgement is not a 2xx, so a modal
+  // that fails to open is logged and the click still acknowledged; a call
+  // that never reached Slack is rethrown and fails the request. The token
+  // above resolves outside the try so a throwing resolver joins that case.
+  try {
+    await callSlackApi({
+      botToken: token,
+      operation: "views.open",
+      body: { trigger_id: triggerId, view },
+    });
+  } catch (error) {
+    if (!isSlackResponseError(error)) throw error;
+    log.error("Slack views.open failed", { error });
   }
 }
 

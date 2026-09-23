@@ -1,3 +1,8 @@
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import {
   getGitHubPullRequest,
   getGitHubRepository,
@@ -10,7 +15,6 @@ import {
 } from "#public/channels/github/auth.js";
 import { gitHubGitBrokerNetworkPolicy, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const DEFAULT_CHECKOUT_PATH = "/workspace";
 const DEFAULT_CHECKOUT_DEPTH = 1;
@@ -65,7 +69,7 @@ export interface GitHubCheckoutInput extends GitHubCheckoutOptions {
  * Channel-internal; not part of the public GitHub channel API.
  */
 export async function checkoutGitHubRepository(
-  sandbox: SandboxSession,
+  sandbox: NetworkPolicySandboxSession,
   input: GitHubCheckoutInput,
 ): Promise<GitHubCheckout> {
   const descriptor = await resolveCheckoutDescriptor(input);
@@ -99,9 +103,6 @@ export async function checkoutGitHubRepository(
   // (token-free) URL and the platform injects `Authorization` on egress to
   // GitHub, so the token never enters the sandbox process. The `"*"` rule keeps
   // the agent's other egress open.
-  if (sandbox.setNetworkPolicy === undefined) {
-    throw new Error("GitHub checkout requires a sandbox provider with mutable network policy.");
-  }
   await sandbox.setNetworkPolicy(gitHubGitBrokerNetworkPolicy(token));
 
   await runCheckoutCommand({

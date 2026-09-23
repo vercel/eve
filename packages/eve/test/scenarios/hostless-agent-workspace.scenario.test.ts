@@ -1,5 +1,4 @@
 import { access, readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -7,8 +6,7 @@ import { describe, expect, it } from "vitest";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
-const require = createRequire(import.meta.url);
-const vercelManifest = require("vercel/package.json") as { version: string };
+const VERCEL_VERSION = "59.5.0";
 const scenarioApp = useScenarioApp();
 
 describe("hostless agent workspace", () => {
@@ -36,17 +34,12 @@ describe("hostless agent workspace", () => {
         )}\n`,
         "pnpm-workspace.yaml": "minimumReleaseAge: 0\n",
       },
-      dependencies: { vercel: vercelManifest.version },
+      dependencies: { vercel: VERCEL_VERSION },
       installDependencies: true,
       name: "hostless-agent-workspace",
     });
     await runPnpmCommand({
-      args: [
-        "exec",
-        "vercel",
-        "build",
-        "--yes",
-      ],
+      args: ["exec", "vercel", "build", "--yes"],
       cwd: app.appRoot,
     });
 

@@ -334,6 +334,10 @@ export default defineHook({
 
 `toolResultFrom` recognizes the mounted `crm__search` result from the original definition, not the namespaced string. Publishers should keep tool descriptions distinct so eve can assign each definition an unambiguous identity.
 
+### Bundled development extensions
+
+Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server. Bundled development extensions are not included in production builds. See [Self-Modification](./guides/self-modification) for the local workflow.
+
 ### Compatibility
 
 At build time, eve checks the extension's generated capability metadata. If the extension needs an unsupported capability contract, upgrade eve or install a compatible extension release.

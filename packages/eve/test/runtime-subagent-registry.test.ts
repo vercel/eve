@@ -29,11 +29,11 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 describe("createRuntimeSubagentRegistry", () => {
   it("accepts null as an omitted agentId", () => {
     expect(
-      subagentToolInputSchema.parse({
+      subagentToolInputSchema["~standard"].validate({
         agentId: null,
         message: "Investigate this",
       }),
-    ).toEqual({ agentId: null, message: "Investigate this" });
+    ).toEqual({ value: { agentId: null, message: "Investigate this" } });
   });
 
   it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {

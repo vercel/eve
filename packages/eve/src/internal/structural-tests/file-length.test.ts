@@ -27,6 +27,8 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
+// Generated copy of `@eve/code` (see scripts/sync-code-extension.mjs); its source lives outside eve.
+const GENERATED_SOURCE_PREFIXES = ["extensions/code/extension/"];
 
 describe("source file structure", () => {
   it("keeps production source files below the line-count cap", async () => {
@@ -37,6 +39,7 @@ describe("source file structure", () => {
     for (const file of sourceFiles) {
       const content = await readFile(file, "utf8");
       const relPath = toPosix(relative(SOURCE_ROOT, file));
+      if (GENERATED_SOURCE_PREFIXES.some((prefix) => relPath.startsWith(prefix))) continue;
       const lineCount = countLines(content);
 
       if (lineCount <= MAX_SOURCE_FILE_LINES) continue;

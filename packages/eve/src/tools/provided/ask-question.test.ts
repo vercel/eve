@@ -11,6 +11,12 @@ import {
 import { askQuestion } from "#tools/provided/ask-question.js";
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
+function accepts(value: unknown): boolean {
+  const result = ASK_QUESTION_INPUT_SCHEMA["~standard"].validate(value);
+  if (result instanceof Promise) throw new Error("Expected synchronous validation.");
+  return result.issues === undefined;
+}
+
 const colorQuestion = {
   options: [
     { description: "Warm and bold.", label: "Red (Recommended)" },
@@ -34,36 +40,32 @@ describe("askQuestion", () => {
   });
 
   it("accepts one question with at most three label and description options", () => {
-    expect(ASK_QUESTION_INPUT_SCHEMA.safeParse(colorQuestion).success).toBe(true);
+    expect(accepts(colorQuestion)).toBe(true);
+    expect(accepts({ question: "What should we call it?" })).toBe(true);
     expect(
-      ASK_QUESTION_INPUT_SCHEMA.safeParse({ question: "What should we call it?" }).success,
-    ).toBe(true);
-    expect(
-      ASK_QUESTION_INPUT_SCHEMA.safeParse({
+      accepts({
         options: [colorQuestion.options[0]],
         question: "Only one choice?",
-      }).success,
+      }),
     ).toBe(false);
     expect(
-      ASK_QUESTION_INPUT_SCHEMA.safeParse({
+      accepts({
         options: [...colorQuestion.options, ...colorQuestion.options],
         question: "Too many choices?",
-      }).success,
+      }),
     ).toBe(false);
     expect(
-      ASK_QUESTION_INPUT_SCHEMA.safeParse({
+      accepts({
         options: colorQuestion.options.map((option, index) => ({ ...option, id: `${index}` })),
         question: colorQuestion.question,
-      }).success,
+      }),
     ).toBe(false);
+    expect(accepts({ ...colorQuestion, questions: [colorQuestion] })).toBe(false);
     expect(
-      ASK_QUESTION_INPUT_SCHEMA.safeParse({ ...colorQuestion, questions: [colorQuestion] }).success,
-    ).toBe(false);
-    expect(
-      ASK_QUESTION_INPUT_SCHEMA.safeParse({
+      accepts({
         options: [colorQuestion.options[1], colorQuestion.options[1]],
         question: "Blue or blue?",
-      }).success,
+      }),
     ).toBe(false);
   });
 });

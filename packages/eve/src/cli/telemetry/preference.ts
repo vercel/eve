@@ -7,7 +7,7 @@ import {
 } from "#cli/telemetry/identity.js";
 import { dirname, isAbsolute, join } from "node:path";
 
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 const EVE_TELEMETRY_NOTICE_VERSION = 1;
 

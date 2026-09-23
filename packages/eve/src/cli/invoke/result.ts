@@ -1,5 +1,5 @@
 import { z } from "#compiled/zod/index.js";
-import { inputOptionSchema, inputRequestSchema, type InputRequest } from "#client/index.js";
+import { inputOptionSchema, inputRequestSchema, type InputRequest } from "#shared/input.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 
 const sessionCursorSchema = z

@@ -11,7 +11,7 @@ import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/mult
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import type { SandboxProviderHandle, SandboxProviderHost } from "#shared/sandbox-provider.js";
-import type { FixedNetworkSandboxSession } from "#shared/sandbox-session.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import type {
@@ -203,9 +203,7 @@ export async function createBashSandbox(input: {
  * Throw rather than silently no-op so brokering code surfaces the gap instead
  * of leaking.
  */
-export function createJustBashHandle(
-  sandbox: BashSandbox,
-): SandboxProviderHandle<FixedNetworkSandboxSession> {
+export function createJustBashHandle(sandbox: BashSandbox): SandboxProviderHandle<SandboxSession> {
   const session = buildSandboxSession(createFileBackedInternalSandboxSession({ sandbox }));
   return {
     sandbox: session,

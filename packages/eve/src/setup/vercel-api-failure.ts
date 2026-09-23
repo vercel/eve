@@ -1,5 +1,5 @@
 import type { VercelCaptureFailure, VercelCaptureResult } from "#setup/primitives/index.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 const VercelApiErrorSchema = z.object({
   error: z

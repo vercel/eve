@@ -67,20 +67,19 @@ function rewriteDeclarationImports(
 }
 
 describe("compiled vendor assets", () => {
-  it("lazily compiles schemas created by the vendored Zod runtime", async () => {
+  it("leaves Zod's process-global configuration to the app", async () => {
+    // Every Zod copy in a process shares `globalThis.__zod_globalConfig`, so a
+    // vendored side effect there would rewrite the app's own schemas too.
     const zodUrl = pathToFileURL(join(COMPILED_VENDOR_ROOT, "zod", "index.js")).href;
     const { z } = await import(zodUrl);
-    const schema = z.object({
-      id: z.string(),
-      nested: z.array(z.object({ active: z.boolean(), count: z.number() })),
-    });
+    const schema = z.object({ id: z.string() });
 
+    expect(schema.parse({ id: "agent" })).toEqual({ id: "agent" });
+    expect(
+      (globalThis as { __zod_globalConfig?: { postProcessor?: unknown } }).__zod_globalConfig
+        ?.postProcessor,
+    ).toBeUndefined();
     expect(schema._zod.bag.validator).toBeUndefined();
-    expect(schema.parse({ id: "agent", nested: [{ active: true, count: 1 }] })).toEqual({
-      id: "agent",
-      nested: [{ active: true, count: 1 }],
-    });
-    expect(schema._zod.bag.validator).toBeTypeOf("function");
   });
 
   it("stamps the compiler versions that drive vendored output", async () => {

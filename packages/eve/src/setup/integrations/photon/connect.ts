@@ -7,7 +7,7 @@ import {
   runVercelCaptureStdout,
   type RunVercelCaptureResult,
 } from "#setup/primitives/run-vercel.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 export const PHOTON_CONNECT_SERVICE = "photon";
 export const PHOTON_CONNECTOR_TYPE = "photon";

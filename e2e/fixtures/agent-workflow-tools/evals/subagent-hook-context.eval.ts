@@ -3,7 +3,7 @@ import type { SubagentHookObservation } from "../subagent-hook-audit";
 
 export default (["direct", "waiting", "background"] as const).map((mode) =>
   defineEval({
-    description: `${mode} subagent delegation preserves dynamic skills and delivers hooks with the parent session context.`,
+    description: `${mode} subagent hooks preserve parent context, skills, and sandbox writes.`,
     async test(t) {
       const initial = await t.send(
         `Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:${mode}`,
@@ -67,6 +67,23 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
             )
           );
         },
+      );
+      t.eventsSatisfy(
+        "hooks receive the exact published event IDs",
+        (events) =>
+          Array.isArray(observations) &&
+          observations.every((record: SubagentHookObservation) =>
+            events.some((event) => event.meta.id === record.eventId && event.type === record.type),
+          ),
+      );
+      t.eventsSatisfy(
+        "hooks persist parent sandbox files for the next turn",
+        () =>
+          Array.isArray(observations) &&
+          observations.every(
+            (record: SubagentHookObservation & { sandboxCallId: string | null }) =>
+              record.sandboxCallId === record.callId,
+          ),
       );
       t.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
       t.event("subagent.completed", { data: { subagentName: "workflow-marker" }, count: 1 });

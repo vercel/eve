@@ -189,7 +189,9 @@ describe("createVercelSandbox", () => {
 
   it("reuses template identity until authored source or resources change", async () => {
     async function prepareName(input: {
-      createOptions?: NonNullable<Parameters<typeof createVercelImplementation>[0]>["createOptions"];
+      createOptions?: NonNullable<
+        Parameters<typeof createVercelImplementation>[0]
+      >["createOptions"];
       resourcesKey?: string;
       sourceRevision: string;
     }) {

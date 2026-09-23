@@ -45,6 +45,7 @@ export async function applyTaskAgentRequest(
         taskId: delivery.taskId,
       });
       let serializedContext = settled.serializedContext;
+      let sessionState = settled.sessionState;
       if (settled.completion !== undefined) {
         const emitted = await emitSubagentEventStep({
           event: settled.completion,
@@ -53,6 +54,7 @@ export async function applyTaskAgentRequest(
           sessionState: settled.sessionState,
         });
         serializedContext = emitted.serializedContext;
+        sessionState = emitted.sessionState;
       }
       await resumeHookStep(
         delivery.replyTo,
@@ -61,7 +63,7 @@ export async function applyTaskAgentRequest(
       );
       return {
         serializedContext,
-        sessionState: settled.sessionState,
+        sessionState,
       };
     }
     case "agent-invoke": {
@@ -75,16 +77,12 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitSubagentEventStep({
+          return await emitSubagentEventStep({
             event: dispatched.event,
             sessionWritable: ctx.sessionWritable,
             serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
             sessionState: dispatched.sessionState,
           });
-          return {
-            serializedContext: emitted.serializedContext,
-            sessionState: dispatched.sessionState,
-          };
         }
         case "failed":
           await resumeHookStep(delivery.replyTo, {

@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import {
   readVercelProjectLink,

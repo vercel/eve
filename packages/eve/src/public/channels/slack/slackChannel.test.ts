@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -9,6 +9,7 @@ import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js"
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 import {
   mockChannelContext,
   type ObservedChannelDelivery,
@@ -90,6 +91,64 @@ function parseSlackRequestBody(init: RequestInit | undefined): Record<string, un
   if (!init?.body) return {};
   const contentType = init.headers ? new Headers(init.headers).get("content-type") : null;
   return decodeSlackApiBody(init.body, contentType) as Record<string, unknown>;
+}
+
+// Selects the captured calls to one Slack Web API method. The transport
+// hands `fetch` a `URL`, which never equals a string, so a URL assertion
+// has to stringify before comparing.
+function slackCalls(
+  fetchMock: ReturnType<typeof vi.fn>,
+  operation: string,
+): Array<[unknown, RequestInit | undefined]> {
+  return fetchMock.mock.calls.filter(
+    ([url]) => String(url) === `https://slack.com/api/${operation}`,
+  ) as Array<[unknown, RequestInit | undefined]>;
+}
+
+// Names the Slack Web API method of every captured call, in order. An
+// assertion on this list says which calls happened, so it still fails
+// when a call moves to a URL the filter in `slackCalls` would miss; a URL
+// this cannot classify throws rather than dropping out of the list.
+function slackOperations(fetchMock: ReturnType<typeof vi.fn>): string[] {
+  return fetchMock.mock.calls.map(([url]) => {
+    const operation = /^https:\/\/slack\.com\/api\/([\w.]+)$/.exec(String(url))?.[1];
+    if (operation === undefined) throw new Error(`Unexpected Slack request: ${String(url)}`);
+    return operation;
+  });
+}
+
+// Captures structured log records for the rest of the current test. The
+// subscriber slot is process-wide, so the helper registers its own
+// teardown rather than leaving that to each caller.
+function captureLogRecords(): { records: LogRecord[] } {
+  const records: LogRecord[] = [];
+  setLogRecordSubscriber((record) => records.push(record));
+  onTestFinished(() => setLogRecordSubscriber(undefined));
+  return { records };
+}
+
+// A response from a gateway in front of Slack: a received non-2xx whose
+// body is an HTML error page rather than a Slack JSON envelope.
+function htmlGatewayError(): Response {
+  return new Response("<html><body>502 Bad Gateway</body></html>", {
+    headers: { "content-type": "text/html" },
+    status: 502,
+  });
+}
+
+// A response whose headers arrived but whose body was cut off mid-read:
+// reading it rejects with the `TypeError` an interrupted connection
+// raises, after the status line is already known.
+function interruptedBody(status: number): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"ok":'));
+        controller.error(new TypeError("terminated"));
+      },
+    }),
+    { status },
+  );
 }
 
 function useSuccessfulSlackFileUpload(
@@ -972,14 +1031,12 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    const postCalls = fetchMock.mock.calls.filter(
-      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
-    );
+    const postCalls = slackCalls(fetchMock, "chat.postMessage");
     expect(postCalls).toHaveLength(2);
-    const details = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit);
+    const details = parseSlackRequestBody(postCalls[0]?.[1]);
     expect(JSON.stringify(details)).toContain("cursor cloud task");
 
-    const controls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+    const controls = parseSlackRequestBody(postCalls[1]?.[1]) as {
       blocks: Array<{
         actions?: Array<{
           action_id: string;
@@ -3171,6 +3228,55 @@ describe("slackChannel() HITL interaction pipeline", () => {
     });
   }
 
+  function buildFreeformSubmissionRequest(): Request {
+    return buildSignedInteractionRequest({
+      type: "view_submission",
+      team: { id: "T_ACTOR" },
+      user: { id: "U_SUBMITTER", username: "grace", name: "grace", team_id: "T_ACTOR" },
+      view: {
+        app_installed_team_id: "T_INSTALLATION",
+        callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
+        private_metadata: JSON.stringify({
+          channelId: "C_ORIGINAL",
+          continuationToken: "C_ORIGINAL:1700000000.000001",
+          messageChannelId: "D_REVIEW",
+          messageTs: "1700000000.000010",
+          requestId: "call_abc123",
+          threadTs: "1700000000.000001",
+        }),
+        state: {
+          values: {
+            [HITL_FREEFORM_MODAL_BLOCK_ID]: {
+              [HITL_FREEFORM_MODAL_ACTION_ID]: { value: "approved with context" },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function buildFreeformButtonRequest(): Request {
+    return buildSignedInteractionRequest({
+      type: "block_actions",
+      trigger_id: "trigger-123",
+      team: { id: "T_INSTALLATION" },
+      user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Explain" } }],
+      },
+      actions: [
+        {
+          action_id: `${HITL_FREEFORM_ACTION_PREFIX}route:C_ORIGINAL:1700000000.000001:call_abc123`,
+          text: { type: "plain_text", text: "Type your answer" },
+          value: "call_abc123",
+        },
+      ],
+    });
+  }
+
   afterAll(() => {
     if (ORIGINAL_SIGNING_SECRET === undefined) {
       delete process.env.SLACK_SIGNING_SECRET;
@@ -3470,35 +3576,12 @@ describe("slackChannel() HITL interaction pipeline", () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     const channel = slackChannel({ credentials: { botToken } });
 
-    await firePost(
-      channel,
-      buildSignedInteractionRequest({
-        type: "block_actions",
-        trigger_id: "trigger-123",
-        team: { id: "T_INSTALLATION" },
-        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
-        channel: { id: "C01" },
-        message: {
-          ts: "1700000000.000010",
-          thread_ts: "1700000000.000001",
-          blocks: [{ type: "section", text: { type: "mrkdwn", text: "Explain" } }],
-        },
-        actions: [
-          {
-            action_id: `${HITL_FREEFORM_ACTION_PREFIX}route:C_ORIGINAL:1700000000.000001:call_abc123`,
-            text: { type: "plain_text", text: "Type your answer" },
-            value: "call_abc123",
-          },
-        ],
-      }),
-    );
+    await firePost(channel, buildFreeformButtonRequest());
 
     expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
-    const openCall = fetchMock.mock.calls.find(
-      ([url]) => String(url) === "https://slack.com/api/views.open",
-    );
+    const openCall = slackCalls(fetchMock, "views.open")[0];
     expect(openCall).toBeDefined();
-    const body = JSON.parse(String((openCall![1] as RequestInit).body)) as {
+    const body = parseSlackRequestBody(openCall![1]) as {
       view: { private_metadata: string };
     };
     expect(JSON.parse(body.view.private_metadata)).toMatchObject({
@@ -3509,6 +3592,115 @@ describe("slackChannel() HITL interaction pipeline", () => {
       requestId: "call_abc123",
       threadTs: "1700000000.000001",
     });
+  });
+
+  it("fails the interaction when views.open never reaches Slack", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error("ECONNRESET")));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    // A call that never reached Slack is not a response, so it escapes the
+    // handler and the route answers a 500. Narrowing the catch to what a
+    // received response raises is what keeps it escaping.
+    await expect(firePost(channel, buildFreeformButtonRequest())).rejects.toThrow("ECONNRESET");
+  });
+
+  it("fails the interaction when the bot token cannot be resolved", async () => {
+    const channel = slackChannel({
+      credentials: {
+        botToken: () => {
+          throw new Error("no installation for T_INSTALLATION");
+        },
+      },
+    });
+
+    // Token resolution sits outside the try, so an unknown installation
+    // workspace escapes the handler and nothing is sent.
+    await expect(firePost(channel, buildFreeformButtonRequest())).rejects.toThrow(
+      "no installation for T_INSTALLATION",
+    );
+    expect(slackOperations(fetchMock)).toEqual([]);
+  });
+
+  it("acks the interaction when views.open fails with a non-2xx", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: false, error: "ratelimited" }), { status: 429 }),
+      ),
+    );
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const logs = captureLogRecords();
+
+    const { response } = await firePost(channel, buildFreeformButtonRequest());
+
+    // Slack retries any ack that is not a 2xx, so the click must be
+    // acknowledged even though the modal never opened.
+    expect(response.status).toBe(200);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "Slack views.open failed" }),
+    );
+  });
+
+  it("acks the interaction when views.open fails with a non-JSON error page", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(htmlGatewayError()));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const logs = captureLogRecords();
+
+    const { response } = await firePost(channel, buildFreeformButtonRequest());
+
+    // Slack retries any ack that is not a 2xx, so the click must be
+    // acknowledged even though the modal never opened.
+    expect(response.status).toBe(200);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "Slack views.open failed" }),
+    );
+  });
+
+  it("acks the interaction when a 200 to views.open is cut off mid-body", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(interruptedBody(200)));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const logs = captureLogRecords();
+
+    const { response } = await firePost(channel, buildFreeformButtonRequest());
+
+    // The response arrived, so the click is acknowledged even though the
+    // body never did. Classifying by error type missed this: reading an
+    // interrupted body raises a `TypeError`, not a Slack error.
+    expect(response.status).toBe(200);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "Slack views.open failed" }),
+    );
+  });
+
+  it("acks the interaction when a non-2xx to views.open is cut off mid-body", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(interruptedBody(502)));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const logs = captureLogRecords();
+
+    const { response } = await firePost(channel, buildFreeformButtonRequest());
+
+    // The transport reads the body before it reads the status, so an
+    // interrupted body hides the non-2xx behind the same `TypeError`.
+    expect(response.status).toBe(200);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "Slack views.open failed" }),
+    );
+  });
+
+  it("acks the interaction when views.open answers ok:false", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: false, error: "expired_trigger_id" }), { status: 200 }),
+      ),
+    );
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const { response } = await firePost(channel, buildFreeformButtonRequest());
+
+    // Slack's usual failure for views.open is a 200 carrying ok:false.
+    // The channel does not inspect `ok` here, so the modal silently
+    // never opens and the click is still acknowledged.
+    expect(response.status).toBe(200);
+    expect(slackCalls(fetchMock, "views.open")).toHaveLength(1);
   });
 
   it("authorizes HITL button answers before resuming with the returned auth", async () => {
@@ -3599,9 +3791,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
       ctx,
     );
 
-    const ephemeralBodies = fetchMock.mock.calls
-      .filter(([url]) => String(url) === "https://slack.com/api/chat.postEphemeral")
-      .map(([, init]) => parseSlackRequestBody(init as RequestInit));
+    const ephemeralBodies = slackCalls(fetchMock, "chat.postEphemeral").map(([, init]) =>
+      parseSlackRequestBody(init),
+    );
     expect(ephemeralBodies).toEqual([
       expect.objectContaining({
         channel: "C01",
@@ -3614,10 +3806,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         user: "U_APPROVER",
       }),
     ]);
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.anything(),
-    );
+    expect(slackOperations(fetchMock)).toEqual(["chat.postEphemeral", "chat.postEphemeral"]);
   });
 
   it("keeps HITL pending when the input-response hook rejects or throws", async () => {
@@ -3639,10 +3828,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
       expect(onInputResponse).toHaveBeenCalledTimes(1);
       expect(send).not.toHaveBeenCalled();
-      expect(fetchMock).not.toHaveBeenCalledWith(
-        "https://slack.com/api/chat.update",
-        expect.anything(),
-      );
+      expect(slackOperations(fetchMock)).toEqual([]);
     }
   });
 
@@ -3665,10 +3851,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     await firePost(channel, buildHitlButtonRequest(), { send });
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.anything(),
-    );
+    expect(slackOperations(fetchMock)).toEqual([]);
   });
 
   it("waits for approval settlement before updating a tool-approval card", async () => {
@@ -3775,10 +3958,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       inputResponses: [{ optionId: "approve", requestId: "approval_451" }],
     });
 
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.anything(),
-    );
+    expect(slackOperations(fetchMock)).toEqual([]);
   });
 
   it("covers the observed e0 batched escalation approval run", async () => {
@@ -3830,11 +4010,9 @@ describe("slackChannel() HITL interaction pipeline", () => {
       ctx,
     );
 
-    const postCalls = fetchMock.mock.calls.filter(
-      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
-    );
+    const postCalls = slackCalls(fetchMock, "chat.postMessage");
     expect(postCalls).toHaveLength(2);
-    const postedDetails = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit) as {
+    const postedDetails = parseSlackRequestBody(postCalls[0]?.[1]) as {
       blocks: Array<{
         child_blocks?: Array<{ text?: { text?: string } }>;
         title?: { text?: string };
@@ -3848,7 +4026,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
     expect(postedDetails.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
 
-    const postedControls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+    const postedControls = parseSlackRequestBody(postCalls[1]?.[1]) as {
       blocks: Array<{
         actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
         type?: string;
@@ -3899,48 +4077,14 @@ describe("slackChannel() HITL interaction pipeline", () => {
       inputResponses: [{ optionId: "cancel", requestId: "approval_451" }],
     });
 
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.anything(),
-    );
+    expect(slackOperations(fetchMock)).toEqual(["chat.postMessage", "chat.postMessage"]);
   });
 
   it("resumes freeform modal answers with the submitting Slack user auth", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     const channel = slackChannel({ credentials: { botToken } });
 
-    const { send } = await firePost(
-      channel,
-      buildSignedInteractionRequest({
-        type: "view_submission",
-        team: { id: "T_ACTOR" },
-        user: {
-          id: "U_SUBMITTER",
-          username: "grace",
-          name: "grace",
-          team_id: "T_ACTOR",
-        },
-        view: {
-          app_installed_team_id: "T_INSTALLATION",
-          callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
-          private_metadata: JSON.stringify({
-            channelId: "C_ORIGINAL",
-            continuationToken: "C_ORIGINAL:1700000000.000001",
-            messageChannelId: "D_REVIEW",
-            messageTs: "1700000000.000010",
-            requestId: "call_abc123",
-            threadTs: "1700000000.000001",
-          }),
-          state: {
-            values: {
-              [HITL_FREEFORM_MODAL_BLOCK_ID]: {
-                [HITL_FREEFORM_MODAL_ACTION_ID]: { value: "approved with context" },
-              },
-            },
-          },
-        },
-      }),
-    );
+    const { send } = await firePost(channel, buildFreeformSubmissionRequest());
 
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
@@ -3963,10 +4107,48 @@ describe("slackChannel() HITL interaction pipeline", () => {
       inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
     });
     expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.objectContaining({ body: expect.stringContaining('"channel":"D_REVIEW"') }),
+    const updateCall = slackCalls(fetchMock, "chat.update")[0];
+    expect(updateCall).toBeDefined();
+    expect(parseSlackRequestBody(updateCall![1])).toMatchObject({
+      channel: "D_REVIEW",
+    });
+  });
+
+  it("keeps a delivered freeform answer when chat.update fails with a non-JSON error page", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(htmlGatewayError()));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const logs = captureLogRecords();
+
+    const { response, send } = await firePost(channel, buildFreeformSubmissionRequest());
+
+    // The answer already reached the session; only the card decoration
+    // failed, so the submission stands and the failure is logged.
+    expect(response.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "freeform answered-card update failed",
+      }),
     );
+  });
+
+  it("keeps a delivered freeform answer when chat.update answers ok:false", async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ ok: false, error: "message_not_found" }), { status: 200 }),
+      ),
+    );
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const { response, send } = await firePost(channel, buildFreeformSubmissionRequest());
+
+    // Slack's usual failure for chat.update is a 200 carrying ok:false.
+    // The channel does not inspect `ok` here, so the card is left
+    // undecorated without a word and the submission still stands.
+    expect(response.status).toBe(200);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(slackCalls(fetchMock, "chat.update")).toHaveLength(1);
   });
 
   it("authorizes freeform modal answers before resuming", async () => {
@@ -4013,10 +4195,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       }),
     );
     expect(send).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "https://slack.com/api/chat.update",
-      expect.anything(),
-    );
+    expect(slackOperations(fetchMock)).toEqual([]);
   });
 });
 

@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
 
 import { assertGitRef, assertRepositoryPart } from "./identifiers.js";
 
@@ -58,6 +59,12 @@ export interface SelfModificationConfig {
           readonly pat: true;
         };
   };
+}
+
+/** Values accepted by the self-modification extension mount. */
+export interface SelfModificationExtensionConfig extends SelfModificationConfig {
+  readonly model?: AgentStaticModelDefinition;
+  readonly reasoning?: AgentReasoningDefinition;
 }
 
 export interface ResolvedSelfModificationConfig {

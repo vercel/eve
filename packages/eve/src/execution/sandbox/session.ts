@@ -1,6 +1,9 @@
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import type {
   InternalSandboxSession,
-  MutableNetworkSandboxSession,
   SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,
@@ -13,7 +16,6 @@ import type {
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import { bufferToStream, streamToBuffer } from "./stream-utils.js";
 
 export type { InternalSandboxSession };
@@ -33,7 +35,7 @@ export type { InternalSandboxSession };
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
   setNetworkPolicy: (policy: SandboxNetworkPolicy) => Promise<void>,
-): MutableNetworkSandboxSession;
+): NetworkPolicySandboxSession;
 export function buildSandboxSession(primitives: InternalSandboxSession): SandboxSession;
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
@@ -116,8 +118,8 @@ export function buildSandboxSession(
       });
     },
   };
-  if (setNetworkPolicy !== undefined) session.setNetworkPolicy = setNetworkPolicy;
-  return session;
+  if (setNetworkPolicy === undefined) return session;
+  return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
 }
 
 /**
