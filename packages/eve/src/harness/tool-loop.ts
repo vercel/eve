@@ -585,7 +585,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return {
         next: null,
         session: setHarnessEmissionState({ ...session, outputSchema: undefined }, emissionState),
-        settledTurn: { notifyCaller: true, isError: true, output: message },
+        settledTurn: { isError: true, output: message },
       };
     };
     const preparePreambleTrace = async (): Promise<RuntimeTraceContext | undefined> => {
@@ -1958,11 +1958,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           details,
           message: errorMessage,
         });
-        const settledTurn = {
-          notifyCaller: true,
-          isError: true,
-          output: taskFailureOutput,
-        } satisfies SettledTurn;
+        const settledTurn = { isError: true, output: taskFailureOutput } satisfies SettledTurn;
         session = { ...session, outputSchema: undefined };
         return {
           next: null,
@@ -2972,7 +2968,7 @@ async function deferTaskTurn(input: {
   return {
     next: null,
     session,
-    settledTurn: { notifyCaller: true, output: structured ?? stepOutput ?? "" },
+    settledTurn: { output: structured ?? stepOutput ?? "" },
   };
 }
 
@@ -3106,7 +3102,7 @@ async function finishConversationTurn(input: {
       emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
       session = setHarnessEmissionState(session, emissionState);
     }
-    const settledTurn = { notifyCaller: true, output: stepOutput ?? "" } satisfies SettledTurn;
+    const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
     return { next: null, session, settledTurn };
   }
 
@@ -3123,7 +3119,6 @@ async function finishConversationTurn(input: {
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = {
-      notifyCaller: true,
       isError: true,
       output: OUTPUT_SCHEMA_NOT_FULFILLED.message,
     } satisfies SettledTurn;
@@ -3135,7 +3130,7 @@ async function finishConversationTurn(input: {
     emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
     session = setHarnessEmissionState(session, emissionState);
   }
-  const settledTurn = { notifyCaller: true, output: structured } satisfies SettledTurn;
+  const settledTurn = { output: structured } satisfies SettledTurn;
   return { next: null, session, settledTurn };
 }
 

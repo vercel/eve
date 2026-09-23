@@ -58,11 +58,12 @@ function sessionAwaitingCallerNotification() {
     {
       next: null,
       session: pending,
-      settledTurn: { notifyCaller: true, output: "Verification is running." },
+      settledTurn: { output: "Verification is running." },
     },
     {},
     "conversation",
     {},
+    "current",
   );
   expect(parked).toMatchObject({ action: "park", settled: { notifyCaller: false } });
   return parked.sessionState;

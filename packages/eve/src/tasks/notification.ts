@@ -1,9 +1,6 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
-import {
-  getBackgroundWorkflowToolRuns,
-  readWorkflowTaskView,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -25,16 +22,19 @@ export function formatTaskOutput(output: JsonValue): string {
   return typeof output === "string" ? output : (JSON.stringify(output) ?? "null");
 }
 
-/** A terminal task may still report settlement, but cannot produce another model notification. */
-export function isSettledTaskDelivery(
+/** Task delivery ids are `<taskId>` or `<taskId>:<event>`; derived task ids never contain `:`. */
+export function taskIdOfDelivery(deliveryId: string): string {
+  const separator = deliveryId.indexOf(":");
+  return separator < 0 ? deliveryId : deliveryId.slice(0, separator);
+}
+
+/** The parent already recorded this task's outcome, so the delivery cannot notify the model again. */
+export function hasRecordedTaskOutcome(
   delivery: DeliverHookPayload,
   state: SessionStateMap | undefined,
 ): boolean {
   const deliveryId = delivery.taskDeliveryId;
   if (deliveryId === undefined) return false;
-  return getBackgroundWorkflowToolRuns(state).some(
-    ({ task }) =>
-      readWorkflowTaskView(task) !== undefined &&
-      (deliveryId === task.taskId || deliveryId.startsWith(`${task.taskId}:`)),
-  );
+  const task = getBackgroundTasks(state).get(taskIdOfDelivery(deliveryId));
+  return task !== undefined && task.status !== "working";
 }

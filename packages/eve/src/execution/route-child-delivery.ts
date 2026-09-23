@@ -1,5 +1,5 @@
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
-import { formatTaskNotification, isSettledTaskDelivery } from "#tasks/notification.js";
+import { formatTaskNotification, hasRecordedTaskOutcome } from "#tasks/notification.js";
 import type { TaskView } from "#tasks/types.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
@@ -119,10 +119,10 @@ export async function routeDeliverToChildren(input: {
     }
   }
 
-  if (
-    payload.task !== undefined &&
-    isSettledTaskDelivery(input.delivery, input.sessionState.snapshot.session.state)
-  ) {
+  // The delivery that records a task's first outcome still notifies the model. A later report
+  // of that outcome only applies its envelopes above.
+  const stateBeforeDelivery = input.sessionState.snapshot.session.state;
+  if (payload.task !== undefined && hasRecordedTaskOutcome(input.delivery, stateBeforeDelivery)) {
     return { kind: "continue", remainder: undefined, serializedContext, sessionState };
   }
 

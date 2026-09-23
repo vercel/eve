@@ -1,9 +1,6 @@
 import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
-import {
-  readWorkflowTaskView,
-  findBackgroundWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { type TaskAuthorizationEventDelivery } from "#tasks/types.js";
 
 /** Accepts authorization events from the workflow task itself or an agent it owns. */
@@ -15,21 +12,20 @@ export async function acceptTaskAuthorizationEventStep(input: {
 
   const { hookPayload, taskId } = input.delivery;
   const durableSession = readDurableSession(input.sessionState);
-  const entry = findBackgroundWorkflowToolRun(durableSession.state, taskId);
-  if (entry === undefined) return false;
+  const task = getBackgroundTasks(durableSession.state).get(taskId);
+  if (task === undefined) return false;
 
   // A workflow tool can request authorization without invoking a child agent.
   // It has no agent handle, so bind its sender to the recorded task run, tool,
   // and launching turn before accepting the event.
   if (
-    entry.task.metadata.kind === "tool" &&
-    entry.address.runId === hookPayload.childSessionId &&
-    entry.task.metadata.name === hookPayload.subagentName &&
-    entry.origin.turnId === hookPayload.event.data.turnId
+    task.metadata.kind === "tool" &&
+    task.run.address.runId === hookPayload.childSessionId &&
+    task.metadata.name === hookPayload.subagentName &&
+    task.turnId === hookPayload.event.data.turnId
   ) {
-    const view = readWorkflowTaskView(entry.task);
     // Completion can arrive after the body has returned; its sign-in UI must still close.
-    return hookPayload.event.type === "authorization.completed" || view === undefined;
+    return hookPayload.event.type === "authorization.completed" || task.status === "working";
   }
 
   const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
@@ -51,6 +47,5 @@ export async function acceptTaskAuthorizationEventStep(input: {
   );
   if (claimed === undefined && reserved.length !== 1) return false;
 
-  const view = readWorkflowTaskView(entry.task);
-  return view === undefined;
+  return task.status === "working";
 }

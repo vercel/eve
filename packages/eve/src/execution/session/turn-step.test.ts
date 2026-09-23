@@ -1185,7 +1185,7 @@ describe("turnStep", () => {
           ? {
               next: null,
               session,
-              settledTurn: { notifyCaller: true, output: { report: message } },
+              settledTurn: { output: { report: message } },
             }
           : { next: { done: true, output: { report: message } }, session };
       };
@@ -2343,7 +2343,7 @@ describe("turnStep", () => {
       return async (stepSession): Promise<StepResult> => ({
         next: null,
         session: stepSession,
-        settledTurn: { notifyCaller: true, output: "settled answer" },
+        settledTurn: { output: "settled answer" },
       });
     });
 
@@ -2373,7 +2373,7 @@ describe("turnStep", () => {
         return {
           next: null,
           session: stepSession,
-          settledTurn: { notifyCaller: true, output: "settled answer" },
+          settledTurn: { output: "settled answer" },
         };
       };
     });
@@ -2429,7 +2429,7 @@ describe("turnStep", () => {
             ...usageStateAfterTurn({ inputTokens: 100, outputTokens: 40 }),
           },
         },
-        settledTurn: { notifyCaller: true, output: "first answer" },
+        settledTurn: { output: "first answer" },
       });
     });
 
@@ -2463,7 +2463,7 @@ describe("turnStep", () => {
             ...usageStateAfterTurn({ inputTokens: 150, outputTokens: 60 }),
           },
         },
-        settledTurn: { notifyCaller: true, output: "second answer" },
+        settledTurn: { output: "second answer" },
       });
     });
 
@@ -2507,7 +2507,7 @@ describe("turnStep", () => {
       return async (stepSession): Promise<StepResult> => ({
         next: null,
         session: stepSession,
-        settledTurn: { notifyCaller: true, output: "settled while approval remains open" },
+        settledTurn: { output: "settled while approval remains open" },
       });
     });
 

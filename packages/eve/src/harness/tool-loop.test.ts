@@ -875,7 +875,7 @@ function createGatewayModelCallError(input: {
 describe("createToolLoopHarness", () => {
   it("keeps a scheduled task session alive across individual results until all tasks settle", async () => {
     const { SessionInputQueue } = await import("#execution/session/input-queue.js");
-    const { recordWorkflowTaskView, findBackgroundWorkflowToolRun } =
+    const { recordWorkflowTaskView, getBackgroundTasks } =
       await import("#harness/workflow-tool-runs.js");
     const { resolveTaskDeliveryContext } = await import("#tasks/delivery-context.js");
     const { backgroundToolExecutionProvider } =
@@ -923,7 +923,7 @@ describe("createToolLoopHarness", () => {
     const result = await contextStorage.run(ctx, () =>
       runStep(session, { message: "A completed", context: [report.context] }),
     );
-    expect(findBackgroundWorkflowToolRun(result.session.state, "B")?.task.outcome).toBeUndefined();
+    expect(getBackgroundTasks(result.session.state).get("B")?.status).toBe("working");
     expect(result.next).toBeNull();
 
     session = {
@@ -2881,7 +2881,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ notifyCaller: true, output: { title: "Done" } });
+    expect(result.settledTurn).toEqual({ output: { title: "Done" } });
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -2947,7 +2947,7 @@ describe("createToolLoopHarness", () => {
     );
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ notifyCaller: true, output: { summary: "Pending" } });
+    expect(result.settledTurn).toEqual({ output: { summary: "Pending" } });
     expect(result.session.outputSchema).toBe(schema);
     expect(events.some((event) => event.type === "result.completed")).toBe(false);
     expect(events.at(-1)?.type).toBe("session.waiting");
@@ -3064,7 +3064,6 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toBeNull();
     expect(result.settledTurn).toEqual({
-      notifyCaller: true,
       isError: true,
       output: "The agent could not produce a result matching the requested schema.",
     });
@@ -3279,7 +3278,6 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toBeNull();
     expect(result.settledTurn).toEqual({
-      notifyCaller: true,
       output: "It is 41 F in New York right now.",
     });
     expect(result.session.history).toEqual([
@@ -3489,7 +3487,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session);
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ notifyCaller: true, output: "The result is 42." });
+    expect(result.settledTurn).toEqual({ output: "The result is 42." });
     expect(result.session.history).toEqual([
       { content: "prior message", kind: "user" as const, role: "user" },
       { content: "The result is 42.", role: "assistant" },
@@ -4923,7 +4921,6 @@ describe("createToolLoopHarness", () => {
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
     expect(result.settledTurn).toEqual({
-      notifyCaller: true,
       isError: true,
       output: "Model blew up",
     });
@@ -4978,7 +4975,6 @@ describe("createToolLoopHarness", () => {
 
       expect(result.next).toBeNull();
       expect(result.settledTurn).toEqual({
-        notifyCaller: true,
         isError: true,
         output: expect.stringContaining(hint),
       });
@@ -13756,7 +13752,6 @@ describe("boundary event failures", () => {
       });
       expect(result.next).toBeNull();
       expect(result.settledTurn).toEqual({
-        notifyCaller: true,
         isError: true,
         output: "admission denied",
       });

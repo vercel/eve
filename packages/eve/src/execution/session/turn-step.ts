@@ -593,6 +593,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       nextSerializedContext,
       mode,
       input.serializedContext,
+      activeTurnId(initialEmissionState),
     );
     if (durableResult.action === "done") await sink.close();
     return durableResult;

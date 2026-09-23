@@ -112,7 +112,7 @@ export async function applySessionCancellation(
       sessionState: input.cursor.sessionState,
     });
     await input.cursor.apply(cancelled);
-    input.queue.discardSettledTaskNotifications(input.cursor.sessionState.snapshot.session.state);
+    input.queue.discardStaleNotifications(input.cursor.sessionState.snapshot.session.state);
   }
   if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
 }

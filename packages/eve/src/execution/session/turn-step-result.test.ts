@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, SettledTurn } from "#harness/types.js";
 import { recordWorkflowTaskView, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 function session(): HarnessSession {
@@ -14,12 +14,16 @@ function session(): HarnessSession {
   };
 }
 
-function startWorker(session: HarnessSession, taskId: string): HarnessSession {
+function startWorker(
+  session: HarnessSession,
+  taskId: string,
+  turnId = "current-turn",
+): HarnessSession {
   return registerWorkflowToolRun(session, {
     callId: taskId,
     toolName: "worker",
     lifetime: "session",
-    origin: { turnId: "earlier-turn", stepIndex: 0 },
+    origin: { turnId, stepIndex: 0 },
     address: { runId: taskId, hookToken: taskId },
     task: {
       taskId,
@@ -27,6 +31,16 @@ function startWorker(session: HarnessSession, taskId: string): HarnessSession {
       dispatchContext: { auth: { current: null, initiator: null } },
     },
   });
+}
+
+function endTurn(session: HarnessSession, settledTurn: SettledTurn, turnId = "current-turn") {
+  return resolveSessionStepResult(
+    { next: null, session, settledTurn },
+    {},
+    "conversation",
+    {},
+    turnId,
+  );
 }
 
 function withUsage(session: HarnessSession, inputTokens: number): HarnessSession {
@@ -44,16 +58,7 @@ function withUsage(session: HarnessSession, inputTokens: number): HarnessSession
 describe("delegated turn completion", () => {
   it("defers caller notification while a task is working and reports accumulated usage with the final result", () => {
     const pending = startWorker(withUsage(session(), 100), "worker-1");
-    const parked = resolveSessionStepResult(
-      {
-        next: null,
-        session: pending,
-        settledTurn: { notifyCaller: true, output: "Verification is running." },
-      },
-      {},
-      "conversation",
-      {},
-    );
+    const parked = endTurn(pending, { output: "Verification is running." });
     expect(parked).toMatchObject({
       action: "park",
       settled: { output: "Verification is running.", notifyCaller: false },
@@ -73,12 +78,8 @@ describe("delegated turn completion", () => {
       },
       150,
     );
-    const settled = resolveSessionStepResult(
-      { next: null, session: completed, settledTurn: { notifyCaller: true, output: "VERIFIED" } },
-      {},
-      "conversation",
-      {},
-    );
+    // The worker's notification wakes a later turn, which gives the final answer.
+    const settled = endTurn(completed, { output: "VERIFIED" }, "woken-turn");
     expect(settled).toMatchObject({
       action: "park",
       settled: {
@@ -104,18 +105,18 @@ describe("delegated turn completion", () => {
         lastOutput: { type: "result", data: "First result" },
       }).state,
     };
-    expect(
-      resolveSessionStepResult(
-        {
-          next: null,
-          session: partiallyCompleted,
-          settledTurn: { notifyCaller: true, output: "Still working." },
-        },
-        {},
-        "conversation",
-        {},
-      ),
-    ).toMatchObject({ action: "park", settled: { notifyCaller: false } });
+    expect(endTurn(partiallyCompleted, { output: "Still working." })).toMatchObject({
+      action: "park",
+      settled: { notifyCaller: false },
+    });
+  });
+
+  it("answers the caller when only work started by an earlier turn is still working", () => {
+    const pending = startWorker(session(), "monitor", "earlier-turn");
+    expect(endTurn(pending, { output: "Here is the report." })).toMatchObject({
+      action: "park",
+      settled: { notifyCaller: true, output: "Here is the report." },
+    });
   });
 
   it.each(["failed", "cancelled"] as const)(
@@ -132,36 +133,16 @@ describe("delegated turn completion", () => {
             : { status }),
         }).state,
       };
-      expect(
-        resolveSessionStepResult(
-          {
-            next: null,
-            session: finished,
-            settledTurn: { notifyCaller: true, output: "Unable to verify." },
-          },
-          {},
-          "conversation",
-          {},
-        ),
-      ).toMatchObject({
+      expect(endTurn(finished, { output: "Unable to verify." })).toMatchObject({
         action: "park",
         settled: { notifyCaller: true, output: "Unable to verify." },
       });
     },
   );
 
-  it("reports a failed turn immediately even when its worker is still pending", () => {
+  it("answers the caller with a final error even when its worker is still working", () => {
     expect(
-      resolveSessionStepResult(
-        {
-          next: null,
-          session: startWorker(session(), "worker-1"),
-          settledTurn: { notifyCaller: true, isError: true, output: "Model failed" },
-        },
-        {},
-        "conversation",
-        {},
-      ),
+      endTurn(startWorker(session(), "worker-1"), { isError: true, output: "Model failed" }),
     ).toMatchObject({
       action: "park",
       settled: { notifyCaller: true, isError: true, output: "Model failed" },

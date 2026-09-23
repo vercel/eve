@@ -13,6 +13,8 @@ export function resolveSessionStepResult(
   nextSerializedContext: Record<string, unknown>,
   mode: RunMode,
   beforeStepContext: Record<string, unknown>,
+  /** The turn this step belongs to. */
+  turnId: string,
 ): DurableStepResult {
   const nextState = createDurableSessionState({ session: stepResult.session });
   if (stepResult.steered)
@@ -60,14 +62,14 @@ export function resolveSessionStepResult(
   if (stepResult.next === null) {
     const pending = derivePendingState(stepResult.session);
 
-    // Ending a model turn does not settle its caller while nested tasks remain open.
-    // Leave usage unreported across yields so the final result includes every turn.
+    // A turn that ends while its own background tasks are working yields: its answer is interim.
+    // Usage stays unreported so the caller's final result includes every yielded turn. An error
+    // is final and always answers the caller.
     if (stepResult.settledTurn !== undefined) {
-      const backgroundTasks = getBackgroundTasks(stepResult.session.state);
-      if (
-        backgroundTasks.query({ state: "working" }).length > 0 &&
-        stepResult.settledTurn.isError !== true
-      ) {
+      const yielded =
+        stepResult.settledTurn.isError !== true &&
+        getBackgroundTasks(stepResult.session.state).query({ state: "working", turnId }).length > 0;
+      if (yielded) {
         return {
           action: "park",
           ...backgroundTransition,

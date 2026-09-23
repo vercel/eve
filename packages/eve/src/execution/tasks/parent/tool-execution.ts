@@ -1,7 +1,6 @@
 import {
   type BackgroundWorkflowToolRun,
-  findBackgroundWorkflowToolRun,
-  getBackgroundWorkflowToolRuns,
+  getBackgroundTasks,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import type { ContextContainer } from "#context/container.js";
@@ -189,9 +188,8 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
 
   hasPendingTasks(): boolean {
     return (
-      getBackgroundWorkflowToolRuns(this.initialSession.state).some(
-        (entry) => entry.task.outcome === undefined,
-      ) || this.records.some((record) => record.settled && record.task !== undefined)
+      getBackgroundTasks(this.initialSession.state).query({ state: "working" }).length > 0 ||
+      this.records.some((record) => record.settled && record.task !== undefined)
     );
   }
 
@@ -426,12 +424,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       });
       if (claim.kind === "busy" && claim.handle.phase === "claimed") {
         const handle = claim.handle;
-        const entry = findBackgroundWorkflowToolRun(this.agentHandleSession.state, handle.ownerId);
+        const owner = getBackgroundTasks(this.agentHandleSession.state).get(handle.ownerId);
         if (
-          entry?.task.metadata.kind === "subagent" &&
-          entry.task.metadata.agentId === handle.identity.id &&
-          entry.task.metadata.name === handle.identity.name &&
-          entry.task.outcome === undefined
+          owner?.metadata.kind === "subagent" &&
+          owner.metadata.agentId === handle.identity.id &&
+          owner.metadata.name === handle.identity.name &&
+          owner.status === "working"
         ) {
           await steerBackgroundAgent({
             ctx: input.ctx,
@@ -442,7 +440,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
           });
           return {
             kind: "steered",
-            receipt: { agentId: handle.identity.id, taskId: entry.task.taskId, status: "working" },
+            receipt: { agentId: handle.identity.id, taskId: owner.taskId, status: "working" },
           };
         }
       }

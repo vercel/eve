@@ -4,7 +4,7 @@ import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.j
 import {
   readWorkflowTaskView,
   recordWorkflowTaskView,
-  getBackgroundWorkflowToolRuns,
+  getBackgroundTasks,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { parseActivityWorkIdentityV1 } from "#protocol/activity.js";
@@ -103,7 +103,11 @@ describe("additive durable state", () => {
       authored: { opaque: true },
       "eve.workflowTool": { version: 3, runs: [task], futureIndex: true },
     };
-    expect(getBackgroundWorkflowToolRuns(restored(state))).toEqual([task]);
+    expect(
+      getBackgroundTasks(restored(state))
+        .query()
+        .map((entry) => entry.run),
+    ).toEqual([task]);
     expect(parseActivityWorkIdentityV1(activity)).toEqual(activity);
     const updated = registerWorkflowToolRun(session(restored(state)), {
       callId: "task",
@@ -160,14 +164,14 @@ describe("additive durable state", () => {
       metadata,
       status: "cancelled",
     }).state;
-    expect(getBackgroundWorkflowToolRuns(restored(cancelled))[0]?.task.outcome).toMatchObject({
+    expect(getBackgroundTasks(restored(cancelled)).get("task")?.run.task.outcome).toMatchObject({
       futureView: true,
       status: "completed",
     });
     expect(cancelled).toBe(saved);
-    const [retained] = getBackgroundWorkflowToolRuns(restored(cancelled));
+    const retained = getBackgroundTasks(restored(cancelled)).get("task");
     assert(retained !== undefined);
-    expect(readWorkflowTaskView(retained.task)?.lastOutput?.data).toBe("done");
+    expect(readWorkflowTaskView(retained.run.task)?.lastOutput?.data).toBe("done");
   });
 });
 

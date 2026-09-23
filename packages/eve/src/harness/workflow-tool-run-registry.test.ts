@@ -2,6 +2,7 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import type { SessionStateMap } from "#harness/types.js";
 import {
+  getBackgroundTasks,
   readWorkflowTaskView,
   recordWorkflowTaskView,
   findBlockingWorkflowToolRun,
@@ -11,7 +12,6 @@ import {
   type BackgroundWorkflowToolRun,
   type BlockingWorkflowToolRun,
 } from "./workflow-tool-runs.js";
-import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 import { resolveTaskDeliveryContext } from "#tasks/delivery-context.js";
 
 const waiting = (turnId: string): BlockingWorkflowToolRun => ({
@@ -97,7 +97,11 @@ describe("shared workflow invocation ownership", () => {
     expect(report?.phase).toBe("settled");
     expect(report?.context).toContain("first");
     expect(report?.context).toContain("second");
-    expect([...getSessionTaskCohorts(restored).values()]).toEqual(["task-a", "task-a"]);
+    expect(
+      getBackgroundTasks(restored)
+        .query()
+        .map((task) => task.cohortId),
+    ).toEqual(["task-a", "task-a"]);
     expect(
       JSON.stringify(removeBlockingWorkflowToolRuns({ state: restored }, "turn-a").state),
     ).toBe(beforeReport);

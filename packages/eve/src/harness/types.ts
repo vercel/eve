@@ -198,8 +198,6 @@ export type StepNext = StepDone | StepFn | null;
 
 /** User-facing answer produced when a conversation turn settles. */
 export interface SettledTurn {
-  /** Whether the parked result should notify its caller. */
-  readonly notifyCaller: boolean;
   readonly output: unknown;
   readonly isError?: boolean;
   /**

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import {
-  getBackgroundWorkflowToolRuns,
+  getBackgroundTasks,
   readWorkflowTaskView,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
@@ -44,9 +44,9 @@ describe("cancelAllIndexedSessionTasksStep", () => {
 
     expect(result.sessionState).toBeDefined();
     expect(
-      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map((entry) =>
-        readWorkflowTaskView(entry.task),
-      ),
+      getBackgroundTasks(result.sessionState?.snapshot.session.state)
+        .query()
+        .map((task) => readWorkflowTaskView(task.run.task)),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
     expect(cancelOwnedTaskMock).toHaveBeenNthCalledWith(1, {
@@ -70,9 +70,9 @@ describe("cancelAllIndexedSessionTasksStep", () => {
       sessionState: makeSessionState([indexedTask("failed-cancel"), indexedTask("cancelled")]),
     });
     expect(
-      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map(
-        ({ task }) => readWorkflowTaskView(task)?.status ?? "working",
-      ),
+      getBackgroundTasks(result.sessionState?.snapshot.session.state)
+        .query()
+        .map((task) => task.status),
     ).toEqual(["working", "cancelled"]);
   });
 

@@ -59,7 +59,7 @@ describe.each(["auto", "cohort"] as const)(
       let state = settle(tasks(), "first", "completed");
       queue.enqueueDelivery(first);
       state = settle(state, "second", "cancelled");
-      queue.discardSettledTaskNotifications(state);
+      queue.discardStaleNotifications(state);
       expect(queue.takeNext(state, { taskDeliveryPolicy })).toBeUndefined();
       expect(queue.pendingCount).toBe(0);
     });
@@ -89,7 +89,7 @@ describe.each(["auto", "cohort"] as const)(
       };
       const admitted = queue.enqueueDelivery(settlement, state);
       expect(admitted).toBeDefined();
-      queue.discardSettledTaskNotifications(state);
+      queue.discardStaleNotifications(state);
       expect(queue.taskDeliveries()).toMatchObject([admitted]);
       queue.replaceDelivery(admitted!.sequence, undefined);
       queue.enqueueDelivery(user, state);
@@ -101,7 +101,7 @@ describe.each(["auto", "cohort"] as const)(
       const state = settle(tasks(), "first", "cancelled");
       const update = { ...second, taskDeliveryId: "second:update:1" };
       queue.enqueueDelivery(update, state);
-      queue.discardSettledTaskNotifications(state);
+      queue.discardStaleNotifications(state);
       expect(queue.takeNext(state, { taskDeliveryPolicy })).toMatchObject({ delivery: update });
       queue.enqueueDelivery(second, state);
       expect(
