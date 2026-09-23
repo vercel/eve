@@ -22,7 +22,10 @@ const authenticateB: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_B ? principal("issuer-b") : null;
 const authenticateEvalDriver: AuthFn<Request> = (request) => ({
   ...principal("eval-driver"),
-  attributes: { denyBoundary: request.headers.get("x-e2e-deny-boundary") ?? "" },
+  attributes: {
+    cancelHookEvent: request.headers.get("x-e2e-cancel-hook") ?? "",
+    failHookEvent: request.headers.get("x-e2e-fail-hook") ?? "",
+  },
 });
 
 export default eveChannel({ auth: [authenticateA, authenticateB, authenticateEvalDriver] });

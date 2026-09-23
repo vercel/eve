@@ -145,8 +145,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   hook: {
-    current: 27,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27],
+    current: 28,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 28],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",

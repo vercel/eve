@@ -77,6 +77,18 @@ export interface HookContext extends SessionContext {
     readonly kind?: string;
     readonly continuationToken?: string;
   };
+  /**
+   * Cancels the running turn once every subscriber for the current event has
+   * run. The turn settles like `session.cancel()`: `turn.cancelled`, then
+   * `session.waiting`, and no further model call or tool starts in that turn.
+   *
+   * Only events emitted while a turn is running can cancel it. On terminal
+   * events (`turn.completed`, `turn.failed`, `turn.cancelled`,
+   * `session.waiting`, `session.completed`, `session.failed`), on
+   * `subagent.called` and `subagent.completed`, and during clear or compact
+   * requests, eve logs a warning and ignores the call.
+   */
+  cancel(): void;
 }
 
 /**

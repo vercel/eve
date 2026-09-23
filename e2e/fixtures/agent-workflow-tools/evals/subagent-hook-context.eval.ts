@@ -3,7 +3,7 @@ import type { SubagentHookObservation } from "../subagent-hook-audit";
 
 export default (["direct", "waiting", "background"] as const).map((mode) =>
   defineEval({
-    description: `${mode} subagent hooks preserve parent context, skills, and sandbox writes.`,
+    description: `${mode} delegation and later wildcard hooks continue after a typed hook writes parent state and throws.`,
     async test(t) {
       const initial = await t.send(
         `Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:${mode}`,
@@ -88,6 +88,7 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       t.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
       t.event("subagent.completed", { data: { subagentName: "workflow-marker" }, count: 1 });
       t.notEvent("session.failed");
+      t.notEvent("turn.failed");
       t.noFailedActions();
       t.succeeded();
     },

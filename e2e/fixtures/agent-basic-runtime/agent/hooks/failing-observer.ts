@@ -5,9 +5,9 @@ export default defineHook({
     "*"(event, ctx) {
       if (
         (event.type === "turn.started" || event.type === "step.started") &&
-        ctx.session.auth.current?.attributes.denyBoundary === event.type
+        ctx.session.auth.current?.attributes.failHookEvent === event.type
       ) {
-        throw new Error("Fixture admission denied.");
+        throw new Error("Fixture event observer failed.");
       }
     },
   },

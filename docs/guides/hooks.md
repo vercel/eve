@@ -61,6 +61,7 @@ helpers documented in [Session context](./session-context):
 interface HookContext extends SessionContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
+  cancel(): void;
 }
 ```
 
@@ -181,9 +182,31 @@ Hooks always run after the event is durably recorded, so if a hook throws, the s
 
 ## What happens when a hook throws
 
-A thrown handler during a model turn propagates through turn execution and surfaces as `turn.failed`. In a conversation session, this includes handlers for `turn.started` and the first `step.started` of a model call: the failed turn ends with `session.waiting`, and the next message can start another turn. Task-mode boundary failures remain terminal. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+eve logs a thrown or rejected handler with the hook slug, subscription, event type, event ID, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `step.started`, and failure events. Throwing from a hook does not reject work or veto a turn. To stop the running turn, call [`ctx.cancel()`](#cancel-the-running-turn-from-a-hook).
 
-For `subagent.called` and `subagent.completed`, a thrown handler fails the notification step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the notification step to finish or exhaust its retries.
+A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a subagent notification fails, the workflow runtime retries the notification step, which can publish the event again.
+
+## Cancel the running turn from a hook
+
+Call `ctx.cancel()` to stop the turn that emitted the event, for example to enforce a per-turn step budget or to decline a request from `turn.started` before the model runs:
+
+```ts title="agent/hooks/step-budget.ts"
+import { defineHook } from "eve/hooks";
+
+const MAX_STEPS_PER_TURN = 20;
+
+export default defineHook({
+  events: {
+    "step.started"(event, ctx) {
+      if (event.data.stepIndex >= MAX_STEPS_PER_TURN) ctx.cancel();
+    },
+  },
+});
+```
+
+`ctx.cancel()` returns immediately. The remaining subscribers for the same event still run, then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
+
+`ctx.cancel()` only stops a turn that is still running. On `turn.completed`, `turn.failed`, `turn.cancelled`, `session.waiting`, `session.completed`, `session.failed`, `subagent.called`, and `subagent.completed`, and during clear or compact requests, eve logs a warning and ignores the call.
 
 ## Subagent isolation
 

@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
 import {
+  createSessionFailedEvent,
   createStepStartedEvent,
   createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
@@ -17,6 +19,13 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { ContinuationTokenKey, SandboxKey, SessionIdKey, SessionKey } from "./keys.js";
+
+const records: LogRecord[] = [];
+beforeEach(() => {
+  records.length = 0;
+  setLogRecordSubscriber((record) => records.push(record));
+});
+afterEach(() => setLogRecordSubscriber(undefined));
 
 function createMockBundle(): CompiledBundle {
   return {
@@ -65,7 +74,7 @@ function hook(slug: string, hooks: Partial<ResolvedHookDefinition>): ResolvedHoo
 }
 
 describe("dispatchStreamEventHooks", () => {
-  it("invokes typed then wildcard subscribers and propagates errors", async () => {
+  it("invokes typed then wildcard subscribers", async () => {
     const calls: string[] = [];
     const registry = createRuntimeHookRegistry([
       hook("audit", {
@@ -95,60 +104,150 @@ describe("dispatchStreamEventHooks", () => {
     );
     expect(calls).toEqual(["typed", "wildcard:session.completed"]);
 
-    const brokenRegistry = createRuntimeHookRegistry([
-      hook("broken", {
+    expect(records).toEqual([]);
+  });
+
+  it.each([
+    createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
+    createStepStartedEvent({ sequence: 0, turnId: "turn_0", stepIndex: 0, modelId: "test" }),
+    { type: "session.completed" } as const,
+    createSessionFailedEvent({
+      code: "TEST_FAILURE",
+      message: "Runtime failure",
+      sessionId: "session_test",
+    }),
+  ])("continues typed and wildcard subscribers after failures for $type", async (event) => {
+    const calls: string[] = [];
+    const registry = createRuntimeHookRegistry([
+      hook("broken-typed", {
         events: {
-          "session.completed": async () => {
-            throw new Error("event hook boom");
+          [event.type]: () => {
+            calls.push("broken-typed");
+            throw new Error("typed hook failed");
+          },
+        },
+      }),
+      hook("healthy-typed", {
+        events: {
+          [event.type]: () => {
+            calls.push("healthy-typed");
+          },
+        },
+      }),
+      hook("broken-wildcard", {
+        events: {
+          "*": async () => {
+            calls.push("broken-wildcard");
+            throw new Error("wildcard hook failed");
+          },
+        },
+      }),
+      hook("healthy-wildcard", {
+        events: {
+          "*": () => {
+            calls.push("healthy-wildcard");
           },
         },
       }),
     ]);
+    const ctx = buildCtx();
+    const stamped = stampTestEvent(event);
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({ ctx, registry, event: stamped }),
+    );
+    expect(calls).toEqual(["broken-typed", "healthy-typed", "broken-wildcard", "healthy-wildcard"]);
+    expect(records).toMatchObject([
+      {
+        level: "error",
+        fields: {
+          hook: "broken-typed",
+          subscription: event.type,
+          eventId: stamped.meta.id,
+          eventType: event.type,
+          sessionId: "session_test",
+          error: { message: expect.stringMatching(/^(?:Error: )?typed hook failed$/) },
+        },
+      },
+      {
+        level: "error",
+        fields: {
+          hook: "broken-wildcard",
+          subscription: "*",
+          eventId: stamped.meta.id,
+          eventType: event.type,
+          sessionId: "session_test",
+          error: { message: expect.stringMatching(/^(?:Error: )?wildcard hook failed$/) },
+        },
+      },
+    ]);
+  });
+
+  it("forwards ctx.cancel() without skipping later subscribers", async () => {
+    const calls: string[] = [];
+    const registry = createRuntimeHookRegistry([
+      hook("gate", {
+        events: {
+          "turn.started": (_event, hookContext) => {
+            calls.push("gate");
+            hookContext.cancel();
+          },
+        },
+      }),
+      hook("audit", { events: { "*": () => void calls.push("audit") } }),
+    ]);
+    const ctx = buildCtx();
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({
+        cancelTurn: () => calls.push("cancelTurn"),
+        ctx,
+        registry,
+        event: stampTestEvent(createTurnStartedEvent({ sequence: 0, turnId: "turn_0" })),
+      }),
+    );
+    expect(calls).toEqual(["gate", "cancelTurn", "audit"]);
+    expect(records).toEqual([]);
+  });
+
+  it("warns and ignores ctx.cancel() when the event cannot cancel a turn", async () => {
+    const registry = createRuntimeHookRegistry([
+      hook("gate", {
+        events: { "session.completed": (_event, hookContext) => hookContext.cancel() },
+      }),
+    ]);
+    const ctx = buildCtx();
+    const stamped = stampTestEvent({ type: "session.completed" });
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({ ctx, registry, event: stamped }),
+    );
+    expect(records).toMatchObject([
+      {
+        level: "warn",
+        message: "ctx.cancel() ignored: the event is not part of a running turn",
+        fields: {
+          hook: "gate",
+          eventId: stamped.meta.id,
+          eventType: "session.completed",
+          sessionId: "session_test",
+        },
+      },
+    ]);
+  });
+
+  it("still propagates runtime context setup failures", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(BundleKey, createMockBundle());
+    const registry = createRuntimeHookRegistry([hook("audit", { events: { "*": () => {} } })]);
     await expect(
       contextStorage.run(ctx, () =>
         dispatchStreamEventHooks({
           ctx,
-          registry: brokenRegistry,
+          registry,
           event: stampTestEvent({ type: "session.completed" }),
         }),
       ),
-    ).rejects.toThrow(/event hook boom/);
+    ).rejects.toThrow('Context key "eve.session" is not set.');
+    expect(records).toEqual([]);
   });
-
-  it.each(["turn.started", "step.started"] as const)(
-    "identifies an authored %s rejection for turn recovery",
-    async (type) => {
-      const cause = new Error("admission denied");
-      const registry = createRuntimeHookRegistry([
-        hook("admission", {
-          events: {
-            "*": async () => {
-              throw cause;
-            },
-          },
-        }),
-      ]);
-      const ctx = buildCtx();
-      await expect(
-        contextStorage.run(ctx, () =>
-          dispatchStreamEventHooks({
-            ctx,
-            registry,
-            event: stampTestEvent(
-              type === "turn.started"
-                ? createTurnStartedEvent({ sequence: 0, turnId: "turn_0" })
-                : createStepStartedEvent({
-                    sequence: 0,
-                    turnId: "turn_0",
-                    stepIndex: 0,
-                    modelId: "test",
-                  }),
-            ),
-          }),
-        ),
-      ).rejects.toMatchObject({ name: "BoundaryHookError", cause, message: "admission denied" });
-    },
-  );
 
   it("can delete the runtime sandbox from a session.completed hook", async () => {
     let deletions = 0;
