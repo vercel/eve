@@ -155,6 +155,12 @@ eve dev https://your_agent.vercel.app/eve/support
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.
 
+## Inspect agent runs
+
+Vercel detects eve and can add an **Agent Runs** tab under the project’s **Observability** view. Use it to browse sessions and inspect each conversation trace.
+
+The Agent Runs tab requires enablement for your Vercel team. Contact your Vercel representative if the tab doesn’t appear. For third-party tracing backends, configure [OpenTelemetry instrumentation](../../observability/instrumentation).
+
 ## Continue configuring production
 
 Use these guides to secure and observe the deployed agent:

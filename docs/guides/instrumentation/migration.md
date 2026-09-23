@@ -89,4 +89,9 @@ see
 Run `eve build`. A remaining `agent/instrumentation.ts` fails the build with a
 message directing you to the instrumentation directory.
 
-Run the agent and verify each destination independently.
+Before verifying a Vercel deployment, configure trace sampling. A deployed eve
+project needs at least one sampling rule with a rate above 0%; we recommend
+setting the rate to 100%. See
+[Enable tracing on Vercel](/docs/observability/otel#enable-tracing-on-vercel).
+
+Then run the agent and verify each destination independently.
