@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout } from "node:timers/promises";
 import type { EveEvalContext } from "eve/evals";
+import { z } from "zod";
 
 export async function waitForVerification(t: EveEvalContext, workerId: string, key: string) {
   const response = await t.target.fetch(`/test/verification/${workerId}/${key}/ready`, {
@@ -19,9 +20,7 @@ export async function releaseVerification(t: EveEvalContext, workerId: string, k
   assert.equal(response.status, 200);
   const { released, result } = await response.json();
   assert.equal(released, true);
-  assert.equal(typeof result, "string");
-  assert.match(result, /^VERIFIED: /);
-  return result as string;
+  return z.uuid().parse(result);
 }
 
 export async function waitForVerificationStop(t: EveEvalContext, workerId: string, key: string) {

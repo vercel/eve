@@ -46,7 +46,7 @@ export default defineChannel({
         return new Response(null, { status: 403 });
       }
       if (action === "ready") return Response.json({ status: await getRun(hook.runId).status });
-      const result = `VERIFIED: ${crypto.randomUUID()}`;
+      const result = crypto.randomUUID();
       await resumeHook(gate.token, result);
       return Response.json({ released: true, result });
     }),
