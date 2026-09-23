@@ -1,0 +1,161 @@
+name: Eval latency experiment
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Repository-relative experiment manifest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: eval-experiment-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      max_parallel: ${{ steps.plan.outputs.max_parallel }}
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Validate and publish immutable plan
+        id: plan
+        env:
+          MANIFEST: ${{ inputs.manifest }}
+        run: |
+          case "$MANIFEST" in experiments/*.json) ;; *) echo "Manifest must be under experiments/"; exit 1 ;; esac
+          node scripts/eval-experiments/plan.mjs "$MANIFEST" plan.json
+          node --input-type=module -e '
+            import { readFile, appendFile } from "node:fs/promises";
+            const plan = JSON.parse(await readFile("plan.json", "utf8"));
+            await appendFile(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(plan.matrix.map(({fixture, model}) => ({fixture, model})))}\nmax_parallel=${Math.min(plan.maxConcurrency, 10)}\n`);
+          '
+      - name: Upload plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: experiment-plan
+          path: plan.json
+          retention-days: 14
+
+  execute:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      EVE_SANDBOX_IMAGE_TAG: latest
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Download plan
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: experiment-plan
+      - name: Prepare isolated variant checkouts and builds
+        run: node scripts/eval-experiments/prepare-checkouts.mjs "$GITHUB_WORKSPACE" plan.json checkouts.json .experiment-worktrees
+      - name: Run planned repetitions
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          EVE_E2E_MODEL: ${{ matrix.model }}
+          SCHEDULE_KEY: ${{ matrix.fixture }}:${{ matrix.model }}
+        run: node scripts/eval-experiments/run.mjs plan.json "$SCHEDULE_KEY" checkouts.json experiment-output
+      - name: Upload invocation artifacts and raw evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: experiment-${{ matrix.fixture }}-${{ matrix.model }}
+          path: experiment-output
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  report:
+    if: always() && needs.plan.result == 'success'
+    needs: [plan, execute]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download plan
+        if: always()
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: experiment-plan
+          path: artifacts/plan
+      - name: Download available execution artifacts
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: experiment-*
+          path: artifacts/execution
+          merge-multiple: true
+      - name: Extract samples and report
+        if: always()
+        id: report
+        run: |
+          set +e
+          mkdir -p artifacts/report
+          node scripts/eval-experiments/extract.mjs artifacts/execution samples.json
+          extract_status=$?
+          node scripts/eval-experiments/compare.mjs artifacts/plan/plan.json samples.json artifacts/report/report.json artifacts/report/report.md
+          status=$?
+          if [ "$extract_status" -ne 0 ]; then status=$extract_status; fi
+          cat artifacts/report/report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+      - name: Upload experiment report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: experiment-report
+          path: |
+            artifacts/report
+            samples.json
+            artifacts/execution
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Require complete infrastructure execution
+        if: always()
+        env:
+          EXECUTE_RESULT: ${{ needs.execute.result }}
+          REPORT_STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          if [ "$EXECUTE_RESULT" != success ] || [ "$REPORT_STATUS" != 0 ]; then
+            echo "Experiment execution incomplete: execute=$EXECUTE_RESULT report=$REPORT_STATUS"
+            exit 1
+          fi
