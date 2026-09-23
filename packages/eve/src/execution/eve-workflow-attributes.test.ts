@@ -335,7 +335,7 @@ describe("buildSessionAttributes", () => {
     expect(attrs["$eve.title"]).toBe("hi");
   });
 
-  it("stamps hosted OTEL enablement without suppressing the stored title", () => {
+  it("keeps hosted OTEL disabled without suppressing the stored title", () => {
     const attrs = buildSessionAttributes({
       serializedContext: {
         "eve.otelTraceEnabled": true,
@@ -343,7 +343,7 @@ describe("buildSessionAttributes", () => {
       },
     });
 
-    expect(attrs["$eve.is_otel_trace_enabled"]).toBe(true);
+    expect(attrs["$eve.is_otel_trace_enabled"]).toBe(false);
     expect(attrs["$eve.is_trace_content_visible"]).toBe(false);
     expect(attrs["$eve.title"]).toBe("private prompt");
   });

@@ -88,7 +88,7 @@ export function initializeSessionInstrumentation(input: {
       input.ctx.set(ParentTraceContextKey, resolvedParent);
     }
   }
-  input.ctx.set(OtelTraceEnabledKey, runtime?.prepareSessionTrace !== undefined);
+  input.ctx.set(OtelTraceEnabledKey, false);
 }
 
 function allocateSessionTraceSeed(input: {

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: implemented
-last_updated: "2026-09-17"
+last_updated: "2026-09-22"
 ---
 
 # Audience-aware trace content policy
@@ -88,7 +88,7 @@ and an explicit emitted decision authorizes its input and output directions even
 for private channels. An omitted provider policy uses the default audience-aware
 behavior.
 
-Agent Runs and local traces expose the managed export policy:
+Local traces expose the managed export policy:
 
 ```ts
 interface SpanExportContext {
@@ -130,7 +130,6 @@ interface ManagedTraceOptions {
   readonly exportPolicy?: SpanExportPolicy | readonly SpanExportPolicy[];
 }
 
-declare function agentRuns(options?: ManagedTraceOptions): OtelIntegration;
 declare function localTraces(options?: ManagedTraceOptions): OtelIntegration;
 ```
 
@@ -150,8 +149,8 @@ export default otel({
   }),
 });
 
-// agent/instrumentation/agent-runs.ts
-export default agentRuns({
+// agent/instrumentation/local.ts
+export default localTraces({
   exportPolicy: [
     {
       span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),

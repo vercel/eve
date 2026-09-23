@@ -34,11 +34,11 @@ describe("resolveInstrumentationLayout", () => {
   it("keys files by path-derived slot in stable order", () => {
     const otel = writeInstrumentationProvider("otel.ts");
     const local = writeInstrumentationProvider("local.mts");
-    const agentRuns = writeInstrumentationProvider("agent-runs.mjs");
+    const audit = writeInstrumentationProvider("audit.mjs");
 
     expect(resolveInstrumentationLayout({ agentRoot })).toEqual({
       kind: "directory",
-      modulePathsBySlot: { "agent-runs": agentRuns, local, otel },
+      modulePathsBySlot: { audit, local, otel },
     });
   });
 

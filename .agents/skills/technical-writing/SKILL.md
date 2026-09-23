@@ -35,7 +35,7 @@ Use support evidence to identify the reader's problem, not to establish product 
 - Use exact public names such as `defineAgent`, `eve dev`, and `eve add channel/slack`.
 - Distinguish the root agent, the built-in `agent` tool, declared subagents, and remote agents. They have different inheritance and execution semantics.
 - Distinguish eve connections from Vercel Connect, the model-facing `Workflow` tool from authored Vercel Workflows, and durable session state from sandbox filesystem or attachment storage.
-- Name diagnostic surfaces precisely: Vercel runtime logs, **Agent Runs**, OpenTelemetry, `eve logs`, and `eve traces` are not interchangeable.
+- Name diagnostic surfaces precisely: Vercel runtime logs, OpenTelemetry, `eve logs`, and `eve traces` are not interchangeable.
 - Treat `docs/**` as published documentation. Update `docs/meta.json` when navigation changes.
 - Keep `.md` files framework-agnostic. Use MDX components only in `.mdx` files and only when nearby pages establish the convention.
 - Preserve published routes and heading anchors when possible. When moving a page, update authored links and add permanent redirects for old HTML and Markdown URLs.

@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("instrumentation provider production defaults", () => {
-  it("keeps authored local traces inert beside Agent Runs", async () => {
+  it("keeps authored local traces inert in production", async () => {
     vi.stubEnv("EVE_DEV_WORKER_APP_ROOT", undefined);
     vi.stubEnv("VERCEL_ENV", "production");
 
@@ -28,6 +28,6 @@ describe("instrumentation provider production defaults", () => {
     await runtime.forceFlush();
     await runtime.shutdown();
 
-    expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["agent-runs", "local"]);
+    expect(getInstrumentationProviders().map(({ slot }) => slot)).toEqual(["local"]);
   });
 });

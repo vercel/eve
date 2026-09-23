@@ -27,7 +27,7 @@
  * - `$eve.invocation_token` — channel-local continuation token for an external invocation
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
- * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
+ * - `$eve.is_otel_trace_enabled` — reserved false while hosted OTel export is disabled
  * - `$eve.trace_id` — sampled trace seed available in the serialized context when
  *   tagging the run. This is a trace link, not a session-wide trace identity or
  *   confirmation that a destination retained the trace.
@@ -36,7 +36,6 @@
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import {
   ChannelRequestIdKey,
-  OtelTraceEnabledKey,
   ScheduleIdKey,
   SessionTitleKey,
   SessionTraceSeedKey,
@@ -119,10 +118,6 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
     audience: conversation?.audience ?? "unknown",
     environment: conversation?.environment ?? "production",
   });
-}
-
-export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
-  return serializedContext[OtelTraceEnabledKey.name] === true;
 }
 
 export function readSessionTraceId(serializedContext: Record<string, unknown>): string | undefined {
@@ -275,11 +270,10 @@ export function buildSessionAttributes(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   const isTraceContentVisible = isWorkflowTraceContentVisible(input.serializedContext);
-  const isOtelTraceEnabled = isWorkflowOtelTraceEnabled(input.serializedContext);
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
     "$eve.schedule": readScheduleId(input.serializedContext),
-    "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
+    "$eve.is_otel_trace_enabled": false,
     "$eve.is_trace_content_visible": isTraceContentVisible,
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "session",
@@ -307,7 +301,7 @@ export function buildSubagentRootAttributes(input: {
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
-    "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
+    "$eve.is_otel_trace_enabled": false,
     "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "subagent",

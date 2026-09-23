@@ -1145,8 +1145,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     });
     expect(seed!.traceFlags).toBe(1);
     expect(seed!.traceId).toMatch(/^[0-9a-f]{32}$/u);
-    expect(serialized["eve.otelTraceEnabled"]).toBe(true);
-    expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
+    expect(serialized["eve.otelTraceEnabled"]).toBe(false);
+    expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
     expect(tracePolicy).toHaveBeenCalledOnce();
   });
 
@@ -1246,8 +1246,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceId).not.toBe(parentTrace.traceId);
     expect(seed!.spanId).not.toBe(parentTrace.spanId);
     expect(serialized["eve.parentTraceContext"]).toEqual(parentTrace);
-    expect(serialized["eve.otelTraceEnabled"]).toBe(true);
-    expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
+    expect(serialized["eve.otelTraceEnabled"]).toBe(false);
+    expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
     expect(tracePolicy).not.toHaveBeenCalled();
   });
 

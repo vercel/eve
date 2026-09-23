@@ -6,7 +6,7 @@ import {
 import { createInstrumentationSetupContext } from "#instrumentation/setup-context.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { DEVELOPMENT_WORKER_APP_ROOT_ENV } from "#internal/workflow/development-world-protocol.js";
-import { agentRuns, localTraces } from "#public/instrumentation/otel.js";
+import { localTraces } from "#public/instrumentation/otel.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { collectOtelPipeline } from "#tracing/otel-declaration.js";
 import {
@@ -51,9 +51,6 @@ function providerRegistry(): Map<string, InstrumentationProvider> {
 /** Fills reserved slots before authored files may reconfigure or disable them. */
 export function seedInstrumentationProviders(): void {
   const registry = providerRegistry();
-  if (process.env.VERCEL_ENV === "preview" || process.env.VERCEL_ENV === "production") {
-    registry.set("agent-runs", agentRuns());
-  }
   if (process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV] !== undefined) {
     registry.set("local", localTraces());
   }

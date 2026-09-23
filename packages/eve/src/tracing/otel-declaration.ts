@@ -12,7 +12,6 @@ import type { InstrumentationRuntimeContextInput } from "#public/instrumentation
 import type { JsonObject } from "#shared/json.js";
 import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
-import { vercelRuntimeSpanProcessor } from "#tracing/vercel-runtime-span-exporter.js";
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 export type {
   TraceCaptureContext,
@@ -172,7 +171,7 @@ export function otelIntegration(options: OtelIntegrationOptions = {}): OtelInteg
   return createOtelIntegration(options);
 }
 
-/** @internal Local and Agent Runs destination declaration. */
+/** @internal Managed local destination declaration. */
 export function managedOtelIntegration(options: OtelIntegrationOptions = {}): OtelIntegration {
   return createOtelIntegration(options);
 }
@@ -193,17 +192,6 @@ function createOtelIntegration(options: OtelIntegrationOptions): OtelIntegration
     spanProcessors: spanProcessors.map((processor) =>
       contentFilteringProcessor(processor, options.exportPolicy),
     ),
-  };
-}
-
-/** Vercel Agent Runs through the hosted request-context transport. @internal */
-export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelIntegration {
-  assertNoRemovedContentOptions(options);
-  return {
-    [OTEL_INTEGRATION]: true,
-    [PROVIDER]: true,
-    metricReaders: [],
-    spanProcessors: [contentFilteringProcessor(vercelRuntimeSpanProcessor(), options.exportPolicy)],
   };
 }
 

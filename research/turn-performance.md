@@ -250,8 +250,8 @@ one noisy p95 sample must not block a PR.
 
 A nightly main run should repeat the suite three times, retain raw GitHub artifacts, and publish
 the aggregates to the existing observability backend for trend and SDK-release correlation.
-Workflow Agent Runs traces are valuable for phase attribution and outliers, but should not be the
-primary benchmark dependency; CI needs a project-scoped token to inspect those runs.
+Hosted workflow traces are valuable for phase attribution and outliers, but should not be the
+primary benchmark dependency; CI needs a project-scoped token to inspect those traces.
 
 ### Phase attribution
 

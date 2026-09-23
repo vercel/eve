@@ -13,7 +13,6 @@ import {
   resolveLocalTracesExportPolicy,
 } from "#tracing/local-traces.js";
 import {
-  agentRunsIntegration,
   managedOtelIntegration,
   type ManagedTraceOptions,
   type OtelIntegration,
@@ -40,16 +39,6 @@ export {
 } from "#tracing/otel-declaration.js";
 
 export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
-
-/**
- * Vercel Agent Runs, enabled by default in preview and production deployments.
- *
- * Export it from `agent/instrumentation/agent-runs.ts` to configure export, or
- * export `disableInstrumentation()` from that file to turn it off.
- */
-export function agentRuns(options: ManagedTraceOptions = {}): OtelIntegration {
-  return agentRunsIntegration(options);
-}
 
 /**
  * The local trace spool `eve dev` reads, as a destination.

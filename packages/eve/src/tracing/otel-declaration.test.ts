@@ -2,7 +2,6 @@ import type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.j
 import { describe, expect, it } from "vitest";
 
 import {
-  agentRunsIntegration,
   collectOtelPipeline,
   isOtelDeclaration,
   isOtelIntegration,
@@ -75,18 +74,6 @@ describe("otelIntegration", () => {
     expect(() => managedOtelIntegration({ recordOutputs: false } as never)).toThrow(
       /use an `exportPolicy` span decision/iu,
     );
-    expect(() => agentRunsIntegration({ recordInputs: false } as never)).toThrow(
-      /use an `exportPolicy` span decision/iu,
-    );
-  });
-});
-
-describe("agentRunsIntegration", () => {
-  it("declares the Agent Runs runtime processor", () => {
-    const integration = agentRunsIntegration();
-
-    expect(integration.spanProcessors).toHaveLength(1);
-    expect(integration.spanProcessors[0]).not.toBe("auto");
   });
 });
 
