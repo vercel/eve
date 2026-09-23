@@ -19,9 +19,12 @@ export async function dispatchStreamEventHooks(input: {
   readonly registry: RuntimeHookRegistry;
   readonly event: MessageStreamEvent;
 }): Promise<void> {
-  if (!hasStreamEventHooks(input.registry, input.event.type)) return;
   const typed = input.registry.streamEventsByType.get(input.event.type) ?? [];
   const wildcard = input.registry.streamEventsWildcard;
+
+  if (typed.length === 0 && wildcard.length === 0) {
+    return;
+  }
 
   const hookCtx = buildHookContext(input.ctx);
   try {
@@ -37,17 +40,6 @@ export async function dispatchStreamEventHooks(input: {
     }
     throw error;
   }
-}
-
-/** Reports whether any typed or wildcard hook subscribes to an event type. */
-export function hasStreamEventHooks(
-  registry: RuntimeHookRegistry,
-  type: MessageStreamEvent["type"],
-): boolean {
-  return (
-    (registry.streamEventsByType.get(type)?.length ?? 0) > 0 ||
-    registry.streamEventsWildcard.length > 0
-  );
 }
 
 /** Builds the {@link HookContext} surfaced to one handler. */

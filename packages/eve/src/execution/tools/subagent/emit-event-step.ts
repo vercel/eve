@@ -1,4 +1,4 @@
-import { dispatchStreamEventHooks, hasStreamEventHooks } from "#context/hook-lifecycle.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { hydrateDurableSession } from "#execution/session.js";
@@ -45,13 +45,18 @@ export async function emitSubagentEventStep(input: {
       sink.release();
     }
   };
-  if (!hasStreamEventHooks(bundle.hookRegistry, input.event.type)) {
+  // Decided before publishing to prevent duplicate events: subscribed events
+  // prepare hook context before the write, so a setup failure retries this step
+  // without having published. Unsubscribed events skip that setup entirely.
+  const registry = bundle.hookRegistry;
+  if (
+    (registry.streamEventsByType.get(input.event.type)?.length ?? 0) === 0 &&
+    registry.streamEventsWildcard.length === 0
+  ) {
     await publish();
     return { serializedContext: serializeContext(ctx), sessionState: input.sessionState };
   }
 
-  // Hook context is prepared before publication so a setup failure retries this
-  // step without having written the event.
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const session = hydrateDurableSession({
     durable: readDurableSession(input.sessionState),
@@ -61,7 +66,7 @@ export async function emitSubagentEventStep(input: {
   const scoped = await withContextScope(ctx, session, async (enriched) => {
     const emitted = await publish();
     if (!emitted.suppressed) {
-      await dispatchStreamEventHooks({ ctx, registry: bundle.hookRegistry, event: emitted.event });
+      await dispatchStreamEventHooks({ ctx, registry, event: emitted.event });
     }
     return { result: undefined, session: enriched };
   });
