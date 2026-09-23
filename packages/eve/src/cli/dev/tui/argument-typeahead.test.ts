@@ -44,6 +44,8 @@ describe("argumentTypeaheadQuery", () => {
       completed: [],
       argumentStart: 6,
     });
+    expect(argumentTypeaheadQuery("/add channel/slack ")).toBeUndefined();
+    expect(argumentTypeaheadQuery("/model anthropic/claude-sonnet high ")).toBeUndefined();
     expect(argumentTypeaheadQuery("/add one two")).toBeUndefined();
     expect(argumentTypeaheadQuery("hello")).toBeUndefined();
   });

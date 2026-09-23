@@ -57,7 +57,8 @@ export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | u
     while (cursor < text.length && text[cursor] !== " ") cursor += 1;
     tokens.push({ value: text.slice(start, cursor), start });
   }
-  if (text.slice(commandEnd).includes("\n") || tokens.length > ARGUMENT_LIMIT[command]) {
+  const argumentCount = tokens.length + (text.endsWith(" ") ? 1 : 0);
+  if (text.slice(commandEnd).includes("\n") || argumentCount > ARGUMENT_LIMIT[command]) {
     return undefined;
   }
   const active = tokens.at(-1);
