@@ -187,10 +187,7 @@ async function resolvePhotonProject(
       phoneNumber: plan.phoneNumber,
     });
   if (plan.phoneNumber === undefined) throw new Error("Photon phone number is required.");
-  const spinner = context.presenter.log.spinner?.("Waiting for Photon approval…", {
-    kind: "external-action",
-    emphasis: "browser",
-  });
+  const spinner = context.presenter.log.spinner?.("Waiting for Photon approval…");
   let authorizationAction:
     | ReturnType<SetupApplyContext["presenter"]["beginExternalAction"]>
     | undefined;

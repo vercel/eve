@@ -143,21 +143,16 @@ export interface FlowPanelLine {
   evidence?: boolean;
 }
 
-/** One already-resolved animation frame and its active color. */
+/** One already-resolved animation frame. */
 export interface FlowPanelIndicator {
   glyph: string;
-  color: "green" | "yellow";
 }
 
-/** One live flow status after its animation frame and visual intent are resolved. */
-export type FlowPanelStatus =
-  | { kind: "progress"; text: string; indicator: FlowPanelIndicator }
-  | {
-      kind: "external-action";
-      text: string;
-      emphasis: string;
-      indicator: FlowPanelIndicator;
-    };
+/** One live flow status after its animation frame is resolved. */
+export interface FlowPanelStatus {
+  text: string;
+  indicator: FlowPanelIndicator;
+}
 
 export type FlowPanelContent =
   | {
@@ -225,24 +220,11 @@ function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
 }
 
 function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
-  return indicator.color === "green"
-    ? theme.colors.green(indicator.glyph)
-    : theme.colors.yellow(indicator.glyph);
-}
-
-function renderStatusText(status: FlowPanelStatus, theme: Theme): string {
-  if (status.kind === "progress") return theme.colors.dim(status.text);
-
-  const start = status.text.indexOf(status.emphasis);
-  if (start === -1) return theme.colors.dim(status.text);
-  const end = start + status.emphasis.length;
-  return `${theme.colors.dim(status.text.slice(0, start))}${theme.colors.yellow(
-    status.text.slice(start, end),
-  )}${theme.colors.dim(status.text.slice(end))}`;
+  return theme.colors.green(indicator.glyph);
 }
 
 function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
-  return `${renderIndicator(status.indicator, theme)} ${renderStatusText(status, theme)}`;
+  return `${renderIndicator(status.indicator, theme)} ${theme.colors.dim(status.text)}`;
 }
 
 export function flowMessageRows(lines: readonly FlowPanelLine[], theme: Theme): string[] {

@@ -9,9 +9,6 @@ export type SetupEditableSelectResult =
   | { kind: "selected"; value: string }
   | { kind: "edited"; value: string; text: string };
 
-/** Ephemeral setup status, with external user action distinct from background work. */
-export type SetupFlowStatus = string | { kind: "external-action"; text: string; emphasis: string };
-
 interface SetupSelectRequestBase {
   message: string;
   description?: string;
@@ -106,7 +103,7 @@ export interface SetupFlowRenderer {
    * whichever settles first wins.
    */
   readChoice(options: ChannelSetupChoiceOptions): ChannelSetupChoice;
-  setStatus(status: SetupFlowStatus | undefined): void;
+  setStatus(status: string | undefined): void;
   renderLine(text: string, tone: "info" | "success" | "warning" | "error"): void;
   replaceContent?(content?: {
     headline: string;

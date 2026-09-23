@@ -66,7 +66,6 @@ import type {
   SetupEditableSelectResult,
   SetupFlowInterrupt,
   SetupFlowRenderer,
-  SetupFlowStatus,
   SetupSelectRequest,
   SetupSelectResult,
 } from "./setup-flow.js";
@@ -234,9 +233,7 @@ function completedTurnStatus(input: {
   return "Done";
 }
 
-type SetupFlowStatusState =
-  | { kind: "progress"; text: string; startedAtMs: number }
-  | { kind: "external-action"; text: string; emphasis: string; startedAtMs: number };
+type SetupFlowStatusState = { text: string; startedAtMs: number };
 
 type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: number };
 
@@ -2314,7 +2311,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     const flow = this.#requireSetupFlow();
     flow.status = {
-      kind: "progress",
       text: stripTerminalControls(opts.status),
       startedAtMs: Date.now(),
     };
@@ -2897,18 +2893,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * status into the working indicator; `undefined` clears it. Nothing is ever
    * committed to the transcript.
    */
-  #setFlowStatus(status: SetupFlowStatus | undefined): void {
+  #setFlowStatus(status: string | undefined): void {
     const content: SetupFlowStatusState | undefined =
       status === undefined
         ? undefined
-        : typeof status === "string"
-          ? { kind: "progress", text: stripTerminalControls(status), startedAtMs: Date.now() }
-          : {
-              kind: "external-action",
-              text: stripTerminalControls(status.text),
-              emphasis: stripTerminalControls(status.emphasis),
-              startedAtMs: Date.now(),
-            };
+        : { text: stripTerminalControls(status), startedAtMs: Date.now() };
     if (this.#setupFlow !== undefined) {
       this.#setupFlow.status = content;
       if (content === undefined) this.#setupFlow.preview = undefined;
@@ -4354,13 +4343,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return isProgressPulseVisible(Date.now() - startedAtMs) ? glyph : " ";
   }
 
-  #setupFlowIndicator(flow: SetupFlowState, status?: SetupFlowStatusState): FlowPanelIndicator {
+  #setupFlowIndicator(flow: SetupFlowState): FlowPanelIndicator {
     return {
       glyph: this.#progressPulseGlyph(
         flow.startedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
       ),
-      color: status?.kind === "external-action" ? "yellow" : "green",
     };
   }
 
@@ -4382,7 +4370,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // very state the line shows (link, pending deploy, model), so mid-flow
       // values are guaranteed stale; it reappears, refreshed, when the
       // panel closes.
-      const indicator = this.#setupFlowIndicator(flow, flow.status);
+      const indicator = this.#setupFlowIndicator(flow);
       let status: FlowPanelStatus | undefined;
       if (flow.status !== undefined) {
         const { startedAtMs, ...flowStatus } = flow.status;

@@ -4704,18 +4704,15 @@ describe("TerminalRenderer setup flow session", () => {
     }
   });
 
-  it("uses the attention color for an external-action pulse", () => {
+  it("keeps a browser wait on the green pulse without highlighting its text", () => {
     const { screen, renderer } = makeRenderer();
 
     renderer.setupFlow.begin("Agent connections");
-    renderer.setupFlow.setStatus({
-      kind: "external-action",
-      text: "Waiting for you to complete setup in the browser…",
-      emphasis: "browser",
-    });
+    renderer.setupFlow.setStatus("Finish signing in to Vercel in your browser");
 
-    expect(screen.rawOutput()).toContain("\x1b[33m▪\x1b[39m");
-    expect(screen.rawOutput()).toContain("\x1b[33mbrowser\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[32m▪\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[2mFinish signing in to Vercel in your browser");
+    expect(screen.rawOutput()).not.toContain("\x1b[33m");
     renderer.shutdown();
   });
 

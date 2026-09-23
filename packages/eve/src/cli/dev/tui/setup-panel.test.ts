@@ -105,7 +105,7 @@ describe("renderFlowPanel", () => {
             tone: "error",
           },
         ],
-        content: { kind: "idle", indicator: { glyph: "▪", color: "green" } },
+        content: { kind: "idle", indicator: { glyph: "▪" } },
       },
       theme,
       60,
@@ -125,7 +125,7 @@ describe("renderFlowPanel", () => {
       {
         title: "/channels",
         lines,
-        content: { kind: "idle", indicator: { glyph: "⠏", color: "yellow" } },
+        content: { kind: "idle", indicator: { glyph: "⠏" } },
       },
       theme,
       60,
@@ -144,9 +144,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Loading teams…",
-            indicator: { glyph: "⠼", color: "yellow" },
+            indicator: { glyph: "⠼" },
           },
         },
       },
@@ -165,9 +164,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Checking the project…",
-            indicator: { glyph: "▪", color: "green" },
+            indicator: { glyph: "▪" },
           },
         },
       },
@@ -187,9 +185,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "question",
           status: {
-            kind: "progress",
             text: "Creating a Slackbot through Vercel Connect…",
-            indicator: { glyph: "▪", color: "green" },
+            indicator: { glyph: "▪" },
           },
           rows: ["    Try again", "    Cancel"],
         },
@@ -273,9 +270,8 @@ describe("renderFlowDrawer", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Loading teams…",
-            indicator: { glyph: "⠼", color: "yellow" },
+            indicator: { glyph: "⠼" },
           },
         },
       },
