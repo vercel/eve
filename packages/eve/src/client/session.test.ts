@@ -265,6 +265,23 @@ describe("ClientSession", () => {
     expect(session.state).toBe(initialState);
   });
 
+  it("snapshots with an AbortSignal that has no throwIfAborted", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(createBoundedStreamResponse([]));
+    const session = createSession();
+    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal.prototype, "throwIfAborted");
+    expect(descriptor).toBeDefined();
+    delete AbortSignal.prototype.throwIfAborted;
+
+    try {
+      await expect(session.snapshot({ signal: new AbortController().signal })).resolves.toEqual({
+        events: [],
+        session: { sessionId: "session_1", streamIndex: 0 },
+      });
+    } finally {
+      Object.defineProperty(AbortSignal.prototype, "throwIfAborted", descriptor!);
+    }
+  });
+
   it("does not mutate the handle when a snapshot is aborted", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if (init?.signal?.aborted) {
