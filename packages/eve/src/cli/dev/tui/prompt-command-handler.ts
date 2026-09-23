@@ -41,9 +41,12 @@ export function createPromptCommandHandler(
         };
       }
 
-      // `/model <slug> [reasoning]` applies directly; only the bare command
-      // opens the configure menu flow below.
-      if (command.name === "model" && command.argument.length > 0) {
+      // Model selection is owned by the inline command drawer. Once the
+      // drawer submits, this is the command's single apply path.
+      if (command.name === "model") {
+        if (command.argument.length === 0) {
+          return { message: "Choose a model from the inline /model suggestions." };
+        }
         if (target.kind !== "local") {
           return {
             message:
@@ -107,6 +110,10 @@ export function createPromptCommandHandler(
         }
       }
 
+      if (command.name === "add" && command.argument.length === 0) {
+        return { message: "Choose an integration from the inline /add suggestions." };
+      }
+
       const flow = context.renderer.setupFlow;
       if (flow === undefined) {
         return { message: `/${command.name} is not supported by this renderer.` };
@@ -137,10 +144,7 @@ export function createPromptCommandHandler(
         if (context.onOnboardingScreen !== undefined) {
           commandInput.onOnboardingScreen = context.onOnboardingScreen;
         }
-        // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
-        if (command.name === "add" && command.argument.length > 0) {
-          commandInput.initialRegistryAddress = command.argument;
-        }
+        if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;

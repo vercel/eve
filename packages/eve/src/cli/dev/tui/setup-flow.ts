@@ -1,6 +1,5 @@
 import type { ChannelSetupChoice, ChannelSetupChoiceOptions } from "#setup/cli/index.js";
 import type { SearchActionOption } from "#setup/cli/select-state.js";
-import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import type { PlannerNavigation, SelectMetadata, SelectNotice } from "#setup/prompter.js";
 
@@ -93,8 +92,6 @@ export interface SetupFlowRenderer {
   }): Promise<SetupEditableSelectResult | undefined>;
   /** Provider-only picker with masked async validation. Not part of Prompter. */
   readProviderPicker(options: ProviderPickerRequest): Promise<ProviderPickerChoice | undefined>;
-  /** Model, speed, and reasoning picker. Not part of Prompter. */
-  readModelPicker(options: ModelSettingsRequest): Promise<ModelSettingsResult | undefined>;
   readText(options: {
     message: string;
     placeholder?: string;

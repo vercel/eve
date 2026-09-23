@@ -26,7 +26,6 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     readSelect: vi.fn(async () => []),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
-    readModelPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => ""),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -61,11 +60,6 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
       kind: "installed",
     })),
-    runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-      kind: "done",
-      accessChanged: true,
-      modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-    })),
     runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => registryResult()),
     runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({
       kind: "deployed",
@@ -76,7 +70,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "model" | "add" | "deploy";
+  command: "add" | "deploy";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -186,250 +180,8 @@ describe("runTuiSetupCommand", () => {
       ),
     ).toEqual({
       login: "pulse",
-      model: "pulse",
       add: "pulse",
       deploy: "spinner",
-    });
-  });
-
-  it("surfaces the model flow's apply line as the outcome", async () => {
-    const flows = fakeFlows();
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appRoot: APP_ROOT,
-        deps: expect.objectContaining({ pickModelSettings: expect.any(Function) }),
-      }),
-    );
-  });
-
-  it("edits the selected workspace agent while configuring project-level provider access", async () => {
-    const flows = fakeFlows();
-
-    await run({
-      command: "model",
-      flows,
-      agentRoot: "/tmp/project/agents/researcher",
-    });
-
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appRoot: "/tmp/project/agents/researcher",
-        environmentRoot: APP_ROOT,
-      }),
-    );
-  });
-
-  it("does not rebuild model access after a rejected edit", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: false,
-        modelMessage: "Couldn't confirm the id.",
-      })),
-    });
-
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Couldn't confirm the id.",
-      preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("keeps model setup attached to the TUI panel", async () => {
-    const renderer = fakePanelRenderer();
-    renderer.withInheritedStdio = vi.fn(async (task) => task());
-    const exclusiveCalls = vi.fn();
-    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      exclusiveCalls();
-      return task();
-    };
-    const flows = fakeFlows();
-
-    await run({ command: "model", flows, renderer, withExclusiveTerminal });
-
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.not.objectContaining({ withExclusiveTerminal: expect.anything() }),
-    );
-    expect(renderer.withInheritedStdio).not.toHaveBeenCalled();
-    expect(exclusiveCalls).not.toHaveBeenCalled();
-  });
-
-  it("forwards an automatic provider entry to the model flow", async () => {
-    const flows = fakeFlows();
-
-    await run({ command: "model", flows, initialModelStep: "provider" });
-
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: APP_ROOT, initialStep: "provider" }),
-    );
-  });
-
-  it("stacks the model and provider selection lines when both menu actions ran", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-        providerSelection: "ai-gateway-project",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message:
-        "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
-        "AI Gateway via Project selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports a provider-only model session with the provider selection", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerSelection: "ai-gateway-project",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "AI Gateway via Project selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports the selected API-key provider without claiming a connection", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerSelection: "ai-gateway-key",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "AI Gateway via API key selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports the selected ChatGPT subscription", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerSelection: "chatgpt",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "ChatGPT subscription selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports a cancelled model pick", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "",
-      cancelled: true,
-      preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("prompts to upgrade an old Vercel CLI when setup reports it unsupported", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "installed",
-      })),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
-      message: "Upgraded the Vercel CLI. Retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: false,
-    });
-    expect(flows.runInstallVercelCliFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appRoot: APP_ROOT,
-        upgrade: true,
-      }),
-    );
-  });
-
-  it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "later" })).resolves.toEqual({
-      message: "The Vercel CLI needs an update — run `vercel upgrade`, then retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
-    });
-    expect(flows.runInstallVercelCliFlow).not.toHaveBeenCalled();
-  });
-
-  it("prints a thrown upgrade error with the manual command", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => {
-        throw new Error("package manager failed");
-      }),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
-      message:
-        "Couldn't upgrade the Vercel CLI (package manager failed) — run `vercel upgrade`, then retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("prints the native CLI failure reason with the manual command", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "failed",
-        reason: "ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory",
-      })),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
-      message:
-        "Couldn't upgrade the Vercel CLI (ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory) — run `vercel upgrade`, then retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
     });
   });
 
@@ -624,38 +376,6 @@ describe("runTuiSetupCommand", () => {
       cancelled: true,
       tone: undefined,
       preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("preserves model access refreshes when provider setup is interrupted", async () => {
-    const renderer = fakePanelRenderer();
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(
-        ({ signal }) =>
-          new Promise((resolve) => {
-            signal?.addEventListener(
-              "abort",
-              () =>
-                resolve({
-                  kind: "done",
-                  accessChanged: true,
-                  providerSelection: "ai-gateway-key",
-                }),
-              { once: true },
-            );
-          }),
-      ),
-    });
-
-    const result = run({ command: "model", flows, renderer });
-    renderer.fireInterrupt();
-
-    await expect(result).resolves.toEqual({
-      message: "",
-      cancelled: true,
-      tone: undefined,
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
     });
   });
 

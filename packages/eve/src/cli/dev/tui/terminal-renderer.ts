@@ -60,13 +60,6 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
-import {
-  initialModelPickerState,
-  transitionModelPicker,
-  renderModelPicker,
-  modelPickerTitle,
-  type ModelPickerEvent,
-} from "./model-picker.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
@@ -77,7 +70,6 @@ import type {
   SetupSelectResult,
 } from "./setup-flow.js";
 import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
-import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
@@ -639,7 +631,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
-    readModelPicker: (options) => this.#readModelPicker(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -2566,68 +2557,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#stopCaretBlink();
       },
     );
-    return await question.promise;
-  }
-
-  async #readModelPicker(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
-    let interaction = initialModelPickerState(opts);
-    const flow = this.#beginSetupQuestion(modelPickerTitle(interaction));
-    flow.question = (width) => renderModelPicker(opts, interaction, this.#theme, width);
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
-      const dispatch = (event: ModelPickerEvent): void => {
-        const transition = transitionModelPicker(interaction, event, opts);
-        switch (transition.kind) {
-          case "render":
-            if (interaction === transition.state) return;
-            interaction = transition.state;
-            flow.questionTitle = modelPickerTitle(interaction);
-            this.#paint();
-            return;
-          case "cancel":
-            settle(undefined);
-            return;
-          case "settle":
-            settle(transition.result);
-            return;
-        }
-      };
-
-      if (key.type === "ctrl-c") {
-        dispatch({ type: "cancel" });
-        return;
-      }
-      if (key.type === "escape" || key.type === "left") {
-        dispatch({ type: "back" });
-        return;
-      }
-      const intent = setupSelectionIntent(key);
-      switch (intent?.kind) {
-        case "move":
-          dispatch({ type: intent.direction });
-          return;
-        case "submit":
-          dispatch({ type: "submit" });
-          return;
-        case "repaint":
-          this.#paint();
-          return;
-      }
-      if (key.type === "backspace") {
-        dispatch({ type: "backspace" });
-        return;
-      }
-      if (key.type === "alt-backspace") {
-        dispatch({ type: "delete-word-backward" });
-        return;
-      }
-      if (key.type === "text") {
-        for (const char of key.value.replaceAll("\n", " ")) {
-          if (char >= " " && char !== "\u007f") dispatch({ type: "char", char });
-        }
-      }
-    });
     return await question.promise;
   }
 
