@@ -87,10 +87,12 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("parses /help and /info without arguments", () => {
+  it("parses /help, /info, and /changelog without arguments", () => {
     expect(parsePromptCommand("/help")).toEqual({ type: "help" });
     expect(parsePromptCommand("/info")).toEqual({ type: "info" });
+    expect(parsePromptCommand("/changelog")).toEqual({ type: "changelog" });
     expect(parsePromptCommand("/info verbose")).toBeNull();
+    expect(parsePromptCommand("/changelog all")).toBeNull();
     expect(parsePromptCommand("/help model")).toBeNull();
   });
 
@@ -120,6 +122,7 @@ describe("promptCommandsFor", () => {
   it("exposes project commands only for local sessions", () => {
     const names = promptCommandsFor("local").map((command) => command.name);
     expect(names).toContain("info");
+    expect(names).toContain("changelog");
     expect(names).toContain("model");
     expect(names).toContain("add");
     expect(names).toContain("deploy");
@@ -135,6 +138,7 @@ describe("promptCommandsFor", () => {
     expect(names).not.toContain("vc:login");
     expect(names).not.toContain("vc:auth");
     expect(names).not.toContain("info");
+    expect(names).not.toContain("changelog");
     expect(names).not.toContain("model");
     expect(names).not.toContain("add");
     expect(names).not.toContain("deploy");

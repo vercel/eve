@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { isJsonObjectValue } from "#shared/json.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
@@ -42,6 +45,7 @@ export type {
   SubagentView,
 } from "./subagent-pump.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import { resolvePackageRoot } from "#internal/application/package.js";
 
 import {
   type FailureStreamEvent,
@@ -54,6 +58,7 @@ import {
 } from "./errors.js";
 
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
+import { formatCurrentChangelog } from "./changelog.js";
 import { parseLogDisplayMode } from "./log-display-mode.js";
 import {
   formatPromptCommandHelp,
@@ -1055,6 +1060,14 @@ export class EveTUIRunner {
           continue;
         }
 
+        if (command?.type === "changelog") {
+          await this.#showChangelog();
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
         // Like /help, /loglevel renders locally: it adjusts the renderer's
         // own log filter, so it works without a prompt-command handler.
         if (command?.type === "loglevel") {
@@ -1901,6 +1914,22 @@ export class EveTUIRunner {
     } catch (error) {
       this.#renderCommandOutcome(
         `Couldn't inspect the application: ${toErrorMessage(error)}`,
+        "error",
+      );
+    }
+  }
+
+  async #showChangelog(): Promise<void> {
+    try {
+      const changelog = await readFile(join(resolvePackageRoot(), "CHANGELOG.md"), "utf8");
+      const currentRelease = formatCurrentChangelog(changelog);
+      this.#renderCommandOutcome(
+        currentRelease ??
+          "Couldn't find release notes for this version.\n\nFull changelog: https://eve.dev/changelog",
+      );
+    } catch {
+      this.#renderCommandOutcome(
+        "Couldn't read release notes for this version.\n\nFull changelog: https://eve.dev/changelog",
         "error",
       );
     }

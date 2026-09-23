@@ -7,6 +7,7 @@ export type PromptCommand =
   | { type: "reset" }
   | { type: "cancel" }
   | { type: "clear" }
+  | { type: "changelog" }
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
@@ -133,6 +134,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Show application and messaging information",
     takesArgument: false,
     build: () => ({ type: "info" }),
+    targets: ["local"],
+  },
+  {
+    name: "changelog",
+    aliases: [],
+    description: "Show release notes for this version",
+    takesArgument: false,
+    build: () => ({ type: "changelog" }),
     targets: ["local"],
   },
   {
