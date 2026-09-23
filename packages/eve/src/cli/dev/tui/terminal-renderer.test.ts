@@ -1858,6 +1858,17 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("holds a running command's gutter still while its setup panel pulses", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/deploy");
+    renderer.setupFlow.begin("");
+
+    expect(screen.snapshot()).toMatch(/^▪ \/deploy$/m);
+    expect(screen.rawOutput()).toContain("\u001b[2m▪\u001b[22m \u001b[1m/deploy");
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
   it("replaces a settled command with its dimmed summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add connection/notion");

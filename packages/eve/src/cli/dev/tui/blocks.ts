@@ -148,6 +148,8 @@ export interface ToolGroupItem {
 export interface RenderBlockContext {
   /** Current shared square-pulse frame for live activity blocks. */
   activityPulse: string;
+  /** An open setup panel owns the pulse, so a running command's gutter holds still. */
+  setupFlowOpen?: boolean;
   /** Whether prose responses are parsed and styled as Markdown. */
   renderMarkdown?: boolean;
   /**
@@ -432,8 +434,9 @@ function paintCommands(line: string, theme: Theme): string {
 }
 
 /**
- * A slash command invocation. Its gutter pulses while the command runs, then
- * carries the settled outcome — `✓`, `⨯`, or `─` — or the user `│` when the
+ * A slash command invocation. While it runs, its gutter pulses — or holds a
+ * still `▪` beside an open setup panel, which pulses itself. It then carries
+ * the settled outcome — `✓`, `⨯`, or `─` — or the user `│` when the
  * command only reports. A settled summary replaces the invocation, dimmed as a
  * record. The `❯` glyph remains exclusive to live input because the TUI tests
  * use `❯` to detect a ready prompt.
@@ -444,7 +447,11 @@ function renderCommand(block: Block, theme: Theme, context: RenderBlockContext):
     return [`${commandGutter(block, theme)} ${c.dim(block.result)}`];
   }
   const gutter =
-    block.live === true ? c.yellow(context.activityPulse) : commandGutter(block, theme);
+    block.live !== true
+      ? commandGutter(block, theme)
+      : context.setupFlowOpen === true
+        ? c.dim(theme.glyph.square)
+        : c.yellow(context.activityPulse);
   return [`${gutter} ${c.bold(block.body ?? "")}`];
 }
 

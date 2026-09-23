@@ -4330,6 +4330,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ),
     };
     if (previous !== undefined) context.previous = previous;
+    if (this.#setupFlow !== undefined) context.setupFlowOpen = true;
     const rows = renderBlockLines(block, width, this.#theme, context);
     if ((block.depth ?? 0) === 0 && leadsWithGap(block, previous)) {
       return ["", ...rows];
