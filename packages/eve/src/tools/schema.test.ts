@@ -146,6 +146,99 @@ describe("defineJsonSchema", () => {
     });
   });
 
+  // Every schema-bearing keyword @cfworker/json-schema evaluates. The probe
+  // accepts "x" only when `format` is stripped and rejects "long" only when the
+  // validator reaches it, so a keyword the preparation walk skips fails here.
+  const PROBE = { format: "uuid", maxLength: 3 };
+  it.each([
+    ["additionalItems", { additionalItems: PROBE, items: [true] }, (v: string) => [0, v]],
+    ["additionalProperties", { additionalProperties: PROBE }, (v: string) => ({ a: v })],
+    ["allOf", { allOf: [PROBE] }, (v: string) => v],
+    ["anyOf", { anyOf: [PROBE] }, (v: string) => v],
+    ["contains", { contains: PROBE }, (v: string) => [v]],
+    ["$defs", { $defs: { id: PROBE }, $ref: "#/$defs/id" }, (v: string) => v],
+    ["definitions", { $ref: "#/definitions/id", definitions: { id: PROBE } }, (v: string) => v],
+    [
+      "dependencies",
+      { dependencies: { a: { properties: { b: PROBE } } } },
+      (v: string) => ({ a: 1, b: v }),
+    ],
+    [
+      "dependentSchemas",
+      { dependentSchemas: { a: { properties: { b: PROBE } } } },
+      (v: string) => ({ a: 1, b: v }),
+    ],
+    ["else", { else: PROBE, if: false }, (v: string) => v],
+    // eslint-disable-next-line unicorn/no-thenable -- `then` is a JSON Schema keyword here
+    ["if", { else: false, if: PROBE, then: true }, (v: string) => v],
+    ["items", { items: PROBE }, (v: string) => [v]],
+    ["items (tuple)", { items: [PROBE] }, (v: string) => [v]],
+    ["not", { not: { not: PROBE } }, (v: string) => v],
+    ["oneOf", { oneOf: [PROBE] }, (v: string) => v],
+    ["patternProperties", { patternProperties: { "^a": PROBE } }, (v: string) => ({ a: v })],
+    ["prefixItems", { prefixItems: [PROBE] }, (v: string) => [v]],
+    ["properties", { properties: { a: PROBE } }, (v: string) => ({ a: v })],
+    ["propertyNames", { propertyNames: PROBE }, (v: string) => ({ [v]: 1 })],
+    // eslint-disable-next-line unicorn/no-thenable -- `then` is a JSON Schema keyword here
+    ["then", { if: true, then: PROBE }, (v: string) => v],
+    ["unevaluatedItems", { unevaluatedItems: PROBE }, (v: string) => [v]],
+    ["unevaluatedProperties", { unevaluatedProperties: PROBE }, (v: string) => ({ a: v })],
+  ])("treats format as an annotation under %s", (_keyword, source, instance) => {
+    const schema = defineJsonSchema(source);
+
+    expect(validate(schema, instance("x"))).toHaveProperty("value");
+    expect(validate(schema, instance("long"))).toHaveProperty("issues");
+  });
+
+  it("enforces draft-07 property-list dependencies", () => {
+    const schema = defineJsonSchema({ dependencies: { card: ["billing_address"] } });
+
+    expect(validate(schema, { billing_address: "1 Main St", card: "4242" })).toHaveProperty(
+      "value",
+    );
+    expect(validate(schema, { card: "4242" })).toHaveProperty("issues");
+  });
+
+  it("fills omitted properties with their defaults after validation", () => {
+    const schema = defineJsonSchema({
+      $defs: { depth: { default: 2, type: "integer" } },
+      properties: {
+        filter: { properties: { depth: { $ref: "#/$defs/depth" } }, type: "object" },
+        limit: { default: 10, type: "integer" },
+        // A default its own schema rejects is still used, as z.fromJSONSchema did.
+        query: { default: null, type: "string" },
+        rows: {
+          items: { properties: { n: { default: 1, type: "integer" } }, type: "object" },
+          type: "array",
+        },
+        tags: { default: ["a"], type: "array" },
+        variant: { anyOf: [{ properties: { mode: { default: "a" } }, type: "object" }] },
+      },
+      type: "object",
+    });
+    const input = { filter: {}, rows: [{}, { n: 5 }], variant: {} };
+
+    expect(validate(schema, input)).toEqual({
+      value: {
+        filter: { depth: 2 },
+        limit: 10,
+        query: null,
+        rows: [{ n: 1 }, { n: 5 }],
+        tags: ["a"],
+        variant: {},
+      },
+    });
+    expect(input).toEqual({ filter: {}, rows: [{}, { n: 5 }], variant: {} });
+    expect(validate(schema, { limit: 3, query: "open" })).toEqual({
+      value: { limit: 3, query: "open", tags: ["a"] },
+    });
+    expect(validate(schema, { limit: "3" })).toHaveProperty("issues");
+
+    const first = validate(schema, {}) as { value: { tags: string[] } };
+    first.value.tags.push("b");
+    expect(validate(schema, {})).toHaveProperty("value.tags", ["a"]);
+  });
+
   it("reports only the deepest failure of each chain with its path", () => {
     const schema = defineJsonSchema({
       properties: {
@@ -172,6 +265,10 @@ describe("defineJsonSchema", () => {
     ["a non-array enum", { properties: { state: { enum: "open" } }, type: "object" }],
     ["an invalid pattern", { properties: { id: { pattern: "(?i)abc", type: "string" } } }],
     ["an invalid pattern property", { patternProperties: { "(?i)x": { type: "string" } } }],
+    [
+      "an invalid pattern under dependencies",
+      { dependencies: { a: { properties: { id: { pattern: "(?i)abc" } } } } },
+    ],
     ["a non-array required", { required: "id", type: "object" }],
     ["an unresolvable reference", { properties: { a: { $ref: "https://example.com/a.json" } } }],
   ])("advertises %s but passes values through unvalidated", (_label, source) => {

@@ -32,7 +32,12 @@ A tool definition needs:
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
-eve validates the model's input against `inputSchema` before `execute` runs. A Zod or Standard Schema validates with its own library, so tools work with whichever Zod version your app installs. A plain JSON Schema object reaches the model as written, without its `$schema` keyword, and eve validates input against it with JSON Schema 2020-12 rules, which also cover draft-07 keywords. eve treats `format` as an annotation and does not reject input for it. When eve cannot evaluate a JSON Schema locally, for example because of an unknown `type` name or a `$ref` it cannot resolve, the model still receives the schema and eve passes the input to `execute` unvalidated.
+eve validates the model's input against `inputSchema` before `execute` runs:
+
+- A Zod or Standard Schema validates with its own library, so tools work with whichever Zod version your app installs.
+- A plain JSON Schema object reaches the model as written, without its `$schema` keyword. eve validates input against it with JSON Schema 2020-12 rules, which also cover draft-07 keywords, then fills omitted properties from their `default` values.
+- eve treats `format` as an annotation and does not reject input for it.
+- When eve cannot evaluate a JSON Schema locally, for example because of an unknown `type` name or a `$ref` it cannot resolve, the model still receives the schema and eve passes the input to `execute` unvalidated.
 
 ### Hide a tool from delegated agents
 

@@ -14,6 +14,7 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 
 import { toErrorMessage } from "#shared/errors.js";
+import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 /**
@@ -108,7 +109,8 @@ export function isToolSchema(value: unknown): value is ToolSchema {
  * JSON Schema 2020-12 validator that also accepts draft-07 constructs.
  *
  * `format` is treated as an annotation, as JSON Schema 2020-12 specifies by
- * default. A schema the validator cannot evaluate faithfully (unknown `type`
+ * default. A valid value's omitted properties receive their `default` values.
+ * A schema the validator cannot evaluate faithfully (unknown `type`
  * names, invalid `pattern` expressions, unresolvable `$ref`s) is still
  * advertised, but its values pass through unvalidated; the tool's executor,
  * such as a remote MCP server, remains the authority for its own contract.
@@ -290,9 +292,79 @@ function createJsonSchemaValidator(
     }
     if (!result.valid) return { issues: toIssues(result.errors) };
 
-    const message = check?.(value);
-    return message === undefined ? { value } : { issues: [{ message }] };
+    const filled = applyDefaults(schema, schema, value);
+    const message = check?.(filled);
+    return message === undefined ? { value: filled } : { issues: [{ message }] };
   };
+}
+
+/**
+ * Fills omitted object properties from their `default` values through
+ * `properties`, array `items`, and local `$ref`s, as `z.fromJSONSchema` did.
+ * It runs after validation, so a default is used as declared even when its own
+ * schema rejects it. Branches of `allOf`, `anyOf`, and `oneOf` are skipped
+ * because which branch governs a value is ambiguous. The input is not mutated.
+ */
+function applyDefaults(root: JsonObject, schema: unknown, value: unknown): unknown {
+  let result = value;
+  for (const node of followRefs(root, schema)) {
+    const { items, properties } = node;
+    if (isObject(result) && isObject(properties)) {
+      result = fillProperties(root, properties, result);
+    } else if (Array.isArray(result) && isObject(items)) {
+      const list: unknown[] = result;
+      const next = list.map((item) => applyDefaults(root, items, item));
+      if (next.some((item, index) => item !== list[index])) result = next;
+    }
+  }
+  return result;
+}
+
+function fillProperties(
+  root: JsonObject,
+  properties: Record<string, unknown>,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  let result = value;
+  for (const [key, property] of Object.entries(properties)) {
+    const current = Object.hasOwn(value, key) ? value[key] : undefined;
+    const next =
+      current === undefined ? findDefault(root, property) : applyDefaults(root, property, current);
+    if (next === current) continue;
+    if (result === value) result = { ...value };
+    result[key] = next;
+  }
+  return result;
+}
+
+function findDefault(root: JsonObject, schema: unknown): unknown {
+  for (const node of followRefs(root, schema)) {
+    if ("default" in node) return structuredClone(node.default);
+  }
+  return undefined;
+}
+
+/** Yields a subschema, then each local `$ref` target it chains through. */
+function* followRefs(root: JsonObject, schema: unknown): Generator<Record<string, unknown>> {
+  const seen = new Set<object>();
+  let node = schema;
+  while (isObject(node) && !seen.has(node)) {
+    seen.add(node);
+    yield node;
+    node = resolveLocalRef(root, node.$ref);
+  }
+}
+
+function resolveLocalRef(root: JsonObject, ref: unknown): unknown {
+  if (typeof ref !== "string" || (ref !== "#" && !ref.startsWith("#/"))) return undefined;
+  let node: unknown = root;
+  for (const segment of decodePointer(ref)) {
+    if (typeof node !== "object" || node === null || !Object.hasOwn(node, segment)) {
+      return undefined;
+    }
+    node = (node as Record<string, unknown>)[segment];
+  }
+  return node;
 }
 
 /** Returns a validator, or the reason the schema cannot be evaluated faithfully. */
@@ -324,6 +396,7 @@ const SUBSCHEMA_LIST_KEYWORDS = ["allOf", "anyOf", "oneOf", "prefixItems"] as co
 const SUBSCHEMA_MAP_KEYWORDS = [
   "$defs",
   "definitions",
+  "dependencies",
   "dependentSchemas",
   "patternProperties",
   "properties",
@@ -387,6 +460,8 @@ function prepareForValidation(schema: unknown): string | undefined {
       if (keyword === "patternProperties" && !isRegExpSource(key)) {
         return `invalid pattern ${JSON.stringify(key)}`;
       }
+      // Draft-07 `dependencies` mixes subschemas with lists of required property names.
+      if (keyword === "dependencies" && Array.isArray(subschema)) continue;
       const problem = prepareForValidation(subschema);
       if (problem !== undefined) return problem;
     }
@@ -420,13 +495,13 @@ function toIssues(errors: readonly OutputUnit[]): StandardSchemaV1.Issue[] {
       return next === undefined || !next.instanceLocation.startsWith(`${error.instanceLocation}/`);
     })
     .map((error) => {
-      const path = toIssuePath(error.instanceLocation);
+      const path = decodePointer(error.instanceLocation);
       return path.length === 0 ? { message: error.error } : { message: error.error, path };
     });
 }
 
-/** Decodes a `#/a/0/b` instance location into Standard Schema path segments. */
-function toIssuePath(location: string): string[] {
+/** Decodes a `#/a/0/b` JSON Pointer fragment into its path segments. */
+function decodePointer(location: string): string[] {
   return location
     .split("/")
     .slice(1)
