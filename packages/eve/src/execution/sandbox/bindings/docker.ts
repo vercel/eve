@@ -2,7 +2,6 @@ import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
 import { randomUUID } from "node:crypto";
 
 import {
-  DOCKER_SANDBOX_LABEL,
   runDockerBaseSetup,
   startDockerContainer,
   stopDockerContainerIfRunning,
@@ -19,6 +18,7 @@ import {
 } from "#execution/sandbox/bindings/docker-options.js";
 import { createDockerInternalSession } from "#execution/sandbox/bindings/docker-session.js";
 import {
+  commitDockerTemplateImage,
   dockerImageExists,
   dockerTemplateImageReference,
   ensureDockerBaseImage,
@@ -276,27 +276,13 @@ export function createDockerSandboxProvider(
           `stop template build container "${buildContainerName}"`,
         );
         context.log?.(`committing template image "${imageReference}"`);
-        const commit = await cli.run([
-          "commit",
-          "--change",
-          `LABEL ${DOCKER_SANDBOX_LABEL}=1`,
-          "--change",
-          `LABEL ${DOCKER_SANDBOX_LABEL}.role=template`,
-          "--change",
-          `LABEL ${DOCKER_SANDBOX_LABEL}.template-key=${templateKey}`,
-          buildContainerIdentity,
+        const commit = await commitDockerTemplateImage({
+          cli,
+          containerIdentity: buildContainerIdentity,
           imageReference,
-        ]);
-        if (commit.exitCode !== 0) {
-          // Template image tags are daemon-scoped while preparation locks are
-          // app-scoped. Concurrent apps can therefore both observe a missing
-          // image; accept only the loser of that exact publication race.
-          const publishedByPeer =
-            /already(?:\s*|-)?exists/iu.test(`${commit.stderr}\n${commit.stdout}`) &&
-            (await dockerImageExists(cli, imageReference));
-          if (!publishedByPeer) {
-            expectDockerSuccess(commit, `commit sandbox template image "${imageReference}"`);
-          }
+          templateKey,
+        });
+        if (commit === "reused") {
           context.log?.("reusing concurrently published template image");
         }
         await touchDockerTemplateMarker(markerPath, imageReference);
