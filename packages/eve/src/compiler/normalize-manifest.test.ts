@@ -27,6 +27,7 @@ import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { compiledAgentManifestSchema } from "#compiler/manifest.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
+import { z } from "#compiled/zod/index.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
@@ -425,6 +426,40 @@ describe("compileAgentManifest source graph", () => {
 
     expect(order[0]).toBe("config");
     expect(order).toContain("tool");
+  });
+
+  it("rejects tool input schemas without a plain object root at build time", async () => {
+    const request = z.discriminatedUnion("action", [
+      z.object({ action: z.literal("lookup"), id: z.string() }),
+      z.object({ action: z.literal("search"), query: z.string() }),
+    ]);
+    const compileWith = (inputSchema: Parameters<typeof defineTool>[0]["inputSchema"]) =>
+      compileAgentManifest(manifest(), {
+        sourceRegistries: [
+          registry([
+            {
+              logicalPath: "agent.ts",
+              loadNamespace: async () => ({
+                default: defineAgent({ model: "openai/gpt-5.4" }),
+              }),
+            },
+            {
+              logicalPath: "tools/lookup.ts",
+              loadNamespace: async () => ({
+                default: defineTool({ description: "Lookup.", inputSchema, execute: () => null }),
+              }),
+            },
+          ]),
+        ],
+      });
+
+    await expect(compileWith(request)).rejects.toThrow(
+      'Tool "tools/lookup.ts" has an inputSchema with a root-level "oneOf".',
+    );
+    await expect(compileWith(z.string())).rejects.toThrow(
+      'Tool "tools/lookup.ts" has an inputSchema with a root of type "string".',
+    );
+    await expect(compileWith(z.object({ request }))).resolves.toBeDefined();
   });
 
   it("classifies compile and runtime usage from normalized authored semantics", async () => {

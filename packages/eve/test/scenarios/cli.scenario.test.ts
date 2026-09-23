@@ -443,7 +443,7 @@ describe("runCli", () => {
       const body = await response.text();
       expect(response.status, `${body}\n${server.stderr()}`).toBe(200);
       expect(JSON.parse(body)).toEqual({
-        parsed: { action: "echo", input: { value: "hello" } },
+        parsed: { request: { action: "echo", input: { value: "hello" } } },
         invalidAccepted: false,
         output: { result: { value: "hello" } },
       });

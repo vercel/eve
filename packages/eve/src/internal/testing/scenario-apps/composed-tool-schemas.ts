@@ -22,16 +22,18 @@ import operation from "../lib/operation.ts";
 
 export default defineTool({
   description: "Dispatch to the echo operation",
-  inputSchema: z.discriminatedUnion("action", [
-    z.object({
-      action: z.literal("echo"),
-      input: operation.inputSchema as z.ZodType<{ value: string }>,
-    }),
-  ]),
+  inputSchema: z.object({
+    request: z.discriminatedUnion("action", [
+      z.object({
+        action: z.literal("echo"),
+        input: operation.inputSchema as z.ZodType<{ value: string }>,
+      }),
+    ]),
+  }),
   outputSchema: z.object({
     result: operation.outputSchema as z.ZodType<{ value: string }>,
   }),
-  execute: async (input) => ({ result: input.input }),
+  execute: async ({ request }) => ({ result: request.input }),
 });
 `,
     "agent/channels/schema-composition.ts": `import { defineChannel, GET } from "eve/channels";
@@ -42,10 +44,11 @@ export default defineChannel({
   routes: [GET("/schema-composition", async () => {
     const input = dispatch.inputSchema as z.ZodType;
     const output = dispatch.outputSchema as z.ZodType;
-    const parsed = input.parse({ action: "echo", input: { value: " hello " } });
+    const parsed = input.parse({ request: { action: "echo", input: { value: " hello " } } });
     return Response.json({
       parsed,
-      invalidAccepted: input.safeParse({ action: "echo", input: { value: " " } }).success,
+      invalidAccepted: input.safeParse({ request: { action: "echo", input: { value: " " } } })
+        .success,
       output: output.parse({ result: { value: "hello" } }),
     });
   })],

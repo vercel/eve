@@ -7,6 +7,7 @@ import {
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import type { JsonObject } from "#shared/json.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -118,6 +119,7 @@ export async function compileToolEntry(
     lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
     suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
   };
+  assertModelCompatibleInputSchema(entry.definition.inputSchema ?? null, source.logicalPath);
   return {
     kind: "tool",
     definition: {
@@ -143,4 +145,29 @@ export async function compileToolEntry(
       workflowProgram: entry.definition.workflowProgram,
     },
   };
+}
+
+const ROOT_COMBINATORS = ["anyOf", "oneOf", "allOf"] as const;
+
+/**
+ * Rejects tool input schemas that model providers refuse at request time.
+ * Anthropic rejects non-object roots and root-level `anyOf`/`oneOf`/`allOf`,
+ * so a root `z.discriminatedUnion()` or `z.union()` fails every Anthropic
+ * request that lists the tool. Catch it when the agent is built instead.
+ */
+function assertModelCompatibleInputSchema(schema: JsonObject | null, logicalPath: string): void {
+  if (schema === null) return;
+  const combinator = ROOT_COMBINATORS.find((key) => key in schema);
+  const hasNonObjectType = schema.type !== undefined && schema.type !== "object";
+  if (combinator === undefined && !hasNonObjectType) return;
+
+  const found =
+    combinator === undefined
+      ? `a root of type ${JSON.stringify(schema.type)}`
+      : `a root-level "${combinator}"`;
+  throw new Error(
+    `Tool "${logicalPath}" has an inputSchema with ${found}. Model providers require tool ` +
+      `input schemas to be a plain object at the root. Wrap the schema in an object property, ` +
+      `for example z.object({ request: z.discriminatedUnion(...) }).`,
+  );
 }
