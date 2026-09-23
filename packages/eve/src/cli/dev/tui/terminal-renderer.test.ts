@@ -12,7 +12,7 @@ import {
 } from "#internal/nitro/host/dev-watcher-log.js";
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
-import { promptCommandsFor } from "./prompt-commands.js";
+import { PROMPT_COMMANDS, promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -5490,6 +5490,29 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("│ /quit");
+  });
+
+  it("lets /help choose a command without retaining the drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+
+    expect(screen.snapshot()).toContain("Commands");
+    input.down();
+    input.enter();
+    expect(await choice).toBe("/reset");
+    expect(screen.snapshot()).not.toContain("Commands");
+    renderer.shutdown();
+  });
+
+  it("closes the transient info panel without retaining its contents", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const panel = renderer.showInfoPanel("Agent: Weather");
+
+    expect(screen.snapshot()).toContain("Agent: Weather");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Agent: Weather");
+    renderer.shutdown();
   });
 
   it("moves the suggestion highlight with arrows instead of recalling history", async () => {

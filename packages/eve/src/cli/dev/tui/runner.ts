@@ -285,6 +285,9 @@ export type AgentTUIRenderer = {
   /** Commits the startup `/deploy` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, status?: CommandResultStatus, summary?: string): void;
+  dismissCommandInvocation?(): void;
+  choosePromptCommand?(commands: readonly PromptCommandSpec[]): Promise<string | undefined>;
+  showInfoPanel?(text: string): Promise<void>;
   readonly setupFlow?: SetupFlowRenderer;
   /**
    * The renderer's full-screen local trace viewer, opened by `/traces`.
@@ -478,7 +481,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
-    command: "model" | "add" | "login",
+    command: "model" | "add" | "login" | "loglevel",
   ) => Promise<readonly PromptArgumentSuggestion[]>;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -922,7 +925,7 @@ export class EveTUIRunner {
 
         if (command?.type === "cancel") {
           if (this.#session === undefined) {
-            this.#renderCommandOutcome("No active turn to cancel.");
+            this.#renderCommandOutcome("", "neutral", "No active turn to cancel");
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -932,9 +935,9 @@ export class EveTUIRunner {
           try {
             const result = await this.#session.cancel();
             this.#renderCommandOutcome(
-              result.status === "accepted"
-                ? "Turn cancellation requested."
-                : "No active turn to cancel.",
+              result.status === "accepted" ? "" : "No active turn to cancel.",
+              result.status === "accepted" ? "success" : "neutral",
+              result.status === "accepted" ? "Cancellation requested" : "No active turn to cancel",
             );
             if (result.status === "no_active_turn") {
               pendingInputResponses = undefined;
@@ -944,7 +947,11 @@ export class EveTUIRunner {
               continue;
             }
           } catch (error) {
-            this.#renderCommandOutcome(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+            this.#renderCommandOutcome(
+              `Couldn't cancel the turn: ${toErrorMessage(error)}`,
+              "error",
+              "Couldn't cancel the turn",
+            );
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -958,6 +965,7 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "reset") {
+          this.#renderer.dismissCommandInvocation?.();
           if (!(await this.#resetCurrentSession())) {
             pendingInputResponses = undefined;
             streamWithoutPrompt = false;
@@ -972,7 +980,7 @@ export class EveTUIRunner {
 
         if (command?.type === "compact") {
           if (this.#session === undefined) {
-            this.#renderCommandOutcome("No active session to compact.");
+            this.#renderCommandOutcome("", "neutral", "No active session to compact");
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -982,9 +990,11 @@ export class EveTUIRunner {
           try {
             const result = await this.#session.compact();
             this.#renderCommandOutcome(
+              result.status === "accepted" ? "" : "No active session to compact.",
+              result.status === "accepted" ? "success" : "neutral",
               result.status === "accepted"
-                ? "Compaction requested."
-                : "No active session to compact.",
+                ? "Compaction requested"
+                : "No active session to compact",
             );
             if (result.status === "no_active_session") {
               pendingInputResponses = undefined;
@@ -994,7 +1004,11 @@ export class EveTUIRunner {
               continue;
             }
           } catch (error) {
-            this.#renderCommandOutcome(`Couldn't compact the session: ${toErrorMessage(error)}`);
+            this.#renderCommandOutcome(
+              `Couldn't compact the session: ${toErrorMessage(error)}`,
+              "error",
+              "Couldn't compact the session",
+            );
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -1008,8 +1022,9 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "clear") {
+          this.#renderer.dismissCommandInvocation?.();
           if (this.#session === undefined) {
-            this.#renderCommandOutcome("No active session to clear.");
+            this.#renderCommandOutcome("", "neutral", "No active session to clear");
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -1018,11 +1033,12 @@ export class EveTUIRunner {
           }
           try {
             const result = await this.#session.clear();
-            this.#renderCommandOutcome(
-              result.status === "accepted"
-                ? "Context clear requested."
-                : "No active session to clear.",
-            );
+            if (result.status !== "accepted")
+              this.#renderCommandOutcome(
+                "No active session to clear.",
+                "neutral",
+                "No active session to clear",
+              );
             if (result.status === "no_active_session") {
               pendingInputResponses = undefined;
               followCurrentSession = false;
@@ -1031,7 +1047,11 @@ export class EveTUIRunner {
               continue;
             }
           } catch (error) {
-            this.#renderCommandOutcome(`Couldn't clear the session: ${toErrorMessage(error)}`);
+            this.#renderCommandOutcome(
+              `Couldn't clear the session: ${toErrorMessage(error)}`,
+              "error",
+              "Couldn't clear the session",
+            );
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -1047,7 +1067,12 @@ export class EveTUIRunner {
         // Help renders locally; unlike extension commands it must work even
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
-          this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
+          const selected = await this.#renderer.choosePromptCommand?.(
+            this.#availablePromptCommands,
+          );
+          if (selected !== undefined) initialDraft = selected;
+          else if (this.#renderer.choosePromptCommand === undefined)
+            this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1911,7 +1936,9 @@ export class EveTUIRunner {
       return;
     }
     try {
-      this.#renderCommandOutcome(renderApplicationInfo(await this.#inspectApplication(appRoot)));
+      const info = renderApplicationInfo(await this.#inspectApplication(appRoot));
+      if (this.#renderer.showInfoPanel !== undefined) await this.#renderer.showInfoPanel(info);
+      else this.#renderCommandOutcome(info);
     } catch (error) {
       this.#renderCommandOutcome(
         `Couldn't inspect the application: ${toErrorMessage(error)}`,

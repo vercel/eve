@@ -11,7 +11,7 @@ export interface PromptArgumentSuggestion {
   readonly next?: readonly PromptArgumentSuggestion[];
 }
 
-export type ArgumentTypeaheadCommand = "model" | "add" | "login";
+export type ArgumentTypeaheadCommand = "model" | "add" | "login" | "loglevel";
 
 export interface ArgumentTypeaheadQuery {
   readonly command: ArgumentTypeaheadCommand;
@@ -27,16 +27,22 @@ export interface ArgumentTypeaheadState extends ArgumentTypeaheadQuery {
   readonly selectedIndex: number;
 }
 
-const ARGUMENT_LIMIT: Record<ArgumentTypeaheadCommand, number> = { add: 1, login: 1, model: 2 };
+const ARGUMENT_LIMIT: Record<ArgumentTypeaheadCommand, number> = {
+  add: 1,
+  login: 1,
+  loglevel: 1,
+  model: 2,
+};
 
 export function isArgumentTypeaheadCommand(command: string): command is ArgumentTypeaheadCommand {
-  return command === "model" || command === "add" || command === "login";
+  return command === "model" || command === "add" || command === "login" || command === "loglevel";
 }
 
 export function argumentTypeaheadLoadingLabel(command: ArgumentTypeaheadCommand): string {
   if (command === "model") return "models";
   if (command === "add") return "registry";
-  return "connections";
+  if (command === "login") return "connections";
+  return "log levels";
 }
 
 /**

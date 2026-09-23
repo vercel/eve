@@ -1688,7 +1688,7 @@ describe("EveTUIRunner development session continuity", () => {
     expect(compact).toHaveBeenCalledOnce();
     expect(stream).toHaveBeenCalledOnce();
     expect(session.send).not.toHaveBeenCalled();
-    expect(results).toEqual(["Compaction requested."]);
+    expect(results).toEqual([""]);
   });
 
   it.each(["/clear", "/new"])(
@@ -1730,7 +1730,7 @@ describe("EveTUIRunner development session continuity", () => {
       expect(clear).toHaveBeenCalledOnce();
       expect(stream).toHaveBeenCalledOnce();
       expect(session.send).not.toHaveBeenCalled();
-      expect(results).toEqual(["Context clear requested."]);
+      expect(results).toEqual([]);
     },
   );
 
@@ -1772,7 +1772,7 @@ describe("EveTUIRunner development session continuity", () => {
     expect(cancel).toHaveBeenCalledOnce();
     expect(stream).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
-    expect(results).toEqual(["Turn cancellation requested."]);
+    expect(results).toEqual([""]);
   });
 
   it("does not call the cancel API before a session has started", async () => {
@@ -1788,7 +1788,7 @@ describe("EveTUIRunner development session continuity", () => {
 
     await runner.run();
 
-    expect(results).toEqual(["No active turn to cancel."]);
+    expect(results).toEqual([""]);
   });
 
   it("keeps the current transcript and session when /reset cannot reset the owner", async () => {

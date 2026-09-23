@@ -54,8 +54,16 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 
 function inlineArgumentSuggestions(appRoot: string) {
   return async (
-    command: "model" | "add" | "login",
+    command: "model" | "add" | "login" | "loglevel",
   ): Promise<readonly PromptArgumentSuggestion[]> => {
+    if (command === "loglevel") {
+      return [
+        { value: "all", label: "all", hint: "Show all captured logs" },
+        { value: "stderr", label: "stderr", hint: "Show stderr logs only" },
+        { value: "sandbox", label: "sandbox", hint: "Show sandbox logs only" },
+        { value: "none", label: "none", hint: "Hide captured logs" },
+      ];
+    }
     if (command === "login") {
       return LOGIN_CONNECTION_COMMAND_OPTIONS.map((option) => ({
         value: option.command,

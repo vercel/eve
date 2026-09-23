@@ -134,6 +134,7 @@ import {
   renderInputText,
   renderInputWithBlockCursor,
   stripAnsi,
+  wrapVisibleLine,
   stripTerminalControls,
 } from "#cli/ui/terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
@@ -293,7 +294,7 @@ export type TerminalRendererOptions = {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
-    command: "model" | "add" | "login",
+    command: "model" | "add" | "login" | "loglevel",
   ) => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };
@@ -1031,7 +1032,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
               argumentOpen === undefined &&
               selected !== undefined &&
               this.#argumentSuggestions !== undefined &&
-              (selected.name === "add" || selected.name === "login" || selected.name === "model")
+              (selected.name === "add" ||
+                selected.name === "login" ||
+                selected.name === "loglevel" ||
+                selected.name === "model")
             ) {
               apply(lineOf(typeaheadCompletion(selected)));
               break;
@@ -2006,6 +2010,95 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * it with the elbow. Without an echo, a successful outcome carries its own
    * check mark.
    */
+  /** Lets `/help` select a command without leaving a transcript row. */
+  async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
+    this.#start();
+    this.dismissCommandInvocation();
+    this.#inputActive = false;
+    let cursor = 0;
+    this.#questionPanel = (width) =>
+      renderQuestionPanel(
+        {
+          prompt: "Commands",
+          options: commands.map((command) => ({
+            id: command.name,
+            label: `/${command.name}${command.argumentHint === undefined ? "" : ` ${command.argumentHint}`}`,
+            description: command.description,
+          })),
+          cursor,
+          allowFreeform: false,
+          editor: EMPTY_LINE,
+          caretVisible: false,
+        },
+        this.#theme,
+        width,
+      );
+    this.#status = "";
+    this.#paint();
+    return await new Promise((resolve) => {
+      this.#consumeKey = (key) => {
+        if (key.type === "up" || key.type === "ctrl-p") {
+          cursor = (cursor - 1 + commands.length) % commands.length;
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          cursor = (cursor + 1) % commands.length;
+          this.#paint();
+        } else if (key.type === "enter") {
+          const command = commands[cursor];
+          this.#closeTransientPanel();
+          resolve(
+            command === undefined
+              ? undefined
+              : `/${command.name}${command.takesArgument ? " " : ""}`,
+          );
+        } else if (key.type === "escape" || key.type === "ctrl-c") {
+          this.#closeTransientPanel();
+          resolve(undefined);
+        }
+      };
+      this.#attachInput();
+    });
+  }
+
+  /** Shows local application metadata without retaining it in the transcript. */
+  async showInfoPanel(text: string): Promise<void> {
+    this.#start();
+    this.dismissCommandInvocation();
+    this.#inputActive = false;
+    this.#questionPanel = (width) => {
+      const rows: string[] = [];
+      for (const line of stripTerminalControls(text).split("\n"))
+        rows.push(...wrapVisibleLine(line, Math.max(8, width - 4)).map((part) => `  ${part}`));
+      rows.push("", `  ${this.#theme.colors.dim("Esc to close")}`);
+      return rows;
+    };
+    this.#status = "";
+    this.#paint();
+    await new Promise<void>((resolve) => {
+      this.#consumeKey = (key) => {
+        if (key.type !== "escape" && key.type !== "ctrl-c" && key.type !== "enter") return;
+        this.#closeTransientPanel();
+        resolve();
+      };
+      this.#attachInput();
+    });
+  }
+
+  #closeTransientPanel(): void {
+    this.#questionPanel = undefined;
+    this.#detachInput();
+    this.#paint();
+  }
+
+  /** Removes an invocation whose command clears the current view. */
+  dismissCommandInvocation(): void {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return;
+    this.#pendingCommandEcho = undefined;
+    this.#blocks = this.#blocks.filter((candidate) => candidate !== block);
+    this.#paint();
+  }
+
   renderCommandResult(text: string, status?: CommandResultStatus, summary?: string): void {
     const content = stripAnsi(text);
     const echo = this.#settleCommandEcho(status, summary);
