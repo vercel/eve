@@ -66,7 +66,7 @@ describe("workflow-owned agent requests", () => {
   });
 
   it.each([false, true])(
-    "waits for notification hooks before acknowledgement and retains their state (fails: %s)",
+    "waits for notification completion before acknowledgement and retains its state (fails: %s)",
     async (fails) => {
       const updatedState = { sessionId: "updated" } as never;
       const hookState = { sessionId: "hooked" } as never;
@@ -90,8 +90,8 @@ describe("workflow-owned agent requests", () => {
       await vi.waitFor(() => expect(emitSubagentEventStep).toHaveBeenCalledOnce());
       expect(resumeHookStep).not.toHaveBeenCalled();
       if (fails) {
-        const rejected = expect(applying).rejects.toThrow("hook failed");
-        notification.reject(new Error("hook failed"));
+        const rejected = expect(applying).rejects.toThrow("notification runtime failed");
+        notification.reject(new Error("notification runtime failed"));
         await rejected;
         expect(emitSubagentEventStep).toHaveBeenCalledOnce();
         expect(resumeHookStep).not.toHaveBeenCalled();

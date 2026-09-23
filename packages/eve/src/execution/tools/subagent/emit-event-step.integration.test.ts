@@ -176,7 +176,7 @@ it.each(
               subscription: subscriber === "typed" ? event.type : "*",
               eventType: event.type,
               sessionId: "parent",
-              error: { message: "subagent subscriber failed" },
+              error: { message: expect.stringMatching(/^(?:Error: )?subagent subscriber failed$/) },
             },
           }))
         : [],

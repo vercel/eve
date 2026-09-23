@@ -181,9 +181,9 @@ Hooks always run after the event is durably recorded, so if a hook throws, the s
 
 ## What happens when a hook throws
 
-A thrown handler during a model turn propagates through turn execution and surfaces as `turn.failed`. In a conversation session, this includes handlers for `turn.started` and the first `step.started` of a model call: the failed turn ends with `session.waiting`, and the next message can start another turn. Task-mode boundary failures remain terminal. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+eve logs a thrown or rejected handler with the hook slug, subscription, event type, event ID, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `step.started`, and failure events. Throwing from a hook does not reject work or veto a turn.
 
-For `subagent.called` and `subagent.completed`, a thrown handler fails the notification step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the notification step to finish or exhaust its retries.
+A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate.
 
 ## Subagent isolation
 

@@ -4,6 +4,7 @@ import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
 import {
+  createSessionFailedEvent,
   createStepStartedEvent,
   createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
@@ -110,6 +111,11 @@ describe("dispatchStreamEventHooks", () => {
     createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
     createStepStartedEvent({ sequence: 0, turnId: "turn_0", stepIndex: 0, modelId: "test" }),
     { type: "session.completed" } as const,
+    createSessionFailedEvent({
+      code: "TEST_FAILURE",
+      message: "Runtime failure",
+      sessionId: "session_test",
+    }),
   ])("continues typed and wildcard subscribers after failures for $type", async (event) => {
     const calls: string[] = [];
     const registry = createRuntimeHookRegistry([
@@ -159,7 +165,7 @@ describe("dispatchStreamEventHooks", () => {
           eventId: stamped.meta.id,
           eventType: event.type,
           sessionId: "session_test",
-          error: { message: "typed hook failed" },
+          error: { message: expect.stringMatching(/^(?:Error: )?typed hook failed$/) },
         },
       },
       {
@@ -170,7 +176,7 @@ describe("dispatchStreamEventHooks", () => {
           eventId: stamped.meta.id,
           eventType: event.type,
           sessionId: "session_test",
-          error: { message: "wildcard hook failed" },
+          error: { message: expect.stringMatching(/^(?:Error: )?wildcard hook failed$/) },
         },
       },
     ]);
