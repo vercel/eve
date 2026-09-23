@@ -1,162 +1,71 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractSample } from "./extract.mjs";
-import { getProfile } from "./profiles/index.mjs";
+import { validateCapturedArtifact, validateMeasurements } from "./extract.mjs";
 
-const event = (type, id, at, data, sessionId) => ({ type, data, meta: { id, at, sessionId } });
-function input({ child = [], parent = [], sessions = true, verdict = "passed" } = {}) {
-  return {
-    identity: {
-      variant: "baseline",
-      fixture: "agent-self-modification",
-      eval: "self-modification/create-shipping-quote",
-      model: "openai-sol",
-      repetition: 0,
-      metricProfile: "self-modification-v1",
-    },
-    profile: getProfile("self-modification-v1"),
-    verdict,
-    artifact: {
-      result: {
-        sessions: sessions
-          ? [
-              {
-                sessionId: "parent",
-                events: [
-                  event(
-                    "turn.started",
-                    "ps",
-                    "2026-01-01T00:00:00.000Z",
-                    { turnId: "pt" },
-                    "parent",
-                  ),
-                  event(
-                    "subagent.called",
-                    "call-event",
-                    "2026-01-01T00:00:01.000Z",
-                    {
-                      name: "self-modification__agent",
-                      childSessionId: "child",
-                      turnId: "pt",
-                      callId: "call",
-                    },
-                    "parent",
-                  ),
-                  ...parent,
-                ],
-              },
-              {
-                sessionId: "child",
-                events: [
-                  event(
-                    "session.started",
-                    "ss",
-                    "2026-01-01T00:00:01.500Z",
-                    {
-                      invocation: {
-                        kind: "subagent",
-                        parentCallId: "call",
-                        parentSessionId: "parent",
-                        parentTurnId: "pt",
-                        name: "self-modification__agent",
-                      },
-                    },
-                    "child",
-                  ),
-                  event(
-                    "turn.started",
-                    "cs",
-                    "2026-01-01T00:00:02.000Z",
-                    { turnId: "ct" },
-                    "child",
-                  ),
-                  ...child,
-                ],
-              },
-            ]
-          : undefined,
-      },
-    },
-  };
-}
-const completed = event(
-  "turn.completed",
-  "ce",
-  "2026-01-01T00:00:05.000Z",
-  { turnId: "ct" },
-  "child",
-);
+const bundle = {
+  version: 1,
+  metrics: { count: { unit: "count", direction: "neutral" } },
+  derive: () => ({ count: { status: "measured", value: 0 } }),
+};
+const artifact = { id: "case", verdict: "passed", result: { status: "completed", sessions: [] } };
 
-test("measures correlated child work and deduplicates delivery by event id", () => {
-  const duplicate = { ...completed };
-  const action = event(
-    "actions.requested",
-    "tools",
-    "2026-01-01T00:00:03.000Z",
-    {
-      turnId: "ct",
-      actions: [
-        { kind: "tool-call", callId: "tool-1" },
-        { kind: "tool-call", callId: "tool-1" },
-        { kind: "tool-call", callId: "tool-2" },
-      ],
-    },
-    "child",
+test("validates the consumed eval artifact projection", () => {
+  assert.equal(validateCapturedArtifact(artifact, "case").result.sessions.length, 0);
+  assert.throws(
+    () => validateCapturedArtifact({ ...artifact, id: "other" }, "case"),
+    /artifact identity/,
   );
-  const sample = extractSample(input({ child: [action, completed, duplicate] }));
-  assert.equal(sample.measurement.status, "complete");
-  assert.deepEqual(sample.metrics, {
-    creationElapsedMs: 5000,
-    childTurnMs: 3000,
-    childToolCalls: 2,
-  });
-  assert.equal(sample.events.childCompletion.id, "ce");
-});
-
-test("keeps missing capture, boundaries, parked input, and failed turns incomplete", () => {
-  assert.equal(
-    extractSample(input({ sessions: false })).measurement.reason,
-    "missing-session-capture",
-  );
-  assert.equal(extractSample(input()).measurement.reason, "missing-child-turn-boundary");
-  assert.equal(
-    extractSample(
-      input({
-        child: [
-          event("input.requested", "approval", "2026-01-01T00:00:03Z", { turnId: "ct" }),
-          completed,
-        ],
-      }),
-    ).measurement.reason,
-    "child-turn-parked",
-  );
-  assert.equal(
-    extractSample(
-      input({
-        child: [
-          event("turn.failed", "failure", "2026-01-01T00:00:03Z", { turnId: "ct" }),
-          completed,
-        ],
-      }),
-    ).measurement.reason,
-    "child-turn-failed",
+  assert.throws(
+    () => validateCapturedArtifact({ ...artifact, result: {} }, "case"),
+    /task result shape/,
   );
 });
 
-test("rejects ambiguous delegation and reused child turn capture", () => {
-  const duplicateDelegation = input({ child: [completed] });
-  duplicateDelegation.artifact.result.sessions[0].events.push(
-    event(
-      "subagent.called",
-      "another-call",
-      "2026-01-01T00:00:01.100Z",
-      { name: "self-modification__agent", childSessionId: "child", turnId: "pt", callId: "call-2" },
-      "parent",
-    ),
+test("keeps artifacts with unavailable session captures analyzable", () => {
+  const captured = validateCapturedArtifact(
+    { ...artifact, result: { status: "completed" } },
+    "case",
   );
-  assert.equal(extractSample(duplicateDelegation).measurement.reason, "ambiguous-delegation");
-  const reused = input({
-    child: [event("turn.started", "cs2", "2026-01-01T00:00:06Z", { turnId: "ct2" }), completed],
-  });
-  assert.equal(extractSample(reused).measurement.reason, "ambiguous-child-turn");
+  assert.equal(captured.result.sessions, undefined);
+  assert.equal(
+    validateMeasurements(
+      { ...bundle, derive: () => ({ count: { status: "unavailable", reason: "no-capture" } }) },
+      captured,
+    ).count.status,
+    "unavailable",
+  );
+});
+
+test("rejects undeclared, invalid, and throwing measurement results", () => {
+  const captured = validateCapturedArtifact(artifact, "case");
+  assert.equal(validateMeasurements(bundle, captured).count.value, 0);
+  assert.throws(
+    () =>
+      validateMeasurements(
+        { ...bundle, derive: () => ({ other: { status: "measured", value: 1 } }) },
+        captured,
+      ),
+    /keys do not match/,
+  );
+  assert.throws(
+    () =>
+      validateMeasurements(
+        { ...bundle, derive: () => ({ count: { status: "measured", value: Infinity } }) },
+        captured,
+      ),
+    /numeric measurement/,
+  );
+  assert.throws(
+    () =>
+      validateMeasurements(
+        {
+          ...bundle,
+          derive: () => {
+            throw new Error("broken");
+          },
+        },
+        captured,
+      ),
+    /broken/,
+  );
 });

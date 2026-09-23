@@ -2,231 +2,248 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export function compareExperiment(plan, samples) {
-  const expected = [];
-  for (const schedule of plan.matrix)
-    for (const block of schedule.blocks)
-      for (const label of block.order) {
-        const variant = plan.variants.find((item) => item.label === label);
-        const fixture = plan.fixtures.find((item) => item.name === schedule.fixture);
-        for (const evalId of fixture.evals)
-          expected.push({
-            variant: label,
-            sha: variant.sha,
-            metricProfile: fixture.metricProfile,
-            metricSchemaVersion: plan.metricProfiles.find(
-              (item) => item.id === fixture.metricProfile,
-            )?.metricSchemaVersion,
+export function compareExperiment(plan, extracted) {
+  const samples = Array.isArray(extracted) ? extracted : extracted.samples;
+  const analysisErrors = Array.isArray(extracted) ? [] : (extracted.analysisErrors ?? []);
+  const duplicates = [];
+  const unexpected = [];
+  const provenanceMismatches = [];
+  const indexed = new Map();
+  for (const sample of samples) {
+    const key = identityKey(sample);
+    const cell = plan.schedule.find((entry) => identityMatches(entry, sample));
+    if (!cell) {
+      unexpected.push(sample);
+      continue;
+    }
+    const expectedIdentity = rowIdentity(plan, cell);
+    if (!sameProvenance(expectedIdentity, sample)) {
+      provenanceMismatches.push({ expected: expectedIdentity, actual: sample });
+      continue;
+    }
+    if (indexed.has(key)) {
+      duplicates.push(sample);
+      continue;
+    }
+    indexed.set(key, sample);
+  }
+  const rows = plan.schedule.map((cell) => {
+    const identity = rowIdentity(plan, cell);
+    return (
+      indexed.get(identityKey(identity)) ?? {
+        ...identity,
+        execution: { status: "missing" },
+        verdict: "missing",
+        measurements: {},
+      }
+    );
+  });
+  const axis = plan.analysis.compare.axis;
+  const comparedEntries = axis === "source" ? plan.sources : plan.configurations;
+  const fixedEntries = axis === "source" ? plan.configurations : plan.sources;
+  const baseline = plan.analysis.compare.baseline;
+  const comparisons = [];
+  for (const fixed of fixedEntries)
+    for (const candidate of comparedEntries.filter((item) => item.label !== baseline)) {
+      const baselineLabel = baseline;
+      for (const fixture of plan.fixtures)
+        for (const evalId of fixture.evals) {
+          const baselineRows = rows.filter(
+            (row) =>
+              row.fixture === fixture.name &&
+              row.eval === evalId &&
+              row[axis] === baselineLabel &&
+              row[axis === "source" ? "configuration" : "source"] === fixed.label,
+          );
+          const candidateRows = rows.filter(
+            (row) =>
+              row.fixture === fixture.name &&
+              row.eval === evalId &&
+              row[axis] === candidate.label &&
+              row[axis === "source" ? "configuration" : "source"] === fixed.label,
+          );
+          const baselineByRep = new Map(baselineRows.map((row) => [row.repetition, row]));
+          const pairs = candidateRows
+            .map((row) => [baselineByRep.get(row.repetition), row])
+            .filter(([left, right]) => left && right);
+          const correctnessPairCount = pairs.filter(
+            ([left, right]) => left.verdict === "passed" && right.verdict === "passed",
+          ).length;
+          const metrics = Object.entries(plan.measurementBundles).flatMap(([namespace, bundle]) =>
+            Object.entries(bundle.metrics).map(([name, metadata]) => ({
+              name: `${namespace}.${name}`,
+              ...metadata,
+            })),
+          );
+          const metricComparisons = {};
+          for (const metric of metrics) {
+            const matched = pairs.filter(
+              ([left, right]) =>
+                left.verdict === "passed" &&
+                right.verdict === "passed" &&
+                left.execution?.status === "complete" &&
+                right.execution?.status === "complete" &&
+                left.measurements?.[metric.name]?.status === "measured" &&
+                right.measurements?.[metric.name]?.status === "measured",
+            );
+            const leftValues = matched.map(([left]) => left.measurements[metric.name].value);
+            const rightValues = matched.map(([, right]) => right.measurements[metric.name].value);
+            const deltas = matched.map(
+              ([left, right]) =>
+                right.measurements[metric.name].value - left.measurements[metric.name].value,
+            );
+            const ratios = matched
+              .map(([left, right]) => {
+                const denominator = left.measurements[metric.name].value;
+                return denominator === 0
+                  ? null
+                  : right.measurements[metric.name].value / denominator;
+              })
+              .filter((ratio) => ratio !== null && Number.isFinite(ratio) && ratio > 0);
+            metricComparisons[metric.name] = {
+              unit: metric.unit,
+              direction: metric.direction,
+              baselineMedian: median(leftValues),
+              candidateMedian: median(rightValues),
+              medianPairedDelta: median(deltas),
+              positiveValueRatios: ratios,
+              paired: matched.length,
+              excluded: plan.sampling.repetitions - matched.length,
+              pairs: pairs.map(([left, right]) => ({
+                repetition: right.repetition,
+                baselineVerdict: left.verdict,
+                candidateVerdict: right.verdict,
+                baselineStatus: left.measurements?.[metric.name]?.status ?? "missing",
+                candidateStatus: right.measurements?.[metric.name]?.status ?? "missing",
+              })),
+            };
+          }
+          comparisons.push({
             fixture: fixture.name,
             eval: evalId,
-            model: schedule.model,
-            modelId: schedule.modelId,
-            reasoning: schedule.reasoning,
-            repetition: block.repetition,
-            executionOrder: block.order.indexOf(label),
+            axis,
+            fixed: fixed.label,
+            baseline: baselineLabel,
+            candidate: candidate.label,
+            primaryMetric: plan.analysis.primaryMetric,
+            baselineCorrect: baselineRows.filter((row) => row.verdict === "passed").length,
+            candidateCorrect: candidateRows.filter((row) => row.verdict === "passed").length,
+            correctnessPaired: correctnessPairCount,
+            planned: plan.sampling.repetitions,
+            executionErrors: [...baselineRows, ...candidateRows].filter(
+              (row) => row.execution?.status === "error",
+            ).length,
+            metrics: metricComparisons,
           });
-      }
-  const expectedKeys = new Set(expected.map(key));
-  const unexpected = samples.filter((sample) => !expectedKeys.has(key(sample)));
-  const indexed = new Map(
-    samples
-      .filter((sample) => expectedKeys.has(key(sample)))
-      .map((sample) => [key(sample), sample]),
-  );
-  const sampleKeys = samples.map(key);
-  const duplicateSamples = samples.filter(
-    (sample, index) => sampleKeys.indexOf(key(sample)) !== index,
-  );
-  const rows = expected.map(
-    (identity) =>
-      indexed.get(key(identity)) ?? {
-        ...identity,
-        verdict: "missing",
-        measurement: { status: "incomplete", reason: "missing-sample" },
-      },
-  );
-  const comparisons = [];
-  const aggregateGroups = new Map();
-  for (const schedule of plan.matrix) {
-    const fixture = plan.fixtures.find((item) => item.name === schedule.fixture);
-    for (const evalId of fixture.evals) {
-      const baseline = plan.variants[0];
-      for (const variant of plan.variants.slice(1)) {
-        const baselineRows = rows.filter(
-          (r) =>
-            r.fixture === schedule.fixture &&
-            r.metricProfile === fixture.metricProfile &&
-            r.eval === evalId &&
-            r.model === schedule.model &&
-            r.variant === baseline.label,
-        );
-        const candidateRows = rows.filter(
-          (r) =>
-            r.fixture === schedule.fixture &&
-            r.metricProfile === fixture.metricProfile &&
-            r.eval === evalId &&
-            r.model === schedule.model &&
-            r.variant === variant.label,
-        );
-        const byRepetition = new Map(baselineRows.map((row) => [row.repetition, row]));
-        const pairs = candidateRows
-          .map((candidate) => [byRepetition.get(candidate.repetition), candidate])
-          .filter(([b, c]) => b && c);
-        const primaryMetric = plan.metricProfiles.find(
-          (item) => item.id === fixture.metricProfile,
-        )?.primaryMetric;
-        const matched = pairs.filter(
-          ([b, c]) =>
-            b.verdict === "passed" &&
-            c.verdict === "passed" &&
-            b.measurement?.status === "complete" &&
-            c.measurement?.status === "complete" &&
-            Number.isFinite(b.metrics?.[primaryMetric]) &&
-            Number.isFinite(c.metrics?.[primaryMetric]),
-        );
-        if (!primaryMetric)
-          throw new Error(`Profile has no primary metric: ${fixture.metricProfile}`);
-        const deltas = matched.map(([b, c]) => c.metrics[primaryMetric] - b.metrics[primaryMetric]);
-        const ratios = matched
-          .map(([b, c]) => c.metrics[primaryMetric] / b.metrics[primaryMetric])
-          .filter((ratio) => Number.isFinite(ratio) && ratio > 0);
-        const excludedCount = plan.repetitions - matched.length;
-        const comparison = {
-          fixture: schedule.fixture,
-          eval: evalId,
-          model: schedule.model,
-          modelId: schedule.modelId,
-          reasoning: schedule.reasoning,
-          baseline: baseline.label,
-          candidate: variant.label,
-          baselineCorrect: baselineRows.filter((r) => r.verdict === "passed").length,
-          candidateCorrect: candidateRows.filter((r) => r.verdict === "passed").length,
-          baselineFailures: baselineRows.filter((r) => r.verdict === "failed").length,
-          baselineSkipped: baselineRows.filter((r) => r.verdict === "skipped").length,
-          baselineTimeouts: baselineRows.filter((r) => r.timedOut).length,
-          baselineInfrastructureErrors: baselineRows.filter((r) => r.infrastructureError).length,
-          baselineMissingMetrics: baselineRows.filter((r) => r.measurement?.status !== "complete")
-            .length,
-          baselineMissingSamples: baselineRows.filter((r) => r.verdict === "missing").length,
-          planned: plan.repetitions,
-          failures: candidateRows.filter((r) => r.verdict === "failed").length,
-          skipped: candidateRows.filter((r) => r.verdict === "skipped").length,
-          infrastructureErrors: candidateRows.filter((r) => r.infrastructureError).length,
-          timeouts: candidateRows.filter((r) => r.timedOut).length,
-          missingMetrics: candidateRows.filter((r) => r.measurement?.status !== "complete").length,
-          missingSamples: candidateRows.filter((r) => r.verdict === "missing").length,
-          matched: matched.length,
-          excluded: excludedCount,
-          samplePairs: pairs.map(([b, c]) => ({
-            repetition: c.repetition,
-            baselineVerdict: b.verdict,
-            candidateVerdict: c.verdict,
-            baselineMeasurement: b.measurement?.status,
-            candidateMeasurement: c.measurement?.status,
-          })),
-          correctCount: {
-            baseline: baselineRows.filter((r) => r.verdict === "passed").length,
-            candidate: candidateRows.filter((r) => r.verdict === "passed").length,
-          },
-          metricProfile: fixture.metricProfile,
-          primaryMetric,
-          baselineMedianMs: median(matched.map(([b]) => b.metrics[primaryMetric])),
-          candidateMedianMs: median(matched.map(([, c]) => c.metrics[primaryMetric])),
-          medianPairedDeltaMs: median(deltas),
-          geometricMeanRatio: geometricMean(ratios),
-        };
-        comparisons.push(comparison);
-        const aggregateKey = `${schedule.model}:${variant.label}`;
-        const aggregate = aggregateGroups.get(aggregateKey) ?? [];
-        aggregate.push(comparison);
-        aggregateGroups.set(aggregateKey, aggregate);
-      }
+        }
     }
-  }
-  const aggregates = [...aggregateGroups.entries()].map(([groupKey, items]) => {
-    const [model, candidate] = groupKey.split(":");
-    const missing = items.some((item) => item.geometricMeanRatio === null);
-    return {
-      model,
-      candidate,
-      status: missing ? "withheld" : "complete",
-      reason: missing ? "one or more selected evals has no matched complete samples" : undefined,
-      equalWeightGeometricMeanRatio: missing
-        ? null
-        : geometricMean(items.map((item) => item.geometricMeanRatio)),
-    };
-  });
+  const completeness = {
+    planned: rows.length,
+    executionComplete: rows.filter((row) => row.execution?.status === "complete").length,
+    executionErrors: rows.filter((row) => row.execution?.status === "error").length,
+    missingExecutions: rows.filter((row) => row.execution?.status === "missing").length,
+    analysisErrors: analysisErrors.length,
+    unexpectedSamples: unexpected.length,
+    duplicateSamples: duplicates.length,
+    provenanceMismatches: provenanceMismatches.length,
+  };
   return {
-    version: 1,
-    experimentSha: plan.experimentSha,
-    manifestHash: plan.manifestHash,
-    metricProfiles: plan.metricProfiles,
+    version: 2,
+    planHash: plan.planHash,
+    experimentRevision: plan.experimentRevision,
+    analysisRevision: extracted.analysisRevision ?? plan.implementationRevision,
+    metricBundles: plan.measurementBundles,
     diffs: plan.diffs,
-    complete:
+    completeness,
+    executionComplete: completeness.missingExecutions === 0 && completeness.executionErrors === 0,
+    analysisComplete:
+      analysisErrors.length === 0 &&
       unexpected.length === 0 &&
-      duplicateSamples.length === 0 &&
-      rows.every(
-        (row) => row.verdict !== "missing" && row.verdict !== "unknown" && !row.infrastructureError,
-      ),
-    unexpectedSamples: unexpected,
-    duplicateSamples,
+      duplicates.length === 0 &&
+      provenanceMismatches.length === 0,
     correctnessRegressions: comparisons.filter(
       (item) => item.candidateCorrect < item.baselineCorrect,
     ),
-    allComparisonsPassCorrectness: comparisons.every(
-      (item) => item.candidateCorrect === item.planned && item.baselineCorrect === item.planned,
-    ),
-    aggregates,
     comparisons,
+    analysisErrors,
+    unexpectedSamples: unexpected,
+    duplicateSamples: duplicates,
+    provenanceMismatches,
     samples: rows,
   };
 }
 
 export function renderMarkdown(report) {
   const lines = [
-    "## Eval latency experiment",
+    "## Eval experiment",
     "",
-    `**Completeness:** ${report.complete ? "complete" : "INCOMPLETE — expected samples are missing"}`,
+    `**Execution:** ${report.completeness.executionComplete ? "complete" : "incomplete"} (${report.completeness.executionComplete}/${report.completeness.planned})`,
+    `**Analysis:** ${report.analysisComplete ? "complete" : "errors"} (${report.completeness.analysisErrors} errors)`,
     `**Correctness regressions:** ${report.correctnessRegressions.length}`,
-    `**All strict evals passed:** ${report.allComparisonsPassCorrectness ? "yes" : "no"}`,
     "",
-    "| Fixture / eval | Model | Reasoning | Candidate | Primary metric | Correctness | Matched | Median paired Δ (ms) | Geomean ratio |",
-    "|---|---|---|---:|---:|---:|---:|---:|",
+    "| Fixture / eval | Compared axis | Fixed entry | Candidate | Metric | Unit | Correctness | Paired | Median delta |",
+    "|---|---|---|---|---|---|---:|---:|---:|",
   ];
   for (const row of report.comparisons)
-    lines.push(
-      `| ${row.fixture} / ${row.eval} | ${row.model} | ${row.reasoning ?? "default"} | ${row.candidate} | ${row.primaryMetric} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${row.matched} | ${format(row.medianPairedDeltaMs)} | ${format(row.geometricMeanRatio)} |`,
-    );
+    for (const [name, metric] of Object.entries(row.metrics)) {
+      lines.push(
+        `| ${row.fixture} / ${row.eval} | ${row.axis} | ${row.fixed} | ${row.candidate} | ${name} | ${metric.unit} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${metric.paired} | ${format(metric.medianPairedDelta)} |`,
+      );
+    }
   lines.push(
     "",
-    "### Full-suite aggregates",
-    "",
-    "| Model | Candidate | Equal-weight geomean ratio | Status |",
-    "|---|---|---:|---|",
-  );
-  for (const aggregate of report.aggregates ?? [])
-    lines.push(
-      `| ${aggregate.model} | ${aggregate.candidate} | ${format(aggregate.equalWeightGeometricMeanRatio)} | ${aggregate.status} |`,
-    );
-  lines.push(
-    "",
-    "Latency includes only matched repetition blocks where both variants passed strict correctness and have complete measurements. This conditional comparison does not establish preserved quality.",
+    "Measurements are derived from archived evidence. Paired values include only healthy executions where both evals passed and the metric was measured. A correctness regression is not a performance win.",
   );
   return `${lines.join("\n")}\n`;
 }
-function key(row) {
-  return [row.variant, row.fixture, row.eval, row.model, row.repetition].join("\u0000");
+function rowIdentity(plan, cell) {
+  return {
+    planHash: plan.planHash,
+    experimentRevision: plan.experimentRevision,
+    source: cell.source,
+    sourceSha: plan.sources.find((item) => item.label === cell.source)?.sha,
+    configuration: cell.configuration,
+    settings: plan.configurations.find((item) => item.label === cell.configuration)?.settings,
+    fixture: cell.fixture,
+    eval: cell.eval,
+    repetition: cell.repetition,
+    executionOrder: cell.executionOrder,
+  };
+}
+function identityKey(row) {
+  return [row.source, row.configuration, row.fixture, row.eval, row.repetition].join("\0");
+}
+function identityMatches(cell, row) {
+  return (
+    cell.source === row.source &&
+    cell.configuration === row.configuration &&
+    cell.fixture === row.fixture &&
+    cell.eval === row.eval &&
+    cell.repetition === row.repetition &&
+    cell.executionOrder === row.executionOrder
+  );
+}
+function sameProvenance(expected, actual) {
+  return (
+    [
+      "planHash",
+      "experimentRevision",
+      "source",
+      "sourceSha",
+      "configuration",
+      "fixture",
+      "eval",
+      "repetition",
+      "executionOrder",
+    ].every((key) => actual[key] === expected[key]) &&
+    JSON.stringify(actual.settings) === JSON.stringify(expected.settings)
+  );
 }
 function median(values) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-function geometricMean(values) {
-  return values.length
-    ? Math.exp(values.reduce((sum, value) => sum + Math.log(value), 0) / values.length)
-    : null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 function format(value) {
   return value === null ? "—" : Number(value).toFixed(2);
@@ -243,5 +260,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
   if (markdownPath) await writeFile(markdownPath, renderMarkdown(report));
   console.log(renderMarkdown(report));
-  if (!report.complete) process.exitCode = 1;
+  if (!report.executionComplete || !report.analysisComplete) process.exitCode = 1;
 }

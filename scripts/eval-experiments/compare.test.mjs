@@ -3,72 +3,128 @@ import assert from "node:assert/strict";
 import { compareExperiment } from "./compare.mjs";
 
 const plan = {
-  experimentSha: "experiment",
-  manifestHash: "hash",
-  metricProfiles: [
-    {
-      id: "self-modification-v1",
-      metricSchemaVersion: "self-modification-v1",
-      primaryMetric: "creationElapsedMs",
-    },
-  ],
-  repetitions: 2,
-  variants: [
-    { label: "baseline", sha: "a" },
+  planHash: "hash",
+  experimentRevision: "revision",
+  analysis: { compare: { axis: "source", baseline: "base" }, primaryMetric: "elapsed" },
+  sampling: { repetitions: 2 },
+  sources: [
+    { label: "base", sha: "a" },
     { label: "candidate", sha: "b" },
   ],
-  fixtures: [
-    { name: "agent-self-modification", metricProfile: "self-modification-v1", evals: ["create"] },
-  ],
-  matrix: [
-    {
-      fixture: "agent-self-modification",
-      model: "openai-sol",
-      modelId: "openai/model",
-      reasoning: undefined,
-      blocks: [
-        { repetition: 0, order: ["baseline", "candidate"] },
-        { repetition: 1, order: ["candidate", "baseline"] },
-      ],
+  configurations: [{ label: "config", settings: {} }],
+  fixtures: [{ name: "fixture", evals: ["case"] }],
+  measurementBundles: {
+    timing: {
+      metrics: {
+        elapsed: { unit: "ms", direction: "lower" },
+        count: { unit: "count", direction: "neutral" },
+      },
     },
-  ],
+  },
+  schedule: [0, 1].flatMap((repetition) =>
+    ["base", "candidate"].map((source, executionOrder) => ({
+      source,
+      configuration: "config",
+      fixture: "fixture",
+      eval: "case",
+      repetition,
+      executionOrder,
+    })),
+  ),
 };
-const sample = (variant, repetition, ms, verdict = "passed") => ({
-  variant,
-  fixture: "agent-self-modification",
-  metricProfile: "self-modification-v1",
-  eval: "create",
-  model: "openai-sol",
+const sample = (source, repetition, executionOrder, elapsed, verdict = "passed") => ({
+  planHash: "hash",
+  experimentRevision: "revision",
+  source,
+  sourceSha: source === "base" ? "a" : "b",
+  configuration: "config",
+  settings: {},
+  fixture: "fixture",
+  eval: "case",
   repetition,
+  executionOrder,
+  execution: { status: "complete" },
   verdict,
-  measurement: { status: "complete" },
-  metrics: { creationElapsedMs: ms },
+  measurements: {
+    "timing.elapsed": { status: "measured", value: elapsed },
+    "timing.count": { status: "measured", value: 0 },
+  },
 });
 
-test("compares matched repetition blocks and retains expected missing samples", () => {
-  const candidateSecond = {
-    ...sample("candidate", 1, 90),
-    measurement: { status: "incomplete", reason: "unsupported-v1" },
-  };
+test("pairs by provenance, preserves zero metrics and units, and keeps comparisons per metric", () => {
   const report = compareExperiment(plan, [
-    sample("baseline", 0, 100),
-    sample("candidate", 0, 80),
-    sample("baseline", 1, 120),
-    candidateSecond,
+    sample("base", 0, 0, 100),
+    sample("candidate", 0, 1, 80),
+    sample("base", 1, 0, 120),
+    sample("candidate", 1, 1, 90),
   ]);
-  assert.equal(report.complete, true);
+  assert.equal(report.comparisons[0].metrics["timing.elapsed"].paired, 2);
+  assert.equal(report.comparisons[0].metrics["timing.count"].baselineMedian, 0);
+  assert.equal(report.comparisons[0].metrics["timing.count"].positiveValueRatios.length, 0);
+  assert.equal(report.comparisons[0].metrics["timing.elapsed"].unit, "ms");
   assert.equal(report.samples.length, 4);
-  assert.equal(report.comparisons[0].matched, 1);
-  assert.equal(report.comparisons[0].medianPairedDeltaMs, -20);
-  assert.equal(report.aggregates[0].status, "complete");
 });
 
-test("does not compare failed correctness samples as latency wins", () => {
-  const report = compareExperiment(plan, [
-    sample("baseline", 0, 100),
-    sample("candidate", 0, 1, "failed"),
-  ]);
-  assert.equal(report.comparisons[0].matched, 0);
-  assert.equal(report.correctnessRegressions.length, 1);
-  assert.equal(report.aggregates[0].status, "withheld");
+test("compares configurations while holding each source fixed", () => {
+  const configurationPlan = {
+    ...plan,
+    analysis: {
+      compare: { axis: "configuration", baseline: "config-a" },
+      primaryMetric: "timing.elapsed",
+    },
+    configurations: [
+      { label: "config-a", settings: {} },
+      { label: "config-b", settings: {} },
+    ],
+    schedule: [0].flatMap((repetition) =>
+      ["base", "candidate"].flatMap((source) =>
+        ["config-a", "config-b"].map((configuration, executionOrder) => ({
+          source,
+          configuration,
+          fixture: "fixture",
+          eval: "case",
+          repetition,
+          executionOrder,
+        })),
+      ),
+    ),
+  };
+  const rows = configurationPlan.schedule.map((cell) => ({
+    planHash: "hash",
+    experimentRevision: "revision",
+    source: cell.source,
+    sourceSha: cell.source === "base" ? "a" : "b",
+    configuration: cell.configuration,
+    settings: {},
+    fixture: cell.fixture,
+    eval: cell.eval,
+    repetition: cell.repetition,
+    executionOrder: cell.executionOrder,
+    execution: { status: "complete" },
+    verdict: "passed",
+    measurements: {
+      "timing.elapsed": { status: "measured", value: cell.configuration === "config-a" ? 100 : 80 },
+      "timing.count": { status: "measured", value: 0 },
+    },
+  }));
+  const report = compareExperiment(configurationPlan, rows);
+  assert.equal(report.comparisons.length, 2);
+  assert.ok(
+    report.comparisons.every(
+      (item) =>
+        (item.axis === "configuration" && item.fixed === "base") || item.fixed === "candidate",
+    ),
+  );
+  assert.ok(
+    report.comparisons.every((item) => item.metrics["timing.elapsed"].medianPairedDelta === -20),
+  );
+});
+
+test("detects duplicate and mismatched samples and excludes failed correctness", () => {
+  const wrong = { ...sample("candidate", 0, 1, 1, "failed"), sourceSha: "wrong" };
+  const valid = sample("candidate", 0, 1, 90);
+  const report = compareExperiment(plan, [sample("base", 0, 0, 100), wrong, valid, valid]);
+  assert.equal(report.completeness.duplicateSamples, 1);
+  assert.equal(report.completeness.provenanceMismatches, 1);
+  assert.equal(report.comparisons[0].metrics["timing.elapsed"].paired, 1);
 });

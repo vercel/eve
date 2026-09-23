@@ -28,6 +28,8 @@
     "test:tui": "pnpm --filter eve run test:tui",
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
+    "typecheck:eval-experiments": "tsc --project scripts/eval-experiments/tsconfig.json",
+    "test:eval-experiments": "node --test scripts/eval-experiments/*.test.mjs",
     "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs",
     "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs"
   },

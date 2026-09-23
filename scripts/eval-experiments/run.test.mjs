@@ -5,62 +5,67 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSchedule } from "./run.mjs";
 
-test("runs each scheduled attempt sequentially and records failed evals without aborting", async () => {
+test("runs scheduled source/configuration cells and records eval exit outcomes", async () => {
   const root = await mkdtemp(join(tmpdir(), "eve-experiment-run-"));
   try {
     const checkouts = {};
-    for (const label of ["baseline", "candidate"]) {
+    for (const label of ["base", "candidate"]) {
       const checkout = join(root, label);
       checkouts[label] = checkout;
-      const app = join(checkout, "e2e/fixtures/sample");
+      const app = join(checkout, "e2e/fixtures/agent-self-modification");
       await mkdir(join(app, "agent"), { recursive: true });
+      await mkdir(join(app, "scripts"), { recursive: true });
       await mkdir(join(app, "node_modules/.bin"), { recursive: true });
-      await writeFile(join(app, "agent/agent.ts"), "export const value = 1;\n");
-      if (label === "candidate") await writeFile(join(app, "agent/fail"), "yes\n");
+      await writeFile(
+        join(app, "agent/agent.ts"),
+        "EVE_EXPERIMENT_PARENT_MODEL EVE_EXPERIMENT_PARENT_REASONING\n",
+      );
+      await writeFile(
+        join(app, "scripts/prepare.mjs"),
+        "EVE_EXPERIMENT_SELF_MODIFICATION_MODEL EVE_EXPERIMENT_SELF_MODIFICATION_REASONING\n",
+      );
       await writeFile(
         join(app, "node_modules/.bin/pnpm"),
-        '#!/bin/sh\nif [ "$1" = "run" ]; then exit 0; fi\nmkdir -p .eve/evals/2026-01-01/evals\nprintf \'{\\"id\\":\\"case\\",\\"verdict\\":\\"passed\\",\\"result\\":{\\"sessions\\":[]}}\' > .eve/evals/2026-01-01/evals/case.json\nif [ -f agent/fail ]; then exit 1; fi\nexit 0\n',
+        '#!/bin/sh\nif [ "$1" = "run" ]; then exit 0; fi\nmkdir -p .eve/evals/2026-01-01/evals\nprintf \'{\\"id\\":\\"case\\",\\"verdict\\":\\"passed\\",\\"result\\":{\\"status\\":\\"completed\\",\\"sessions\\":[]}}\' > .eve/evals/2026-01-01/evals/case.json\nexit 0\n',
       );
       await import("node:fs/promises").then(({ chmod }) =>
         chmod(join(app, "node_modules/.bin/pnpm"), 0o755),
       );
     }
-    const outputDir = join(root, "output");
     const plan = {
-      variants: [
-        { label: "baseline", sha: "a" },
+      planHash: "hash",
+      experimentRevision: "rev",
+      sources: [
+        { label: "base", sha: "a" },
         { label: "candidate", sha: "b" },
       ],
-      metricProfiles: [
+      configurations: [{ label: "config", settings: { parent: { model: "provider/model" } } }],
+      fixtures: [{ name: "agent-self-modification", evals: ["case"] }],
+      schedule: [
         {
-          id: "self-modification-v1",
-          metricSchemaVersion: "self-modification-v1",
-          primaryMetric: "creationElapsedMs",
+          source: "base",
+          configuration: "config",
+          fixture: "agent-self-modification",
+          eval: "case",
+          repetition: 0,
+          executionOrder: 0,
         },
       ],
-      fixtures: [{ name: "sample", metricProfile: "self-modification-v1", evals: ["case"] }],
     };
-    const schedule = {
-      fixture: "sample",
-      model: "mock",
-      modelId: "mock",
-      blocks: [{ repetition: 0, order: ["baseline", "candidate"] }],
-    };
+    const outputDir = join(root, "output");
     const records = await runSchedule({
       plan,
-      schedule,
       checkouts,
       outputDir,
       env: {
-        ...process.env,
-        PATH: `${join(root, "baseline/e2e/fixtures/sample/node_modules/.bin")}:${process.env.PATH}`,
+        PATH: `${join(root, "base/e2e/fixtures/agent-self-modification/node_modules/.bin")}:${process.env.PATH}`,
+        EVE_EXPERIMENT_PARENT_MODEL: "leak",
       },
-      timeoutMs: 5000,
     });
-    assert.equal(records.length, 2);
     assert.equal(records[0].correctnessOutcome, "passed");
-    assert.equal(records[1].correctnessOutcome, "failed");
-    assert.equal(JSON.parse(await readFile(join(outputDir, "invocations.json"), "utf8")).length, 2);
+    assert.equal(records[0].requestedSettings.parent.model, "provider/model");
+    assert.equal(records[0].scheduleIdentity.case.source, "base");
+    assert.equal(JSON.parse(await readFile(join(outputDir, "invocations.json"), "utf8")).length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

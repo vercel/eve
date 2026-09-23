@@ -1,33 +1,45 @@
-# Eval latency experiments
+# Eval experiments
 
-This internal harness compares correctness-eval runs across immutable git snapshots. It does not add latency assertions or alter required checks.
+This internal harness compares immutable eve source revisions and named runtime configurations over existing evals. `eve eval` remains the execution engine; the harness only plans scheduled runs, archives evidence, derives measurements, and compares paired samples. It is not a public `eve` command and does not make experiments part of product CI.
+
+## Define an experiment
+
+Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition.
+
+Both matrix axes are named maps. Omit `matrix.source` to run against the planner checkout's HEAD: the planner records one source entry named `head` with the full commit SHA. In GitHub Actions, this is the dispatched revision, not a moving branch reference. Uncommitted source changes are not included. Set `analysis.compare.axis` to `"configuration"` and choose a configuration baseline when using this default; the compared axis requires at least two entries. An explicit source map must be non-empty and use full commit SHAs, not `"HEAD"`.
+
+Source values are whole immutable commit trees and configuration values are explicit combinations of full model IDs and reasoning settings. Shared settings are merged with each configuration field-by-field in the `parent` and `selfModification` scopes. Overrides win; a configuration that overrides an authored model default changes that source behavior and should be avoided in an instruction-change experiment. Omitted reasoning means the fixture default. The fixture adapter rejects unknown scopes and source checkouts that do not implement scoped overrides. Judge configuration remains fixed.
+
+For the self-modification fixture, `parent` controls the user-facing agent that receives the request, delegates the edit, and uses the changed agent in verification conversations. `selfModification` controls the child agent that edits the source. Neither override is required: omitted models keep their authored defaults. To isolate editing-model differences, vary only `selfModification`; to compare each model across the whole workflow, override both scopes in each configuration.
+
+Measurement modules are plain synchronous ESM objects. Their declared keys and metadata define report metrics; namespace is assigned in the experiment. Derivation receives validated captured artifacts and must be deterministic and side-effect-free. A thrown derive function or invalid metric result is an analysis error. Correctness, execution health, and measurement missingness remain independent.
 
 ## Dispatch
 
-Create `experiments/<name>.json` from the manifest shape in `research/eval-latency-experiments.md`, ensuring each candidate SHA is a full commit and each baseline-to-candidate diff is confined to the two allowed agent files. Push the experiment branch and dispatch from a trusted same-repository ref:
+Commit the definition and imported measurement modules at the trusted dispatch revision; keep them clean. Dispatch from that repository ref:
 
 ```sh
 gh workflow run eval-experiment.yml --ref my-experiment-branch \
-  -f manifest=experiments/self-modification-latency.json
+  -f definition=experiments/self-modification.mjs
 ```
 
-Every candidate SHA describes its whole tree. Restore the baseline files between independent variants. Model aliases are resolved from `e2e/matrix.json` and full model IDs are recorded. The manifest-only commit is experiment metadata, not a candidate measurement. Metrics profiles are registered under `scripts/eval-experiments/profiles/`; a profile controls supported fixture/eval selections, allowed variant diff paths, fixture restoration checks, observed model settings, and metric extraction. The planner and comparator consume profile metadata rather than embedding those selectors. The Actions run executes the unmodified fixture correctness eval with `--strict --verbose --max-concurrency 1 --skip-report`; fixture timeout, judge, setup, teardown, and source restoration remain authoritative.
+Only dispatch trusted repository code. The workflow does not accept arbitrary uploads. GitHub Actions is the live execution environment; do not run provider-backed e2e suites locally. The planner resolves full source SHAs, fixture/eval selections, requested settings, measurement schemas, and a deterministic counterbalanced schedule into `plan.json`. Source comparisons retain baseline-to-candidate diff evidence but do not apply patches to another checkout.
 
-## Artifacts and local report regeneration
+## Artifacts and offline reanalysis
 
-The workflow uploads the immutable plan, invocation records, each timestamped eval artifact directory, and the generated JSON/Markdown report. Download artifacts with `gh run download <run-id>`. To normalize a downloaded execution artifact tree and compare it against the downloaded plan:
+The workflow archives `plan.json`, per-invocation records, raw logs and timestamped eval artifact directories, normalized samples, and JSON/Markdown reports. Download with `gh run download <run-id>`. To rederive from the downloaded execution evidence without launching an eval:
 
 ```sh
-node scripts/eval-experiments/extract.mjs ./execution-artifacts ./samples.json
+node scripts/eval-experiments/extract.mjs ./execution ./plan.json ./samples.json ./experiments/self-modification.mjs <analysis-revision>
 node scripts/eval-experiments/compare.mjs ./plan.json ./samples.json ./report.json ./report.md
 ```
 
-The extractor reads per-session event arrays only; the task-level events NDJSON file is intentionally not concatenated. Event references retain their IDs and timestamps for audit. Samples missing execution or metrics remain visible in the comparison output.
+The default analysis module should be the pinned experiment revision's module. If intentionally using changed modules, retain the original plan and invocation provenance and record the new analysis revision; never silently replace the original report meaning.
 
-## Metrics and interpretation
+## Reading reports
 
-`creationElapsedMs` is the parent `turn.started` timestamp to the matching fresh child's `turn.completed`; `childTurnMs` is the child turn duration; `childToolCalls` counts distinct child action call IDs. These server-event durations exclude ingress, delivery, build/startup, verification conversations, and teardown. Parent and child work can overlap; never sum the parent-to-child interval with child duration. Terminal failures, parked turns, and ambiguous/missing event correlations are incomplete, not zero-duration success.
+Comparisons remain separate by eval, fixed matrix entry, and metric. No cross-eval or cross-model aggregates are generated. Paired metrics require both evals to pass, both invocations to be healthy, and that metric to be measured. Zero is a valid measurement; a zero denominator does not produce a ratio. Missing samples, unavailable measurements, not-applicable measurements, execution errors, and analysis errors are distinct. A correctness regression is never labeled a performance win.
 
-Correctness counts include all planned repetitions. Latency uses only paired repetitions where both variants pass strict correctness and have complete metrics; this conditional view does not establish preserved quality. Five repetitions are exploratory, not a tail estimate. Provider caches, routing, and model versions are not frozen by source SHAs. A faster candidate with a correctness regression is not a winner. Confirm any selected candidate against a fresh baseline with more repetitions.
+Self-modification metrics cover all seven evals in `experiments/self-modification.mjs`. `parentTurnToFinalChildCompletion` measures from the earliest parent turn that delegates to self-modification through the latest corresponding child turn completion. `totalChildDuration` sums each child turn's own duration, and `toolCalls` counts distinct requested tool call IDs across those turns. This includes resumed child turns after approval and subsequent repair delegations. The wall-clock span includes pauses between child turns and is closer to end-to-end child-flow latency, but can include approval and scheduling delays. Summed child duration excludes those gaps and better isolates time spent in child turns, but omits time between turns. Both exclude ingress, startup/build, verification conversations, and teardown, so they do not represent full eval runtime.
 
-The `self-modification-v1` profile accepts all seven fixture evals for strict correctness execution, but only its simple single-turn creation cases currently have a latency metric. Repair/approval cases and the background-workflow case are retained as explicit incomplete measurements until their episode or task lifecycle can be attributed without mixing verification or approval waits. Do not treat an all-eval run's speed comparison as a full-suite aggregate while those metrics are incomplete.
+Harness tests run with `pnpm test:eval-experiments`. Internal definition typing runs with `pnpm typecheck:eval-experiments`.
