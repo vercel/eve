@@ -5,7 +5,7 @@ import { reconcileCleanupIntents, recordCleanupIntent } from "#cli/dev/local-ser
 
 const options = JSON.parse(process.argv[2] ?? "{}") as Pick<
   DevelopmentServerOptions,
-  "existing" | "host" | "port"
+  "developmentExtensions" | "existing" | "host" | "port"
 >;
 const server = createDevelopmentServer(process.cwd(), {
   ...options,

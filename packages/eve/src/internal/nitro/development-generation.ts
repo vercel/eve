@@ -32,6 +32,7 @@ export async function stageDevelopmentGeneration(
   // Drain both operations before discarding a failed candidate's snapshot.
   const [preparation, staging] = await Promise.allSettled([
     prepareAuthoredRuntimeModules({
+      appRoot: compileResult.project.appRoot,
       manifest: compileResult.manifest,
       moduleMapPath: compileResult.paths.moduleMapPath,
     }),

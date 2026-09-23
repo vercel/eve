@@ -1,0 +1,106 @@
+---
+title: "Vercel Sandbox"
+description: "Create snapshot-backed persistent sandboxes on Vercel."
+---
+
+`VercelSandbox.environment()` prepares a reusable Vercel Sandbox snapshot and creates persistent session sandboxes from its recorded snapshot ID.
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  prepare: async (sandbox) => {
+    await sandbox.run({ command: "pnpm install --frozen-lockfile" });
+  },
+});
+
+export default defineSandbox(() =>
+  environment.open({
+    networkPolicy: {
+      allow: {
+        "api.github.com": [],
+      },
+    },
+    resources: { vcpus: 4 },
+  }),
+);
+```
+
+## Snapshot preparation
+
+eve creates a temporary persistent Vercel Sandbox during build, installs the base runtime, writes managed workspace and skill files, runs the authored `prepare` callback, and captures a snapshot. The build artifact records the snapshot ID.
+
+When a live session sandbox does not exist, eve creates it directly from that snapshot ID. Runtime does not need to look up the temporary template Sandbox.
+
+## Initialize after open
+
+Initialize session-specific state after `open()` and before returning the sandbox. This selector writes a configuration file into the persistent `/workspace` filesystem:
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment();
+
+export default defineSandbox(async ({ session }) => {
+  const sandbox = await environment.open();
+  await sandbox.writeTextFile({
+    content: JSON.stringify({ sessionId: session.id, workspace: "analysis" }),
+    path: ".eve/session.json",
+  });
+  return sandbox;
+});
+```
+
+The selector runs until initialization succeeds. Later workflow steps and process restarts resume the same provider state without rerunning the selector, so the file is not rewritten at each boundary.
+
+You can also configure the live sandbox and run setup commands before returning it:
+
+```ts
+export default defineSandbox(async () => {
+  const sandbox = await environment.open();
+  await sandbox.setNetworkPolicy("deny-all");
+  const result = await sandbox.run({ command: "mkdir -p .cache/app" });
+  if (result.exitCode !== 0) throw new Error(result.stderr);
+  return sandbox;
+});
+```
+
+Use the environment's `prepare` callback for immutable setup that every new session should inherit. Use post-open initialization for state that belongs only to one durable session.
+
+## Network policy
+
+Pass the initial policy to `open()`. It applies to the new live Vercel Sandbox, not to the environment definition:
+
+```ts
+return environment.open({
+  networkPolicy: {
+    allow: {
+      "api.example.com": [
+        {
+          transform: [{ headers: { authorization: `Bearer ${token}` } }],
+        },
+      ],
+    },
+  },
+});
+```
+
+Credential transforms inject headers at the network boundary so the secret does not enter the sandbox process. The dedicated Vercel environment returns a session where `setNetworkPolicy()` is required, so you can update the policy directly after `open()` without a capability check:
+
+```ts
+const sandbox = await environment.open();
+await sandbox.setNetworkPolicy("deny-all");
+return sandbox;
+```
+
+## Live sandbox options
+
+`open()` also accepts Vercel compute resources, timeout, and Drive mounts. Configure project credentials and custom fetch behavior on the environment, not in `open()`, because resume does not reconstruct start-only options.
+
+Initialize the returned sandbox directly in `defineSandbox()`. If initialization fails, eve deletes the newly started sandbox and retries the selector on the next access. After initialization succeeds, the provider persists only immutable JSON-compatible state. If the named Vercel Sandbox later disappears, resume fails rather than recreating initialization side effects.
+
+eve owns the persistent sandbox identity and prepared snapshot source.
+
+See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

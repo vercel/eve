@@ -25,6 +25,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
   TurnTaskDeliveryKey,
+  TaskDeliveryPolicyKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -120,6 +121,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+  const taskDeliveryPolicy =
+    rawDelivery?.taskDeliveryPolicy ?? ctx.get(TaskDeliveryPolicyKey) ?? "auto";
+  ctx.set(TaskDeliveryPolicyKey, taskDeliveryPolicy);
 
   // Populate the callback base URL so getHookUrl() works during tool
   // execution, preferring eve's active local origin over metadata fallback.
@@ -307,7 +311,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     if (resolved !== undefined && backgroundTaskDelivery !== undefined) {
       const taskContext = resolveTaskDeliveryContext({
         state: durableSession.state,
-        taskDeliveryId: backgroundTaskDelivery.taskDeliveryId,
+        taskDeliveryIds: backgroundTaskDelivery.taskDeliveryIds ?? [
+          backgroundTaskDelivery.taskDeliveryId,
+        ],
+        taskDeliveryPolicy,
       });
       if (taskContext !== undefined) {
         ctx.set(TurnTaskDeliveryKey, taskContext.phase);
@@ -391,13 +398,17 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
             messages: history.initial.messages,
             runtimeRevision: dynamicRuntimeRevision,
           }),
-          refreshDynamicSessionToolsForRuntimeRevision({
+          contextStorage.run(
             ctx,
-            resolvers: dynamicToolResolvers,
-            event: refreshEvent,
-            messages: history.initial.messages,
-            runtimeRevision: dynamicRuntimeRevision,
-          }),
+            async () =>
+              await refreshDynamicSessionToolsForRuntimeRevision({
+                ctx,
+                resolvers: dynamicToolResolvers,
+                event: refreshEvent,
+                messages: history.initial.messages,
+                runtimeRevision: dynamicRuntimeRevision,
+              }),
+          ),
         ]);
         await rebindMissingCompiledDynamicToolCallbacks({
           ctx,

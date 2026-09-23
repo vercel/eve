@@ -19,6 +19,17 @@ import type {
 } from "./runner.js";
 import { interruptedError } from "./errors.js";
 import {
+  argumentTypeaheadCompletion,
+  argumentTypeaheadFor,
+  argumentTypeaheadLoadingLabel,
+  argumentTypeaheadQuery,
+  moveArgumentTypeaheadSelection,
+  renderArgumentSuggestions,
+  selectedArgumentSuggestion,
+  type ArgumentTypeaheadState,
+  type PromptArgumentSuggestion,
+} from "./argument-typeahead.js";
+import {
   dismissTypeahead,
   inlineCommandHint,
   isTypeaheadOpen,
@@ -49,13 +60,6 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
-import {
-  initialModelPickerState,
-  transitionModelPicker,
-  renderModelPicker,
-  modelPickerTitle,
-  type ModelPickerEvent,
-} from "./model-picker.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
@@ -66,7 +70,6 @@ import type {
   SetupSelectResult,
 } from "./setup-flow.js";
 import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
-import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
@@ -147,13 +150,6 @@ import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import { renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
-import {
-  allTodoItemsSettled,
-  readTodoToolItems,
-  renderFinishedTodoRows,
-  renderTodoPanelRows,
-  type TodoPanelItem,
-} from "./todo-panel.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
@@ -296,6 +292,8 @@ export type TerminalRendererOptions = {
   diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Catalog entries available to inline `/model` and `/add` completion. */
+  argumentSuggestions?: (command: "model" | "add") => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };
 
@@ -478,6 +476,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * a `/`-prefixed freeform answer must never sprout suggestions.
    */
   #typeahead?: CommandTypeaheadState;
+  #argumentTypeahead?: ArgumentTypeaheadState;
+  readonly #argumentSuggestions?: TerminalRendererOptions["argumentSuggestions"];
+  readonly #argumentCatalogs = new Map<
+    ArgumentTypeaheadState["command"],
+    { kind: "loading" } | { kind: "ready"; suggestions: readonly PromptArgumentSuggestion[] }
+  >();
   /**
    * Whether the empty input row invites with a rotating placeholder. Only
    * the main chat prompt turns this on — a freeform question's empty input
@@ -584,18 +588,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #resolvedModelId?: string;
   #modelTurnId?: string;
   /**
-   * The pinned todo panel above the input, replaced wholesale by each `todo`
-   * tool-call input. Cleared (and committed to the transcript) once every
-   * item settles.
-   */
-  #todoItems?: readonly TodoPanelItem[];
-  /**
-   * Signature of the last todo list committed as a finished transcript block.
-   * The result event re-plays the same call through {@link #upsertNativeTool},
-   * so committing must be idempotent per list content.
-   */
-  #todoCommittedSignature?: string;
-  /**
    * Messages submitted while a turn streams, pinned in a panel directly
    * above the input when steering is unavailable. `/cancel` cancels directly, and Esc or
    * Ctrl+C pops-to-steer or cancels immediately when empty; the runner drains
@@ -639,7 +631,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
-    readModelPicker: (options) => this.#readModelPicker(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -680,8 +671,63 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
     this.#onExitRequest = options?.onExitRequest;
+    this.#argumentSuggestions = options?.argumentSuggestions;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
+  }
+
+  #syncTypeahead(text: string): void {
+    this.#typeahead = typeaheadFor(this.#availablePromptCommands, text, this.#typeahead);
+    const query = argumentTypeaheadQuery(text);
+    if (query === undefined || this.#argumentSuggestions === undefined) {
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    const catalog = this.#argumentCatalogs.get(query.command);
+    if (catalog === undefined) {
+      this.#argumentCatalogs.set(query.command, { kind: "loading" });
+      void this.#argumentSuggestions(query.command)
+        .catch(() => [])
+        .then((suggestions) => {
+          this.#argumentCatalogs.set(query.command, { kind: "ready", suggestions });
+          if (this.#inputActive) this.#syncTypeahead(this.#inputText);
+          this.#paint();
+        });
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    if (catalog.kind === "loading") {
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    this.#argumentTypeahead = argumentTypeaheadFor(
+      query,
+      catalog.suggestions,
+      this.#argumentTypeahead,
+    );
+  }
+
+  #typeaheadDrawerRows(width: number): string[] {
+    const query = argumentTypeaheadQuery(this.#inputText);
+    const catalog = query === undefined ? undefined : this.#argumentCatalogs.get(query.command);
+    if (catalog?.kind === "loading" && query !== undefined) {
+      return [
+        clip(
+          this.#theme.colors.dim(`Loading ${argumentTypeaheadLoadingLabel(query.command)}…`),
+          width,
+        ),
+      ];
+    }
+    if (this.#argumentTypeahead !== undefined) {
+      return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
+    }
+    const inlineHint =
+      this.#typeahead === undefined ? undefined : inlineCommandHint(this.#typeahead);
+    return inlineHint === undefined &&
+      this.#typeahead !== undefined &&
+      isTypeaheadOpen(this.#typeahead)
+      ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
+      : [];
   }
 
   setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
@@ -827,7 +873,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#streamDraft = EMPTY_LINE;
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
-    this.#typeahead = typeaheadFor(this.#availablePromptCommands, editor.text);
+    this.#syncTypeahead(editor.text);
     this.#startCaretBlink();
     this.#paint();
 
@@ -837,7 +883,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         editor = next;
         this.#showCaret();
         this.#syncInput(editor);
-        this.#typeahead = typeaheadFor(this.#availablePromptCommands, next.text, this.#typeahead);
+        this.#syncTypeahead(next.text);
         this.#paint();
       };
       const recall = (entry: string | undefined) => {
@@ -853,6 +899,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
           ? this.#typeahead
           : undefined;
+      const argumentSuggestions = () =>
+        this.#argumentTypeahead?.suggestions.length ? this.#argumentTypeahead : undefined;
       const highlighted = () => {
         const open = suggestions();
         return open === undefined ? undefined : selectedTypeaheadCommand(open);
@@ -873,6 +921,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
         switch (key.type) {
           case "up":
           case "ctrl-p": {
+            const argumentOpen = argumentSuggestions();
+            if (argumentOpen !== undefined) {
+              this.#argumentTypeahead = moveArgumentTypeaheadSelection(argumentOpen, -1);
+              this.#paint();
+              break;
+            }
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, -1);
@@ -888,6 +942,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
           case "down":
           case "ctrl-n": {
+            const argumentOpen = argumentSuggestions();
+            if (argumentOpen !== undefined) {
+              this.#argumentTypeahead = moveArgumentTypeaheadSelection(argumentOpen, 1);
+              this.#paint();
+              break;
+            }
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, 1);
@@ -900,11 +960,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
           }
           case "tab": {
+            const argumentOpen = argumentSuggestions();
+            const argumentSelected =
+              argumentOpen === undefined ? undefined : selectedArgumentSuggestion(argumentOpen);
+            if (argumentOpen !== undefined && argumentSelected !== undefined) {
+              apply(lineOf(argumentTypeaheadCompletion(argumentOpen, argumentSelected)));
+              break;
+            }
             const selected = highlighted();
             if (selected !== undefined) apply(lineOf(typeaheadCompletion(selected)));
             break;
           }
           case "escape": {
+            if (this.#argumentTypeahead !== undefined) {
+              this.#argumentTypeahead = undefined;
+              this.#paint();
+              break;
+            }
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = dismissTypeahead(open);
@@ -913,17 +985,42 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
           }
           case "enter": {
+            const argumentOpen = argumentSuggestions();
+            const argumentSelected =
+              argumentOpen === undefined ? undefined : selectedArgumentSuggestion(argumentOpen);
             const selected = highlighted();
             // Complete only genuine prefixes: a draft that already parses
             // (exact name, alias, or argument form) submits verbatim, so
             // /quit echoes as the user typed it.
+            if (
+              argumentOpen !== undefined &&
+              argumentSelected?.next !== undefined &&
+              argumentOpen.completed.length === 0
+            ) {
+              apply(lineOf(`${argumentTypeaheadCompletion(argumentOpen, argumentSelected)} `));
+              break;
+            }
+            // `/add` and `/model` share their inline drawer whether the
+            // command was typed exactly or reached through slash completion.
+            if (
+              argumentOpen === undefined &&
+              selected !== undefined &&
+              this.#argumentSuggestions !== undefined &&
+              (selected.name === "add" || selected.name === "model")
+            ) {
+              apply(lineOf(typeaheadCompletion(selected)));
+              break;
+            }
             const prompt =
-              selected !== undefined && parsePromptCommand(editor.text) === null
-                ? typeaheadCompletion(selected).trimEnd()
-                : editor.text;
+              argumentOpen !== undefined && argumentSelected !== undefined
+                ? argumentTypeaheadCompletion(argumentOpen, argumentSelected)
+                : selected !== undefined && parsePromptCommand(editor.text) === null
+                  ? typeaheadCompletion(selected).trimEnd()
+                  : editor.text;
             // An empty (or whitespace-only) buffer never submits.
             if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
+            this.#argumentTypeahead = undefined;
             this.#promptHistory.add(prompt);
             this.#inputActive = false;
             this.#stopCaretBlink();
@@ -1332,15 +1429,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return response;
     };
 
-    // Dismissal resolves `undefined` — no answer travels; the transcript
-    // records the question compactly instead of preserving its option list.
+    // Dismissal resolves `undefined` — no answer travels and the question stays
+    // open; the transcript records it compactly instead of keeping its options.
     const dismiss = () => {
       this.#questionPanel = undefined;
       this.#upsertBlock({
         id: sectionKey,
         kind: "question",
         title: stripTerminalControls(question.prompt),
-        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Dismissed.")}`,
+        body: `${this.#theme.colors.dim(this.#theme.glyph.elbow)}  ${this.#theme.colors.dim("Skipped. The question stays open.")}`,
         preformatted: true,
         live: false,
       });
@@ -1549,7 +1646,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const status = subagentToolStatus(update.status);
-    // Subagents share the session's sandbox, so their reads and writes feed
+    // Subagents reuse the session's sandbox, so their reads and writes feed
     // the same file-content cache and their write blocks diff the same way.
     const presentation =
       update.status === "preparing"
@@ -1804,8 +1901,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * THE one authority for state scoped to a server-side conversation
    * context. Called by both context cuts — `/reset` and the
    * mid-conversation session replacement (`renderSessionBoundary`) — so the
-   * two can never drift on what dies with the old context: the pinned todo
-   * list (its tasks were not finished — dismiss, don't commit), write-diff
+   * two can never drift on what dies with the old context: write-diff
    * bases (a fresh session may run a fresh sandbox, where stale bases
    * render confidently wrong diffs), subagent call identity (ordinals must
    * not count across a cut), tool-call ownership maps, and the turn clock.
@@ -1819,8 +1915,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#backgroundSubagentCallIds.clear();
     this.#provisionalSubagentCallIds.clear();
     this.#subagentCallsByName.clear();
-    this.#todoItems = undefined;
-    this.#todoCommittedSignature = undefined;
     this.#messageQueue.reset();
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
@@ -1838,16 +1932,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (content.trim().length === 0) return;
     this.#start();
     this.#pushBlock({ kind: "notice", body: content, live: false });
-    this.#paint();
-  }
-
-  renderSandboxLog(text: string): void {
-    const content = stripTerminalControls(text);
-    const sandboxMessage = parseSandboxLogLine(content);
-    if (sandboxMessage === undefined) return;
-    this.#diagnostics?.append({ source: "sandbox", detail: sandboxMessage });
-    this.#start();
-    this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
     this.#paint();
   }
 
@@ -2473,68 +2557,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#stopCaretBlink();
       },
     );
-    return await question.promise;
-  }
-
-  async #readModelPicker(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
-    let interaction = initialModelPickerState(opts);
-    const flow = this.#beginSetupQuestion(modelPickerTitle(interaction));
-    flow.question = (width) => renderModelPicker(opts, interaction, this.#theme, width);
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
-      const dispatch = (event: ModelPickerEvent): void => {
-        const transition = transitionModelPicker(interaction, event, opts);
-        switch (transition.kind) {
-          case "render":
-            if (interaction === transition.state) return;
-            interaction = transition.state;
-            flow.questionTitle = modelPickerTitle(interaction);
-            this.#paint();
-            return;
-          case "cancel":
-            settle(undefined);
-            return;
-          case "settle":
-            settle(transition.result);
-            return;
-        }
-      };
-
-      if (key.type === "ctrl-c") {
-        dispatch({ type: "cancel" });
-        return;
-      }
-      if (key.type === "escape" || key.type === "left") {
-        dispatch({ type: "back" });
-        return;
-      }
-      const intent = setupSelectionIntent(key);
-      switch (intent?.kind) {
-        case "move":
-          dispatch({ type: intent.direction });
-          return;
-        case "submit":
-          dispatch({ type: "submit" });
-          return;
-        case "repaint":
-          this.#paint();
-          return;
-      }
-      if (key.type === "backspace") {
-        dispatch({ type: "backspace" });
-        return;
-      }
-      if (key.type === "alt-backspace") {
-        dispatch({ type: "delete-word-backward" });
-        return;
-      }
-      if (key.type === "text") {
-        for (const char of key.value.replaceAll("\n", " ")) {
-          if (char >= " " && char !== "\u007f") dispatch({ type: "char", char });
-        }
-      }
-    });
     return await question.promise;
   }
 
@@ -3746,8 +3768,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "tool-call-preparing":
         if (displayModes.tools === "hidden") break;
-        // Panel-routed tools need the real input; their placeholder would
-        // misread an input-less call (e.g. as a todo read).
+        // Panel-routed tools render from the real input, never a placeholder.
         if (isPanelRoutedTool(event.toolName)) break;
         this.#upsertNativeTool(
           {
@@ -3892,13 +3913,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   ): void {
     turnState.tools.set(tool.toolCallId, tool);
     if (this.#childToolCallIds.has(tool.toolCallId)) return;
-    if (this.#applyTodoToolCall(tool)) return;
     // The question surface — overlay while open, `? … ⎿ …` once answered —
     // is the whole story of an ask_question call; a tool block beside it
-    // would narrate the same thing twice. Together with #applyTodoToolCall
-    // this is the full-call half of isPanelRoutedTool (read-only todo calls
-    // deliberately fall through to an ordinary block).
-    if (toolBaseName(tool.toolName) === "ask_question") return;
+    // would narrate the same thing twice.
+    if (isPanelRoutedTool(tool.toolName)) return;
 
     const id = toolSectionId(tool.toolCallId);
     this.#parentToolBlockIds.set(tool.toolCallId, id);
@@ -3978,38 +3996,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#removeBlock(id);
       this.#parentToolBlockIds.delete(toolCallId);
     }
-  }
-
-  /**
-   * Routes a `todo` replacement write into the pinned panel instead of a
-   * transcript tool block. The whole list arrives with every call, so the
-   * panel is replaced wholesale; once every item settles the finished list
-   * commits to the transcript and the panel clears. Returns `false` for
-   * non-todo calls and read-only todo calls, which keep their ordinary block.
-   */
-  #applyTodoToolCall(tool: NativeToolState): boolean {
-    const items = readTodoToolItems(tool.toolName, tool.input);
-    if (items === undefined) return false;
-
-    if (items.length > 0 && allTodoItemsSettled(items)) {
-      // The call's result event re-plays through here; commit only once per
-      // list content.
-      const signature = JSON.stringify(items);
-      if (this.#todoCommittedSignature !== signature) {
-        this.#todoCommittedSignature = signature;
-        this.#pushBlock({
-          kind: "todo-list",
-          body: renderFinishedTodoRows(items, this.#width(), this.#theme).join("\n"),
-          live: false,
-        });
-      }
-      this.#todoItems = undefined;
-    } else {
-      this.#todoItems = items.length > 0 ? items : undefined;
-      this.#todoCommittedSignature = undefined;
-    }
-    this.#paint();
-    return true;
   }
 
   /** Keeps one parallel tool cohort mutable until every independent call settles. */
@@ -4402,27 +4388,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
     }
 
-    // The pinned todo panel holds its place above the prompt, updated in
-    // place by each `todo` tool call rather than scrolling with the stream.
-    if (this.#todoItems !== undefined) {
-      rows.push(
-        ...renderTodoPanelRows({
-          items: this.#todoItems,
-          width,
-          theme: this.#theme,
-          working: this.#streamDraftActive || this.#turnIndicator.kind === "waiting",
-          pulse: this.#progressPulseGlyph(
-            this.#activityPulseStartedAtMs,
-            this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-          ),
-        }),
-        "",
-      );
-    }
-
-    // The message-queue panel takes the slot directly above the input —
-    // ahead of the todo panel — because it holds the user's own undelivered
-    // words and carries the steering/cancel affordance.
+    // The message-queue panel takes the slot directly above the input
+    // because it holds the user's own undelivered words and carries the
+    // steering/cancel affordance.
     const queueRows = renderMessageQueueRows({
       view: this.#messageQueue.view(),
       width,
@@ -4437,13 +4405,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // still open the list above the input.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
-      if (
-        inlineHint === undefined &&
-        this.#typeahead !== undefined &&
-        isTypeaheadOpen(this.#typeahead)
-      ) {
-        rows.push(...renderCommandSuggestions(this.#typeahead, this.#theme, width));
-      }
+      const typeaheadRows = this.#typeaheadDrawerRows(width);
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
@@ -4456,7 +4418,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
       // (attention or typeahead), so the prompt receives only what remains.
-      const maxPromptRows = Math.max(1, this.#height() - 1 - rows.length - 1 - statusRows.length);
+      const maxPromptRows = Math.max(
+        1,
+        this.#height() -
+          1 -
+          rows.length -
+          1 -
+          typeaheadRows.length -
+          statusRows.length -
+          (typeaheadRows.length > 0 ? 2 : 0),
+      );
       const promptRows: Parameters<typeof promptInputRows>[0] = {
         text: this.#inputText,
         cursor: this.#inputCursor,
@@ -4477,7 +4448,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
               ? ""
               : "Send a message…";
       }
-      rows.push(...promptInputRows(promptRows));
+      const renderedPromptRows = promptInputRows(promptRows);
+      // The prompt helper ends with a footer spacer; a drawer owns that gap.
+      if (typeaheadRows.length > 0 && renderedPromptRows.at(-1) === "") renderedPromptRows.pop();
+      rows.push(...renderedPromptRows);
+      // Keep menus beneath the composer so opening them never moves the caret.
+      if (typeaheadRows.length > 0) rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
+      rows.push(...typeaheadRows);
+      if (typeaheadRows.length > 0 && statusRows.length > 0) {
+        rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
+      }
       rows.push(...statusRows);
       return rows;
     }
@@ -5038,7 +5018,7 @@ interface PromptInputRowsInput {
   readonly width: number;
   readonly theme: Theme;
   readonly caretVisible: boolean;
-  /** A fully typed known command paints blue, confirming it will dispatch as a command. */
+  /** A fully typed known command is bold, confirming it will dispatch as a command. */
   readonly isCommand: boolean;
   readonly ghost: string;
   readonly maxRows: number;
@@ -5090,7 +5070,7 @@ function promptInputRows({
 
   const style = (segment: string): string => {
     const rendered = renderInputText(segment);
-    return isCommand && rendered.length > 0 ? c.blue(rendered) : rendered;
+    return isCommand && rendered.length > 0 ? c.bold(rendered) : rendered;
   };
 
   const layout = layoutPromptInput({ text, cursor });
@@ -5210,7 +5190,6 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "flow":
     case "turn-stats":
     case "session-boundary":
-    case "todo-list":
     case "agent-header":
       return true;
     // The elbow result hangs tight under its invocation — never a gap.

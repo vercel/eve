@@ -8,9 +8,7 @@
       "type": "registry:item",
       "title": "Self-modification",
       "description": "Add a source editing subagent with local edits and official registry installation.",
-      "dependencies": [
-        "just-bash"
-      ],
+      "dependencies": ["just-bash"],
       "meta": {
         "eve": {
           "requires": ">=0.62.0",
@@ -18,10 +16,7 @@
             "pnpm": {
               "buildScripts": [
                 {
-                  "packages": [
-                    "node-liblzma",
-                    "@mongodb-js/zstd"
-                  ],
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
                   "optional": true,
                   "recommendedAction": "ignore-optional",
                   "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
@@ -33,11 +28,7 @@
             {
               "package": "eve",
               "bin": "eve",
-              "args": [
-                "integration",
-                "setup",
-                "self-modification"
-              ]
+              "args": ["integration", "setup", "self-modification"]
             }
           ]
         }
@@ -55,9 +46,7 @@
       "type": "registry:item",
       "title": "Self-modification (Experimental)",
       "description": "Add an experimental source editing subagent with local edits and official registry installation.",
-      "dependencies": [
-        "just-bash"
-      ],
+      "dependencies": ["just-bash"],
       "meta": {
         "eve": {
           "hidden": true,
@@ -65,10 +54,7 @@
             "pnpm": {
               "buildScripts": [
                 {
-                  "packages": [
-                    "node-liblzma",
-                    "@mongodb-js/zstd"
-                  ],
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
                   "optional": true,
                   "recommendedAction": "ignore-optional",
                   "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
@@ -80,11 +66,7 @@
             {
               "package": "eve",
               "bin": "eve",
-              "args": [
-                "integration",
-                "setup",
-                "self-modification"
-              ]
+              "args": ["integration", "setup", "self-modification"]
             }
           ],
           "requires": ">=0.62.0"
@@ -103,9 +85,7 @@
       "type": "registry:item",
       "title": "agent-browser",
       "description": "Add browser automation tools backed by agent-browser to an eve agent.",
-      "dependencies": [
-        "@agent-browser/eve"
-      ],
+      "dependencies": ["@agent-browser/eve"],
       "files": [
         {
           "path": "registry/extensions/agent-browser.ts",
@@ -119,9 +99,7 @@
       "type": "registry:item",
       "title": "Browserbase",
       "description": "Search, fetch, and automate the web with Browserbase and Stagehand.",
-      "dependencies": [
-        "@browserbasehq/eve"
-      ],
+      "dependencies": ["@browserbasehq/eve"],
       "envVars": {
         "BROWSERBASE_API_KEY": ""
       },
@@ -138,9 +116,7 @@
       "type": "registry:item",
       "title": "BlitzReels",
       "description": "Turn long videos into short clips, generate media, repair edits, and export.",
-      "dependencies": [
-        "@blitzreels/eve"
-      ],
+      "dependencies": ["@blitzreels/eve"],
       "envVars": {
         "BLITZREELS_API_KEY": ""
       },
@@ -157,10 +133,7 @@
       "type": "registry:item",
       "title": "GitHub Tools",
       "description": "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
-      "dependencies": [
-        "@github-tools/eve-extension",
-        "@vercel/connect"
-      ],
+      "dependencies": ["@github-tools/eve-extension", "@vercel/connect"],
       "envVars": {
         "GITHUB_TOKEN": ""
       },
@@ -177,9 +150,7 @@
       "type": "registry:item",
       "title": "Jetty",
       "description": "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
-      "dependencies": [
-        "@jetty/eve"
-      ],
+      "dependencies": ["@jetty/eve"],
       "envVars": {
         "JETTY_API_TOKEN": "",
         "JETTY_COLLECTION": ""
@@ -197,9 +168,7 @@
       "type": "registry:item",
       "title": "KERNEL",
       "description": "Let your eve agent use the Internet with KERNEL browser infrastructure, observability, and stealth.",
-      "dependencies": [
-        "@onkernel/eve-extension"
-      ],
+      "dependencies": ["@onkernel/eve-extension"],
       "envVars": {
         "KERNEL_API_KEY": ""
       },
@@ -221,11 +190,7 @@
           "setup": {
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "file-memory"
-            ]
+            "args": ["integration", "setup", "file-memory"]
           },
           "requires": ">=0.49.1",
           "docs": "/docs/memory/file"
@@ -244,9 +209,7 @@
       "type": "registry:item",
       "title": "Supermemory",
       "description": "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
-      "dependencies": [
-        "@supermemory/eve"
-      ],
+      "dependencies": ["@supermemory/eve"],
       "envVars": {
         "SUPERMEMORY_API_KEY": ""
       },
@@ -268,10 +231,7 @@
       "type": "registry:item",
       "title": "Upstash AgentKit",
       "description": "Give your agents ranked recall and automatic capture on Upstash Redis, or a Redis backend for file memory.",
-      "dependencies": [
-        "@upstash/agentkit-eve",
-        "@upstash/redis"
-      ],
+      "dependencies": ["@upstash/agentkit-eve", "@upstash/redis"],
       "envVars": {
         "UPSTASH_REDIS_REST_URL": "",
         "UPSTASH_REDIS_REST_TOKEN": ""
@@ -294,9 +254,7 @@
       "type": "registry:item",
       "title": "Kybernesis Arcana",
       "description": "Give your agents workspace-scoped long-term memory with automatic recall and deliberate storage.",
-      "dependencies": [
-        "@kybernesis/arcana"
-      ],
+      "dependencies": ["@kybernesis/arcana"],
       "envVars": {
         "ARCANA_API_KEY": "",
         "ARCANA_WORKSPACE": ""
@@ -319,9 +277,7 @@
       "type": "registry:item",
       "title": "Hindsight",
       "description": "Recall relevant context before every turn and retain each exchange automatically.",
-      "dependencies": [
-        "@vectorize-io/hindsight-eve"
-      ],
+      "dependencies": ["@vectorize-io/hindsight-eve"],
       "envVars": {
         "HINDSIGHT_API_KEY": "",
         "HINDSIGHT_API_URL": "",
@@ -357,7 +313,7 @@
       "name": "tool/ask_question",
       "type": "registry:item",
       "title": "Ask Question",
-      "description": "Let the agent ask the user a question during a turn.",
+      "description": "Let the agent ask the user one question and wait for the answer.",
       "files": [
         {
           "path": "registry/tools/ask_question.ts",
@@ -415,19 +371,6 @@
           "path": "registry/tools/task_cancel.ts",
           "type": "registry:file",
           "target": "agent/tools/task_cancel.ts"
-        }
-      ]
-    },
-    {
-      "name": "tool/todo",
-      "type": "registry:item",
-      "title": "Todo",
-      "description": "Maintain a durable per-session todo list.",
-      "files": [
-        {
-          "path": "registry/tools/todo.ts",
-          "type": "registry:file",
-          "target": "agent/tools/todo.ts"
         }
       ]
     },
@@ -549,9 +492,7 @@
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/vercel.ts",
@@ -571,20 +512,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "linear",
-              "mcp.linear.app",
-              "linear"
-            ]
+            "args": ["integration", "connect", "linear", "mcp.linear.app", "linear"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/linear.ts",
@@ -604,20 +537,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "notion",
-              "mcp.notion.com",
-              "notion"
-            ]
+            "args": ["integration", "connect", "notion", "mcp.notion.com", "notion"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/notion.ts",
@@ -637,20 +562,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "datadog",
-              "mcp.datadoghq.com",
-              "datadog"
-            ]
+            "args": ["integration", "connect", "datadog", "mcp.datadoghq.com", "datadog"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/datadog.ts",
@@ -670,20 +587,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "honeycomb",
-              "mcp.honeycomb.io",
-              "honeycomb"
-            ]
+            "args": ["integration", "connect", "honeycomb", "mcp.honeycomb.io", "honeycomb"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/honeycomb.ts",
@@ -718,12 +627,8 @@
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
-      "devDependencies": [
-        "vercel@>=58.7.0"
-      ],
+      "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.7.0"],
       "files": [
         {
           "path": "registry/connections/agentcard.ts",
@@ -743,20 +648,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "airtable",
-              "airtable",
-              "airtable"
-            ]
+            "args": ["integration", "connect", "airtable", "airtable", "airtable"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/airtable.ts",
@@ -776,20 +673,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "bitly",
-              "bitly",
-              "bitly"
-            ]
+            "args": ["integration", "connect", "bitly", "bitly", "bitly"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/bitly.ts",
@@ -809,20 +698,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "brex",
-              "brex",
-              "brex"
-            ]
+            "args": ["integration", "connect", "brex", "brex", "brex"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/brex.ts",
@@ -842,20 +723,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "candid",
-              "candid",
-              "candid"
-            ]
+            "args": ["integration", "connect", "candid", "candid", "candid"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/candid.ts",
@@ -875,20 +748,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "clickhouse",
-              "clickhouse",
-              "clickhouse"
-            ]
+            "args": ["integration", "connect", "clickhouse", "clickhouse", "clickhouse"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/clickhouse.ts",
@@ -908,20 +773,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "cloudinary",
-              "cloudinary",
-              "cloudinary"
-            ]
+            "args": ["integration", "connect", "cloudinary", "cloudinary", "cloudinary"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/cloudinary.ts",
@@ -941,20 +798,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "coda",
-              "coda",
-              "coda"
-            ]
+            "args": ["integration", "connect", "coda", "coda", "coda"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/coda.ts",
@@ -974,20 +823,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "context",
-              "mcp.context.dev",
-              "context"
-            ]
+            "args": ["integration", "connect", "context", "mcp.context.dev", "context"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/context.ts",
@@ -1007,20 +848,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "egnyte",
-              "egnyte",
-              "egnyte"
-            ]
+            "args": ["integration", "connect", "egnyte", "egnyte", "egnyte"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/egnyte.ts",
@@ -1040,20 +873,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "embat",
-              "embat",
-              "embat"
-            ]
+            "args": ["integration", "connect", "embat", "embat", "embat"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/embat.ts",
@@ -1073,20 +898,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "hugging-face",
-              "hugging-face",
-              "hugging-face"
-            ]
+            "args": ["integration", "connect", "hugging-face", "hugging-face", "hugging-face"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/hugging-face.ts",
@@ -1106,20 +923,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "local-falcon",
-              "local-falcon",
-              "local-falcon"
-            ]
+            "args": ["integration", "connect", "local-falcon", "local-falcon", "local-falcon"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/local-falcon.ts",
@@ -1139,20 +948,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "make",
-              "make",
-              "make"
-            ]
+            "args": ["integration", "connect", "make", "make", "make"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/make.ts",
@@ -1172,20 +973,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "manufact",
-              "manufact",
-              "manufact"
-            ]
+            "args": ["integration", "connect", "manufact", "manufact", "manufact"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/manufact.ts",
@@ -1205,20 +998,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "mem0",
-              "mem0",
-              "mem0"
-            ]
+            "args": ["integration", "connect", "mem0", "mem0", "mem0"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/mem0.ts",
@@ -1238,20 +1023,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "miro",
-              "miro",
-              "miro"
-            ]
+            "args": ["integration", "connect", "miro", "miro", "miro"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/miro.ts",
@@ -1271,20 +1048,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "mixpanel",
-              "mixpanel",
-              "mixpanel"
-            ]
+            "args": ["integration", "connect", "mixpanel", "mixpanel", "mixpanel"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/mixpanel.ts",
@@ -1304,20 +1073,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "natural",
-              "mcp.natural.com",
-              "natural"
-            ]
+            "args": ["integration", "connect", "natural", "mcp.natural.com", "natural"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/natural.ts",
@@ -1337,22 +1098,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "neon",
-              "neon",
-              "neon",
-              "--principal-type",
-              "app"
-            ]
+            "args": ["integration", "connect", "neon", "neon", "neon", "--principal-type", "app"]
           },
           "requires": ">=0.48.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/neon.ts",
@@ -1372,20 +1123,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "netlify",
-              "netlify",
-              "netlify"
-            ]
+            "args": ["integration", "connect", "netlify", "netlify", "netlify"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/netlify.ts",
@@ -1405,20 +1148,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "oreilly",
-              "oreilly",
-              "oreilly"
-            ]
+            "args": ["integration", "connect", "oreilly", "oreilly", "oreilly"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/oreilly.ts",
@@ -1438,20 +1173,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "planetscale",
-              "planetscale",
-              "planetscale"
-            ]
+            "args": ["integration", "connect", "planetscale", "planetscale", "planetscale"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/planetscale.ts",
@@ -1471,20 +1198,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "posthog",
-              "posthog",
-              "posthog"
-            ]
+            "args": ["integration", "connect", "posthog", "posthog", "posthog"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/posthog.ts",
@@ -1504,20 +1223,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "postman",
-              "postman",
-              "postman"
-            ]
+            "args": ["integration", "connect", "postman", "postman", "postman"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/postman.ts",
@@ -1537,20 +1248,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "razorpay",
-              "razorpay",
-              "razorpay"
-            ]
+            "args": ["integration", "connect", "razorpay", "razorpay", "razorpay"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/razorpay.ts",
@@ -1570,20 +1273,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "sentry",
-              "sentry",
-              "sentry"
-            ]
+            "args": ["integration", "connect", "sentry", "sentry", "sentry"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/sentry.ts",
@@ -1603,20 +1298,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "similarweb",
-              "similarweb",
-              "similarweb"
-            ]
+            "args": ["integration", "connect", "similarweb", "similarweb", "similarweb"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/similarweb.ts",
@@ -1636,11 +1323,7 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "shopify"
-            ]
+            "args": ["integration", "setup", "shopify"]
           },
           "requires": ">=0.46.1"
         }
@@ -1664,20 +1347,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "stripe",
-              "stripe",
-              "stripe"
-            ]
+            "args": ["integration", "connect", "stripe", "stripe", "stripe"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/stripe.ts",
@@ -1697,20 +1372,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "supabase",
-              "supabase",
-              "supabase"
-            ]
+            "args": ["integration", "connect", "supabase", "supabase", "supabase"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/supabase.ts",
@@ -1730,20 +1397,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "ticket-tailor",
-              "ticket-tailor",
-              "ticket-tailor"
-            ]
+            "args": ["integration", "connect", "ticket-tailor", "ticket-tailor", "ticket-tailor"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/ticket-tailor.ts",
@@ -1763,20 +1422,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "ticktick",
-              "ticktick",
-              "ticktick"
-            ]
+            "args": ["integration", "connect", "ticktick", "ticktick", "ticktick"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/ticktick.ts",
@@ -1809,9 +1460,7 @@
           "requires": ">=0.48.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/tinybird.ts",
@@ -1831,20 +1480,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "todoist",
-              "todoist",
-              "todoist"
-            ]
+            "args": ["integration", "connect", "todoist", "todoist", "todoist"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/todoist.ts",
@@ -1864,20 +1505,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "webflow",
-              "webflow",
-              "webflow"
-            ]
+            "args": ["integration", "connect", "webflow", "webflow", "webflow"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/webflow.ts",
@@ -1897,20 +1530,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "wix",
-              "wix",
-              "wix"
-            ]
+            "args": ["integration", "connect", "wix", "wix", "wix"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/wix.ts",
@@ -1930,20 +1555,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "zapier",
-              "zapier",
-              "zapier"
-            ]
+            "args": ["integration", "connect", "zapier", "zapier", "zapier"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/zapier.ts",
@@ -1963,20 +1580,12 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "connect",
-              "zomato",
-              "zomato",
-              "zomato"
-            ]
+            "args": ["integration", "connect", "zomato", "zomato", "zomato"]
           },
           "requires": ">=0.29.0"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
+      "dependencies": ["@vercel/connect"],
       "files": [
         {
           "path": "registry/connections/zomato.ts",
@@ -1996,40 +1605,28 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "slack"
-            ]
+            "args": ["integration", "setup", "slack"]
           },
           "requires": ">=0.33.0",
           "docs": "/docs/channels/slack",
           "implementation": "native"
         }
       },
-      "dependencies": [
-        "@vercel/connect@>=0.4.2"
-      ]
+      "dependencies": ["@vercel/connect@>=0.4.2"]
     },
     {
       "name": "channel/discord",
       "type": "registry:item",
       "title": "Discord",
       "description": "Connect an eve agent to Discord with guided connector and slash-command setup.",
-      "dependencies": [
-        "@vercel/connect@>=0.6.0"
-      ],
+      "dependencies": ["@vercel/connect@>=0.6.0"],
       "meta": {
         "eve": {
           "setup": {
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "discord"
-            ]
+            "args": ["integration", "setup", "discord"]
           },
           "requires": ">=0.33.0",
           "docs": "/docs/channels/discord",
@@ -2048,23 +1645,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "teams"
-            ]
+            "args": ["integration", "setup", "teams"]
           },
           "requires": ">=0.53.0",
           "docs": "/docs/channels/teams",
           "implementation": "native"
         }
       },
-      "dependencies": [
-        "@vercel/connect@>=2.1.0"
-      ],
-      "devDependencies": [
-        "vercel@>=58.5.1"
-      ]
+      "dependencies": ["@vercel/connect@>=2.1.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/telegram",
@@ -2116,9 +1705,7 @@
       "type": "registry:item",
       "title": "Blooio",
       "description": "Send and receive iMessage, RCS, and SMS through Blooio, with reactions, typing indicators, read receipts, polls, groups, capability checks, and history.",
-      "dependencies": [
-        "eve-channel-blooio"
-      ],
+      "dependencies": ["eve-channel-blooio"],
       "envVars": {
         "BLOOIO_API_KEY": "",
         "BLOOIO_WEBHOOK_SECRET": ""
@@ -2148,23 +1735,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "github"
-            ]
+            "args": ["integration", "setup", "github"]
           },
           "requires": ">=0.33.0",
           "docs": "/docs/channels/github",
           "implementation": "native"
         }
       },
-      "dependencies": [
-        "@vercel/connect@>=0.6.0"
-      ],
-      "devDependencies": [
-        "vercel@>=58.5.1"
-      ]
+      "dependencies": ["@vercel/connect@>=0.6.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/linear",
@@ -2177,23 +1756,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "linear"
-            ]
+            "args": ["integration", "setup", "linear"]
           },
           "requires": ">=0.33.0",
           "docs": "/docs/channels/linear",
           "implementation": "native"
         }
       },
-      "dependencies": [
-        "@vercel/connect"
-      ],
-      "devDependencies": [
-        "vercel@>=58.5.1"
-      ]
+      "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/web",
@@ -2206,11 +1777,7 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "web"
-            ]
+            "args": ["integration", "setup", "web"]
           },
           "requires": ">=0.33.0",
           "docs": "/docs/channels/eve",
@@ -2458,11 +2025,7 @@
       "type": "registry:item",
       "title": "Google Chat",
       "description": "Google Chat spaces and DMs via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@chat-adapter/gchat",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@chat-adapter/gchat", "@chat-adapter/state-memory"],
       "files": [
         {
           "path": "registry/channels/chat-sdk-gchat.ts",
@@ -2485,11 +2048,7 @@
       "type": "registry:item",
       "title": "WhatsApp",
       "description": "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@chat-adapter/whatsapp",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@chat-adapter/whatsapp", "@chat-adapter/state-memory"],
       "files": [
         {
           "path": "registry/channels/chat-sdk-whatsapp.ts",
@@ -2515,11 +2074,7 @@
       "type": "registry:item",
       "title": "X",
       "description": "Public mentions and DMs on X via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@chat-adapter/x",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@chat-adapter/x", "@chat-adapter/state-memory"],
       "files": [
         {
           "path": "registry/channels/chat-sdk-x.ts",
@@ -2543,11 +2098,7 @@
       "type": "registry:item",
       "title": "Messenger",
       "description": "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@chat-adapter/messenger",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@chat-adapter/messenger", "@chat-adapter/state-memory"],
       "files": [
         {
           "path": "registry/channels/chat-sdk-messenger.ts",
@@ -2572,11 +2123,7 @@
       "type": "registry:item",
       "title": "Zernio",
       "description": "Reach seven social and messaging platforms through one Zernio integration.",
-      "dependencies": [
-        "chat",
-        "@zernio/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@zernio/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "ZERNIO_API_KEY": "",
         "ZERNIO_WEBHOOK_SECRET": ""
@@ -2600,11 +2147,7 @@
       "type": "registry:item",
       "title": "Velt",
       "description": "Add agents to anchored comments across documents, canvases, PDFs, and video.",
-      "dependencies": [
-        "chat",
-        "@veltdev/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@veltdev/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "VELT_API_KEY": "",
         "VELT_WEBHOOK_SECRET": ""
@@ -2628,11 +2171,7 @@
       "type": "registry:item",
       "title": "Sendblue",
       "description": "Send and receive iMessage, SMS, and RCS through Sendblue.",
-      "dependencies": [
-        "chat",
-        "chat-adapter-sendblue",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "chat-adapter-sendblue", "@chat-adapter/state-memory"],
       "envVars": {
         "SENDBLUE_API_KEY": "",
         "SENDBLUE_API_SECRET": "",
@@ -2657,11 +2196,7 @@
       "type": "registry:item",
       "title": "Novu",
       "description": "Reach Slack, Teams, WhatsApp, Telegram, and email through Novu.",
-      "dependencies": [
-        "chat",
-        "@novu/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@novu/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "files": [
         {
           "path": "registry/channels/chat-sdk-novu.ts",
@@ -2685,11 +2220,7 @@
       "type": "registry:item",
       "title": "Liveblocks",
       "description": "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
-      "dependencies": [
-        "chat",
-        "@liveblocks/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@liveblocks/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "LIVEBLOCKS_SECRET_KEY": "",
         "LIVEBLOCKS_WEBHOOK_SECRET": ""
@@ -2713,23 +2244,15 @@
       "type": "registry:item",
       "title": "Linq",
       "description": "Connect an eve agent to iMessage and SMS through Linq with guided Connect or portable setup.",
-      "dependencies": [
-        "@vercel/connect@>=0.9.0"
-      ],
-      "devDependencies": [
-        "vercel@>=58.5.1"
-      ],
+      "dependencies": ["@vercel/connect@>=0.9.0"],
+      "devDependencies": ["vercel@>=58.5.1"],
       "meta": {
         "eve": {
           "setup": {
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "linq"
-            ]
+            "args": ["integration", "setup", "linq"]
           },
           "requires": ">=0.41.0",
           "docs": "/docs/channels/linq",
@@ -2742,11 +2265,7 @@
       "type": "registry:item",
       "title": "Kapso",
       "description": "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
-      "dependencies": [
-        "chat",
-        "@kapso/chat-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@kapso/chat-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "KAPSO_API_KEY": "",
         "KAPSO_PHONE_NUMBER_ID": "",
@@ -2771,20 +2290,14 @@
       "type": "registry:item",
       "title": "Photon iMessage",
       "description": "Connect an eve agent to iMessage through Photon with guided project and phone setup.",
-      "dependencies": [
-        "@vercel/connect@>=0.5.0"
-      ],
+      "dependencies": ["@vercel/connect@>=0.5.0"],
       "meta": {
         "eve": {
           "setup": {
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": [
-              "integration",
-              "setup",
-              "photon"
-            ]
+            "args": ["integration", "setup", "photon"]
           },
           "requires": ">=0.33.0",
           "docs": "/docs/channels/photon",
@@ -2797,11 +2310,7 @@
       "type": "registry:item",
       "title": "Dial",
       "description": "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
-      "dependencies": [
-        "chat",
-        "@getdial/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@getdial/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "DIAL_API_KEY": "",
         "DIAL_FROM_NUMBER_ID": "",
@@ -2826,11 +2335,7 @@
       "type": "registry:item",
       "title": "AgentPhone",
       "description": "SMS, MMS, iMessage, and voice conversations through AgentPhone.",
-      "dependencies": [
-        "chat",
-        "@agentphone/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@agentphone/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "AGENTPHONE_API_KEY": "",
         "AGENTPHONE_AGENT_ID": "",
@@ -2855,11 +2360,7 @@
       "type": "registry:item",
       "title": "Lark / Feishu",
       "description": "Lark and Feishu chats with native card streaming via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@larksuite/vercel-chat-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@larksuite/vercel-chat-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "LARK_APP_ID": "",
         "LARK_APP_SECRET": ""
@@ -2883,11 +2384,7 @@
       "type": "registry:item",
       "title": "Beeper",
       "description": "Matrix rooms and bridged messaging networks through Beeper.",
-      "dependencies": [
-        "chat",
-        "@beeper/chat-adapter-matrix",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@beeper/chat-adapter-matrix", "@chat-adapter/state-memory"],
       "files": [
         {
           "path": "registry/channels/chat-sdk-beeper.ts",
@@ -2911,11 +2408,7 @@
       "type": "registry:item",
       "title": "Resend",
       "description": "Send and receive threaded email through Resend via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@resend/chat-sdk-adapter",
-        "@chat-adapter/state-memory"
-      ],
+      "dependencies": ["chat", "@resend/chat-sdk-adapter", "@chat-adapter/state-memory"],
       "envVars": {
         "RESEND_API_KEY": "",
         "RESEND_WEBHOOK_SECRET": "",
@@ -2940,11 +2433,7 @@
       "type": "registry:item",
       "title": "Gmail",
       "description": "Turn labelled Gmail threads into agent conversations via the Chat SDK.",
-      "dependencies": [
-        "chat",
-        "@chat-adapter/gmail",
-        "@chat-adapter/state-redis"
-      ],
+      "dependencies": ["chat", "@chat-adapter/gmail", "@chat-adapter/state-redis"],
       "envVars": {
         "REDIS_URL": "",
         "GMAIL_MAILBOX": "",
@@ -2981,9 +2470,7 @@
       "type": "registry:item",
       "title": "Braintrust",
       "description": "Trace eve agent sessions in Braintrust, including turns, steps, tool calls, and subagent interactions.",
-      "dependencies": [
-        "braintrust@^3.29.0"
-      ],
+      "dependencies": ["braintrust@^3.29.0"],
       "envVars": {
         "BRAINTRUST_API_KEY": ""
       },
@@ -3024,9 +2511,7 @@
       "type": "registry:item",
       "title": "Sentry",
       "description": "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
-      "dependencies": [
-        "@vercel/otel"
-      ],
+      "dependencies": ["@vercel/otel"],
       "envVars": {
         "SENTRY_OTLP_TRACES_ENDPOINT": "",
         "SENTRY_PUBLIC_KEY": ""
@@ -3044,9 +2529,7 @@
       "type": "registry:item",
       "title": "Datadog",
       "description": "Export agent traces to Datadog APM alongside the rest of your stack.",
-      "dependencies": [
-        "@vercel/otel"
-      ],
+      "dependencies": ["@vercel/otel"],
       "envVars": {
         "DATADOG_OTLP_TRACES_ENDPOINT": "",
         "DD_API_KEY": ""
@@ -3064,9 +2547,7 @@
       "type": "registry:item",
       "title": "Honeycomb",
       "description": "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
-      "dependencies": [
-        "@vercel/otel"
-      ],
+      "dependencies": ["@vercel/otel"],
       "envVars": {
         "HONEYCOMB_API_KEY": ""
       },
@@ -3083,9 +2564,7 @@
       "type": "registry:item",
       "title": "Arize",
       "description": "Export traces to Arize AX for LLM observability and evaluation.",
-      "dependencies": [
-        "@vercel/otel"
-      ],
+      "dependencies": ["@vercel/otel"],
       "envVars": {
         "ARIZE_SPACE_ID": "",
         "ARIZE_API_KEY": ""
@@ -3103,9 +2582,7 @@
       "type": "registry:item",
       "title": "Raindrop",
       "description": "Send agent traces to Raindrop to detect and debug AI product issues.",
-      "dependencies": [
-        "@vercel/otel"
-      ],
+      "dependencies": ["@vercel/otel"],
       "envVars": {
         "RAINDROP_WRITE_KEY": ""
       },
@@ -3122,9 +2599,7 @@
       "type": "registry:item",
       "title": "Jaeger",
       "description": "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
-      "dependencies": [
-        "@vercel/otel"
-      ],
+      "dependencies": ["@vercel/otel"],
       "files": [
         {
           "path": "registry/instrumentation/jaeger.ts",

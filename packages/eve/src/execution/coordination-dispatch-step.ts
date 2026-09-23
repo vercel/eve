@@ -41,6 +41,7 @@ export async function dispatchCoordinationStep(
         agents: prepared.workflowAgents,
         auth: prepared.auth,
         batchEvent: batch.event,
+        canRequestInput: prepared.capabilities?.requestInput === true,
         initiatorAuth: prepared.initiatorAuth,
         owner: input.workflowToolRunOwner,
         parentSession: prepared.parentSession,

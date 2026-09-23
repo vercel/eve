@@ -382,6 +382,15 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("-y, --yes");
     expect(help).toContain("--model <model>");
     expect(help).toContain("--reasoning <effort>");
+    expect(help).toContain("-n, --non-interactive");
+  });
+
+  it("does not print the boot banner because interactive onboarding owns its header", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+
+    await runCli(["init", "my-agent"], logger);
+
+    expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining("☰eve"));
   });
 
   it("forwards model settings to the init command", async () => {
@@ -402,6 +411,30 @@ describe("eve init compatibility flags", () => {
         channelWebNextjs: undefined,
         model: "openai/gpt-5.6-sol",
         reasoning: "high",
+        nonInteractive: undefined,
+      },
+      undefined,
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  it("forwards -n to the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", "my-agent", "-n"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(
+      logger,
+      resolve(process.cwd()),
+      "my-agent",
+      {
+        agents: undefined,
+        channelWebNextjs: undefined,
+        model: undefined,
+        reasoning: undefined,
+        nonInteractive: true,
       },
       undefined,
       expect.any(Function),
@@ -535,6 +568,24 @@ describe("eve dev --input", () => {
       }
     },
   );
+
+  it("passes the default extension opt-out to the local server", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+
+    await runInteractiveDev(["dev", "--no-default-extensions"], { startHost });
+
+    expect(startHost).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ developmentExtensions: { enabled: [] } }),
+    );
+  });
 
   it("forwards the internal init onboarding handoff to the local TUI", async () => {
     const startHost = vi.fn(() => ({
@@ -1122,7 +1173,7 @@ describe("eve build output ownership", () => {
 
     expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
       profileOutputPath: resolve(process.cwd(), profilePath),
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
       vercelServiceOutput: undefined,
       workspaceMember: false,
     });
@@ -1142,7 +1193,7 @@ describe("eve build output ownership", () => {
     }
 
     expect(buildHost).toHaveBeenCalledWith(process.cwd(), {
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
       vercelServiceOutput: {
         hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
         serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),

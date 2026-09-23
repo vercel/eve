@@ -6,6 +6,7 @@ import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import type { EveCliTelemetry } from "#cli/telemetry/index.js";
+import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import type { DevelopmentServer, DevelopmentServerOptions } from "#internal/nitro/host/types.js";
 
 import { createDevBootProgressReporter } from "./boot-progress.js";
@@ -87,6 +88,7 @@ export function registerDevelopmentCommand(input: {
       parseDevelopmentHeaderOption,
     )
     .option("--no-ui", "Start the server without an interactive UI")
+    .option("--no-default-extensions", "Do not mount default development extensions")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input")
     .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
@@ -221,6 +223,9 @@ export function registerDevelopmentCommand(input: {
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
         server = startHost(applicationContext.root, {
+          ...(options.defaultExtensions === false
+            ? { developmentExtensions: noDevelopmentExtensions() }
+            : {}),
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,

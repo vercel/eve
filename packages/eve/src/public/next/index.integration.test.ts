@@ -129,11 +129,16 @@ describe("withEve Vercel config", () => {
     });
   });
 
-  it("writes Build Output config to the closest existing .vercel directory", async () => {
+  it("writes fallback Build Output config under the app in a linked monorepo", async () => {
     const projectRoot = await createTempAppRoot();
     const appRoot = join(projectRoot, "apps", "web");
     await mkdir(join(projectRoot, ".vercel"), { recursive: true });
-    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
+    await writeFile(
+      join(projectRoot, ".vercel", "project.json"),
+      JSON.stringify({ settings: { rootDirectory: "apps/web" } }),
+    );
+    await mkdir(join(projectRoot, "custom-staging"));
+    await writeFile(join(projectRoot, "custom-staging", "builds.json"), "{}\n");
     await mkdir(appRoot, { recursive: true });
     process.chdir(appRoot);
     vi.stubEnv("NODE_ENV", "production");
@@ -142,7 +147,7 @@ describe("withEve Vercel config", () => {
 
     await resolveConfig(withEve<TestConfig>({}));
 
-    const outputConfig = await readJsonFile(join(projectRoot, ".vercel", "output", "config.json"));
+    const outputConfig = await readJsonFile(join(appRoot, ".vercel", "output", "config.json"));
 
     expect(outputConfig).toEqual({
       routes: [
@@ -157,7 +162,7 @@ describe("withEve Vercel config", () => {
       services: {
         eve: {
           buildCommand:
-            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
+            "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
           outputDirectory: ".vercel/output",
           routes: [
@@ -178,7 +183,7 @@ describe("withEve Vercel config", () => {
       version: 3,
     });
     await expect(
-      readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+      readFile(join(projectRoot, ".vercel", "output", "config.json"), "utf8"),
     ).rejects.toThrow();
   });
 

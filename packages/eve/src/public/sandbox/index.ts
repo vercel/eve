@@ -1,45 +1,29 @@
-/**
- * Sandbox authoring helpers for `agent/sandbox.ts` (or
- * `agent/sandbox/sandbox.ts` when paired with a `workspace/` folder).
- */
 export {
+  defineParentSandbox,
   defineSandbox,
-  type SandboxAncestorReference,
-  type SandboxBootstrapContext,
-  type SandboxBootstrapUseFn,
+  type SandboxOpenArguments,
+  type SandboxEnvironment,
+  type SandboxSelector,
+  type SandboxSelectorContext,
   type SandboxCommandResult,
-  type SandboxDefinition,
-  type SandboxParentDefinition,
-  type SandboxParentDefinitionContext,
-  type SandboxParentValue,
+  type FixedNetworkSandboxSession,
+  type MutableNetworkSandboxSession,
   type SandboxProcess,
   type SandboxReadBinaryFileOptions,
   type SandboxReadFileOptions,
   type SandboxReadTextFileOptions,
-  type SandboxRevalidationKeyFn,
   type SandboxRunOptions,
   type SandboxSession,
   type RuntimeSandboxSession,
+  type RuntimeSandboxSessionFor,
   type SandboxSpawnOptions,
-  type SandboxSessionContext,
-  type SandboxSessionUseFn,
   type SandboxWriteBinaryFileOptions,
   type SandboxWriteFileOptions,
   type SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
+export { DefaultSandbox } from "#sandbox/providers/default.js";
+export type { DefaultSandboxEnvironmentOptions } from "#sandbox/providers/default.js";
 export type {
-  SandboxBackend,
-  SandboxBackendCreateInput,
-  SandboxBackendHandle,
-  SandboxBackendPrewarmInput,
-  SandboxBackendRuntimeContext,
-  SandboxBackendSessionState,
-  SandboxDeleteOptions,
-  SandboxSeedFile,
-} from "#public/definitions/sandbox-backend.js";
-export type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
-export { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
-export {
-  defaultSandbox as defaultBackend,
-  type DefaultSandboxOptions as DefaultBackendOptions,
-} from "#public/sandbox/backends/default.js";
+  SandboxNetworkOptions,
+  SandboxNetworkPolicy,
+} from "#shared/sandbox-network-policy.js";

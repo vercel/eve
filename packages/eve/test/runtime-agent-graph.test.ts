@@ -23,7 +23,9 @@ describe("resolveRuntimeAgentGraph", () => {
     const names = graph.root.turnAgent.tools.map((tool) => tool.name);
 
     expect(graph.root.nodeId).toBe("__root__");
-    expect(graph.root.sandboxRegistry.sandbox.definition.backend.name).toBe("vercel");
+    const definition = graph.root.sandboxRegistry.sandbox.definition;
+    expect(definition.kind).toBe("independent");
+    if (definition.kind === "independent") expect(definition.environment.provider).toBe("vercel");
     expect(names).toEqual(manifest.tools.map((tool) => tool.name));
     expect(names).toContain("web_search");
     expect(graph.root.agent.tools.every((tool) => tool.owner.kind === "framework")).toBe(true);

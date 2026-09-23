@@ -11,7 +11,7 @@ The harness keeps a long session from overflowing the model's context window. Be
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   compaction: {
     thresholdPercent: 0.75,
   },
@@ -23,8 +23,6 @@ It checks whether that reduction is sufficient using the last provider-reported
 input token count plus an estimate of new messages. A smaller character estimate
 alone cannot satisfy compaction triggered by a higher provider count. If trimming
 cannot free enough space, eve summarizes the older history.
-
-Compaction also preserves the framework's own tool state automatically. It resets read-before-write tracking (so a write afterward re-reads the file whose read evidence was summarized away) and re-injects the active todo list, so the model keeps its task list across the summary. There is no per-tool hook to configure.
 
 First-class [memory](../memory) participates in a separate lifecycle. eve asks
 providers to capture before compaction, excludes attributed recalled records

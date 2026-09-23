@@ -99,6 +99,9 @@ export async function checkoutGitHubRepository(
   // (token-free) URL and the platform injects `Authorization` on egress to
   // GitHub, so the token never enters the sandbox process. The `"*"` rule keeps
   // the agent's other egress open.
+  if (sandbox.setNetworkPolicy === undefined) {
+    throw new Error("GitHub checkout requires a sandbox provider with mutable network policy.");
+  }
   await sandbox.setNetworkPolicy(gitHubGitBrokerNetworkPolicy(token));
 
   await runCheckoutCommand({

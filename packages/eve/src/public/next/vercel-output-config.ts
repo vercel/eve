@@ -61,16 +61,8 @@ async function resolveVercelOutputConfigLocation(nextRoot: string): Promise<{
     };
   }
 
-  if (vercelDirectory !== undefined) {
-    return {
-      canWriteGeneratedOutput: true,
-      outputConfigPath: join(vercelDirectory, "output", "config.json"),
-      projectRoot,
-    };
-  }
-
   return {
-    canWriteGeneratedOutput: Boolean(process.env.VERCEL),
+    canWriteGeneratedOutput: vercelDirectory !== undefined || Boolean(process.env.VERCEL),
     outputConfigPath: join(nextRoot, VERCEL_OUTPUT_CONFIG_FILE_NAME),
     projectRoot,
   };

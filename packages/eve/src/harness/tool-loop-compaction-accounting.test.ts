@@ -349,15 +349,20 @@ describe("tool-loop structured compaction accounting", () => {
       requests: [
         {
           action: {
-            callId: "question-call",
-            input: { prompt: "Pick one." },
+            callId: "call-1",
+            input: { command: "pwd" },
             kind: "tool-call",
-            toolName: "ask_question",
+            toolName: "bash",
           },
-          display: "select",
-          kind: "question",
-          prompt: "Pick one.",
-          requestId: "question-call",
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "cancel", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
         },
       ],
       responseMessages: [],
@@ -375,8 +380,8 @@ describe("tool-loop structured compaction accounting", () => {
     const result = await runStep(session, {
       inputResponses: [
         {
-          optionId: "yes",
-          requestId: "question-call",
+          optionId: "approve",
+          requestId: "approval-1",
         },
       ],
     });
@@ -595,59 +600,5 @@ describe("final request envelope compaction", () => {
     expect(generateText).toHaveBeenCalledOnce();
     expect(events.indexOf("compaction.requested")).toBeGreaterThan(events.indexOf("step.started"));
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools).toHaveProperty("catalog");
-  });
-
-  it("does not count a capability-filtered tool that the provider never sees", async () => {
-    setupMockAgentSequence([completed()]);
-    const runStep = createToolLoopHarness(
-      createTestConfig({
-        tools: new Map([
-          [
-            "hidden",
-            {
-              name: "hidden",
-              description: "private catalog ".repeat(10_000),
-              inputSchema: jsonSchema({ type: "object" }),
-              behavior: { availability: ["requires-request-input"] },
-            },
-          ],
-        ]),
-      }),
-    );
-    await runStep(
-      createTestSession({
-        compaction: {
-          lastKnownInputTokens: 8_000,
-          lastKnownPromptMessageCount: 1,
-          recentWindowSize: 0,
-          threshold: 10_000,
-        },
-        history: [{ role: "user", kind: "user", content: "earlier" }],
-      }),
-      { message: "continue" },
-    );
-    expect(generateText).not.toHaveBeenCalled();
-    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools).not.toHaveProperty("hidden");
-  });
-  it("propagates a compaction callback failure without treating it as a model failure", async () => {
-    const error = new Error("memory recall failed");
-    const onCompaction = vi.fn(() => {
-      throw error;
-    });
-    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
-      ReturnType<typeof generateText>
-    >);
-    const runStep = createToolLoopHarness(createTestConfig({ onCompaction }));
-    await expect(
-      runStep(
-        createTestSession({
-          compaction: { recentWindowSize: 0, threshold: 100 },
-          history: [{ role: "user", kind: "user", content: "history ".repeat(1_000) }],
-        }),
-        { message: "continue" },
-      ),
-    ).rejects.toBe(error);
-    expect(onCompaction).toHaveBeenCalledOnce();
-    expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 });

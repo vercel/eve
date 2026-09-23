@@ -47,7 +47,6 @@ export type BlockKind =
   | "log"
   | "turn-stats"
   | "session-boundary"
-  | "todo-list"
   | "agent-header";
 
 /**
@@ -256,7 +255,6 @@ function renderBody(
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
-    case "todo-list":
     case "agent-header":
       // Rows arrive fully styled and width-fit from their builders.
       return (block.body ?? "").split("\n");
@@ -441,7 +439,7 @@ function paintCommands(line: string, theme: Theme): string {
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;
   const status = block.status === "error" ? `${c.red(theme.glyph.error)} ` : "";
-  return [`${c.cyan(theme.glyph.user)} ${status}${c.blue(block.body ?? "")}`];
+  return [`${c.cyan(theme.glyph.user)} ${status}${c.bold(block.body ?? "")}`];
 }
 
 /**

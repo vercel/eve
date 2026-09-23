@@ -150,11 +150,23 @@ function expectCacheReuse(t: EveEvalContext, turns: EveEvalTurn[]) {
   }
 }
 
+// Keeps the first request above the provider's cache minimum without relying
+// on the size of the default tool descriptions.
+const EVENT_OVERVIEW = `Event overview: The weekend programme runs on Saturday and Sunday in the ground-floor hall, the studio, and the two meeting rooms beside the garden. Alice coordinates the tutors and volunteers, while Bob manages purchasing, supplier contact, and the shared budget sheet kept in the office. The centre's caretaker opens the building each morning and holds the keys for the storeroom, the side entrance, and the equipment cupboard.
+
+Visitors book workshop places through the front desk or the centre's newsletter. Most sessions are for adults, but the Sunday afternoon drawing workshop welcomes families, so the tutors keep a small box of simpler materials for younger visitors. Volunteers greet arrivals at the main entrance, direct them to the right room, and collect short feedback cards at the end of each session. Tea and water are available in the garden room throughout the day.
+
+The budget for the weekend was agreed at the last committee meeting. It covers materials, equipment hire, printed signs, and a modest amount for refreshments. Bob records each purchase against the budget sheet as soon as an order is confirmed, and Alice reviews the running total every Wednesday. Any change above the agreed amounts needs a short note explaining why it is needed and what it replaces.
+
+Accessibility is part of every room plan. The hall and the studio have step-free access from the side entrance, and the meeting rooms share a ramp from the garden path. Tutors keep one table in each room clear of stools for visitors who use wheelchairs, and printed instructions come in a larger type size on request. The front desk keeps a short list of quiet spaces for anyone who needs a break from the busier sessions.
+
+After the event, volunteers pack away the reusable materials, count what remains, and label the storeroom shelves so the next programme can start from an accurate inventory. The committee would like each review to be practical and brief, focused on whether the current plan works as written rather than on redesigning the weekend.`;
+
 function reviewPacket(): string {
   const sheets = purchasingSheets
     .map(
       (sheet, index) => `Sheet ${index + 1}: ${sheet.title}\n${sheet.question}\n\n${sheet.notes}`,
     )
     .join("\n\n");
-  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Each reviewer has access to the stored sheets and their review questions, so the sheet number is enough for its assignment. Let Alice know when the reviews are underway, then give Bob a brief summary once their findings are available.\n\n${sheets}`;
+  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Each reviewer has access to the stored sheets and their review questions, so the sheet number is enough for its assignment. Let Alice know when the reviews are underway, then give Bob a brief summary once their findings are available.\n\n${EVENT_OVERVIEW}\n\n${sheets}`;
 }

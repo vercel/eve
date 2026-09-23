@@ -79,6 +79,7 @@ describe("eval artifacts", () => {
               },
               name: "judge.boolean",
               passed: false,
+              errored: false,
               score: 0,
               severity: "soft",
               threshold: 0.8,
@@ -138,6 +139,7 @@ function judgedSummary(): EveEvalRunSummary {
         severity: "soft",
         threshold: 0.8,
         passed: false,
+        errored: false,
         message: 'state: {"input":"Name the source.","output":"No source."}',
         metadata: {
           question: { type: "boolean", instructions: "cites a source" },

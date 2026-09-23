@@ -20,6 +20,7 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
@@ -150,7 +151,7 @@ async function handleWorkflowToolRunRequest(
   await cursor.apply(
     await runProxySubagentEventStep({
       ...(message.requestCoordinates === undefined
-        ? { answerHook: { runId: message.from.runId } }
+        ? { answerHook: createAnswerHookRoute(message) }
         : {}),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
       sessionWritable: cursor.sessionWritable,
@@ -158,6 +159,19 @@ async function handleWorkflowToolRunRequest(
       sessionState: cursor.sessionState,
     }),
   );
+}
+
+function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHookRoute {
+  if (message.request.kind !== "ask") return { runId: message.from.runId };
+  const { allowFreeform, dismissible, options } = message.request.request;
+  return {
+    question: {
+      ...(allowFreeform !== undefined && { allowFreeform }),
+      ...(dismissible !== undefined && { dismissible }),
+      ...(options !== undefined && { options: [...options] }),
+    },
+    runId: message.from.runId,
+  };
 }
 
 function requestContext(input: HandlerInput<unknown>) {

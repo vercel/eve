@@ -10,7 +10,6 @@ import type {
 function sessionContext(): SessionContext {
   return {
     getSandbox: vi.fn(),
-    getSkill: vi.fn(),
     session: {
       auth: {
         current: {

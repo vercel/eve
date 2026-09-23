@@ -66,9 +66,16 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
       traceContexts: [],
     },
     assertions: [
-      { name: "succeeded", score: 1, severity: "gate", passed: true },
-      { name: "similarity", score: 0.9, severity: "soft", threshold: 0.6, passed: true },
-      { name: "judge.boolean", score: 1, severity: "soft", passed: true },
+      { name: "succeeded", score: 1, severity: "gate", passed: true, errored: false },
+      {
+        name: "similarity",
+        score: 0.9,
+        severity: "soft",
+        threshold: 0.6,
+        passed: true,
+        errored: false,
+      },
+      { name: "judge.boolean", score: 1, severity: "soft", passed: true, errored: false },
     ],
     verdict: "passed",
     startedAt: "2026-01-01T00:00:00.000Z",
@@ -262,6 +269,7 @@ describe("Datadog", () => {
           score: 0,
           severity: "gate",
           passed: false,
+          errored: false,
         },
       ],
       verdict: "failed",
@@ -298,6 +306,7 @@ describe("Datadog", () => {
           score: 0,
           severity: "gate",
           passed: false,
+          errored: false,
         },
       ],
       verdict: "failed",
@@ -332,10 +341,10 @@ describe("Datadog", () => {
     const reporter = Datadog(config);
     const result = makeEvalResult({
       assertions: [
-        { name: "same label", score: 1, severity: "soft", passed: true },
-        { name: "same@label", score: 1, severity: "soft", passed: true },
-        { name: "same label", score: 1, severity: "soft", passed: true },
-        { name: "eve_tool_call_count", score: 1, severity: "soft", passed: true },
+        { name: "same label", score: 1, severity: "soft", passed: true, errored: false },
+        { name: "same@label", score: 1, severity: "soft", passed: true, errored: false },
+        { name: "same label", score: 1, severity: "soft", passed: true, errored: false },
+        { name: "eve_tool_call_count", score: 1, severity: "soft", passed: true, errored: false },
       ],
     });
 

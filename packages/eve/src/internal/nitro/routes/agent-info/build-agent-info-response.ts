@@ -142,12 +142,9 @@ export function buildAgentInfoResponse(
     },
     sandbox: {
       ...toModuleSource(manifest, manifest.sandbox),
-      backendKind: manifest.sandbox.backendName,
-      description: manifest.sandbox.description,
-      hasBootstrap: false,
-      hasOnSession: false,
-      revalidationKey: manifest.sandbox.revalidationKey,
-      sourceHash: manifest.sandbox.sourceHash,
+      provider: manifest.sandbox.providerName,
+      environmentExportName: manifest.sandbox.environmentExportName,
+      revisionHash: manifest.sandbox.revisionHash,
     },
     schedules: manifest.schedules.map((schedule) => ({
       ...toOwnedSource(manifest, schedule),
@@ -205,7 +202,7 @@ export function buildAgentInfoResponse(
         requiresApproval: tool.requiresApproval,
       })),
     },
-    version: 4,
+    version: 5,
     workspace: {
       resourceRoot: manifest.workspaceResourceRoot,
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],
@@ -440,13 +437,6 @@ function projectPreparedKernelEffects(
         effects.push({
           audience: [...behavior.availability],
           kind: "provider-tool",
-          sourceId: tool.sourceId,
-        });
-        break;
-      case "request-input":
-        effects.push({
-          audience: [...behavior.availability],
-          kind: "request-input",
           sourceId: tool.sourceId,
         });
         break;

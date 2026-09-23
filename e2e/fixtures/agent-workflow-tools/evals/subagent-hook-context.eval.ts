@@ -3,12 +3,13 @@ import type { SubagentHookObservation } from "../subagent-hook-audit";
 
 export default (["direct", "waiting", "background"] as const).map((mode) =>
   defineEval({
-    description: `${mode} subagent delegation delivers typed and wildcard hooks with the parent session context.`,
+    description: `${mode} subagent delegation preserves dynamic skills and delivers hooks with the parent session context.`,
     async test(t) {
       const initial = await t.send(
         `Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:${mode}`,
       );
       initial.expectOk();
+      initial.calledTool("load_skill", { count: 1, status: "completed" });
       const marker =
         mode === "direct"
           ? "Alice's hook audit"
@@ -26,6 +27,14 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
         "Alice reviews the recorded hook observations for Bob's completed report. SUBAGENT-HOOKS:AUDIT",
       );
       audit.expectOk();
+      audit.calledTool("load_skill", { count: 1, status: "completed" });
+      t.eventsSatisfy("the parent's dynamic skill remains loadable after delegation", () =>
+        [initial, audit].every((turn) =>
+          String(turn.toolCalls.find((call) => call.name === "load_skill")?.output).includes(
+            "DELEGATION-POLICY:",
+          ),
+        ),
+      );
       audit.calledTool("read_subagent_hooks", { count: 1, status: "completed" });
       const observations = audit.toolCalls.find(
         (call) => call.name === "read_subagent_hooks",

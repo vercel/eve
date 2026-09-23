@@ -4,6 +4,7 @@ import {
   type Experimental_EvaluationQuestion as EvaluationQuestion,
 } from "ai";
 
+import { ensureAiSdkWarningLogger } from "#instrumentation/ai-sdk-warnings.js";
 import { localGatewayEvaluationModel } from "#internal/model-auth/transport.js";
 
 export const DEFAULT_EVALUATION_MODEL = "typesafe-ai/jev";
@@ -16,6 +17,7 @@ export function evaluate<const Questions extends Record<string, EvaluationQuesti
   /** Evaluation model instance or ID. Defaults to TypeSafe Jev. */
   model?: EvaluationModel;
 }) {
+  ensureAiSdkWarningLogger();
   return evaluateWithAiSdk({
     ...options,
     model:

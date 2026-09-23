@@ -10,6 +10,7 @@ export interface RuntimeCompilerArtifactPaths {
   readonly discoveryManifestPath: string;
   readonly discoveryDirectoryPath: string;
   readonly moduleMapPath: string;
+  readonly sandboxPreparedArtifactsPath: string;
 }
 
 /**
@@ -30,6 +31,7 @@ export function resolveRuntimeCompilerArtifactPaths(appRoot: string): RuntimeCom
     discoveryDirectoryPath,
     discoveryManifestPath: `${discoveryDirectoryPath}/agent-discovery-manifest.json`,
     moduleMapPath: `${compileDirectoryPath}/module-map.mjs`,
+    sandboxPreparedArtifactsPath: `${compileDirectoryPath}/sandbox-prepared-artifacts.json`,
   };
 }
 

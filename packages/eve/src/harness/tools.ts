@@ -1,6 +1,5 @@
 import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, tool } from "ai";
 
-import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -39,11 +38,6 @@ const toolApprovals = new WeakMap<
  * Tools without `execute` are surfaced to the model as client-side tools
  * (no server execution).
  *
- * The framework's `ask_question` tool is only exposed to the model when
- * {@link SessionCapabilities.requestInput} is `true`. Sessions without
- * the HITL capability (scheduled task roots and any subagent chain
- * descending from one) never see the tool.
- *
  * Entries listed in `disabledProviderTools` are skipped entirely. Used
  * by the harness recovery path when a gateway fallback provider has
  * rejected a provider-specific tool — the tool is dropped for the
@@ -52,23 +46,14 @@ const toolApprovals = new WeakMap<
 export function buildToolSet(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly backgroundBatch?: BackgroundToolCallBatch;
-  readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
 }): ToolSet {
   const tools: Record<string, ToolSet[string]> = {};
   const backgroundBatch = input.backgroundBatch ?? createBackgroundToolCallBatch();
-  const canRequestInput = input.capabilities?.requestInput === true;
   const disabled = input.disabledProviderTools;
 
   for (const definition of input.tools.values()) {
-    if (
-      definition.behavior?.availability.includes("requires-request-input") === true &&
-      !canRequestInput
-    ) {
-      continue;
-    }
-
     if (disabled?.has(definition.name)) {
       continue;
     }
@@ -187,7 +172,6 @@ function requireBackgroundWorkflowId(definition: HarnessToolDefinition): string 
 export function buildToolSetFromDefinitions(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly backgroundBatch?: BackgroundToolCallBatch;
-  readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: readonly HarnessToolDefinition[];
 }): ToolSet {
@@ -200,7 +184,6 @@ export function buildToolSetFromDefinitions(input: {
   return buildToolSet({
     approvedTools: input.approvedTools,
     backgroundBatch: input.backgroundBatch,
-    capabilities: input.capabilities,
     disabledProviderTools: input.disabledProviderTools,
     tools,
   });
@@ -301,7 +284,6 @@ function normalizeToolExecuteOutput(
 export async function buildToolSetWithProviderTools(input: {
   readonly approvedTools?: ReadonlySet<string>;
   readonly backgroundBatch?: BackgroundToolCallBatch;
-  readonly capabilities?: SessionCapabilities;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
   readonly tools: HarnessToolMap;
@@ -311,7 +293,6 @@ export async function buildToolSetWithProviderTools(input: {
     ...buildToolSet({
       approvedTools: input.approvedTools,
       backgroundBatch: input.backgroundBatch,
-      capabilities: input.capabilities,
       disabledProviderTools: disabled,
       tools: input.tools,
     }),

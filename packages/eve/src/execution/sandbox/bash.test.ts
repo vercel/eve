@@ -41,7 +41,6 @@ describe("executeBashOnSandbox", () => {
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
   return {
-    id: "test-sandbox",
     readBinaryFile: async () => null,
     readFile: async () => null,
     readTextFile: async () => null,

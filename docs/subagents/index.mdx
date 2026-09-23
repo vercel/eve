@@ -13,16 +13,30 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
 later user turns join the open cohort while earlier work is still pending or its
-terminal results await delivery. eve holds completion, failure, and cancellation
-notifications until every task in that cohort is terminal, then delivers all outcomes
-together in one parent turn. This includes cohorts where every task failed or was
-cancelled. Partial settlements do not invoke the parent model. Work started after the
-cohort settles forms a new cohort. No configuration or debounce timer is required.
+terminal results await delivery. With `taskDeliveryPolicy: "cohort"`, eve holds
+completion, failure, and cancellation notifications
+until every task in that cohort has completed, failed, or been cancelled, then
+delivers all outcomes together in one parent turn. Partial settlements
+do not invoke the parent model. Work started after the cohort settles forms a new
+cohort.
 
-User messages, input requests, and authorization events are handled without waiting
-for the cohort. Failure and cancellation update task lifecycle state immediately;
-their automatic conversational report waits for the cohort. Child lifecycle events
-are processed before terminal delivery so usage accounting and handle cleanup stay ordered.
+New channel sessions default to `"auto"`; schedules default to `"cohort"`.
+Pass `taskDeliveryPolicy` to `send(...)` to select or update the session policy. See
+[Background task results](/docs/channels/overview#background-task-results).
+
+With `"auto"`, a terminal outcome can start a parent turn while other tasks are
+still running. The parent reports independently useful results and stays silent
+when a useful answer depends on unfinished tasks. Ready results may share a turn.
+The reporting context includes the whole cohort and every available output,
+including previously withheld results, for a later combined report.
+
+The setting applies to background tools and built-in, declared, and remote
+subagents owned by the session. Internal subagent sessions use `"cohort"` for
+background work they start.
+
+User messages, input requests, authorization events, failures, and cancellation
+are handled without waiting for the cohort. Child lifecycle events are processed
+before completion delivery so usage accounting and handle cleanup stay ordered.
 To follow work in progress, subscribe to the child session streams.
 
 ## The built-in `agent` tool
@@ -49,7 +63,7 @@ To prevent the root session from delegating to a fresh copy of itself, set `tool
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   tool: false,
 });
 ```
@@ -65,7 +79,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   description: "Investigate ambiguous questions before the parent agent responds.",
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
 });
 ```
 
@@ -76,7 +90,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   description: "Investigate ambiguous questions for the routing workflow.",
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   tool: false,
 });
 ```
@@ -88,6 +102,8 @@ Every declared local or remote subagent runs as a durable background task: the c
 `task_cancel` is available to sessions that own background tasks, including a child that starts nested background work.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
+
+Local `eve dev` mounts the bundled self-modification extension by default, which exposes the `self-modification__agent` subagent without adding files to your project. An authored extension mounted as `self-modification` takes its place. Pass `--no-default-extensions` to run without bundled development extensions. Production builds do not include development extensions unless you mount them in your agent.
 
 ### Vercel workspace peers
 
@@ -135,7 +151,7 @@ export default defineDynamic({
       ctx.session.auth.current?.attributes.research === true
         ? defineAgent({
             description: "Investigate ambiguous questions before the parent responds.",
-            model: "anthropic/claude-opus-4.8",
+            model: "anthropic/claude-opus-5.5",
           })
         : null,
   },
@@ -158,7 +174,7 @@ export default defineDynamic({
     "session.started": () =>
       defineAgent({
         description: "Use a native package when handling delegated work.",
-        model: "anthropic/claude-opus-4.8",
+        model: "anthropic/claude-opus-5.5",
       }),
   },
 });
@@ -202,7 +218,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 | Tools        | Inherited except root-only    | Own `tools/`                           |
 | Connections  | Inherited                     | Own `connections/`                     |
 | Skills       | Inherited                     | Own `skills/`                          |
-| Sandbox      | Shared with parent            | Own `sandbox/`, else framework default |
+| Sandbox      | Reuses the parent sandbox     | Own `sandbox/`, else framework default |
 | Hooks        | Inherited                     | Own `hooks/`                           |
 | Extensions   | Inherited contributions       | Own `extensions/`                      |
 | State        | Fresh                         | Fresh                                  |
@@ -211,7 +227,7 @@ A declared subagent inherits nothing from the root's authored slots. Discovery t
 
 For a declared subagent this means authoring or mounting anything the child needs. When two subagents need the same procedure, package the skill in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each subagent. Share typed helpers through `lib/`. The sandbox does not inherit from the parent; eve selects the default sandbox source unless the subagent authors `subagents/<id>/sandbox.ts` or seeds files via `subagents/<id>/sandbox/workspace/`.
 
-The root built-in `agent` tool is the exception. Its children share the root's sandbox and tools because they are copies of the same agent working on the same files.
+The root built-in `agent` tool is the exception. Its children reuse the root's sandbox and tools because they are copies of the same agent working on the same files.
 
 `defineState` is never shared, for either kind. Each child starts with fresh durable state.
 

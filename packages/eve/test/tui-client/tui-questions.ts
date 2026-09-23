@@ -17,7 +17,7 @@ import { theme } from "./lib/theme.ts";
  *   1. Start the apps/fixtures/agent-tui-client server.
  *   2. Boot an `EveTUIRunner` with a mock terminal.
  *   3. Type a prompt that asks the model to call `ask_question` with
- *      two options (red/blue).
+ *      two options (Red/Blue).
  *   4. Wait for the question overlay to display the numbered select
  *      indicator (`› 1. <label>`), which proves the question UI is up.
  *   5. Send Down arrow + Enter to pick the second option (blue).
@@ -27,8 +27,6 @@ import { theme } from "./lib/theme.ts";
  *      flowed through to the agent and resolved the pending input.
  */
 
-const RED_ID = "red";
-const BLUE_ID = "blue";
 process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
@@ -53,10 +51,8 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
 
   const promptLines = [
     "Use the ask_question tool exactly once to ask me which color I prefer.",
-    "Set prompt to: 'Pick a color.'",
-    "Provide exactly two options:",
-    `- id "${RED_ID}", label "Red"`,
-    `- id "${BLUE_ID}", label "Blue"`,
+    "Set question to: 'Pick a color.'",
+    'Provide exactly two options: label "Red" and label "Blue".',
     "Wait for my response.",
   ];
   input.type(promptLines.join(" · "));

@@ -20,6 +20,11 @@ export interface WorkflowBodyDefinition {
   /** Snapshot added for new runs; absent only when resuming an older durable payload. */
   readonly agents?: WorkflowToolContext["agents"];
   readonly callId: string;
+  /**
+   * Whether the owning session can reach a human. `false` makes `ctx.ask()`
+   * resolve as `unavailable` instead of waiting for an answer no one can give.
+   */
+  readonly canRequestInput?: boolean;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
 
@@ -54,6 +59,7 @@ export async function executeWorkflowBody(
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
   attachWorkflowToolRunContext(ctx, {
+    canRequestInput: input.canRequestInput,
     from,
     owner: input.owner,
   });
@@ -149,7 +155,6 @@ function createWorkflowBodyContext(
     abortSignal: signal,
     callId: input.callId,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
-    getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
     requireAuth: () =>

@@ -14,6 +14,7 @@ export default defineTaskEval({
   async test(t) {
     const started = await t.send(
       "Alice asks Bob to summarize the available tools for a background task.",
+      { taskDeliveryPolicy: "cohort" },
     );
     started.expectOk();
     started.calledSubagent("tool-surface-worker", { status: "working", count: 1 });

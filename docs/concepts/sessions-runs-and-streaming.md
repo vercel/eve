@@ -77,7 +77,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                                                      |
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                                           |
 | `action.result`           | A tool call returned.                                                                                                                              |
-| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`.                                   |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                           |
 | `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                             |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                                                   |
 | `subagent.completed`      | The parent recorded a successful subagent invocation result; carries the actual output.                                                            |
@@ -210,7 +210,7 @@ Message sends default to `"steer"`. Before assistant output begins, eve interrup
 
 If the session is waiting on a human-in-the-loop approval, respond with the channel’s Approve or Cancel controls. Text messages do not decide an approval; unrelated text starts an ordinary turn while the approval stays pending and answerable. A later structured `inputResponses` answer keyed by its `requestId` still resumes the original tool call, even after intervening turns.
 
-With one question-only batch, an exact option match or permitted freeform response answers `ask_question`. Any other follow-up marks the question unanswered and starts the new turn. With several approval or question batches pending, eve does not guess which batch plain text addresses: the message starts an ordinary turn and the batches stay open. Use structured responses to target requests unambiguously.
+A pending `ctx.ask()` question from a blocking tool, such as `ask_question`, can be answered with plain text. When it is the only pending question, a message that matches an option answers it, and so does any message when the question allows free text. Otherwise eve does not guess which question the text addresses: the message follows the normal `turnPolicy`, questions created with `dismissible: true` resolve as `dismissed`, and other questions stay open. Questions from background tools and subagents always need a structured response. Use structured responses to target requests unambiguously.
 
 A structured response matches any currently pending request by ID, not only the newest batch. It becomes stale only after that request was answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
 
@@ -301,7 +301,7 @@ Start with the [Client SDK](../guides/client/overview) guide. It covers basic us
 
 ## Inspect the agent over HTTP
 
-`GET /eve/v1/info` returns agent-info version 4, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`.
+`GET /eve/v1/info` returns agent-info version 6, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
 
 The info route belongs to the selected `channels/eve.ts` source and uses its resolved auth policy. Without an authored replacement, eve selects the default channel source with Vercel OIDC, local development access, and the production placeholder. Replacing or disabling that source replaces or removes the info route too; no native fallback serves it.
 
@@ -309,7 +309,7 @@ The info route belongs to the selected `channels/eve.ts` source and uses its res
 curl http://127.0.0.1:2000/eve/v1/info
 ```
 
-With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, an `eve dev` or `vercel dev` server authenticates local requests, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
+With the default auth chain (`[vercelOidc(), localDev(), placeholderAuth()]`), a Vercel OIDC bearer takes precedence, `localDev()` accepts requests to an `eve dev` or `vercel dev` server, and everything else is rejected. A deployed Vercel target requires a valid OIDC bearer, with a same-project bypass for in-deployment callers. See [auth & route protection](../guides/auth-and-route-protection).
 
 ## Dispatch order
 

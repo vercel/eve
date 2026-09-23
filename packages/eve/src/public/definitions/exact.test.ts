@@ -23,6 +23,7 @@ import {
   type ProviderDefinition,
 } from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { DockerSandbox, VercelSandbox } from "#sandbox/providers.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { defineTool, type TaskReceipt, type ToolDefinition } from "#public/tools/index.js";
@@ -444,40 +445,20 @@ function typeOnlyFixtures(): void {
     },
   });
 
-  defineSandbox({
-    async onSession({ ctx, use }) {
-      const sessionId: string = ctx.session.id;
-      // @ts-expect-error Sandbox lifecycle access is unavailable during session initialization.
-      void ctx.getSandbox;
-      // @ts-expect-error Skill access is unavailable during session initialization.
-      void ctx.getSkill;
-      const sandbox = await use();
-      // @ts-expect-error Runtime lifecycle access is unavailable during session initialization.
-      void sandbox.delete;
-      void sandbox;
-      void sessionId;
-    },
+  const environment = VercelSandbox.environment();
+  defineSandbox(async ({ session }) => {
+    const sandbox = await environment.open({
+      mounts: {},
+      networkPolicy: "deny-all",
+      resources: { vcpus: 4 },
+    });
+    const sessionId: string = session.id;
+    await sandbox.setNetworkPolicy?.("allow-all");
+    void sessionId;
+    return sandbox;
   });
-
-  defineSandbox({
-    async bootstrap({ use }) {
-      const sandbox = await use();
-      void sandbox;
-    },
-  });
-
-  defineSandbox({
-    revalidationKey: () => "bootstrap-v1",
-    async bootstrap({ use }) {
-      const sandbox = await use();
-      void sandbox;
-    },
-  });
-
-  // @ts-expect-error Sandbox revalidation keys are only valid with bootstrap.
-  defineSandbox({
-    revalidationKey: () => "unused",
-  });
+  const dockerEnvironment = DockerSandbox.environment();
+  defineSandbox(() => dockerEnvironment.open({ networkPolicy: "deny-all" }));
 
   defineTool({
     description: "Fetch current weather for a city.",

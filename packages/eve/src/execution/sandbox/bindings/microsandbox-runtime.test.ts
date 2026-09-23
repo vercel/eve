@@ -4,6 +4,7 @@ import type { MicrosandboxSessionMetadata } from "#execution/sandbox/bindings/mi
 import {
   connectMicrosandbox,
   createPreparedMicrosandbox,
+  loadMicrosandboxModule,
   MicrosandboxVm,
 } from "#execution/sandbox/bindings/microsandbox-runtime.js";
 import {
@@ -12,6 +13,35 @@ import {
 } from "#execution/sandbox/bindings/microsandbox-options.js";
 import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
+
+vi.mock("#execution/sandbox/bindings/microsandbox-platform.js", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("#execution/sandbox/bindings/microsandbox-platform.js")
+  >()),
+  assertMicrosandboxPlatformCandidate: vi.fn(async () => {}),
+}));
+
+describe("microsandbox package installation guidance", () => {
+  it("uses the supported install specifier for both automatic and manual installation", async () => {
+    const loadOptionalPackage = vi.fn(async (input: { readonly missingMessage: string }) => {
+      throw new Error(input.missingMessage);
+    });
+    await expect(
+      loadMicrosandboxModule({
+        host: { loadOptionalPackage, resolveProjectPath: (path) => path },
+        options: resolveMicrosandboxOptions({ setup: { autoInstall: false } }),
+      }),
+    ).rejects.toThrow("pnpm add -D microsandbox@0.5.5");
+    expect(loadOptionalPackage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        autoInstall: false,
+        packageName: "microsandbox",
+        installPackageName: "microsandbox@0.5.5",
+        missingMessage: expect.stringContaining("`pnpm add -D microsandbox@0.5.5`"),
+      }),
+    );
+  });
+});
 
 const metadataState = vi.hoisted(() => ({
   writeSessionMetadata: vi.fn(),
@@ -49,7 +79,7 @@ describe.skipIf(process.platform === "win32")("connectMicrosandbox", () => {
       }),
     );
 
-    await vm.setNetworkPolicy("deny-all");
+    await vm.setNetworkPolicy?.("deny-all");
 
     expect(metadataState.writeSessionMetadata).toHaveBeenCalledWith(
       "/tmp/eve-microsandbox-session/metadata.json",
@@ -366,6 +396,27 @@ describe.skipIf(process.platform === "win32")("createPreparedMicrosandbox", () =
     }
   });
 
+  it("mounts compiled resources read-only", async () => {
+    const module = createCreationModule({
+      create: async () => createMockMicrosandbox(),
+      progress: [],
+    });
+
+    await createPreparedMicrosandbox({
+      module: module as never,
+      name: "template-vm",
+      networkPolicy: "deny-all",
+      options: resolveMicrosandboxOptions(undefined),
+      resourcesPath: "/tmp/resources",
+      sessionKey: "template-key",
+      setupBaseRuntime: false,
+    });
+
+    expect(module.mounts).toEqual([
+      { guest: "/eve/resources", host: "/tmp/resources", readonly: true },
+    ]);
+  });
+
   it("adds image and provider context when VM creation rejects", async () => {
     class TestMicrosandboxError extends Error {
       readonly code = "imageNotFound";
@@ -450,6 +501,7 @@ function createCreationModule(input: {
   readonly create: () => Promise<ReturnType<typeof createMockMicrosandbox>>;
   readonly progress: readonly Record<string, unknown>[];
 }) {
+  const mounts: Array<{ guest: string; host?: string; readonly: boolean }> = [];
   const builder = {
     cpus: returnBuilder,
     async create() {
@@ -472,6 +524,26 @@ function createCreationModule(input: {
     pullPolicy: returnBuilder,
     replace: returnBuilder,
     user: returnBuilder,
+    volume(guest: string, configure: (mount: unknown) => unknown) {
+      const record = { guest, readonly: false } as {
+        guest: string;
+        host?: string;
+        readonly: boolean;
+      };
+      const mount = {
+        bind(host: string) {
+          record.host = host;
+          return mount;
+        },
+        readonly() {
+          record.readonly = true;
+          return mount;
+        },
+      };
+      configure(mount);
+      mounts.push(record);
+      return builder;
+    },
     workdir: returnBuilder,
   };
 
@@ -480,6 +552,7 @@ function createCreationModule(input: {
   }
 
   return {
+    mounts,
     Sandbox: {
       builder() {
         return builder;

@@ -20,7 +20,7 @@ const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = {
-  skipVercelSandboxPrewarm: false,
+  skipSandboxPrewarm: false,
 } as const;
 
 async function readJavaScriptModulesRecursively(rootDirectory: string): Promise<string> {
@@ -411,11 +411,10 @@ describe("app runtime dependency tracing", () => {
           join(appRoot, "agent", "sandbox.ts"),
           [
             'import { defineSandbox } from "eve/sandbox";',
-            'import { justbash } from "eve/sandbox/just-bash";',
+            'import { JustBashSandbox } from "eve/sandbox/just-bash";',
             "",
-            "export default defineSandbox({",
-            "  backend: justbash(),",
-            "});",
+            "export const environment = JustBashSandbox.environment();",
+            "export default defineSandbox(() => environment.open());",
             "",
           ].join("\n"),
         );
@@ -811,56 +810,83 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).toContain(
       "Execute a shell command in the shared workspace environment.",
     );
-    expect(serverModuleSource).toContain("The dynamic skill");
+    expect(serverModuleSource).toContain("is an installed connection, not a skill.");
     expect(serverModuleSource).toContain("URL must start with https://");
   }, 30_000);
 
-  it("does not bundle local-only runtime infrastructure into hosted Vercel output", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+  it.each([
+    { name: "hosted Vercel", vercel: true },
+    { name: "self-hosted production", vercel: false },
+  ])(
+    "does not bundle local-only runtime infrastructure into $name output",
+    async ({ vercel }) => {
+      if (vercel) {
+        vi.stubEnv("VERCEL", "1");
+        vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+      }
 
-    const appRoot = await createScratchDirectory("eve-app-hosted-no-dev-runtime-build-");
+      const appRoot = await createScratchDirectory(
+        `eve-app-${vercel ? "hosted" : "self-hosted"}-no-dev-runtime-build-`,
+      );
 
-    await mkdir(join(appRoot, "agent"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(appRoot, "package.json"),
-      `${JSON.stringify(
-        {
-          name: "hosted-no-dev-runtime-build-test",
-          private: true,
-          type: "module",
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    await writeFile(
-      join(appRoot, "agent", "agent.ts"),
-      ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
-    );
-    await writeFile(
-      join(appRoot, "agent", "instructions.md"),
-      "Verify deployed runtime contents.\n",
-    );
+      await mkdir(join(appRoot, "agent"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(appRoot, "package.json"),
+        `${JSON.stringify(
+          {
+            name: "hosted-no-dev-runtime-build-test",
+            private: true,
+            type: "module",
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      await writeFile(
+        join(appRoot, "agent", "agent.ts"),
+        ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
+      );
+      await writeFile(
+        join(appRoot, "agent", "instructions.md"),
+        "Verify deployed runtime contents.\n",
+      );
 
-    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
-    const vercelFunctionsSource = await readJavaScriptModulesRecursively(
-      join(outputDir, "functions"),
-    );
+      const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+      const runtimeSource = await readJavaScriptModulesRecursively(
+        join(outputDir, vercel ? "functions" : "server"),
+      );
 
-    expect(vercelFunctionsSource).not.toContain("dev-authored-source-watcher");
-    expect(vercelFunctionsSource).not.toContain("chokidar");
-    expect(vercelFunctionsSource).not.toContain("[eve:dev]");
-    expect(vercelFunctionsSource).not.toContain("rollup:reload");
-    // The world-local canary is its log prefix, not names other packages
-    // legitimately mention without bundling world-local code: the
-    // semantic-error catalog embeds error-class names like
-    // `DataDirAccessError`, and @workflow/core's runtime world factory
-    // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
-    expect(vercelFunctionsSource).not.toContain("[world-local]");
-  }, 30_000);
+      expect(runtimeSource).not.toContain("dev-authored-source-watcher");
+      expect(runtimeSource).not.toContain("chokidar");
+      expect(runtimeSource).not.toContain("[eve:dev]");
+      expect(runtimeSource).not.toContain("rollup:reload");
+      // The world-local canary is its log prefix, not names other packages
+      // legitimately mention without bundling world-local code: the
+      // semantic-error catalog embeds error-class names like
+      // `DataDirAccessError`, and @workflow/core's runtime world factory
+      // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
+      if (vercel) {
+        expect(runtimeSource).not.toContain("[world-local]");
+
+        vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_hosted_no_dev_runtime_test");
+        const serverModule = (await import(
+          `${pathToFileURL(join(outputDir, "functions", "__server.func", "index.mjs")).href}?test=${Date.now()}`
+        )) as {
+          default: {
+            fetch(request: Request, context: { waitUntil(): void }): Promise<Response>;
+          };
+        };
+        const healthResponse = await serverModule.default.fetch(
+          new Request("https://example.com/eve/v1/health"),
+          { waitUntil() {} },
+        );
+        expect(healthResponse.status).toBe(200);
+      }
+    },
+    30_000,
+  );
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {
     vi.stubEnv("VERCEL", "1");

@@ -34,7 +34,10 @@ function createMultiAgentSummary(workspace: AgentWorkspace): VercelEveMultiAgent
 }
 
 /** Emit the inferred Vercel Services project for a strict hostless workspace. */
-export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<string> {
+export async function buildAgentWorkspace(
+  workspace: AgentWorkspace,
+  options: { readonly skipSandboxPrewarm?: boolean } = {},
+): Promise<string> {
   const config = await readVercelJsonFile(join(workspace.root, "vercel.json"));
   if (
     config.services !== undefined ||
@@ -51,7 +54,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
       appRoot: member.appRoot,
       buildCommand: `node ${quoteVercelShellArgument(
         toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
-      )} build`,
+      )} build${options.skipSandboxPrewarm === true ? " --skip-sandbox-prewarm" : ""}`,
       devCommand: `node ${quoteVercelShellArgument(
         toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
       )} dev --no-ui`,

@@ -26,7 +26,6 @@ import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
@@ -63,6 +62,7 @@ import {
   type PromptCommand,
   type PromptCommandSpec,
 } from "./prompt-commands.js";
+import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
 import {
   createRemoteConnectionController,
   type RemoteConnectionController,
@@ -279,7 +279,6 @@ export type AgentTUIRenderer = {
    * Commits one development sandbox lifecycle line to the transcript.
    * Optional so non-terminal renderers can ignore local prewarm progress.
    */
-  renderSandboxLog?(text: string): void;
   renderSetupWarning?(text: string): void;
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
@@ -472,6 +471,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Catalog entries available to inline `/model` and `/add` completion. */
+  argumentSuggestions?: (command: "model" | "add") => Promise<readonly PromptArgumentSuggestion[]>;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Remote target and mutable OIDC token source, when connected through `--url`. */
@@ -612,7 +613,6 @@ export class EveTUIRunner {
    * only if it is still current, so a stale failure from A cannot replace B.
    */
   #failedSession?: ClientSession;
-  #unsubscribeDevelopmentSandboxLogs?: () => void;
   readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
@@ -768,8 +768,6 @@ export class EveTUIRunner {
       this.#authProbeAbort.abort();
       this.#subagentPump.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
-      this.#unsubscribeDevelopmentSandboxLogs?.();
-      this.#unsubscribeDevelopmentSandboxLogs = undefined;
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint
       // into a torn-down terminal.
@@ -788,7 +786,6 @@ export class EveTUIRunner {
     let streamWithoutPrompt = false;
     this.#renderer.setStartupPhase?.("starting");
     await this.#loadInitialAgentInfo();
-    this.#subscribeDevelopmentSandboxLogs();
     // Fire-and-forget: the link identity is network-bound to resolve, and the
     // first prompt must not wait on it. The segment appears when it lands.
     this.#vercelStatus?.refreshIdentity();
@@ -1175,11 +1172,10 @@ export class EveTUIRunner {
             }
 
             if (responses.length === 0) {
-              // Every pending question was dismissed without an answer. Fall
-              // back to the prompt rather than resuming with an empty
-              // response set: the turn stays parked, and the user's next
-              // message resumes it with the unanswered requests recorded as
-              // `ignored` (the server's continued-without-responding path).
+              // Every pending question was skipped without an answer. Fall
+              // back to the prompt rather than sending an empty response set:
+              // the questions stay open, and the server decides whether the
+              // user's next message answers, dismisses, or leaves them.
               break;
             }
 
@@ -1745,20 +1741,6 @@ export class EveTUIRunner {
     }
   }
 
-  #subscribeDevelopmentSandboxLogs(): void {
-    if (this.#appRoot === undefined || this.#renderer.renderSandboxLog === undefined) {
-      return;
-    }
-    if (this.#unsubscribeDevelopmentSandboxLogs !== undefined) {
-      return;
-    }
-
-    this.#unsubscribeDevelopmentSandboxLogs = subscribeDevelopmentSandboxPrewarmLogs({
-      appRoot: this.#appRoot,
-      log: (message) => this.#renderer.renderSandboxLog?.(message),
-    });
-  }
-
   #renderCommandOutcome(text: string | undefined, tone?: "success" | "error"): void {
     if (text === undefined) return;
     if (this.#renderer.renderCommandResult !== undefined) {
@@ -2090,6 +2072,7 @@ function createRenderer(options: EveTUIRunnerOptions): AgentTUIRenderer {
     contextSize: options.contextSize,
     logs: options.logs,
     availablePromptCommands: options.availablePromptCommands,
+    argumentSuggestions: options.argumentSuggestions,
     input: options.userInput,
     output: options.screen,
     diagnostics: options.diagnostics,

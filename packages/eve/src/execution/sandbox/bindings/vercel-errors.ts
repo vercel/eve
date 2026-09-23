@@ -1,29 +1,25 @@
 export function isVercelSnapshotUnavailableError(error: unknown): boolean {
-  for (const candidate of walkErrorChain(error)) {
-    const status =
-      (candidate as { response?: { status?: number } }).response?.status ??
-      (candidate as { status?: number }).status ??
-      (candidate as { statusCode?: number }).statusCode;
-    if (status === 410) {
-      return true;
-    }
-  }
-
-  return false;
+  return errorChainContainsStatus(error, 410);
 }
 
 export function isVercelSandboxMissingError(error: unknown): boolean {
-  for (const candidate of walkErrorChain(error)) {
-    const status =
-      (candidate as { response?: { status?: number } }).response?.status ??
-      (candidate as { status?: number }).status ??
-      (candidate as { statusCode?: number }).statusCode;
-    if (status === 404) {
-      return true;
-    }
-  }
+  return errorChainContainsStatus(error, 404);
+}
 
+function errorChainContainsStatus(error: unknown, expectedStatus: number): boolean {
+  for (const candidate of walkErrorChain(error)) {
+    if (readErrorStatus(candidate) === expectedStatus) return true;
+  }
   return false;
+}
+
+function readErrorStatus(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.status === "number") return value.status;
+  if (typeof value.statusCode === "number") return value.statusCode;
+  return isRecord(value.response) && typeof value.response.status === "number"
+    ? value.response.status
+    : undefined;
 }
 
 function* walkErrorChain(error: unknown): Generator<unknown> {
@@ -32,6 +28,10 @@ function* walkErrorChain(error: unknown): Generator<unknown> {
   while (current !== undefined && current !== null && !seen.has(current)) {
     seen.add(current);
     yield current;
-    current = (current as { cause?: unknown }).cause;
+    current = isRecord(current) ? current.cause : undefined;
   }
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
 }

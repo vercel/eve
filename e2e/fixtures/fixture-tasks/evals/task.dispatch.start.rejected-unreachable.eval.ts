@@ -12,7 +12,9 @@ export default defineTaskEval({
     dimensions: { transport: "remote", parentPhase: "active" },
   },
   async test(t) {
-    const started = await t.send("TASK-A3-DISPATCH-START-FAILURE");
+    const started = await t.send("TASK-A3-DISPATCH-START-FAILURE", {
+      taskDeliveryPolicy: "cohort",
+    });
     started.expectOk();
     started.messageIncludes("TASK-A3-PARENT-SURVIVED");
     started.event("action.result", {

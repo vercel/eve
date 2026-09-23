@@ -120,7 +120,7 @@ describe("pending input request ID uniqueness", () => {
 });
 
 describe("persisted pending input validation", () => {
-  it("rejects an unknown request kind instead of routing it as a question", () => {
+  it("rejects an unknown request kind", () => {
     const persisted = session({
       "eve.runtime.pendingInputBatches": [
         {

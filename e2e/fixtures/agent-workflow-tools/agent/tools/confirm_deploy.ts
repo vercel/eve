@@ -23,6 +23,6 @@ export default defineWorkflowTool({
       prompt: `Apply ${describePlan(service)}?`,
     });
     yield "approval received";
-    return { approved: answer.optionId === "approve", service };
+    return { approved: answer.status === "answered" && answer.optionId === "approve", service };
   },
 });

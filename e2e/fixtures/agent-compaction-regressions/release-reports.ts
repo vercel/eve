@@ -1,20 +1,10 @@
 import { defineState } from "eve/context";
 
-export type ReviewSubject = "repository" | "checkout";
-
-export const reviewReferences = {
-  repository: "reviews/storefront/repository",
-  checkout: "reviews/storefront/checkout",
-} as const;
-
-export const handoffReferences = {
-  repository: "handoffs/storefront/repository",
-  checkout: "handoffs/storefront/checkout",
-} as const;
+export const REVIEW_REFERENCE = "reviews/storefront/repository";
+export const HANDOFF_REFERENCE = "handoffs/storefront/repository";
 
 export interface ReleaseRecord {
   readonly reportId: string;
-  readonly subject: ReviewSubject;
   readonly status: "completed";
   readonly findings: readonly string[];
 }

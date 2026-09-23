@@ -103,6 +103,15 @@ jobs:
         if: needs.changes.outputs.relevant == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Install microsandbox runtime
+        if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-microsandbox-dockerfile'
+        run: |
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          docker info
+          pnpm --filter agent-microsandbox-dockerfile exec node --input-type=module -e \
+            'import { setup } from "microsandbox"; await setup().install();'
+
       - name: Build eve package
         if: needs.changes.outputs.relevant == 'true'
         # Full build, not build:js: the deployed/runtime bundles must carry the

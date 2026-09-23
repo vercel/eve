@@ -1,10 +1,11 @@
-import { isAbsolute, posix } from "node:path";
+import { posix } from "node:path";
 
+import { normalizeLogicalPath, stripLogicalPathExtension } from "#discover/filesystem.js";
 import {
-  getSupportedModuleBaseName,
-  normalizeLogicalPath,
-  stripLogicalPathExtension,
-} from "#discover/filesystem.js";
+  validateProgrammaticLogicalPath,
+  validateProgrammaticLogicalPathInternal,
+} from "#compiler/source-graph-paths.js";
+export { validateProgrammaticLogicalPath } from "#compiler/source-graph-paths.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
@@ -61,6 +62,8 @@ export interface AgentSourceRegistration {
 }
 
 export interface AgentSourceRegistryOptions {
+  /** Programmatic extension declarations loaded by compiled virtual mounts. */
+  readonly extensionDeclarations?: readonly ProgrammaticAgentSource[];
   readonly templates?: readonly ProgrammaticAgentSource[];
 }
 
@@ -258,11 +261,21 @@ const registeredProgrammaticTemplates = new WeakSet<RegisteredProgrammaticTempla
 export function defineProgrammaticAgentSource(
   input: ProgrammaticAgentSource,
 ): ProgrammaticAgentSource {
+  return defineProgrammaticAgentSourceInternal(input, false);
+}
+
+function defineProgrammaticAgentSourceInternal(
+  input: ProgrammaticAgentSource,
+  allowExtensionMount: boolean,
+): ProgrammaticAgentSource {
   const id = expectNonEmpty(input.id, "Programmatic agent source id");
   const revision = expectNonEmpty(input.revision, `Programmatic agent source "${id}" revision`);
   const logicalPaths = new Set<string>();
   const modules = input.modules.map((module) => {
-    const logicalPath = validateProgrammaticLogicalPath(module.logicalPath);
+    const logicalPath = validateProgrammaticLogicalPathInternal(
+      module.logicalPath,
+      allowExtensionMount,
+    );
     if (logicalPaths.has(logicalPath)) {
       throw new Error(
         `Programmatic agent source "${id}" declares "${logicalPath}" more than once.`,
@@ -287,14 +300,23 @@ export function defineProgrammaticAgentSource(
   return Object.freeze({ id, modules: Object.freeze(modules), revision });
 }
 
+export function defineProgrammaticExtensionMountDeclaration(
+  input: ProgrammaticAgentSource,
+): ProgrammaticAgentSource {
+  return defineProgrammaticAgentSourceInternal(input, true);
+}
+
 export function createAgentSourceRegistry(
   registrations: readonly AgentSourceRegistration[],
   options: AgentSourceRegistryOptions = {},
 ): AgentSourceRegistry {
   const sources = new Map<string, ProgrammaticAgentSource>();
   const templates = new Map<string, RegisteredProgrammaticTemplate>();
-  const addSource = (inputSource: ProgrammaticAgentSource): ProgrammaticAgentSource => {
-    const source = defineProgrammaticAgentSource(inputSource);
+  const addSource = (
+    inputSource: ProgrammaticAgentSource,
+    allowExtensionMount = false,
+  ): ProgrammaticAgentSource => {
+    const source = defineProgrammaticAgentSourceInternal(inputSource, allowExtensionMount);
     if (sources.has(source.id)) {
       throw new Error(`Programmatic agent source id "${source.id}" is registered more than once.`);
     }
@@ -305,6 +327,9 @@ export function createAgentSourceRegistry(
     const source = addSource(registration.source);
     return Object.freeze({ applyTo: registration.applyTo, source });
   });
+  for (const declaration of options.extensionDeclarations ?? []) {
+    addSource(declaration, true);
+  }
   for (const inputTemplate of options.templates ?? []) {
     const source = addSource(inputTemplate);
     if (source.modules.length !== 1) {
@@ -596,52 +621,6 @@ export function canonicalSourceSlot(logicalPath: string): string {
   if (skillPackageMatch !== null) return `skills/${skillPackageMatch[1]!}`;
 
   return withoutExtension;
-}
-
-export function validateProgrammaticLogicalPath(input: string): string {
-  if (input.length === 0 || isAbsolute(input) || input.includes("\\")) {
-    throw new Error(`Programmatic module logical path "${input}" must be a relative POSIX path.`);
-  }
-  const logicalPath = normalizeLogicalPath(input);
-  if (
-    logicalPath === "." ||
-    logicalPath.startsWith("../") ||
-    logicalPath.includes("/../") ||
-    posix.normalize(logicalPath) !== logicalPath
-  ) {
-    throw new Error(`Programmatic module logical path "${input}" may not traverse directories.`);
-  }
-  const segments = logicalPath.split("/");
-  const fileName = segments.at(-1)!;
-  if (getSupportedModuleBaseName(fileName) === null) {
-    throw new Error(
-      `Programmatic module logical path "${input}" must use a supported JavaScript or TypeScript extension.`,
-    );
-  }
-  const root = segments[0];
-  const extensionless = stripLogicalPathExtension(logicalPath);
-  const supported =
-    (segments.length === 1 && ["agent", "memory", "sandbox"].includes(extensionless)) ||
-    (root === "sandbox" &&
-      segments.length === 2 &&
-      getSupportedModuleBaseName(fileName) === "sandbox") ||
-    ([
-      "channels",
-      "connections",
-      "hooks",
-      "instructions",
-      "memory",
-      "schedules",
-      "skills",
-      "tools",
-    ].includes(root!) &&
-      segments.length >= 2);
-  if (!supported) {
-    throw new Error(
-      `Programmatic module logical path "${input}" does not select an eve module slot.`,
-    );
-  }
-  return logicalPath;
 }
 
 export function describeAgentSourceCandidate(

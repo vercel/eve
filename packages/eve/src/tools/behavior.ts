@@ -1,16 +1,12 @@
 import type { WebSearchProvider } from "#shared/web-search.js";
 
 /** Session facts that can hide a selected tool without changing source composition. */
-export type ToolAvailabilityCondition =
-  | "delegated-task-child"
-  | "requires-request-input"
-  | "root-session";
+export type ToolAvailabilityCondition = "delegated-task-child" | "root-session";
 
 /** Native behavior declared by a selected compiled tool. */
 export type CompiledToolHandling =
   | { readonly kind: "dispatch"; readonly action: "self-agent" | "task-cancel" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
-  | { readonly kind: "request-input"; readonly request: "question" }
   | { readonly kind: "workflow-tool"; readonly workflowId: string };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */
@@ -49,7 +45,7 @@ export type PreparedDispatchTarget =
 /** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =
   | { readonly kind: "dispatch"; readonly target: PreparedDispatchTarget }
-  | Extract<CompiledToolHandling, { readonly kind: "provider-tool" | "request-input" }>;
+  | Extract<CompiledToolHandling, { readonly kind: "provider-tool" }>;
 
 /** Runtime-prepared behavior carried by one harness-visible tool. */
 export interface PreparedToolBehavior {

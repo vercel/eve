@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 
 const projectRoot = "wayfinder";
 
-const defaultAgentModel = "openai/gpt-5.6-luna-fast";
+const defaultAgentModel = "spacexai/grok-4.7";
 
 test("creates a complete eve project in place", () => {
   expect(existsSync(`${projectRoot}/agent/channels/eve.ts`)).toBe(true);

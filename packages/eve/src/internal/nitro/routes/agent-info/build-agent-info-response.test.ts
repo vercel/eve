@@ -34,7 +34,7 @@ describe("buildAgentInfoResponse", () => {
       },
       capabilities: { devRoutes: true },
       kind: "eve-agent-info",
-      version: 4,
+      version: 5,
     });
     expect(response.tools.static).toContainEqual(
       expect.objectContaining({
@@ -124,7 +124,6 @@ describe("buildAgentInfoResponse", () => {
 
     expect(response.kernelEffects).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "request-input" }),
         expect.objectContaining({ action: "subagent-call", kind: "dispatch" }),
       ]),
     );

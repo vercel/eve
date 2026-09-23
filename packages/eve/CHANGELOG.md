@@ -1,5 +1,68 @@
 # eve
 
+## 0.65.0
+
+### Minor Changes
+
+- 60998d6: Remove the `todo` tool, its `eve/tools/todo` export, and the dev TUI todo panel; delete any `agent/tools/todo.ts`, including one that exports `disableTool()`, which now fails the build because there is no default `todo` tool to disable. Compaction no longer resets `write_file` read tracking, so a file read before compaction can be overwritten without re-reading it; stale-read detection still rejects the write if the file changed since that read.
+  
+  `ask_question` is no longer a default tool and is now an ordinary workflow tool built on `ctx.ask()`. Add it with `eve add tool/ask_question`, or change an existing `agent/tools/ask_question.ts` to `import { askQuestion } from "eve/tools/ask_question"; export default askQuestion();`. The model now asks one `question` with up to three `{ label, description }` options, can always receive a free-text answer, and gets back `{ status: "answered", answer }` with the chosen label or the user's words. In sessions that cannot request input, the tool is still available and returns `{ status: "unavailable" }`. If you disabled `ask_question` with `disableTool()`, delete that file; it now fails the build for the same reason.
+  
+  `ctx.ask()` now resolves to `{ status: "answered", optionId?, text? }`, `{ status: "dismissed" }`, or `{ status: "unavailable" }`; check `status` before reading `optionId`. It returns `unavailable` immediately when the session cannot request input. A plain-text message answers a blocking tool's `ctx.ask()` question when it is the only pending question and the message matches an option or the question allows free text. Pass `dismissible: true` to resolve the question as `dismissed` when the user sends an unrelated message instead. An `ask_question` request's `requestId` is no longer its tool call ID; use `action.callId` to relate a request to its tool call.
+
+### Patch Changes
+
+- 155d24a: Make the bundled self-modification subagent scaffold an authored mount before changing its model, reasoning, or policy.
+- 155d24a: `eve dev` now mounts bundled development extensions by default, including the local self-modification subagent. Pass `--no-default-extensions` to run without them; production bundles do not initialize these development-only mounts.
+- ebab950: Fix subagent delegation failing with `Context key "eve.sandbox" is not set` when the parent has dynamic skills. Skill announcements are rebuilt at model preparation boundaries, so subagent notifications no longer require sandbox access.
+- d2ed49e: Exclude lazy development sandbox preparation and its transitive dependencies from every production server bundle, including self-hosted builds without a Vercel preset.
+- f945b80: Stop vendoring the unused `@workflow/builders` directive utilities into the published package.
+- a3b795b: Export an `errored` flag on eval assertion results so scorer failures can be distinguished from legitimate zero scores.
+
+## 0.64.1
+
+### Patch Changes
+
+- b49a598: Restore the active eve context while session-scoped dynamic tools are recovered, so resolvers that read durable state keep their callbacks after a resumed session.
+- 867a6ad: Prepare pnpm's optional-dependency policy before automatically installing just-bash during development, avoiding startup failures on unapproved native codec builds. Existing package-specific build decisions are preserved.
+- 867a6ad: Pin automatic microsandbox installs and manual installation guidance to the supported version so a new development server does not install an incompatible release.
+- 3e2bf95: Fix background workflow tools in workspace agents to use app-relative workflow IDs so dispatch matches the registered workflow.
+- 070525e: Defer sandbox environment preparation during development until the first sandbox access, so startup and rebuilds no longer wait for optional engine installation. First access prepares all environments in that compiled generation, with heartbeat-backed coordination that recovers after a development worker crash; production builds still prepare eagerly.
+- 867a6ad: Serialize automatic sandbox dependency installations that share a package-manager root, preventing concurrent providers or workspace apps from racing on dependency files. Waiting installations recheck their own package and can proceed after another installation fails.
+- 1a6cb88: Write fallback Vercel service configuration under the Next.js app directory in linked monorepos. This keeps generated eve services discoverable when no active build output directory is found, preventing deployments that omit the agent endpoints.
+
+## 0.64.0
+
+### Minor Changes
+
+- 3be0b74: Add `taskDeliveryPolicy: "auto" | "cohort"` to message sends. New channel sessions default to `"auto"`, allowing independently useful reports or silence until related work settles; schedules default to `"cohort"`, and explicit sends can select or update the session's policy.
+- 49971b7: Replace object-form sandbox definitions with exported provider environments whose `open()` method starts and returns the current eve session's persistent live sandbox. After successful selector initialization, durable boundaries resume directly from immutable provider state without rerunning `defineSandbox()`; provider-specific session capabilities remain precisely typed.
+
+### Patch Changes
+
+- fa92e5e: Route AI SDK provider warnings to eve's diagnostics instead of presenting successful compatibility fallbacks as stderr errors. Existing custom warning handlers and `AI_SDK_LOG_WARNINGS=false` remain respected.
+- 3be0b74: Align the bundled Chat SDK and adapters with version 4.41.0. Chat SDK channel types now reference the installed `chat` package so external adapters and handlers share the same type identity; `chat` is an optional peer for this integration.
+- 3e5ff9f: Fix a Vercel Workflow race where a rejected inline-step preclaim could skip the owner's body, leaving the durable step to fail after exhausting its retry limit without running user code.
+- aceb298: Local self-modification now depends on `eve dev` host facilities instead of request provenance.
+- f2b8792: Pre-approve esbuild install scripts in newly initialized pnpm projects so registry additions that install the Vercel CLI no longer require a separate `pnpm approve-builds` step.
+- b174a62: Remove the redundant Enter badge from searchable setup pickers; the selected-row cursor already indicates the active choice.
+- 9f17453: Clarify that `eve build --skip-sandbox-prewarm` skips sandbox preparation for local and hosted builds. Workspace fixture typechecks now use this mode instead of provisioning sandbox infrastructure.
+- d98edb2: Add `eve init --non-interactive` to scaffold and install an agent without opening the development TUI.
+
+## 0.63.1
+
+### Patch Changes
+
+- de29d28: In the eve TUI, press `Ctrl+Y` to paste text you removed with `Ctrl+K`, `Ctrl+U`, or `Ctrl+W`. Press `Alt+Y` immediately afterward to cycle through earlier removals.
+- 7cfaa6f: Option+Delete on macOS and Alt+Backspace now delete to the previous word boundary in editable eve TUI fields.
+- e110eb2: Allow an active turn to finish its tool-result continuation when an earlier turn's HITL request remains unanswered, while preserving current-turn HITL parking. Partial approval responses remain saved until their batch can resolve; they do not cause an extra model call after an unrelated answer.
+- 56e3510: Keep sessions on their original stream across consecutive deployment handoffs. Intermediate handoffs no longer end the session before the final owner completes it, preventing later handoffs from failing with a fatal Workflow SDK `Hook not found` error.
+- b333e7d: Fix saved-session resume in browsers without `Symbol.dispose`.
+- 3d96b69: Use `spacexai/grok-4.7` as the default model for new projects, agents without an `agent.ts`, and Gateway setup.
+- d88aede: Add eval setup and teardown callbacks with typed context shared by reference across evals and cleanup. Setup returns the context directly before the local agent starts, and teardown runs after shutdown even when setup or the run fails.
+- dea2ced: Upgrade the Workflow runtime and quiet expected inline-step contention while preserving protection against duplicate execution.
+- ffb1276: Fix background subagent calls failing the parent session when typed or wildcard hooks subscribe to subagent events. These hooks now receive the parent session context after workflow step boundaries.
+
 ## 0.63.0
 
 ### Minor Changes

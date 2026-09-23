@@ -2,19 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
 import { mockTool } from "#internal/testing/mocks/mock-tool.js";
 
 /**
  * Integration coverage for authored tool execution through the harness.
  *
  * Replaces the `test/harness-tool-execution.integration.test.ts` fixture —
- * the seven cases here exercise the same seam (tool execute, error
- * propagation, session/skill/sandbox exposure) through the AppHarness.
- * No test body touches `mkdtemp`, `installBundledCompiledArtifacts`, or
- * real sandboxes. The skill test delegates materialization to
- * `mockSkill()`, which manages its own temp directory and cleanup
- * automatically via an internally-registered `afterEach` hook.
+ * these cases exercise the same seam (tool execute, error propagation,
+ * session and sandbox exposure) through the AppHarness. No test body
+ * touches `mkdtemp`, `installBundledCompiledArtifacts`, or real sandboxes.
  */
 
 const WEATHER_INPUT_SCHEMA = {
@@ -141,41 +137,6 @@ describe("authored tool execution", () => {
     });
   });
 
-  it("exposes visible skill files to authored tool execution", async () => {
-    const semanticModel = await mockSkill({
-      name: "semantic-model",
-      description: "Inspect the semantic model.",
-      markdown: "Inspect the semantic model.",
-      references: {
-        "catalog.yml": "entities: []\n",
-      },
-    });
-
-    const skillReader = mockTool({
-      name: "skill_reader",
-      async execute(_input, ctx) {
-        return await ctx.getSkill("semantic-model").file("references/catalog.yml").text();
-      },
-    });
-    const runtime = await createTestRuntime({
-      tools: [skillReader],
-      skills: [semanticModel.source],
-    });
-
-    const sandbox = mockSandbox({
-      initialFiles: {
-        "/workspace/skills/semantic-model/SKILL.md": "Inspect the semantic model.",
-        "/workspace/skills/semantic-model/references/catalog.yml": "entities: []\n",
-      },
-    });
-
-    const result = await runtime.runAsSession({ sandbox }, async () =>
-      runtime.executeTool(skillReader, {}),
-    );
-
-    expect(result).toBe("entities: []\n");
-  });
-
   it("allows authored tools to lazily resolve the sandbox through ctx.getSandbox()", async () => {
     const sandbox = mockSandbox({ id: "sbx_tool" });
     const sandboxTool = mockTool({
@@ -184,17 +145,16 @@ describe("authored tool execution", () => {
         const live = await ctx.getSandbox();
         await live.writeTextFile({ content: "sandbox-note", path: "note.txt" });
         const content = await live.readTextFile({ path: "note.txt" });
-        return { content, id: live.id };
+        return { content };
       },
     });
     const runtime = await createTestRuntime({ tools: [sandboxTool] });
 
     const result = (await runtime.runAsSession({ sandbox }, async () =>
       runtime.executeTool(sandboxTool, {}),
-    )) as { content: string; id: string };
+    )) as { content: string };
 
     expect(result.content).toBe("sandbox-note");
-    expect(result.id).toBe("sbx_tool");
     expect(sandbox.files.get("/workspace/note.txt")).toBe("sandbox-note");
   });
 

@@ -35,6 +35,7 @@ export async function startWorkflowToolRun(
 export async function startWorkflowTask(input: {
   readonly agents: WorkflowToolRunInput["agents"];
   readonly auth: SessionAuth["current"];
+  readonly canRequestInput: boolean;
   readonly batchEvent: {
     readonly sequence: number;
     readonly stepIndex: number;
@@ -51,6 +52,7 @@ export async function startWorkflowTask(input: {
     const started = await startWorkflowToolRun({
       agents: input.agents,
       callId: task.callId,
+      canRequestInput: input.canRequestInput,
       executeInput: task.executeInput,
       input: task.input,
       owner: input.owner,

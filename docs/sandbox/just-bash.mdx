@@ -1,0 +1,24 @@
+---
+title: "just-bash Sandbox"
+description: "Use a pure-JavaScript shell and virtual filesystem."
+---
+
+`JustBashSandbox.environment()` provides a shell and filesystem without starting a container or VM.
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { JustBashSandbox } from "eve/sandbox/just-bash";
+
+export const environment = JustBashSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+just-bash can prepare and persist its virtual filesystem. It cannot use OCI images or Dockerfiles, does not run native processes, and provides no network isolation. The session does not expose `setNetworkPolicy()`.
+
+## Automatic installation
+
+When an environment uses just-bash during `eve dev`, eve installs the package into your application if it is missing, unless you set `autoInstall: false` in the environment options. `DefaultSandbox` selects only one provider, but another environment, such as local self-modification, can use just-bash independently. Other environments require you to install the package yourself.
+
+For pnpm projects, automatic installation adds `@mongodb-js/zstd` and `node-liblzma` to `ignoredOptionalDependencies` in the owning `pnpm-workspace.yaml` when they have no explicit package policy. These optional native codecs are not needed for basic shell and filesystem operations. Commands that require those codecs may be unavailable without them. eve preserves existing package-specific build decisions and does not automatically approve build scripts.
+
+See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

@@ -27,26 +27,24 @@ A string model ID routes requests through the [Vercel AI Gateway](https://vercel
 
 Add credentials for direct model providers, tools, and connections to the Vercel project environment. Add any signing keys or passwords required by your [route authentication policy](../auth-and-route-protection). Replace `placeholderAuth()` before a browser sends a production request.
 
-## Select the sandbox backend
+## Select the sandbox environment
 
-Leave the sandbox `backend` unset to use `defaultBackend()`. On Vercel, it selects Vercel Sandbox. You can also select the backend explicitly:
+The default environment selects Vercel Sandbox on Vercel. To select it explicitly:
 
 ```typescript
 import { defineSandbox } from "eve/sandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
-export default defineSandbox({
-  backend: vercel(),
-});
+export const environment = VercelSandbox.environment();
+export default defineSandbox(() => environment.open());
 ```
 
-See [Sandbox](../../sandbox) for resource limits, network policy, and lifecycle hooks.
+See [Sandbox](../../sandbox) for preparation, resource limits, network policy, and lifecycle.
 
 <Callout type="info" title="Sandbox prewarming">
-  During a Vercel build, eve automatically creates or reuses a sandbox template when your sandbox
-  has `bootstrap()` or seed files. The build needs permission to create Vercel Sandbox templates,
-  and a prewarm failure stops the deployment. See the [sandbox lifecycle](../../sandbox#lifecycle)
-  for template and session setup.
+  During a Vercel build, eve creates or reuses a snapshot-backed template when an environment uses
+  `VercelSandbox.environment({prepare})` or has seed files. A prewarm failure stops the deployment.
+  See the [sandbox lifecycle](../../sandbox#lifecycle).
 </Callout>
 
 ## Deploy the agent
@@ -137,7 +135,7 @@ Vercel uses the generated output to configure these services:
 - **Web runtime**: serves health, session, stream, channel, callback, and schedule routes
 - **Vercel Workflow**: persists and resumes durable runs, with optimistic replay preconditions enabled so stale event-log snapshots reload before they can commit
 - **Vercel Cron**: invokes authored schedules
-- **Vercel Sandbox**: runs sandbox sessions selected by `defaultBackend()`
+- **Vercel Sandbox**: runs sandbox sessions selected by the default sandbox environment
 
 ## Verify the deployment
 
@@ -156,12 +154,6 @@ eve dev https://your_agent.vercel.app/eve/support
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.
-
-## Inspect agent runs
-
-Vercel detects eve and can add an **Agent Runs** tab under the project’s **Observability** view. Use it to browse sessions and inspect each conversation trace.
-
-The Agent Runs tab requires enablement for your Vercel team. Contact your Vercel representative if the tab doesn’t appear. For third-party tracing backends, configure [OpenTelemetry instrumentation](../../observability/instrumentation).
 
 ## Continue configuring production
 

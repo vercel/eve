@@ -9,8 +9,18 @@ import {
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
+import {
+  resumeWorkflowToolRunAnswers,
+  resumeWorkflowToolRunDismissal,
+} from "#execution/tools/workflow/answer.js";
+import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
+import {
+  createInputResolvedEvent,
+  encodeMessageStreamEvent,
+  type InputResolution,
+  stampMessageStreamEvent,
+} from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
@@ -36,6 +46,7 @@ interface ChildBucket {
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly childResponseUrl?: string;
+  readonly dismissedRequestIds: string[];
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
   readonly retireRequestIds: string[];
@@ -56,19 +67,31 @@ export async function routeProxiedDeliverStep(input: {
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
+  // Only a person's own message may answer or skip a pending question.
+  const resolveMessage =
+    sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
+  // Every payload routes against the same state, so an answer-hook request
+  // resolved by an earlier payload is hidden from later ones; its hook accepts
+  // one answer, and later messages must reach the parent instead.
+  const resolvedQuestions = new Set<string>();
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
-      allowRoute: (_requestId, route) =>
-        route.taskId === undefined ||
-        findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined,
+      allowRoute: (requestId, route) =>
+        !resolvedQuestions.has(requestId) &&
+        (route.taskId === undefined ||
+          findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined),
       payload,
+      resolveMessage,
       state: durableSession.state,
     });
     parentAction ??= routed.parentAction;
     if (routed.forSelf !== undefined) parentPayloads.set(sourcePayloadIndex, routed.forSelf);
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
+      if (forChild.answerHook !== undefined) {
+        for (const requestId of forChild.retireRequestIds) resolvedQuestions.add(requestId);
+      }
       const key = [
         forChild.childContinuationToken,
         forChild.childSessionInbox?.sessionId ?? "",
@@ -80,6 +103,7 @@ export async function routeProxiedDeliverStep(input: {
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
         childResponseUrl: forChild.childResponseUrl,
+        dismissedRequestIds: [],
         metadata: [],
         payloads: [],
         retireRequestIds: [],
@@ -88,6 +112,7 @@ export async function routeProxiedDeliverStep(input: {
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
+      child.dismissedRequestIds.push(...(forChild.dismissedRequestIds ?? []));
       child.retireRequestIds.push(...forChild.retireRequestIds);
       child.sourcePayloadIndexes.push(sourcePayloadIndex);
       if (routed.forSelf === undefined && childIndex === 0) {
@@ -135,10 +160,19 @@ export async function routeProxiedDeliverStep(input: {
     }
 
     if (child.answerHook !== undefined) {
-      await resumeWorkflowToolRunAnswers(
-        child.childContinuationToken,
-        coalesceDeliverPayloads(child.payloads).inputResponses,
-      );
+      const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
+      await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
+      if (child.dismissedRequestIds.length > 0) {
+        await resumeWorkflowToolRunDismissal(child.childContinuationToken);
+      }
+      if (child.answerHook.question !== undefined) {
+        await emitQuestionResolutions({
+          dismissedRequestIds: child.dismissedRequestIds,
+          responses,
+          sessionState: durableSession.state,
+          sessionWritable: input.sessionWritable,
+        });
+      }
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
       continue;
@@ -181,6 +215,43 @@ export async function routeProxiedDeliverStep(input: {
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
   return { ...context, kind: "continue", remainder };
+}
+
+// A `ctx.ask()` question is resolved by its workflow, not the harness, so the
+// parent announces the resolution. A blocking run starts from the pending
+// coordination batch, which carries the coordinates of its request.
+async function emitQuestionResolutions(input: {
+  readonly dismissedRequestIds: readonly string[];
+  readonly responses: readonly InputResponse[];
+  readonly sessionState: Parameters<typeof getPendingCoordinationBatch>[0];
+  readonly sessionWritable: WritableStream<Uint8Array>;
+}): Promise<void> {
+  const event = getPendingCoordinationBatch(input.sessionState)?.event;
+  if (event === undefined) return;
+  const resolutions: InputResolution[] = [
+    ...input.responses.map((response) => ({
+      kind: "question" as const,
+      outcome: "answered" as const,
+      requestId: response.requestId,
+      response,
+    })),
+    ...input.dismissedRequestIds.map((requestId) => ({
+      kind: "question" as const,
+      outcome: "ignored" as const,
+      requestId,
+    })),
+  ];
+  if (resolutions.length === 0) return;
+  const writer = input.sessionWritable.getWriter();
+  try {
+    await writer.write(
+      encodeMessageStreamEvent(
+        stampMessageStreamEvent(createInputResolvedEvent({ resolutions, ...event })),
+      ),
+    );
+  } finally {
+    writer.releaseLock();
+  }
 }
 
 // Answers to a task that finished mid-flight rejoin the parent-local

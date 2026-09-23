@@ -1,11 +1,11 @@
 import { handleDevelopmentModelCredentialRequest } from "#internal/model-auth/development-broker-server.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
+import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
 
 import type { Nitro } from "nitro/types";
 
 import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
-import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import type { AuthoredSourceWatcherHandle } from "#internal/nitro/host/dev-authored-source-watcher.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
@@ -23,12 +23,10 @@ import { toErrorMessage } from "#shared/errors.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
 import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { handleDevRuntimeArtifactsRequest } from "#internal/nitro/routes/dev-runtime-artifacts.js";
-import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import {
   pruneLocalSandboxTemplatesInBackground,
   stopDevelopmentSandboxResources,
 } from "#execution/sandbox/bindings/local.js";
-import { startDevelopmentSandboxPrewarmInBackground } from "#execution/sandbox/development-prewarm.js";
 import {
   createDevelopmentSandboxRunId,
   EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
@@ -391,13 +389,17 @@ async function startNitroDevelopmentServer(
   // optional sandbox engine packages) can gate on it.
   process.env[EVE_DEV_ENV_FLAG] ??= "1";
 
+  const developmentExtensions = options.developmentExtensions ?? defaultDevelopmentExtensions();
   const project = await resolveDiscoveryProject(rootDir);
   await loadDevelopmentEnvironmentFiles(project.appRoot);
 
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
-  const hasExplicitEndpoint =
-    options.host !== undefined || options.port !== undefined || environmentPort !== undefined;
+  const hasExplicitServerConfiguration =
+    options.developmentExtensions !== undefined ||
+    options.host !== undefined ||
+    options.port !== undefined ||
+    environmentPort !== undefined;
   const state = new DevelopmentServerState(project);
   const existingServerUrl = await state.read();
 
@@ -406,7 +408,7 @@ async function startNitroDevelopmentServer(
     isLoopbackServerUrl(existingServerUrl) &&
     (await isDevelopmentServerReady(existingServerUrl))
   ) {
-    if (options.existing === "attach-if-unconfigured" && !hasExplicitEndpoint) {
+    if (options.existing === "attach-if-unconfigured" && !hasExplicitServerConfiguration) {
       return {
         handle: { kind: "existing", appRoot: project.appRoot, url: existingServerUrl },
         close: undefined,
@@ -432,16 +434,10 @@ async function startNitroDevelopmentServer(
   try {
     const preparedHost = await devBootPhase(
       "compiling agent",
-      () => prepareDevelopmentApplicationHost(project.appRoot),
+      () => prepareDevelopmentApplicationHost(project.appRoot, { developmentExtensions }),
       options.onBootProgress,
     );
     preparedDevelopmentHost = preparedHost;
-    const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(
-      createDevelopmentNitroArtifactsConfig({
-        appRoot: preparedHost.appRoot,
-        configuredWorld: preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
-      }),
-    );
     pruneLocalSandboxTemplatesInBackground(preparedHost.appRoot);
     const activeNitro = await devBootPhase(
       "creating dev server",
@@ -523,12 +519,9 @@ async function startNitroDevelopmentServer(
       options.onBootProgress,
     );
     await workflowWorld?.start();
-    startDevelopmentSandboxPrewarmInBackground({
-      appRoot: preparedHost.appRoot,
-      compiledArtifactsSource,
-    });
 
     const rebuildCoordinator = await createDevelopmentAuthoredRebuildCoordinator({
+      developmentExtensions,
       devServer: activeDevServer,
       initialHost: preparedHost,
     });

@@ -1650,7 +1650,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("┌── Session restarted, clear context.");
   });
 
-  it("closes the dying turn's coda and dismisses the todo panel at the boundary", async () => {
+  it("closes the dying turn's coda at the boundary", async () => {
     const { screen, input, renderer } = makeRenderer();
     const prompt = renderer.readPrompt();
     input.type("hey agent");
@@ -1660,17 +1660,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await renderer.renderStream(
       streamOf([
         { type: "step-start" },
-        {
-          type: "tool-call",
-          toolCallId: "t1",
-          toolName: "todo",
-          input: {
-            todos: [
-              { content: "first task", status: "in_progress" },
-              { content: "second task", status: "pending" },
-            ],
-          },
-        },
         { type: "assistant-delta", id: "m1", delta: "working" },
         { type: "assistant-complete", id: "m1" },
         { type: "step-finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
@@ -1678,15 +1667,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
       ]),
       { continueSession: true },
     );
-    expect(screen.snapshot()).toContain("first task");
 
     renderer.renderSessionBoundary();
     const snapshot = screen.snapshot();
-    // The dead turn's stats close before the boundary, not after it…
+    // The dead turn's stats close before the boundary, not after it.
     expect(snapshot.indexOf("└ Done in")).toBeGreaterThan(-1);
     expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
-    // …and the discarded session's plan dismisses instead of lingering.
-    expect(snapshot).not.toContain("first task");
 
     // Control returning to the prompt must not add a second coda.
     const second = renderer.readPrompt();
@@ -2928,13 +2914,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Esc to dismiss");
 
     await escape();
-    // No answer travels; the runner returns to the prompt and the server
-    // records the parked request as ignored on the next message.
+    // No answer travels; the runner returns to the prompt and the question
+    // stays open for the next message.
     await expect(answer).resolves.toBeUndefined();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("? Choose access");
-    expect(snapshot).toContain("⎿  Dismissed.");
+    expect(snapshot).toContain("⎿  Skipped. The question stays open.");
     // The option list does not survive the dismissal.
     expect(snapshot).not.toContain("Managed access");
     expect(snapshot).not.toContain("Enter to select");
@@ -2965,7 +2951,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -3082,7 +3068,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -3128,13 +3114,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("paints a fully typed known command blue in the input line", async () => {
+  it("paints a fully typed known command bold in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/add");
-    // The ANSI blue open (34) wraps the typed command in the painted row.
-    expect(screen.rawOutput()).toContain("[34m/add");
+    // Bold confirms command dispatch without competing with status color.
+    expect(screen.rawOutput()).toContain("[1m/add");
+    expect(screen.rawOutput()).not.toContain("[34m/add");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -3147,7 +3134,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Never passes through a known command, even if painted per keystroke
     // ("/li…" is not a known command).
     input.type("/lin is not a command");
-    expect(screen.rawOutput()).not.toContain("[34m");
+    expect(screen.rawOutput()).not.toContain("[1m/lin is not a command");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -3462,22 +3449,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("records sandbox log lines in the diagnostic log", () => {
+  it("records captured sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const stub = stubDiagnostics();
-    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       unicode: true,
       diagnostics: stub.diagnostics,
     });
-
-    renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
-    expect(append).toHaveBeenCalledWith({ source: "sandbox", detail: expect.any(String) });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    process.stdout.write('eve: sandbox template "root" (microsandbox): apt-get update\n');
     renderer.shutdown();
+    expect(stub.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "stdout",
+        detail: expect.stringContaining("apt-get update"),
+      }),
+    );
   });
 
   it("shows delayed build progress and immediate completion when logs are hidden", () => {
@@ -3660,22 +3651,22 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("ordinary stdout log");
   });
 
-  it("renders subscribed sandbox logs under the sandbox log level", () => {
+  it("renders captured lazy preparation logs under the sandbox log level", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       logs: "sandbox",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    renderer.renderSandboxLog?.('eve: sandbox template "root" (docker): checking Docker daemon');
-    renderer.renderSandboxLog?.("eve: initializing 3 sandbox templates...");
-    renderer.renderSandboxLog?.('eve: built sandbox template "root" on backend "docker".');
-    renderer.renderSandboxLog?.("ordinary stdout log");
+    process.stdout.write('eve: sandbox template "root" (docker): checking Docker daemon\n');
+    process.stdout.write("eve: initializing 3 sandbox templates...\n");
+    process.stdout.write('eve: built sandbox template "root" on backend "docker".\n');
+    process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -5248,6 +5239,116 @@ describe("TerminalRenderer command typeahead", () => {
 
     input.enter();
     expect(await prompt).toBe("/model");
+    renderer.shutdown();
+  });
+
+  it("shows loading before model argument suggestions arrive", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const suggestions = Promise.withResolvers<
+      readonly {
+        value: string;
+        label: string;
+        hint?: string;
+      }[]
+    >();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => suggestions.promise,
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model ");
+    expect(screen.snapshot()).toContain("Loading models…");
+    suggestions.resolve([{ value: "openai/gpt-5", label: "GPT-5" }]);
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it("advances to reasoning after selecting a model with reasoning choices", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => [
+        {
+          value: "openai/gpt-6-sol",
+          label: "openai/gpt-6-sol",
+          next: [{ value: "high", label: "high" }],
+        },
+      ],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model sol");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-6-sol"));
+    input.enter();
+    expect(screen.snapshot()).toContain("❯ /model openai/gpt-6-sol ");
+    expect(screen.snapshot()).toContain("high");
+    input.enter();
+
+    expect(await prompt).toBe("/model openai/gpt-6-sol high");
+    renderer.shutdown();
+  });
+
+  it("completes a model argument from its inline catalog", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async (command) =>
+        command === "model"
+          ? [
+              {
+                value: "anthropic/claude-sonnet-5",
+                label: "Claude Sonnet 5",
+                hint: "Anthropic",
+              },
+            ]
+          : [],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model claude");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("anthropic/claude-sonnet-5"));
+    input.enter();
+
+    expect(await prompt).toBe("/model anthropic/claude-sonnet-5");
+    renderer.shutdown();
+  });
+
+  it("completes an add argument from its inline registry catalog", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async (command) =>
+        command === "add"
+          ? [{ value: "channel/slack", label: "Slack", hint: "Slack channel" }]
+          : [],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/add slack");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("channel/slack"));
+    input.send("\t");
+    input.enter();
+
+    expect(await prompt).toBe("/add channel/slack");
     renderer.shutdown();
   });
 

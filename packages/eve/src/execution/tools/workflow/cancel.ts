@@ -70,12 +70,3 @@ export async function settleWorkflowToolRunCancellation(
     throw error;
   }
 }
-
-export async function cancelWorkflowToolRunStep(input: {
-  readonly reason: string;
-  readonly run: WorkflowToolRunAddress;
-}): Promise<void> {
-  "use step";
-
-  await cancelWorkflowToolRun(input.run, input.reason);
-}

@@ -26,12 +26,6 @@ import type {
   ResolvePendingInputResult,
   ToolResponsePart,
 } from "#harness/hitl/pending-input-resolution.js";
-import {
-  buildQuestionToolResponsePart,
-  findAnsweredQuestionBatches,
-  resolveQuestionBatches,
-} from "#harness/hitl/question-input-requests.js";
-import type { QuestionInputRequest } from "#harness/hitl/question-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
@@ -54,33 +48,18 @@ export function findAnsweredApprovalBatches(
 
 export function resolveApprovalInputBatches(
   input: InputDomainResolverInput & {
-    readonly approvalBatches: readonly PendingInputBatch[];
-    readonly questionBatches: readonly PendingInputBatch[];
     readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   },
 ): ResolvePendingInputResult {
-  const answeredApprovalBatches = new Set(
-    findAnsweredApprovalBatches(input.approvalBatches, input.responses),
-  );
-  const answeredQuestionBatches = new Set(
-    findAnsweredQuestionBatches(input.questionBatches, input.responses),
-  );
-  let resolvedBatches = input.batches.filter(
-    (batch) => answeredApprovalBatches.has(batch) || answeredQuestionBatches.has(batch),
-  );
-  const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-  if (firstApprovalIndex >= 0) {
-    // Anything after this batch would hide its approval response from AI
-    // SDK's tail-tool-message scan. Its responses replay on the next step.
-    resolvedBatches = resolvedBatches.slice(0, firstApprovalIndex + 1);
-  }
-
-  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const answered = new Set(findAnsweredApprovalBatches(input.batches, input.responses));
+  // Only the first answered batch resolves: anything after it would hide its
+  // approval response from AI SDK's tail-tool-message scan. Later answers
+  // replay on the next step.
+  const approvalBatch = input.batches.find((batch) => answered.has(batch));
+  const openBatches = input.batches.filter((batch) => batch !== approvalBatch);
   const leftoverResponses = responsesForBatches(input.responses, openBatches);
 
-  if (resolvedBatches.length === 0) {
+  if (approvalBatch === undefined) {
     if (input.resolvedStepInput?.message === undefined) {
       return {
         outcome: "unresolved",
@@ -101,37 +80,23 @@ export function resolveApprovalInputBatches(
     };
   }
 
-  const approvalBatch = resolvedBatches.find((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-  const questionBatches = resolvedBatches.filter((batch) => batch !== approvalBatch);
-  const questions = resolveQuestionBatches({
-    batches: questionBatches,
+  const approval = resolveApprovalBatch({
+    batch: approvalBatch,
     messages: [...input.baseHistory],
+    resolveApprovalKey: input.resolveApprovalKey,
     responses: input.responses,
+    session: input.session,
   });
-  const approval =
-    approvalBatch === undefined
-      ? { messages: questions, session: input.session }
-      : resolveApprovalBatch({
-          batch: approvalBatch,
-          messages: questions,
-          resolveApprovalKey: input.resolveApprovalKey,
-          responses: input.responses,
-          session: input.session,
-        });
+  const resolved = buildResolvedInputBatch(approvalBatch, input.responses);
 
   return finishResolvedInput({
-    deferTurnInput: approvalBatch !== undefined || input.deferTurnInput,
+    deferTurnInput: true,
     leftoverResponses,
     messages: approval.messages,
     rejectedActions: approval.rejectedActions,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
-    }),
+    resolvedInputs: resolved === undefined ? [] : [resolved],
     resolvedStepInput: input.resolvedStepInput,
-    session: removePendingInputBatches(approval.session, resolvedBatches),
+    session: removePendingInputBatches(approval.session, [approvalBatch]),
   });
 }
 
@@ -253,11 +218,9 @@ function buildApprovalBatchToolResponseParts(
         );
         break;
       case "question":
-        parts.push(buildQuestionToolResponsePart(request as QuestionInputRequest, response));
-        break;
       case "session-limit":
         throw new TypeError(
-          "Session-limit pending input batches must contain only session-limit requests.",
+          `Approval pending input batches cannot contain a "${request.kind}" request.`,
         );
       default: {
         const unhandled: never = request.kind;

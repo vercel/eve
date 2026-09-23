@@ -1,11 +1,12 @@
 import {
   type BackgroundWorkflowToolRun,
   findBackgroundWorkflowToolRun,
+  getBackgroundWorkflowToolRuns,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
-import { ActivityObserverKey } from "#context/keys.js";
+import { ActivityObserverKey, CapabilitiesKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -187,7 +188,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 
   hasPendingTasks(): boolean {
-    return this.records.some((record) => record.settled && record.task !== undefined);
+    return (
+      getBackgroundWorkflowToolRuns(this.initialSession.state).some(
+        (entry) => entry.task.outcome === undefined,
+      ) || this.records.some((record) => record.settled && record.task !== undefined)
+    );
   }
 
   async commit(session: HarnessSession): Promise<HarnessSession> {
@@ -458,6 +463,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       workflow: {
         agents: resolveWorkflowAgentMetadata(input.ctx),
         callId: taskInput.callId,
+        canRequestInput: input.ctx.get(CapabilitiesKey)?.requestInput === true,
         executeInput: workflow.executeInput?.(workflowInput),
         input: workflowInput,
         session: callbackSession,

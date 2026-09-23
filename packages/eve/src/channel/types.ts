@@ -195,6 +195,9 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
+/** Controls background task wake timing and whether partial results require a report. */
+export type TaskDeliveryPolicy = "cohort" | "auto";
+
 /** Controls how a channel message interacts with an active turn. */
 export type TurnPolicy = "steer" | "queue";
 
@@ -219,6 +222,7 @@ export type SessionCommand =
        */
       readonly taskDeliveryId?: string;
       readonly turnPolicy?: TurnPolicy;
+      readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
     }
   | {
       readonly kind: "cancel";
@@ -291,9 +295,12 @@ export interface DeliverHookPayload {
    * `resumeHook` already succeeded.
    */
   readonly taskDeliveryId?: string;
+  /** All source notifications when the session queue combines task results. */
+  readonly taskDeliveryIds?: readonly string[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
   readonly turnPolicy?: TurnPolicy;
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 }
 
 /** Internal deadline signal sent through the stable session command inbox. */
@@ -443,13 +450,12 @@ export interface SessionCallback {
 export interface SessionCapabilities {
   /**
    * True when the session may request input from a human (tool approvals,
-   * `ask_question`). The runtime reads this in every HITL gate:
+   * `ctx.ask()`). The runtime reads this in every HITL gate:
    *
-   * 1. `ask_question` tool registration in `buildToolSet`: the tool is hidden
-   *    from the model when the session cannot request input.
+   * 1. `ctx.ask()` resolves as `unavailable` instead of waiting when the
+   *    session cannot request input.
    * 2. The pending-input park guard: scheduled task sessions without this flag
-   *    fail fast rather than waiting for a response, covering both tool
-   *    approvals and `ask_question` prompts the model has already emitted.
+   *    fail fast rather than waiting for a response to a tool approval.
    */
   readonly requestInput?: boolean;
 }
@@ -464,6 +470,7 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly adapter: ChannelAdapter<any>;
   /** Framework task that owns this run, when the run is a task executor. */
   readonly taskId?: string;

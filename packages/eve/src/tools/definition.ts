@@ -112,8 +112,8 @@ export interface PublicToolDefinitionWithExecuteFn<
 
 /**
  * A question a workflow tool asks the human on the session's channel, sent
- * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the way they render
- * `ask_question` and tool approvals.
+ * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
+ * way they render tool approvals.
  */
 export interface ToolInputRequest {
   /**
@@ -121,6 +121,12 @@ export interface ToolInputRequest {
    * {@link options}.
    */
   readonly allowFreeform?: boolean;
+  /**
+   * Whether the user's next message may skip the question. When `true`, a
+   * message that does not answer it resolves the request as `dismissed`, and
+   * the message reaches the agent as usual.
+   */
+  readonly dismissible?: boolean;
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
   /** Selectable answers. */
@@ -128,13 +134,24 @@ export interface ToolInputRequest {
   readonly prompt: string;
 }
 
-/** The human's answer to a {@link ToolInputRequest}. */
-export interface ToolInputResponse {
-  /** The selected option's `id`, when the user picked one. */
-  readonly optionId?: string;
-  /** Free text, when the user typed an answer. */
-  readonly text?: string;
-}
+/**
+ * The outcome of a {@link ToolInputRequest}.
+ *
+ * - `answered`: the user picked an option or typed an answer.
+ * - `dismissed`: the user moved on without answering a `dismissible` request.
+ * - `unavailable`: the session cannot reach a human, such as a scheduled run,
+ *   so the request resolved immediately without being shown.
+ */
+export type ToolInputResponse =
+  | {
+      readonly status: "answered";
+      /** The selected option's `id`, when the user picked one. */
+      readonly optionId?: string;
+      /** Free text, when the user typed an answer. */
+      readonly text?: string;
+    }
+  | { readonly status: "dismissed" }
+  | { readonly status: "unavailable" };
 
 /**
  * Authored tool context. Passed as the last argument to

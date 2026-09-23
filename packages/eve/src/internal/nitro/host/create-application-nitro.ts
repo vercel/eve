@@ -17,7 +17,8 @@ import {
   writeEveVersionedCacheMetadata,
 } from "#internal/application/cache-metadata.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { createCompiledSandboxBackendPrunePlugin } from "#internal/nitro/host/compiled-sandbox-backend-prune-plugin.js";
+import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
+import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
   createExtensionExternalDependencyPlugin,
@@ -137,29 +138,29 @@ function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): 
  * and subagents) selected, so the host build can make backend-aware
  * packaging decisions.
  */
-function collectConfiguredSandboxBackendNames(manifest: CompiledAgentManifest): Set<string> {
+function collectConfiguredSandboxProviderNames(manifest: CompiledAgentManifest): Set<string> {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
   return new Set(
     nodes
-      .map((node) => node.sandbox?.backendName)
-      .filter((backendName): backendName is string => typeof backendName === "string"),
+      .map((node) => node.sandbox?.providerName)
+      .filter((providerName): providerName is string => typeof providerName === "string"),
   );
 }
 
 /**
- * Hosted Vercel builds can prune local sandbox backends only when the
+ * Hosted Vercel builds can prune local sandbox providers only when the
  * app did not explicitly configure one. Omitted backends resolve through
- * `defaultSandbox()`, which selects Vercel on hosted Vercel and never
+ * `DefaultSandbox.environment()`, which selects Vercel on hosted Vercel and never
  * needs local runtime code there.
  */
-export function shouldPruneLocalSandboxBackends(input: {
+export function shouldPruneLocalSandboxProviders(input: {
   readonly configuredBackendNames: ReadonlySet<string>;
   readonly preset: "vercel" | undefined;
 }): boolean {
   return (
     input.preset === "vercel" &&
-    ![...input.configuredBackendNames].some((backendName) =>
-      LOCAL_SANDBOX_BACKEND_NAMES.has(backendName),
+    ![...input.configuredBackendNames].some((providerName) =>
+      LOCAL_SANDBOX_BACKEND_NAMES.has(providerName),
     )
   );
 }
@@ -554,23 +555,24 @@ function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: strin
 
 function createApplicationNitroBundlerConfiguration(
   preparedHost: PreparedApplicationHost,
-  preset: "vercel" | undefined,
+  options: { readonly development: boolean; readonly preset: "vercel" | undefined },
 ) {
-  const configuredBackendNames = collectConfiguredSandboxBackendNames(
+  const { preset } = options;
+  const configuredBackendNames = collectConfiguredSandboxProviderNames(
     preparedHost.compileResult.manifest,
   );
-  const compiledSandboxBackendPrunePlugin = shouldPruneLocalSandboxBackends({
+  const compiledSandboxProviderPrunePlugin = shouldPruneLocalSandboxProviders({
     configuredBackendNames,
     preset,
   })
-    ? createCompiledSandboxBackendPrunePlugin()
+    ? createCompiledSandboxProviderPrunePlugin()
     : null;
   const configuredOptionalEnginePackages: string[] = [];
   const unconfiguredOptionalEnginePackages: string[] = [];
-  for (const [backendName, packageName] of Object.entries(
+  for (const [providerName, packageName] of Object.entries(
     OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
   )) {
-    (configuredBackendNames.has(backendName)
+    (configuredBackendNames.has(providerName)
       ? configuredOptionalEnginePackages
       : unconfiguredOptionalEnginePackages
     ).push(packageName);
@@ -591,7 +593,8 @@ function createApplicationNitroBundlerConfiguration(
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ].flatMap((node) => node.extensionMounts);
   const nitroBundlerPlugins = [
-    compiledSandboxBackendPrunePlugin,
+    options.development ? null : createDevelopmentRuntimePrunePlugin(),
+    compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
     extensionScopePlugin,
@@ -702,7 +705,10 @@ export async function createDevelopmentApplicationNitro(
   preparedHost: PreparedDevelopmentApplicationHost,
 ): Promise<Nitro> {
   const nitroBuildDir = preparedHost.workspace.nitroBuildDir;
-  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, undefined);
+  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, {
+    development: true,
+    preset: undefined,
+  });
   const plugins = createApplicationNitroPlugins(preparedHost);
   if (preparedHost.compiledArtifacts.instrumentationPluginPath === undefined) {
     plugins.unshift(
@@ -776,7 +782,10 @@ export async function createProductionApplicationNitro(
   options: ProductionApplicationNitroOptions,
 ): Promise<Nitro> {
   const preset = resolveProductionNitroPreset();
-  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, preset);
+  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, {
+    development: false,
+    preset,
+  });
   const nitroPlugins = createApplicationNitroPlugins(preparedHost);
   nitroPlugins.push(
     resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
@@ -815,7 +824,7 @@ export async function createProductionApplicationNitro(
 
   if (preparedHost.scheduleRegistrations.length > 0) {
     applyEveCronHandlerRoute(nitro);
-    const artifactsConfig = createProductionNitroArtifactsConfig();
+    const artifactsConfig = createProductionNitroArtifactsConfig(preparedHost.appRoot);
     registerScheduleTaskHandlers(nitro, {
       artifactsConfig,
       dispatchModulePath: resolvePackageSourceFilePath(

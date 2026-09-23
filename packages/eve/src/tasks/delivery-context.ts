@@ -1,4 +1,4 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { TaskDeliveryPolicy, DeliverHookPayload } from "#channel/types.js";
 import { markFrameworkStepInput } from "#harness/messages.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
@@ -16,7 +16,9 @@ The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists 
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
-export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nThis turn was triggered by background task activity. The accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists overlapping background tasks in the same cohort, potentially started across different user turns, all settled, with every available terminal output. Do not reply with ${EMPTY_DELIVERY_SENTINEL}. Send one user-facing response that combines their useful results.`;
+export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nFor this background-task update, the accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the settled tasks in this cohort and their available terminal outputs. Report their useful results together in one user-facing response without repeating results already reported. Do not reply with ${EMPTY_DELIVERY_SENTINEL}.`;
+
+export const TASK_DELIVERY_AUTO_INSTRUCTION = `Background task reporting\nFor this background-task update, the accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the whole cohort, including pending tasks and every available terminal output. A received result has not necessarily been reported to the user. Report new results only when they are useful independently of unfinished work. When that work settles, combine its results with any previously withheld results. If there is nothing new and useful to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}. Do not repeat results already reported or send an acknowledgement just to say you are waiting.`;
 
 type BackgroundTaskDelivery = DeliverHookPayload & {
   readonly taskDeliveryId: string;
@@ -38,10 +40,11 @@ export function markBackgroundTaskStepInput(input: StepInput): StepInput {
     : markFrameworkStepInput(input, "execution.background_task");
 }
 
-/** Groups overlapping tasks without changing the delivered task's activity root. */
+/** Projects the report group without changing the delivered task's activity root. */
 export function resolveTaskDeliveryContext(input: {
   readonly state: SessionStateMap | undefined;
-  readonly taskDeliveryId: string;
+  readonly taskDeliveryIds: readonly string[];
+  readonly taskDeliveryPolicy: TaskDeliveryPolicy;
 }):
   | {
       readonly context: string;
@@ -49,16 +52,19 @@ export function resolveTaskDeliveryContext(input: {
       readonly rootTurnId: string;
     }
   | undefined {
+  const firstDeliveryId = input.taskDeliveryIds[0];
+  if (firstDeliveryId === undefined) return undefined;
   const entries = getBackgroundWorkflowToolRuns(input.state);
-  const delivered = entries.find((entry) =>
-    input.taskDeliveryId.startsWith(`${entry.task.taskId}:`),
-  );
+  const delivered = entries.find((entry) => firstDeliveryId.startsWith(`${entry.task.taskId}:`));
   if (delivered === undefined) return undefined;
 
   const cohort = entries.filter(
     (entry) => getTaskCohortId(entry.task) === getTaskCohortId(delivered.task),
   );
-  return { ...projectTaskCohort(cohort), rootTurnId: delivered.origin.turnId };
+  return {
+    ...projectTaskCohort(cohort, input.taskDeliveryPolicy === "auto"),
+    rootTurnId: delivered.origin.turnId,
+  };
 }
 
 /** Returns model context for durable tasks launched by the active parent turn. */
@@ -72,10 +78,13 @@ export function resolveInitiatingTaskContext(input: {
   if (!cohort.some((entry) => entry.task.outcome === undefined)) {
     return undefined;
   }
-  return { ...projectTaskCohort(cohort), phase: "initiating" };
+  return { ...projectTaskCohort(cohort, false), phase: "initiating" };
 }
 
-function projectTaskCohort(cohort: readonly BackgroundWorkflowToolRun[]): {
+function projectTaskCohort(
+  cohort: readonly BackgroundWorkflowToolRun[],
+  includePartialOutputs: boolean,
+): {
   readonly context: string;
   readonly phase: "pending" | "settled";
 } {
@@ -84,7 +93,7 @@ function projectTaskCohort(cohort: readonly BackgroundWorkflowToolRun[]): {
     const view = readWorkflowTaskView(entry.task);
     return {
       name: entry.task.metadata.name,
-      output: settled ? view?.lastOutput : undefined,
+      output: settled || includePartialOutputs ? view?.lastOutput : undefined,
       status: view?.status ?? "pending",
       taskId: entry.task.taskId,
     };

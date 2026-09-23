@@ -37,6 +37,7 @@ export type {
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
+  TaskDeliveryPolicy,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";

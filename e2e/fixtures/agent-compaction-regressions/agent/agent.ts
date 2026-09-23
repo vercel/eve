@@ -13,23 +13,19 @@ import {
   TASK_TAIL_SENTINEL,
 } from "../constants";
 import { assistantHasReport } from "../report-evidence";
-import { handoffReferences, reviewReferences } from "../release-reports";
+import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 const TEST_CONTEXT_WINDOW_TOKENS = 32_000;
-// The compiled fixture's instructions and 13 advertised tools occupy ~2,823
+// The compiled fixture's instructions and 11 advertised tools occupy ~2,371
 // tokens. Reserve them in addition to the summarizer's history budget.
-const TEST_REQUEST_ENVELOPE_TOKENS = 2_823;
+const TEST_REQUEST_ENVELOPE_TOKENS = 2_371;
 // Fit the capped file-output exchange, while forcing the larger review and
 // handoff reports into the assistant checkpoint consumed by the script.
 const TEST_HISTORY_BUDGET_TOKENS = 900;
 const COMPACTION_PRESSURE_USAGE = { inputTokens: TEST_REQUEST_ENVELOPE_TOKENS + 4_096 };
 const MAX_TOOL_CALLS = 10;
 
-type RegressionCase =
-  | "content-output-file-stub"
-  | "redundant-tool-calls"
-  | "stale-todo-work"
-  | "task-survival";
+type RegressionCase = "content-output-file-stub" | "redundant-tool-calls" | "task-survival";
 
 let activeCase: RegressionCase | undefined;
 const handoffCallCounts = new Map<RegressionCase, number>();
@@ -172,9 +168,8 @@ const taskModel = mockModel({
       };
     }
 
-    const subject = regressionCase === "redundant-tool-calls" ? "repository" : "checkout";
-    const reviewId = reviewReferences[subject];
-    const handoffId = handoffReferences[subject];
+    const reviewId = REVIEW_REFERENCE;
+    const handoffId = HANDOFF_REFERENCE;
 
     if (assistantHasReport(request.messages, reviewId)) {
       if (assistantHasReport(request.messages, handoffId)) {
@@ -191,7 +186,7 @@ const taskModel = mockModel({
         toolCalls: [
           {
             id: `prepare-handoff-${handoffCalls + 1}`,
-            input: { subject, reviewId },
+            input: { reviewId },
             name: "prepare-handoff",
           },
         ],
@@ -207,9 +202,9 @@ const taskModel = mockModel({
       usage: COMPACTION_PRESSURE_USAGE,
       toolCalls: [
         {
-          id: `${subject}-review-${reviewCalls + 1}`,
-          input: { scope: subject },
-          name: subject === "repository" ? "inspect-repository" : "perform-source-analysis",
+          id: `repository-review-${reviewCalls + 1}`,
+          input: { scope: "repository" },
+          name: "inspect-repository",
         },
       ],
     };
@@ -246,7 +241,6 @@ function regressionCaseFromText(text: string): RegressionCase | undefined {
   if (text.includes("[case: content-output-file-stub]")) return "content-output-file-stub";
   if (text.toLowerCase().includes("review the storefront repository"))
     return "redundant-tool-calls";
-  if (text.toLowerCase().includes("review the checkout implementation")) return "stale-todo-work";
   if (text.includes("[case: task-survival]")) return "task-survival";
   return undefined;
 }

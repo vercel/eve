@@ -16,7 +16,7 @@ Initialize an agent from the current `main` build with:
 npm exec --yes --package=https://pkg.eve.dev/main/eve.tgz -- eve init my-agent
 ```
 
-A same-repository pull-request build is available after its **Vercel – eve-pkg** deployment succeeds. Fork pull requests and direct branch deployments never build or publish package artifacts. For example:
+A same-repository pull-request build is available after its **Vercel – eve-pkg** deployment succeeds, including when the pull request targets another branch in a stack. Fork pull requests and direct branch deployments never build or publish package artifacts. For example:
 
 ```bash
 npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent

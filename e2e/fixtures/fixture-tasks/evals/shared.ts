@@ -140,7 +140,7 @@ export async function sendAndFollowQueuedTurn(
   options: FollowQueuedTurnOptions = {},
 ): Promise<FollowedQueuedTurn> {
   let session = initialSession;
-  let turn = await session.send(message);
+  let turn = await session.send(message, { taskDeliveryPolicy: "cohort" });
   const observedTurns = [turn];
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (options.allowFailedActions !== true) {

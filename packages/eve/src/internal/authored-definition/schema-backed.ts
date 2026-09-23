@@ -132,11 +132,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
   const hasExecute = record.execute !== undefined;
-  if (
-    !hasExecute &&
-    behavior?.handling?.kind !== "dispatch" &&
-    behavior?.handling?.kind !== "request-input"
-  ) {
+  if (!hasExecute && behavior?.handling?.kind !== "dispatch") {
     expectFunction(record.execute, message);
   }
   const definition: MutableNormalizedAuthoredTool = {

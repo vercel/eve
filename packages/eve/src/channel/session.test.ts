@@ -55,6 +55,20 @@ function createRuntime(): Runtime {
 }
 
 describe("createSession#cancel", () => {
+  it("passes an explicit task policy through a fixed-session send", async () => {
+    const runtime = createRuntime();
+    await createSession("sess_1", runtime).send("Report when ready", {
+      auth: null,
+      taskDeliveryPolicy: "auto",
+    });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess_1",
+        command: expect.objectContaining({ taskDeliveryPolicy: "auto" }),
+      }),
+    );
+  });
+
   it("cancels this session's turn by session id", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);

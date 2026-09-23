@@ -1,6 +1,7 @@
 /**
- * Pure rendering for the HITL question panel — the overlay the agent's
- * `ask_question` tool opens above the input area. A full-width rule separates
+ * Pure rendering for the HITL question panel — the overlay a pending question
+ * request (such as one from `ask_question` or `ctx.ask()`) opens above the
+ * input area. A full-width rule separates
  * it from the transcript, options render as numbered rows with their
  * descriptions always visible, and the trailing "Type your own answer" row
  * carries an inline elbow editor that receives focus the moment the cursor
