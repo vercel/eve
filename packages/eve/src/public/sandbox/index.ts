@@ -6,7 +6,6 @@ export {
   type SandboxSelector,
   type SandboxSelectorContext,
   type SandboxCommandResult,
-  type NetworkPolicySandboxSession,
   type SandboxProcess,
   type SandboxReadBinaryFileOptions,
   type SandboxReadFileOptions,

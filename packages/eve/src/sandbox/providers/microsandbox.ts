@@ -1,3 +1,4 @@
+import type { MicrosandboxSandboxSession } from "#public/sandbox/microsandbox.js";
 import {
   createMicrosandboxSandboxProvider,
   type MicrosandboxProviderSessionState,
@@ -9,7 +10,6 @@ import type {
 } from "#public/sandbox/microsandbox-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 
 export type MicrosandboxEnvironmentOptions = MicrosandboxSandboxCreateOptions;
 
@@ -20,7 +20,7 @@ const provider = defineSandboxProvider<
   MicrosandboxSandboxRuntimeOptions,
   MicrosandboxPreparedArtifact,
   MicrosandboxProviderSessionState,
-  NetworkPolicySandboxSession
+  MicrosandboxSandboxSession
 >({
   name: "microsandbox",
   stateProtocolVersion: 3,
@@ -31,13 +31,13 @@ export const MicrosandboxSandbox = {
   ...provider,
   dockerfile(
     options: DockerfileEnvironmentInput = {},
-  ): SandboxEnvironment<MicrosandboxSandboxRuntimeOptions, NetworkPolicySandboxSession> {
+  ): SandboxEnvironment<MicrosandboxSandboxRuntimeOptions, MicrosandboxSandboxSession> {
     return provider.environment(options);
   },
   image(
     reference: string,
     options: DockerfileEnvironmentInput = {},
-  ): SandboxEnvironment<MicrosandboxSandboxRuntimeOptions, NetworkPolicySandboxSession> {
+  ): SandboxEnvironment<MicrosandboxSandboxRuntimeOptions, MicrosandboxSandboxSession> {
     return provider.environment({ ...options, image: reference });
   },
 };

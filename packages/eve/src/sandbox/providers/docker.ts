@@ -1,3 +1,4 @@
+import type { DockerSandboxSession } from "#public/sandbox/docker.js";
 import { createDockerSandboxProvider } from "#execution/sandbox/bindings/local.js";
 import type {
   DockerSandboxEnvironmentOptions,
@@ -5,7 +6,6 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 
 export type {
   DockerSandboxEnvironmentOptions,
@@ -19,7 +19,7 @@ const provider = defineSandboxProvider<
   DockerSandboxRuntimeOptions,
   { readonly imageReference: string },
   { readonly containerName: string; readonly generation: string; readonly version: 2 },
-  NetworkPolicySandboxSession
+  DockerSandboxSession
 >({
   name: "docker",
   environment(options) {
@@ -31,13 +31,13 @@ export const DockerSandbox = {
   ...provider,
   dockerfile(
     options: DockerfileEnvironmentInput = {},
-  ): SandboxEnvironment<DockerSandboxRuntimeOptions, NetworkPolicySandboxSession> {
+  ): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession> {
     return provider.environment(options);
   },
   image(
     reference: string,
     options: DockerfileEnvironmentInput = {},
-  ): SandboxEnvironment<DockerSandboxRuntimeOptions, NetworkPolicySandboxSession> {
+  ): SandboxEnvironment<DockerSandboxRuntimeOptions, DockerSandboxSession> {
     return provider.environment({ ...options, image: reference });
   },
 };

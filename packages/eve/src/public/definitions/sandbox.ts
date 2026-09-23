@@ -1,6 +1,5 @@
 import type { SandboxSelector } from "#shared/sandbox-environment.js";
 
-export type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
 export type {
   SandboxCommandResult,
   SandboxProcess,

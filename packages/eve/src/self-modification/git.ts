@@ -1,7 +1,10 @@
 import type { SandboxSession } from "eve/sandbox";
 
 import { gitHubGitBrokerNetworkPolicy } from "#shared/git.js";
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 
 import { SELF_MODIFICATION_BASELINE_NETWORK_POLICY } from "./network-policy.js";
 

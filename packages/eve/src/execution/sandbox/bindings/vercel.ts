@@ -1,4 +1,7 @@
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import {
   applyInitialVercelNetworkPolicy,

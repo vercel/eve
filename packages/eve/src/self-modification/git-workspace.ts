@@ -1,6 +1,9 @@
 import type { SandboxSession } from "eve/sandbox";
 
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 
 import { gitHubRemoteUrl } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";

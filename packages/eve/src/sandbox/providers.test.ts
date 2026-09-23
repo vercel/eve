@@ -1,4 +1,4 @@
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
+import type { DockerSandboxSession } from "#public/sandbox/docker.js";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { defineDefaultSandboxProvider } from "#sandbox/providers/default.js";
@@ -26,9 +26,9 @@ describe("sandbox providers", () => {
   });
 
   it("returns runtime sandboxes from open", () => {
-    const environment = DockerSandbox.environment();
+    const environment = DockerSandbox.environment({});
     expectTypeOf(environment.open).returns.toEqualTypeOf<
-      Promise<RuntimeSandboxSessionFor<NetworkPolicySandboxSession>>
+      Promise<RuntimeSandboxSessionFor<DockerSandboxSession>>
     >();
   });
 });

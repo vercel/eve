@@ -12,9 +12,11 @@ import type {
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
-import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
+import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 
 /**

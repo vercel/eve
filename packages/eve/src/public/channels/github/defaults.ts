@@ -1,4 +1,8 @@
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";

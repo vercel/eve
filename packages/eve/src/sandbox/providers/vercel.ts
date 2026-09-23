@@ -1,4 +1,4 @@
-import type { NetworkPolicySandboxSession } from "#public/sandbox/network-policy-session.js";
+import type { VercelSandboxSession } from "#public/sandbox/vercel.js";
 import {
   createVercelSandbox,
   createVercelSandboxProvider,
@@ -23,7 +23,7 @@ const defaultProvider = defineSandboxProvider<
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
-  NetworkPolicySandboxSession
+  VercelSandboxSession
 >({
   name: "vercel",
   environment: (options) => {
@@ -37,7 +37,7 @@ const provider = defineSandboxProvider<
   VercelSandboxRuntimeOptions,
   VercelSandboxPreparedArtifact,
   VercelSandboxSessionState,
-  NetworkPolicySandboxSession
+  VercelSandboxSession
 >({
   name: "vercel",
   environment: (options) => createVercelSandboxProvider(options),
@@ -45,7 +45,7 @@ const provider = defineSandboxProvider<
 
 export function createDefaultVercelEnvironment(
   options?: VercelSandboxEnvironmentOptions,
-): SandboxEnvironment<VercelSandboxRuntimeOptions, NetworkPolicySandboxSession> {
+): SandboxEnvironment<VercelSandboxRuntimeOptions, VercelSandboxSession> {
   return defaultProvider.environment(options);
 }
 
@@ -53,7 +53,7 @@ export const VercelSandbox = {
   name: "vercel",
   environment(
     options?: VercelSandboxEnvironmentOptions,
-  ): SandboxEnvironment<VercelSandboxRuntimeOptions, NetworkPolicySandboxSession> {
+  ): SandboxEnvironment<VercelSandboxRuntimeOptions, VercelSandboxSession> {
     return provider.environment(options);
   },
 };
