@@ -2787,6 +2787,12 @@ describe("createAgentOtelInstrumentation", () => {
     await emitAttempt({
       channelAudience: "public",
       hooks: runtime.hooks,
+      modelTools: [
+        {
+          inputSchema: { type: "object" },
+          name: "get_weather",
+        },
+      ],
       runInContext: runtime.runInContext,
       sessionId: "session-redacted",
       turnId: "turn-redacted",
@@ -2800,6 +2806,9 @@ describe("createAgentOtelInstrumentation", () => {
     );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
       "gen_ai.system_instructions",
+    );
+    expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.tool.definitions",
     );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
       "gen_ai.output.messages",
