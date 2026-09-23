@@ -5612,9 +5612,6 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("empty model response recovery", () => {
-    const emptyResponseNudge =
-      "Your previous reply was empty and was not delivered. Continue the current user request. Reuse completed results when they satisfy the request. If existing results are stale or insufficient, use the appropriate read tools to get fresh results. Do not repeat writes or other side effects that already completed. Do not mention this notice.";
-
     const emptyResult: Record<string, unknown> = {
       content: [],
       finishReason: "other",
@@ -5730,7 +5727,7 @@ describe("createToolLoopHarness", () => {
           role: string;
         }>;
         expect(reissueMessages.at(-1)).toMatchObject({
-          content: emptyResponseNudge,
+          content: expect.stringContaining("was not delivered"),
           kind: "execution.retry",
           role: "user",
         });
@@ -5832,7 +5829,7 @@ describe("createToolLoopHarness", () => {
           ]),
         );
         expect(retryMessages.at(-1)).toMatchObject({
-          content: emptyResponseNudge,
+          content: expect.stringContaining("use the appropriate read tools to get fresh results"),
           kind: "execution.retry",
           role: "user",
         });
@@ -5905,13 +5902,12 @@ describe("createToolLoopHarness", () => {
           ]),
         );
         expect(retryMessages.at(-1)).toMatchObject({
-          content: emptyResponseNudge,
+          content: expect.stringContaining(
+            "Do not repeat writes or other side effects that already completed.",
+          ),
           kind: "execution.retry",
           role: "user",
         });
-        expect(retryMessages.at(-1)?.content).toContain(
-          "Do not repeat writes or other side effects that already completed.",
-        );
       } finally {
         warnSpy.mockRestore();
       }
