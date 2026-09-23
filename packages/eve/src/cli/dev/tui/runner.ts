@@ -284,7 +284,7 @@ export type AgentTUIRenderer = {
   clearSetupWarning?(): void;
   /** Commits the startup `/deploy` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
-  renderCommandResult?(text: string, tone?: "success" | "error"): void;
+  renderCommandResult?(text: string, status?: CommandResultStatus): void;
   readonly setupFlow?: SetupFlowRenderer;
   /**
    * The renderer's full-screen local trace viewer, opened by `/traces`.
@@ -405,6 +405,9 @@ export interface PromptCommandHandlerContext {
   readonly withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
 }
+
+/** How a settled slash command marks its echoed invocation. */
+export type CommandResultStatus = "success" | "error" | "cancelled";
 
 /** What one handled slash command leaves behind for the runner to apply. */
 export interface PromptCommandOutcome {
@@ -1665,6 +1668,7 @@ export class EveTUIRunner {
   }
 
   async #openRegistrySetup(address: string): Promise<void> {
+    this.#renderer.renderCommandInvocation?.(`/add ${address}`);
     await this.#executeExtensionCommand(
       { type: "extension", name: "add", argument: address },
       "Add to your agent",
@@ -1743,13 +1747,14 @@ export class EveTUIRunner {
     }
   }
 
-  #renderCommandOutcome(text: string | undefined, tone?: "success" | "error"): void {
-    if (text === undefined) return;
+  #renderCommandOutcome(text: string | undefined, status?: CommandResultStatus): void {
     if (this.#renderer.renderCommandResult !== undefined) {
-      this.#renderer.renderCommandResult(text, tone);
+      if (text !== undefined || status !== undefined) {
+        this.#renderer.renderCommandResult(text ?? "", status);
+      }
       return;
     }
-    this.#renderer.renderNotice?.(text);
+    if (text !== undefined && text.length > 0) this.#renderer.renderNotice?.(text);
   }
 
   async #handleExtensionCommand(
@@ -1835,7 +1840,7 @@ export class EveTUIRunner {
       (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
       (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
     if (!suppressTranscript && input.trigger !== "startup")
-      this.#renderCommandOutcome(outcome?.message, outcome?.tone);
+      this.#renderCommandOutcome(outcome?.message, commandResultStatus(outcome));
     this.#refreshHeaderFromRemoteConnection();
     return outcome;
   }
@@ -2797,3 +2802,11 @@ type ConnectionAuthRun = {
   webhookUrl?: string;
   reason?: string;
 };
+
+function commandResultStatus(
+  outcome: PromptCommandOutcome | undefined,
+): CommandResultStatus | undefined {
+  if (outcome?.tone === "error") return "error";
+  if (outcome?.cancelled === true) return "cancelled";
+  return outcome?.tone;
+}

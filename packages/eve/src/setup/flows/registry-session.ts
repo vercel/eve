@@ -9,30 +9,23 @@ export interface RegistrySessionDeps {
   runDeployFlow: typeof runDeployFlow;
 }
 
-export interface RegistrySessionItemResult {
-  title: string;
-  facts: readonly RegistrySetupFact[];
-  output: readonly string[];
-}
-
-/** An item the user chose to skip after its installation could not complete. */
-export interface RegistrySessionItemFailure {
-  title: string;
-  /** User-facing installation error, including any actionable follow-up lines. */
-  message: string;
-}
-
 export type RegistrySessionOutcome =
-  | ({ kind: "installed" } & RegistrySessionItemResult)
-  | ({ kind: "failed" } & RegistrySessionItemFailure)
+  | {
+      kind: "installed";
+      title: string;
+      facts: readonly RegistrySetupFact[];
+      output: readonly string[];
+    }
+  /** Files were added, but the item's setup was cancelled or skipped. */
+  | { kind: "incomplete"; title: string; resumeCommand: string }
+  /** User-facing installation error, including any actionable follow-up lines. */
+  | { kind: "failed"; title: string; message: string }
+  /** Stopped before anything was written. */
   | { kind: "cancelled"; title: string };
 
 export interface RegistrySessionResult {
-  items: readonly RegistrySessionItemResult[];
-  /** Installation failures retained when a user skips an item. */
-  failures: readonly RegistrySessionItemFailure[];
   /** Every item outcome in installation order. */
-  outcomes?: readonly RegistrySessionOutcome[];
+  outcomes: readonly RegistrySessionOutcome[];
   /** Setup stopped outside an individual item after preserving settled results. */
   cancelled?: true;
   deployed?: "production";
@@ -40,6 +33,7 @@ export interface RegistrySessionResult {
 
 export interface RegistrySession {
   add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
+  addIncomplete(title: string, resumeCommand: string): void;
   addFailure(title: string, message: string): void;
   addCancellation(title: string): void;
   result(deployed?: "production"): RegistrySessionResult;
@@ -56,16 +50,7 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
   let deploymentRequired = false;
 
   function result(deployed?: "production"): RegistrySessionResult {
-    const items = outcomes.flatMap((outcome) =>
-      outcome.kind === "installed"
-        ? [{ title: outcome.title, facts: outcome.facts, output: outcome.output }]
-        : [],
-    );
-    const failures = outcomes.flatMap((outcome) =>
-      outcome.kind === "failed" ? [{ title: outcome.title, message: outcome.message }] : [],
-    );
-    const session: RegistrySessionResult = { items, failures };
-    if (outcomes.some((outcome) => outcome.kind !== "installed")) session.outcomes = outcomes;
+    const session: RegistrySessionResult = { outcomes: [...outcomes] };
     if (deployed !== undefined) session.deployed = deployed;
     return session;
   }
@@ -74,6 +59,10 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
     add(title, itemOutput, setup = { facts: [] }) {
       outcomes.push({ kind: "installed", title, facts: setup.facts, output: itemOutput });
       deploymentRequired ||= setup.deploymentRequired === true;
+    },
+
+    addIncomplete(title, resumeCommand) {
+      outcomes.push({ kind: "incomplete", title, resumeCommand });
     },
 
     addFailure(title, message) {

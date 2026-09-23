@@ -24,7 +24,7 @@ import {
   wrapVisibleLine,
 } from "#cli/ui/terminal-text.js";
 
-export type ToolStatus = "running" | "done" | "error" | "denied" | "approval";
+export type ToolStatus = "running" | "done" | "error" | "denied" | "approval" | "cancelled";
 
 export type BlockKind =
   | "user"
@@ -432,14 +432,22 @@ function paintCommands(line: string, theme: Theme): string {
 }
 
 /**
- * A slash command invocation under the user gutter. Automatic commands use
- * the same row so their result can follow it. The `❯` glyph remains
- * exclusive to live input because the TUI tests use `❯` to detect a ready prompt.
+ * A slash command invocation. Its gutter carries the settled outcome — `✓`,
+ * `⨯`, or `─` — and stays the user `│` while running or when the command only
+ * reports. The `❯` glyph remains exclusive to live input because the TUI tests
+ * use `❯` to detect a ready prompt.
  */
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;
-  const status = block.status === "error" ? `${c.red(theme.glyph.error)} ` : "";
-  return [`${c.cyan(theme.glyph.user)} ${status}${c.bold(block.body ?? "")}`];
+  const gutter =
+    block.status === "done"
+      ? c.green(theme.glyph.success)
+      : block.status === "error"
+        ? c.red(theme.glyph.error)
+        : block.status === "cancelled"
+          ? c.yellow(theme.glyph.dash)
+          : c.cyan(theme.glyph.user);
+  return [`${gutter} ${c.bold(block.body ?? "")}`];
 }
 
 /**
@@ -452,6 +460,7 @@ function paintOutcomeMarker(line: string, theme: Theme, source = line): string {
   if (marker === "✓") return line.replace(marker, theme.colors.green(theme.glyph.success));
   if (marker === "⨯") return line.replace(marker, theme.colors.red(theme.glyph.error));
   if (marker === "–") return line.replace(marker, theme.colors.yellow(theme.glyph.dash));
+  if (marker === "⚠") return line.replace(marker, theme.colors.yellow(theme.glyph.warning));
   return line;
 }
 

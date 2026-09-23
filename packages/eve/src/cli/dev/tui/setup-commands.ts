@@ -11,11 +11,9 @@ import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import {
-  formatRegistrySessionResult,
-  registryItemProgress,
-  registryResultTone,
-} from "./registry-result-message.js";
+import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
+
+import { registryCommandOutcome, registryItemProgress } from "./registry-result-message.js";
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
 import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
@@ -105,7 +103,8 @@ export interface TuiSetupCommandResult {
 function muteableRenderer(
   renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
-  withSuspendedRuntime?: TuiSetupCommandInput["withExclusiveTerminal"],
+  withSuspendedRuntime: TuiSetupCommandInput["withExclusiveTerminal"],
+  warnings: string[],
 ): MuteableSetupRenderer {
   return {
     readSelect: (options) =>
@@ -128,6 +127,7 @@ function muteableRenderer(
       if (!isMuted()) renderer.setStatus(text);
     },
     renderLine: (text, tone) => {
+      if (tone === "warning") warnings.push(text);
       if (!isMuted() || tone === "warning" || tone === "error") {
         renderer.renderLine(text, tone);
       }
@@ -163,7 +163,14 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
+  // Flow warnings outlive the panel only as short notes on the `/add` outcome.
+  const warnings: string[] = [];
+  const renderer = muteableRenderer(
+    input.renderer,
+    () => interrupted,
+    input.withExclusiveTerminal,
+    warnings,
+  );
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   let cancelActiveRegistryItem: (() => void) | undefined;
@@ -186,6 +193,7 @@ export async function runTuiSetupCommand(
     renderer,
     controller.signal,
     runRegistryItem,
+    warnings,
   );
   const outcomePromise = execution.then((value) => ({ kind: "outcome" as const, value }));
   try {
@@ -234,6 +242,7 @@ async function executeSetupCommand(
   renderer: MuteableSetupRenderer,
   signal: AbortSignal,
   runRegistryItem: <T>(task: (signal?: AbortSignal) => Promise<T>) => Promise<T>,
+  warnings: readonly string[],
 ): Promise<TuiSetupCommandResult> {
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
@@ -264,6 +273,7 @@ async function executeSetupCommand(
             }
           : {
               message: "Connected. Start chatting · /add to extend your agent",
+              tone: "success",
               effect: {
                 kind: "model-access-changed",
                 reload: result.reload,
@@ -283,24 +293,12 @@ async function executeSetupCommand(
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
         });
-        if (flow.kind === "cancelled") {
+        if (flow.kind === "cancelled" || flow.result.outcomes.length === 0) {
           return cancelledSetupResult();
         }
-        const result = flow.result;
-        const tone = registryResultTone(result);
-        const report =
-          result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined
-            ? formatRegistrySessionResult(result)
-            : "No integrations selected.";
-        const outcome: TuiSetupCommandResult = {
-          message: tone === "error" ? `/add failed — ${report}` : report,
-          preserveFlowDiagnostics: true,
-        };
-        if (result.cancelled === true) {
-          outcome.partial = true;
-          outcome.tone = "error";
-        } else if (tone !== undefined) outcome.tone = tone;
-        if (result.deployed === "production") outcome.effect = { kind: "deployed" };
+        const outcome = registryResult(flow.result, warnings);
+        if (flow.result.cancelled === true) outcome.partial = true;
+        if (flow.result.deployed === "production") outcome.effect = { kind: "deployed" };
         return outcome;
       }
       case "deploy": {
@@ -325,6 +323,7 @@ async function executeSetupCommand(
         return {
           message:
             result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
+          tone: "success",
           preserveFlowDiagnostics: true,
           effect: { kind: "deployed" },
         };
@@ -340,39 +339,51 @@ async function executeSetupCommand(
       prompter,
       signal,
     });
-    if (upgrade !== undefined) return withRegistryResults(upgrade, error);
+    if (upgrade !== undefined) return withRegistryResults(upgrade, error, warnings);
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
     const routed = vercelActionOutcome(actionableError, command);
-    if (routed !== undefined) return withRegistryResults(routed, error);
+    if (routed !== undefined) return withRegistryResults(routed, error, warnings);
     if (error instanceof RegistryFlowFailedError) {
-      return {
-        message: `${formatRegistrySessionResult(error.completed)}\n\n${error.message}`,
-        partial: true,
-        tone: "error",
-        preserveFlowDiagnostics: true,
-      };
+      return withRegistryResults(
+        { message: error.message, tone: "error", preserveFlowDiagnostics: false },
+        error,
+        warnings,
+      );
     }
     return {
-      message: `/${command} failed: ${error instanceof Error ? error.message : String(error)}`,
+      message: error instanceof Error ? error.message : String(error),
       tone: "error",
-      preserveFlowDiagnostics: true,
+      preserveFlowDiagnostics: command !== "add",
     };
   }
+}
+
+function registryResult(
+  result: RegistrySessionResult,
+  warnings: readonly string[],
+): TuiSetupCommandResult {
+  const { status, message } = registryCommandOutcome(result, warnings);
+  const outcome: TuiSetupCommandResult = { message, preserveFlowDiagnostics: false };
+  if (status === "cancelled") outcome.cancelled = true;
+  else outcome.tone = status;
+  return outcome;
 }
 
 function withRegistryResults(
   outcome: TuiSetupCommandResult,
   error: unknown,
+  warnings: readonly string[],
 ): TuiSetupCommandResult {
   if (!(error instanceof RegistryFlowFailedError)) return outcome;
+  const completed = registryResult(error.completed, warnings).message;
   return {
     ...outcome,
-    message: `${formatRegistrySessionResult(error.completed)}\n\n${outcome.message}`,
+    message: [completed, outcome.message].filter((part) => part !== "").join("\n"),
     partial: true,
     tone: "error",
-    preserveFlowDiagnostics: true,
+    preserveFlowDiagnostics: false,
   };
 }
 

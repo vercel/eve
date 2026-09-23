@@ -1032,7 +1032,7 @@ describe("provisionSlackbot", () => {
 
     await expect(provisioning).rejects.toMatchObject({ name: "AbortError" });
     expect(log.warning).toHaveBeenCalledWith(
-      "Vercel returned no connector UID for the abandoned Slack Connect request, so eve cannot prove that request was cancelled. No connector was removed; do not retry until the browser request is no longer usable.",
+      "eve couldn't confirm the Slack request in your browser was cancelled. Wait for it to expire before retrying.",
     );
   });
 

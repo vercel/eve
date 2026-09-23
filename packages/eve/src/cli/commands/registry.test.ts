@@ -811,6 +811,53 @@ describe("registry commands", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it("treats a cancellation thrown by the setup CLI like a returned one", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => {
+      throw new WizardCancelledError();
+    });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(logger.logs).toEqual([
+      "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+    expect(logger.errors).toEqual([]);
+  });
+
+  it("returns unfinished setup to the TUI as a structured resume command", async () => {
+    const fake = createFakePrompter();
+    const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await expect(
+      installRegistryItem(
+        "/project",
+        "channel/slack",
+        { prompter: fake.prompter, silent: true },
+        { loadSetupCommandRunner: async () => runSetup },
+      ),
+    ).resolves.toEqual({
+      output: [],
+      setupIncomplete: { resumeCommand: "eve add channel/slack --skip-install" },
+    });
+  });
+
   it("runs setup directly without installing the item", async () => {
     const logger = createLogger();
     const runSetup = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));

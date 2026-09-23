@@ -1,5 +1,10 @@
 import type { RegistryCatalogItem } from "#cli/commands/registry.js";
-import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
+import type {
+  RegistrySessionOutcome,
+  RegistrySessionResult,
+} from "#setup/flows/registry-session.js";
+
+import type { CommandResultStatus } from "./runner.js";
 
 /** Builds the shared transient progress update for `/add` and initial onboarding. */
 export function registryItemProgress(renderer: {
@@ -17,84 +22,63 @@ export function registryItemProgress(renderer: {
   };
 }
 
-export function registryResultTone(result: RegistrySessionResult): "success" | "error" | undefined {
-  if (result.failures.length > 0 && result.items.length === 0) return "error";
-  if (result.outcomes?.some((outcome) => outcome.kind === "cancelled")) return undefined;
-  return result.items.length > 0 ? "success" : undefined;
+export interface RegistryCommandOutcome {
+  status: CommandResultStatus;
+  /** Detail hung under the echoed `/add`; empty when the gutter says it all. */
+  message: string;
 }
 
-function joinedTitles(titles: readonly string[]): string {
-  if (titles.length === 0) return "";
-  if (titles.length === 1) return titles[0]!;
-  if (titles.length === 2) return `${titles[0]} and ${titles[1]}`;
-  return `${titles.slice(0, -1).join(", ")}, and ${titles.at(-1)}`;
-}
+const OUTCOME_MARKER = {
+  installed: "✓",
+  incomplete: "–",
+  failed: "⨯",
+  cancelled: "–",
+} as const;
 
-function formatFailureMessage(message: string): string {
-  return message.replace(" Try again with `", "\nTry again with `");
-}
-
-function resultHeadline(
-  outcomes: readonly { kind: "installed" | "failed" | "cancelled" }[],
-  installedTitles: readonly string[],
-): string {
-  const failed = outcomes.filter((outcome) => outcome.kind === "failed").length;
-  const cancelled = outcomes.filter((outcome) => outcome.kind === "cancelled").length;
-  if (failed === 0 && cancelled === 0) return `Added ${joinedTitles(installedTitles)}`;
-
-  const installed = outcomes.length - failed - cancelled;
-  const parts = [
-    installed > 0 ? `${installed} added` : undefined,
-    failed > 0 ? `${failed} failed` : undefined,
-    cancelled > 0 ? `${cancelled} cancelled` : undefined,
-  ].filter((part): part is string => part !== undefined);
-  return `${outcomes.length} ${outcomes.length === 1 ? "addition" : "additions"}: ${parts.join(", ")}`;
-}
-
-/** Formats structured registry setup results after their temporary panel closes. */
-export function formatRegistrySessionResult(result: RegistrySessionResult): string {
-  const outcomes = result.outcomes ?? [
-    ...result.items.map((item) => ({ kind: "installed" as const, ...item })),
-    ...result.failures.map((failure) => ({ kind: "failed" as const, ...failure })),
-  ];
-  const lines = [
-    resultHeadline(
-      outcomes,
-      result.items.map((item) => item.title),
-    ),
-  ];
-  for (const outcome of outcomes) {
-    const marker = outcome.kind === "installed" ? "✓" : outcome.kind === "failed" ? "⨯" : "–";
-    lines.push("", `  ${marker} ${outcome.title}`);
-    if (outcome.kind === "cancelled") {
-      lines.push("    Cancelled.");
-      continue;
+function outcomeDetails(outcome: RegistrySessionOutcome): string[] {
+  switch (outcome.kind) {
+    case "installed": {
+      const labeledFacts = outcome.facts.filter((fact) => fact.label.length > 0);
+      const width = Math.max(0, ...labeledFacts.map((fact) => fact.label.length));
+      return [
+        ...outcome.facts.map((fact) =>
+          fact.label.length === 0 ? fact.value : `${fact.label.padEnd(width)}  ${fact.value}`,
+        ),
+        ...outcome.output,
+      ];
     }
-    if (outcome.kind === "failed") {
-      lines.push(
-        ...formatFailureMessage(outcome.message)
-          .split("\n")
-          .map((line) => `    ${line}`),
-      );
-      continue;
-    }
-    if (outcome.facts.length === 0 && outcome.output.length === 0) {
-      lines.push("    Installed.");
-      continue;
-    }
-    const labeledFacts = outcome.facts.filter((fact) => fact.label.length > 0);
-    const width = Math.max(0, ...labeledFacts.map((fact) => fact.label.length));
-    for (const fact of outcome.facts) {
-      lines.push(
-        fact.label.length === 0
-          ? `    ${fact.value}`
-          : `    ${fact.label.padEnd(width)}  ${fact.value}`,
-      );
-    }
-    for (const output of outcome.output) lines.push(`    ${output}`);
+    case "incomplete":
+      return ["Setup not finished", `Finish with \`${outcome.resumeCommand}\``];
+    case "failed":
+      return outcome.message.replace(" Try again with `", "\nTry again with `").split("\n");
+    case "cancelled":
+      return [];
   }
-  if (result.cancelled === true) {
-    lines.push("", "Setup stopped before the remaining selections were added.");
-  }
-  return lines.join("\n");
+}
+
+function outcomeStatus(outcomes: readonly RegistrySessionOutcome[]): CommandResultStatus {
+  if (outcomes.some((outcome) => outcome.kind === "failed")) return "error";
+  if (outcomes.every((outcome) => outcome.kind === "installed")) return "success";
+  return "cancelled";
+}
+
+/**
+ * Summarizes an `/add` session for the echoed command: the gutter carries the
+ * outcome, so one item only adds its details, and several items list one
+ * marked row each.
+ */
+export function registryCommandOutcome(
+  result: RegistrySessionResult,
+  notes: readonly string[] = [],
+): RegistryCommandOutcome {
+  const { outcomes } = result;
+  const lines =
+    outcomes.length === 1
+      ? outcomeDetails(outcomes[0]!)
+      : outcomes.flatMap((outcome) => [
+          `${OUTCOME_MARKER[outcome.kind]} ${outcome.title}`,
+          ...outcomeDetails(outcome).map((line) => `  ${line}`),
+        ]);
+  lines.push(...notes.map((note) => `⚠ ${note}`));
+  return { status: outcomeStatus(outcomes), message: lines.join("\n") };
 }

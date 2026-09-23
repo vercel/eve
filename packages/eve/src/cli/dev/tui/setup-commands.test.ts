@@ -51,7 +51,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
 function registryResult(overrides: Partial<RegistrySessionResult> = {}) {
   return {
     kind: "done" as const,
-    result: { items: [], failures: [], ...overrides },
+    result: { outcomes: [], ...overrides },
   };
 }
 
@@ -185,32 +185,65 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
+  const installed = {
+    kind: "installed" as const,
+    title: "Agent Browser",
+    facts: [],
+    output: [],
+  };
+
   it.each([
     [
       "added",
-      registryResult({
-        items: [{ title: "Agent Browser", facts: [], output: [] }],
-      }),
-      "Added Agent Browser\n\n  ✓ Agent Browser\n    Installed.",
+      registryResult({ outcomes: [installed] }),
+      { message: "", tone: "success", preserveFlowDiagnostics: false },
     ],
-    ["empty", registryResult(), "No integrations selected."],
-    ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
-    ["cancelled", { kind: "cancelled" as const }, ""],
-  ] as const)("reports a %s registry flow", async (_case, result, message) => {
+    [
+      "deployed",
+      registryResult({ outcomes: [installed], deployed: "production" }),
+      { message: "", tone: "success", effect: { kind: "deployed" } },
+    ],
+    ["empty", registryResult(), { message: "", cancelled: true }],
+    ["cancelled", { kind: "cancelled" as const }, { message: "", cancelled: true }],
+  ] as const)("reports a %s registry flow", async (_case, result, expected) => {
     const runRegistryFlow = vi.fn(async () => result);
     const outcome = await run({ command: "add", flows: fakeFlows({ runRegistryFlow }) });
-    expect(outcome).toMatchObject({
-      message,
-      preserveFlowDiagnostics: result.kind !== "cancelled",
-    });
-    if (result.kind === "done" && result.result.items.length > 0)
-      expect(outcome.tone).toBe("success");
-    if (result.kind === "done" && result.result.deployed === "production") {
-      expect(outcome.effect).toEqual({ kind: "deployed" });
-    }
+    expect(outcome).toMatchObject(expected);
     expect(runRegistryFlow).toHaveBeenCalledWith(
       expect.objectContaining({ appRoot: APP_ROOT, installRoot: undefined }),
     );
+  });
+
+  it("keeps flow warnings only as notes on the add outcome", async () => {
+    const renderer = fakePanelRenderer();
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ prompter }) => {
+      prompter.log.warning("Wait for the Slack request to expire before retrying.");
+      return registryResult({
+        outcomes: [
+          {
+            kind: "incomplete",
+            title: "channel/slack",
+            resumeCommand: "eve add channel/slack --skip-install",
+          },
+        ],
+      });
+    });
+
+    await expect(
+      run({
+        command: "add",
+        flows: fakeFlows({ runRegistryFlow }),
+        renderer,
+        useDefaultPrompter: true,
+      }),
+    ).resolves.toEqual({
+      message:
+        "Setup not finished\n" +
+        "Finish with `eve add channel/slack --skip-install`\n" +
+        "⚠ Wait for the Slack request to expire before retrying.",
+      cancelled: true,
+      preserveFlowDiagnostics: false,
+    });
   });
 
   it("keeps shared setup at the workspace root while installing into its agent", async () => {
@@ -229,52 +262,25 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
-  it("reports completed items and skipped failures together", async () => {
+  it("reports a failed installation as an error without its flow logs", async () => {
     const flows = fakeFlows({
-      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
-        kind: "done",
-        result: {
-          items: [
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () =>
+        registryResult({
+          outcomes: [
             {
-              title: "Photon iMessage",
-              output: [],
-              facts: [{ label: "Agent phone number", value: "+15551234567" }],
-            },
-          ],
-          failures: [
-            {
-              title: "GitHub",
+              kind: "failed",
+              title: "connection/github",
               message: "Refusing to overwrite github.ts",
             },
           ],
-        },
-      })),
+        }),
+      ),
     });
 
-    await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringContaining("⨯ GitHub"),
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("headlines a completely failed registry batch", async () => {
-    const flows = fakeFlows({
-      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
-        kind: "done",
-        result: {
-          items: [],
-          failures: [
-            { title: "Web Chat", message: "Dependency installation failed." },
-            { title: "Vercel", message: "Connector setup failed." },
-          ],
-        },
-      })),
-    });
-
-    await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^\/add failed — 2 additions: 2 failed/),
+    await expect(run({ command: "add", flows })).resolves.toEqual({
+      message: "Refusing to overwrite github.ts",
       tone: "error",
-      preserveFlowDiagnostics: true,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -282,6 +288,7 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows();
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message: "Deployed: https://my-agent.vercel.app",
+      tone: "success",
       preserveFlowDiagnostics: true,
       effect: { kind: "deployed" },
     });
@@ -302,17 +309,7 @@ describe("runTuiSetupCommand", () => {
               }),
           ),
         ).rejects.toBeInstanceOf(WizardCancelledError);
-        return registryResult({
-          items: [
-            { title: "Web Chat", facts: [], output: [] },
-            { title: "Notion", facts: [], output: [] },
-          ],
-          outcomes: [
-            { kind: "installed", title: "Web Chat", facts: [], output: [] },
-            { kind: "cancelled", title: "Slack" },
-            { kind: "installed", title: "Notion", facts: [], output: [] },
-          ],
-        });
+        return registryResult({ outcomes: [{ kind: "cancelled", title: "channel/slack" }] });
       }),
     });
 
@@ -320,10 +317,9 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt();
 
     await expect(result).resolves.toEqual({
-      message:
-        "3 additions: 2 added, 1 cancelled\n\n  ✓ Web Chat\n    Installed.\n\n" +
-        "  – Slack\n    Cancelled.\n\n  ✓ Notion\n    Installed.",
-      preserveFlowDiagnostics: true,
+      message: "",
+      cancelled: true,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -388,14 +384,20 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runRegistryFlow: vi.fn(async () => {
         throw new RegistryFlowFailedError(cause, {
-          items: [{ title: "Web Chat", facts: [], output: [] }],
-          failures: [],
+          outcomes: [
+            {
+              kind: "installed",
+              title: "Web Chat",
+              facts: [{ label: "URL", value: "http://localhost:3000" }],
+              output: [],
+            },
+          ],
         });
       }),
     });
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/deploy/),
+      message: expect.stringMatching(/^URL {2}http:\/\/localhost:3000\n[\s\S]*run \/deploy/),
       partial: true,
       tone: "error",
     });
@@ -430,7 +432,9 @@ describe("runTuiSetupCommand", () => {
       }),
     });
     await expect(run({ command: "deploy", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^\/deploy failed: /),
+      message:
+        "Human action required: `vercel link` — Deployment needs this directory linked to a Vercel project.",
+      tone: "error",
     });
   });
 

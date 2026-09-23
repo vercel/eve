@@ -1849,6 +1849,42 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
+  it("draws a successful command's outcome into its echo's gutter", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/notion");
+    renderer.renderCommandResult("", "success");
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^✓ \/add connection\/notion$/m);
+    expect(snapshot).not.toContain("⎿");
+  });
+
+  it("hangs a settled command's details under its marked echo", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add channel/slack");
+    renderer.renderCommandResult(
+      "Setup not finished\nFinish with `eve add channel/slack --skip-install`",
+      "cancelled",
+    );
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^─ \/add channel\/slack\n {3}⎿ {2}Setup not finished$/m);
+    expect(snapshot).toContain("      Finish with `eve add channel/slack --skip-install`");
+  });
+
+  it("replaces the user gutter when a command fails", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/sentry");
+    renderer.renderCommandResult("npm install exited with code 1", "error");
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^⨯ \/add connection\/sentry$/m);
+    expect(snapshot).not.toContain("│ /add connection/sentry");
+  });
+
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/deploy", "failed");
@@ -1860,7 +1896,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("│ ⨯ /deploy");
+    expect(snapshot).toMatch(/^⨯ \/deploy$/m);
     expect(snapshot).toContain("⎿  Authentication was refreshed");
     expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
     expect(snapshot).not.toContain("· Authentication was refreshed");

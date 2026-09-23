@@ -12,6 +12,7 @@ import type {
   AgentTUIStreamResult,
   AgentTUIToolApprovalRequest,
   AgentTUIToolApprovalResponse,
+  CommandResultStatus,
   ConnectionAuthUpdate,
   SubagentStepUpdate,
   SubagentView,
@@ -416,6 +417,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Live (uncommitted) blocks, in transcript order. */
   #blocks: Block[] = [];
   readonly #blockById = new Map<string, Block>();
+  /** The invocation whose gutter awaits the command's outcome. */
+  #pendingCommandEcho: Block | undefined;
   /** Section ids already committed to scrollback — never re-rendered. */
   readonly #committedIds = new Set<string>();
   /**
@@ -864,6 +867,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
+    // A command that settled without reporting an outcome must not hold the
+    // transcript out of scrollback.
+    this.#settleCommandEcho();
     this.#start(options);
     this.#syncBackgroundActivityTicker();
     this.#commitTurnStats();
@@ -1049,14 +1055,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
             this.#stopCaretBlink();
             this.#status = STATUS.processing;
             if (isPromptControlCommand(prompt)) {
-              // Commands echo as their own line (blue, under the prompt
-              // glyph) so the elbow-connected outcome has an invocation to
-              // hang under — never as a user chat message.
-              this.#pushBlock({
-                kind: "command",
-                body: stripTerminalControls(prompt.trim()),
-                live: false,
-              });
+              // Commands echo as their own line so the elbow-connected
+              // outcome has an invocation to hang under — never as a user
+              // chat message.
+              this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
             } else {
               this.#startWorking();
               this.#addUserBlock(prompt);
@@ -1987,33 +1989,57 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** Commits a slash-command invocation that was started without prompt input. */
+  /** Echoes a slash-command invocation that was started without prompt input. */
   renderCommandInvocation(text: string, status?: "failed"): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     this.#start();
-    const block: Block = {
-      kind: "command",
-      body: content,
-      live: false,
-    };
-    if (status === "failed") block.status = "error";
-    this.#pushBlock(block);
+    this.#pushCommandEcho(content);
+    if (status === "failed") this.#settleCommandEcho("error");
     this.#paint();
   }
 
-  /** Commits one command outcome, promoting explicit status to a top-level result. */
-  renderCommandResult(text: string, tone?: "success" | "error"): void {
+  /**
+   * Settles the pending command echo with the outcome's status, then hangs any
+   * detail text under it with the elbow. Without an echo, a successful outcome
+   * carries its own check mark.
+   */
+  renderCommandResult(text: string, status?: CommandResultStatus): void {
     const content = stripAnsi(text);
-    if (content.trim().length === 0) return;
+    const echo = this.#settleCommandEcho(status);
+    if (content.trim().length === 0) {
+      if (echo !== undefined) this.#paint();
+      return;
+    }
     this.#start();
     this.#pushBlock({
       kind: "result",
       body: content,
       live: false,
-      status: tone === "success" ? "done" : undefined,
+      status: echo === undefined && status === "success" ? "done" : undefined,
     });
     this.#paint();
+  }
+
+  /**
+   * The echo stays live, and so out of scrollback, until its command settles:
+   * the outcome is drawn into its gutter.
+   */
+  #pushCommandEcho(body: string): void {
+    this.#settleCommandEcho();
+    const block: Block = { kind: "command", body, live: true };
+    this.#pendingCommandEcho = block;
+    this.#pushBlock(block);
+  }
+
+  #settleCommandEcho(status?: CommandResultStatus): Block | undefined {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return undefined;
+    this.#pendingCommandEcho = undefined;
+    block.live = false;
+    if (status === "success") block.status = "done";
+    else if (status !== undefined) block.status = status;
+    return block;
   }
 
   /**
@@ -3190,6 +3216,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // vanishing with the repaint area. The in-place rebuild status and any
     // open log run settle first so their last state survives as scrollback.
     this.#settleDevRebuildStatus();
+    this.#settleCommandEcho();
     for (const block of this.#blocks) {
       if (block.kind === "log" && block.id === undefined) block.live = false;
     }
