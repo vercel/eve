@@ -69,7 +69,7 @@ describe("Codex model", () => {
       { role: "user", content: [{ type: "input_text", text: "hello" }] },
       {
         role: "assistant",
-        content: "previous answer",
+        content: [{ type: "output_text", text: "previous answer" }],
         phase: "final_answer",
       },
     ]);
