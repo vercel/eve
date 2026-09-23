@@ -8,6 +8,7 @@ import {
   type DevelopmentOidcTokenFailure,
   resolveDevelopmentOidcToken,
 } from "#services/dev-client/request-headers.js";
+import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 import { resolveVercelDeployment, type VercelDeploymentResolution } from "./vercel-deployment.js";
 
@@ -38,6 +39,8 @@ export async function resolveVerifiedRemoteDevelopmentClient(input: {
   readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
   readonly signal?: AbortSignal;
+  /** Linked project identity used to scope and verify the deployment lookup. */
+  readonly projectSource?: VercelProjectReference;
   readonly vercelScope?: string;
   readonly workspaceRoot: string;
   readonly deps?: Partial<VerifiedRemoteDevelopmentClientDeps>;
@@ -50,7 +53,9 @@ export async function resolveVerifiedRemoteDevelopmentClient(input: {
     deploymentResolution = await deps.resolveVercelDeployment({
       workspaceRoot: input.workspaceRoot,
       host: new URL(input.serverUrl).host,
-      scope: input.vercelScope,
+      ...(input.projectSource === undefined
+        ? { scope: input.vercelScope }
+        : { source: input.projectSource }),
       signal: input.signal,
     });
 

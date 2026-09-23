@@ -5,6 +5,7 @@ import {
   resolveVerifiedRemoteDevelopmentClient,
   type VerifiedRemoteDevelopmentClientDeps,
 } from "#setup/verified-remote-client.js";
+import { projectReferenceFromEnvironment, readProjectLink } from "#setup/project-resolution.js";
 
 import type { EveEvalTargetHandle } from "#evals/types.js";
 
@@ -46,7 +47,10 @@ export async function createEvalClient(
     return new Client(base);
   }
 
+  const projectSource =
+    projectReferenceFromEnvironment(process.env) ?? (await readProjectLink(options.workspaceRoot));
   const { options: verified } = await resolveVerifiedRemoteDevelopmentClient({
+    projectSource,
     serverUrl: target.url,
     workspaceRoot: options.workspaceRoot,
     deps: options.deps,
