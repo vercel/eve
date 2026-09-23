@@ -139,7 +139,8 @@ export async function* confirmDeployWorkflow(
     prompt: `Apply ${plan}?`,
   });
   yield "approval received";
-  return { approved: answer.optionId === "approve", service: input.service };
+  const approved = answer.status === "answered" && answer.optionId === "approve";
+  return { approved, service: input.service };
 }
 
 export async function failingDeployWorkflow(input: DeployInput): Promise<never> {

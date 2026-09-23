@@ -6,6 +6,9 @@ import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { always } from "#tools/approval/policies.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type Part = StreamResult["stream"] extends ReadableStream<infer T> ? T : never;
@@ -86,9 +89,9 @@ describe("generation steering with the real AI SDK", () => {
               start(controller) {
                 controller.enqueue({
                   type: "tool-call",
-                  toolCallId: "question-1",
-                  toolName: "ask_question",
-                  input: JSON.stringify({ prompt: "Which year should Alice use?" }),
+                  toolCallId: "publish-1",
+                  toolName: "publish_report",
+                  input: JSON.stringify({}),
                 });
                 controller.enqueue({
                   type: "finish",
@@ -101,21 +104,19 @@ describe("generation steering with the real AI SDK", () => {
           };
         },
       });
-      const result = await createToolLoopHarness({
+      const harness = createToolLoopHarness({
         mode: "conversation",
         capabilities: { requestInput: true },
         steeringSignal: steering.signal,
         tools: new Map([
           [
-            "ask_question",
+            "publish_report",
             {
-              name: "ask_question",
-              description: "Ask the user a question",
+              approval: always(),
+              name: "publish_report",
+              description: "Publish Alice's report after approval",
+              execute: async () => ({ published: true }),
               inputSchema: jsonSchema({ type: "object" }),
-              behavior: {
-                availability: ["requires-request-input"],
-                handling: { kind: "request-input", request: "question" },
-              },
             },
           ],
         ]),
@@ -124,7 +125,16 @@ describe("generation steering with the real AI SDK", () => {
           events.push(event);
           if (event.type === boundary) steering.abort();
         },
-      })(session(), { message: "Report only if there is a new update" });
+      });
+      const ctx = new ContextContainer();
+      ctx.set(SessionKey, {
+        auth: { current: null, initiator: null },
+        sessionId: session().sessionId,
+        turn: { id: "turn_0", sequence: 0 },
+      });
+      const result = await contextStorage.run(ctx, () =>
+        harness(session(), { message: "Report only if there is a new update" }),
+      );
       expect(result.steered).toBeUndefined();
       expect(result.next).toBeNull();
       expect(events.filter((event) => event.type === boundary)).toHaveLength(1);

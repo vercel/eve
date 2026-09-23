@@ -21,6 +21,7 @@ import {
 } from "#compiler/diagnostics.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
 import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 
@@ -119,6 +120,7 @@ export interface CompilerArtifactLocations {
  */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
+  developmentExtensions?: DevelopmentExtensionSelection;
   artifactLocations: CompilerArtifactLocations;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
@@ -244,7 +246,10 @@ export async function writeCompilerArtifacts(
   );
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest, { diagnostics }),
+    manifest: await compileAgentManifest(input.manifest, {
+      developmentExtensions: input.developmentExtensions,
+      diagnostics,
+    }),
   });
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);

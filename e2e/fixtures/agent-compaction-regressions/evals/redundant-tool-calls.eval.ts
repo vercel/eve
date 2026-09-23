@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-import { handoffReferences, reviewReferences } from "../release-reports";
+import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 export default defineEval({
   tags: ["real-model"],
@@ -17,16 +17,16 @@ export default defineEval({
     t.calledTool("inspect-repository", {
       count: 1,
       input: { scope: "repository" },
-      output: { completed: true, reportId: reviewReferences.repository, status: "completed" },
+      output: { completed: true, reportId: REVIEW_REFERENCE, status: "completed" },
     });
     t.calledTool("prepare-handoff", {
       count: 1,
-      input: { subject: "repository", reviewId: reviewReferences.repository },
-      output: { completed: true, reportId: handoffReferences.repository, status: "completed" },
+      input: { reviewId: REVIEW_REFERENCE },
+      output: { completed: true, reportId: HANDOFF_REFERENCE, status: "completed" },
     });
     t.event("compaction.completed", { count: (count) => count >= 2 });
-    t.messageIncludes(reviewReferences.repository);
-    t.messageIncludes(handoffReferences.repository);
+    t.messageIncludes(REVIEW_REFERENCE);
+    t.messageIncludes(HANDOFF_REFERENCE);
     t.noFailedActions();
 
     t.calledTool("inspect-repository", { count: 1 }).soft().label("no repeated inspection");

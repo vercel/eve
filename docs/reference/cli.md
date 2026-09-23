@@ -59,12 +59,12 @@ Existing packages do not need a target-selection prompt: run `eve init` from the
 
 After scaffolding in an interactive human terminal, eve opens the TUI directly. Pass `-n` or `--non-interactive` to return after scaffolding instead. It still installs dependencies and follows the normal Git setup behavior. Noninteractive and coding-agent invocations return without starting an interactive session. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                    | Type   | Default                    | Description                                                                                                              |
-| ----------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`       | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>`  | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs`  | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
-| `-n, --non-interactive` | flag   | off                        | Scaffold and install dependencies without starting development.                                                          |
+| Flag                    | Type   | Default                  | Description                                                                                                              |
+| ----------------------- | ------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `--model <model>`       | string | `openai/gpt-6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
+| `--reasoning <effort>`  | enum   | provider default         | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--channel-web-nextjs`  | flag   | off                      | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| `-n, --non-interactive` | flag   | off                      | Scaffold and install dependencies without starting development.                                                          |
 
 ## `eve extension`
 
@@ -102,7 +102,7 @@ Change the root agent's AI Gateway model and reasoning effort without opening th
 
 ```bash
 eve set \
-  --model openai/gpt-5.6-sol \
+  --model openai/gpt-6-sol \
   --reasoning high
 ```
 
@@ -223,6 +223,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
 | `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
+| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                                               |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                                            |
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                                                 |
 | `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
@@ -232,6 +233,8 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic: `tokens` \| `tokensPerSecond`                                 |
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
+
+Local development mounts bundled development extensions without adding files to your project. The default set includes the self-modification extension and its `self-modification__agent` subagent. Pass `--no-default-extensions` to disable the complete set for that server.
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
 

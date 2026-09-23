@@ -213,6 +213,8 @@ export interface AssertionResult {
   readonly severity: AssertionSeverity;
   readonly threshold?: number;
   readonly passed: boolean;
+  /** Whether the assertion failed because its scorer threw instead of producing a score. */
+  readonly errored: boolean;
   /** Human-readable failure detail, shown in console output and artifacts. */
   readonly message?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;

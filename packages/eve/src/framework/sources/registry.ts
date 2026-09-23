@@ -9,7 +9,7 @@ import {
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
 
-const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v49`;
+const revision = `eve@${resolveInstalledPackageInfo().version}:compiled-manifest-v50`;
 
 const localDefaults = defineProgrammaticAgentSource({
   id: "eve:defaults",
@@ -34,10 +34,6 @@ const localDefaults = defineProgrammaticAgentSource({
       loadNamespace: () => import("#tools/provided/write-file.js"),
     },
     {
-      logicalPath: "tools/todo.ts",
-      loadNamespace: () => import("#tools/provided/todo.js"),
-    },
-    {
       logicalPath: "tools/web_fetch.ts",
       loadNamespace: () => import("#tools/provided/web-fetch.js"),
     },
@@ -48,10 +44,6 @@ const localDefaults = defineProgrammaticAgentSource({
     {
       logicalPath: "tools/connection_search.ts",
       loadNamespace: () => import("#tools/framework/connection-search.js"),
-    },
-    {
-      logicalPath: "tools/ask_question.ts",
-      loadNamespace: () => import("#tools/framework/ask-question.js"),
     },
     {
       logicalPath: "tools/task_cancel.ts",

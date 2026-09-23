@@ -1,3 +1,5 @@
+import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { contextStorage } from "#context/container.js";
 import {
   buildCallbackContext,
@@ -190,6 +192,14 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     const definition = inherited?.definition ?? registered.definition;
     if (definition.kind !== "independent")
       throw new Error(`Sandbox "${definition.logicalPath}" has no resolved parent.`);
+
+    if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
+      await ensureDevelopmentSandboxesPrepared({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: inherited?.nodeId ?? input.nodeId,
+        providerName: getSandboxEnvironmentRuntime(definition.environment).providerName,
+      });
+    }
 
     const activeSession =
       contextStorage.getStore() === undefined

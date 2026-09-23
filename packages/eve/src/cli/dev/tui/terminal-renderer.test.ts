@@ -1665,7 +1665,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("┌── Session restarted, clear context.");
   });
 
-  it("closes the dying turn's coda and dismisses the todo panel at the boundary", async () => {
+  it("closes the dying turn's coda at the boundary", async () => {
     const { screen, input, renderer } = makeRenderer();
     const prompt = renderer.readPrompt();
     input.type("hey agent");
@@ -1675,17 +1675,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await renderer.renderStream(
       streamOf([
         { type: "step-start" },
-        {
-          type: "tool-call",
-          toolCallId: "t1",
-          toolName: "todo",
-          input: {
-            todos: [
-              { content: "first task", status: "in_progress" },
-              { content: "second task", status: "pending" },
-            ],
-          },
-        },
         { type: "assistant-delta", id: "m1", delta: "working" },
         { type: "assistant-complete", id: "m1" },
         { type: "step-finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
@@ -1693,15 +1682,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
       ]),
       { continueSession: true },
     );
-    expect(screen.snapshot()).toContain("first task");
 
     renderer.renderSessionBoundary();
     const snapshot = screen.snapshot();
-    // The dead turn's stats close before the boundary, not after it…
+    // The dead turn's stats close before the boundary, not after it.
     expect(snapshot.indexOf("└ Done in")).toBeGreaterThan(-1);
     expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
-    // …and the discarded session's plan dismisses instead of lingering.
-    expect(snapshot).not.toContain("first task");
 
     // Control returning to the prompt must not add a second coda.
     const second = renderer.readPrompt();
@@ -2943,13 +2929,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Esc to dismiss");
 
     await escape();
-    // No answer travels; the runner returns to the prompt and the server
-    // records the parked request as ignored on the next message.
+    // No answer travels; the runner returns to the prompt and the question
+    // stays open for the next message.
     await expect(answer).resolves.toBeUndefined();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("? Choose access");
-    expect(snapshot).toContain("⎿  Dismissed.");
+    expect(snapshot).toContain("⎿  Skipped. The question stays open.");
     // The option list does not survive the dismissal.
     expect(snapshot).not.toContain("Managed access");
     expect(snapshot).not.toContain("Enter to select");
@@ -2980,7 +2966,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -3097,7 +3083,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -3477,22 +3463,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("records sandbox log lines in the diagnostic log", () => {
+  it("records captured sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const stub = stubDiagnostics();
-    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       unicode: true,
       diagnostics: stub.diagnostics,
     });
-
-    renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
-    expect(append).toHaveBeenCalledWith({ source: "sandbox", detail: expect.any(String) });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    process.stdout.write('eve: sandbox template "root" (microsandbox): apt-get update\n');
     renderer.shutdown();
+    expect(stub.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "stdout",
+        detail: expect.stringContaining("apt-get update"),
+      }),
+    );
   });
 
   it("shows delayed build progress and immediate completion when logs are hidden", () => {
@@ -3675,22 +3665,22 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("ordinary stdout log");
   });
 
-  it("renders subscribed sandbox logs under the sandbox log level", () => {
+  it("renders captured lazy preparation logs under the sandbox log level", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       logs: "sandbox",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    renderer.renderSandboxLog?.('eve: sandbox template "root" (docker): checking Docker daemon');
-    renderer.renderSandboxLog?.("eve: initializing 3 sandbox templates...");
-    renderer.renderSandboxLog?.('eve: built sandbox template "root" on backend "docker".');
-    renderer.renderSandboxLog?.("ordinary stdout log");
+    process.stdout.write('eve: sandbox template "root" (docker): checking Docker daemon\n');
+    process.stdout.write("eve: initializing 3 sandbox templates...\n");
+    process.stdout.write('eve: built sandbox template "root" on backend "docker".\n');
+    process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();

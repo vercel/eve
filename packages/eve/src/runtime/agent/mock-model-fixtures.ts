@@ -19,8 +19,8 @@ export function createMockAuthoredToolInput(
   city: string,
 ): Record<string, unknown> {
   const inputPropertyNames = getToolInputPropertyNames(tool.inputSchema);
-  if (tool.name === "ask_question" || hasProperties(inputPropertyNames, ["prompt", "options"])) {
-    return createAskQuestionInput(message);
+  if (inputPropertyNames.includes("question")) {
+    return createQuestionInput(message);
   }
 
   if (inputPropertyNames.includes("command")) {
@@ -238,40 +238,24 @@ function hasDeclaredInputProperties(schema: unknown): boolean {
   return isRecord(schema) && isRecord(schema.properties);
 }
 
-function hasProperties(actual: readonly string[], expected: readonly string[]): boolean {
-  return expected.every((property) => actual.includes(property));
-}
-
-function createAskQuestionInput(message: string): Record<string, unknown> {
-  const options = parseInputOptions(message);
-  const input: Record<string, unknown> = {
-    prompt: resolveQuestionPrompt(message),
-  };
-
-  if (options.length > 0) {
-    input.options = options;
-  }
-
-  if (/\ballow\s*freeform\s+(?:to\s+)?true\b|\ballowfreeform\s+(?:to\s+)?true\b/iu.test(message)) {
-    input.allowFreeform = true;
-  }
-
-  return input;
-}
-
-function parseInputOptions(message: string): Array<{ id: string; label: string }> {
-  return [...message.matchAll(/\bid\b\s*:?\s*"([^"]+)"\s*,\s*label\b\s*:?\s*"([^"]+)"/giu)].map(
-    (match) => ({
-      id: match[1] ?? "",
-      label: match[2] ?? "",
+function createQuestionInput(message: string): Record<string, unknown> {
+  const labels = parseOptionLabels(message);
+  return {
+    question: resolveQuestionPrompt(message),
+    ...(labels.length >= 2 && {
+      options: labels.map((label) => ({ description: `Choose ${label}.`, label })),
     }),
-  );
+  };
+}
+
+function parseOptionLabels(message: string): string[] {
+  return [...message.matchAll(/\blabel\b\s*:?\s*"([^"]+)"/giu)].map((match) => match[1] ?? "");
 }
 
 function resolveQuestionPrompt(message: string): string {
   const quotedPrompt =
-    /\b(?:set\s+)?prompt\s+to:\s*'([^']+)'/iu.exec(message) ??
-    /\b(?:set\s+)?prompt\s+to:\s*"([^"]+)"/iu.exec(message);
+    /\b(?:set\s+)?question\s+to:\s*'([^']+)'/iu.exec(message) ??
+    /\b(?:set\s+)?question\s+to:\s*"([^"]+)"/iu.exec(message);
   if (quotedPrompt?.[1]) {
     return quotedPrompt[1].trim();
   }

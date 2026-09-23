@@ -1,11 +1,10 @@
 import { stageDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { prewarmDevelopmentSandboxes } from "#execution/sandbox/development-prewarm.js";
-import { createDevelopmentGenerationArtifactsSource } from "#internal/nitro/host/artifacts-config.js";
 import { createDevelopmentApplicationNitro } from "#internal/nitro/host/create-application-nitro.js";
 import { buildDevelopmentHostCandidate } from "#internal/nitro/host/dev-host-candidate.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import { removeDevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
 import { prepareDevelopmentApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import { DrainedNitroDevServer } from "#internal/nitro/host/drained-nitro-dev-server.js";
 import { usesParentDevelopmentWorkflowWorld } from "#internal/workflow/development-world-protocol.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
@@ -55,11 +54,13 @@ export interface DevelopmentAuthoredRebuildCoordinator {
 }
 
 export async function createDevelopmentAuthoredRebuildCoordinator(input: {
+  readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly devServer: DrainedNitroDevServer;
   readonly initialHost: PreparedDevelopmentApplicationHost;
 }): Promise<DevelopmentAuthoredRebuildCoordinator> {
   return new TransactionalDevelopmentAuthoredRebuildCoordinator({
     currentHostFingerprint: await computeDevelopmentHostFingerprint(input.initialHost),
+    developmentExtensions: input.developmentExtensions,
     currentRuntimeFingerprint: input.initialHost.generation.fingerprint,
     devServer: input.devServer,
     initialHost: input.initialHost,
@@ -80,17 +81,20 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
   #currentHost: PreparedDevelopmentApplicationHost;
   #currentHostFingerprint: string;
   #currentRuntimeFingerprint: string;
+  readonly #developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly #devServer: DrainedNitroDevServer;
   readonly #usesParentWorkflowWorld: boolean;
 
   constructor(input: {
     readonly currentHostFingerprint: string;
     readonly currentRuntimeFingerprint: string;
+    readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
     readonly devServer: DrainedNitroDevServer;
     readonly initialHost: PreparedDevelopmentApplicationHost;
   }) {
     this.#currentHost = input.initialHost;
     this.#currentHostFingerprint = input.currentHostFingerprint;
+    this.#developmentExtensions = input.developmentExtensions;
     this.#currentRuntimeFingerprint = input.currentRuntimeFingerprint;
     this.#devServer = input.devServer;
     this.#usesParentWorkflowWorld = usesParentDevelopmentWorkflowWorld(
@@ -112,6 +116,7 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
     try {
       nextHost = await prepareDevelopmentApplicationHost(previousHost.appRoot, {
         changedPaths: input.changedPaths,
+        developmentExtensions: this.#developmentExtensions,
         previousExtensions: previousHost.workspaceExtensions,
       });
       if (
@@ -121,7 +126,6 @@ class TransactionalDevelopmentAuthoredRebuildCoordinator implements DevelopmentA
       ) {
         throw new DevelopmentWorkflowWorldChangeRequiresRestartError();
       }
-      await prewarmDevelopmentHost(nextHost);
       const nextHostFingerprint = await computeDevelopmentHostFingerprint(nextHost);
       const nextRuntimeFingerprint = nextHost.generation.fingerprint;
       const hasStructuralChange = nextHostFingerprint !== this.#currentHostFingerprint;
@@ -260,18 +264,6 @@ function retainActiveHostWorkspace(
     workflowBuildDir: activeHost.workflowBuildDir,
     workspace: activeHost.workspace,
   };
-}
-
-async function prewarmDevelopmentHost(host: PreparedDevelopmentApplicationHost): Promise<void> {
-  await prewarmDevelopmentSandboxes({
-    appRoot: host.appRoot,
-    compiledArtifactsSource: createDevelopmentGenerationArtifactsSource({
-      appRoot: host.appRoot,
-      configuredWorld: host.compileResult.manifest.config.experimental?.workflow?.world,
-      runtimeAppRoot: host.generation.runtimeAppRoot,
-    }),
-    log: (message) => console.log(message),
-  });
 }
 
 async function discardPreparedHost(host: PreparedDevelopmentApplicationHost): Promise<void> {

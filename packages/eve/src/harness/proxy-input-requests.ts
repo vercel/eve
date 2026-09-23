@@ -1,6 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import type { InputRequestKind } from "#shared/input.js";
+import { inputOptionSchema, type InputOption, type InputRequestKind } from "#shared/input.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 import {
   isSessionInboxAddress,
@@ -21,6 +21,15 @@ const PROXY_INPUT_REQUEST_KINDS = {
  */
 export interface AnswerHookRoute {
   readonly runId: string;
+  /** Present for a `ctx.ask()` question: what a plain-text message may answer or dismiss. */
+  readonly question?: AnswerHookQuestion;
+}
+
+/** The parts of a `ctx.ask()` request a plain-text message is resolved against. */
+export interface AnswerHookQuestion {
+  readonly allowFreeform?: boolean;
+  readonly dismissible?: boolean;
+  readonly options?: readonly InputOption[];
 }
 
 /** Routing and control metadata for one descendant-owned input request. */
@@ -322,9 +331,32 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
 
 function parseAnswerHookRoute(value: unknown): AnswerHookRoute | undefined {
   if (value === null || typeof value !== "object" || !("runId" in value)) return undefined;
-  return typeof value.runId === "string" && value.runId.length > 0
-    ? { runId: value.runId }
-    : undefined;
+  if (typeof value.runId !== "string" || value.runId.length === 0) return undefined;
+  if (!("question" in value) || value.question === undefined) return { runId: value.runId };
+  const question = parseAnswerHookQuestion(value.question);
+  return question === undefined ? undefined : { question, runId: value.runId };
+}
+
+function parseAnswerHookQuestion(value: unknown): AnswerHookQuestion | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const question: {
+    allowFreeform?: boolean;
+    dismissible?: boolean;
+    options?: readonly InputOption[];
+  } = {};
+  for (const key of ["allowFreeform", "dismissible"] as const) {
+    const flag = Reflect.get(value, key);
+    if (flag === undefined) continue;
+    if (typeof flag !== "boolean") return undefined;
+    question[key] = flag;
+  }
+  const options = Reflect.get(value, "options");
+  if (options !== undefined) {
+    const parsed = inputOptionSchema.array().safeParse(options);
+    if (!parsed.success) return undefined;
+    question.options = parsed.data;
+  }
+  return question;
 }
 
 function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | undefined {

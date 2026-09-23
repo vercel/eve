@@ -296,14 +296,14 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("builds ask_question input from prompt text and option labels", async () => {
+  it("builds ask_question input from question text and option labels", async () => {
     const result = await generateWithPrompt(
       [
         {
           content: [
             "Use the ask_question tool exactly once.",
-            "Set prompt to: 'Pick a color.'",
-            'Provide exactly two options: - id "red", label "Red" - id "blue", label "Blue"',
+            "Set question to: 'Pick a color.'",
+            'Provide exactly two options: label "Red" and label "Blue".',
           ].join("\n"),
           role: "user",
         },
@@ -312,9 +312,8 @@ describe("createMockAuthoredRuntimeModel", () => {
         {
           inputSchema: {
             properties: {
-              allowFreeform: { type: "boolean" },
               options: { type: "array" },
-              prompt: { type: "string" },
+              question: { type: "string" },
             },
             type: "object",
           },
@@ -328,10 +327,10 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(result.content).toEqual([
       {
         input: JSON.stringify({
-          prompt: "Pick a color.",
+          question: "Pick a color.",
           options: [
-            { id: "red", label: "Red" },
-            { id: "blue", label: "Blue" },
+            { description: "Choose Red.", label: "Red" },
+            { description: "Choose Blue.", label: "Blue" },
           ],
         }),
         toolCallId: "call_ask_question",

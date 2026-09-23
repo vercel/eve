@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.64.0",
+  "version": "0.64.1",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -166,11 +166,6 @@
       "types": "./dist/src/public/tools/write-file.d.ts",
       "import": "./dist/src/public/tools/write-file.js",
       "default": "./dist/src/public/tools/write-file.js"
-    },
-    "./tools/todo": {
-      "types": "./dist/src/public/tools/todo.d.ts",
-      "import": "./dist/src/public/tools/todo.js",
-      "default": "./dist/src/public/tools/todo.js"
     },
     "./tools/web_fetch": {
       "types": "./dist/src/public/tools/web-fetch.d.ts",
@@ -522,11 +517,9 @@
     "@vercel/otel": "catalog:",
     "@vercel/sandbox": "catalog:",
     "@vercel/sdk": "1.28.8",
-    "@workflow/builders": "5.0.0-beta.55",
     "@workflow/core": "5.0.0-beta.55",
     "@workflow/errors": "5.0.0-beta.22",
     "@workflow/serde": "5.0.0-beta.2",
-    "@workflow/utils": "5.0.0-beta.10",
     "@workflow/world": "5.0.0-beta.37",
     "@workflow/world-local": "5.0.0-beta.46",
     "@workflow/world-vercel": "5.0.0-beta.50",
@@ -539,7 +532,6 @@
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
     "gray-matter": "4.0.3",
-    "historical-eve-0-30-8": "npm:eve@0.30.8",
     "jose": "6.2.3",
     "jsonc-parser": "3.3.1",
     "just-bash": "3.1.0",

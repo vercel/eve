@@ -55,7 +55,7 @@ The model proposes the query, `approval` returns `"user-approval"`, and the turn
 
 Each session has exactly one active continuation. Answer an approval against a stale handle and it's rejected, so there's no way to double-resume the same parked turn.
 
-The same machinery backs the built-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools and human-in-the-loop](../tools).
+The same machinery backs the opt-in `ask_question` tool, where the model asks you mid-turn, and per-connection approval via `approval: once()`. See [Tools and human-in-the-loop](../tools).
 
 → Next: [Ship it](./ship-it)
 

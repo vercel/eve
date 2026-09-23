@@ -1,5 +1,17 @@
 # eve
 
+## 0.64.1
+
+### Patch Changes
+
+- b49a598: Restore the active eve context while session-scoped dynamic tools are recovered, so resolvers that read durable state keep their callbacks after a resumed session.
+- 867a6ad: Prepare pnpm's optional-dependency policy before automatically installing just-bash during development, avoiding startup failures on unapproved native codec builds. Existing package-specific build decisions are preserved.
+- 867a6ad: Pin automatic microsandbox installs and manual installation guidance to the supported version so a new development server does not install an incompatible release.
+- 3e2bf95: Fix background workflow tools in workspace agents to use app-relative workflow IDs so dispatch matches the registered workflow.
+- 070525e: Defer sandbox environment preparation during development until the first sandbox access, so startup and rebuilds no longer wait for optional engine installation. First access prepares all environments in that compiled generation, with heartbeat-backed coordination that recovers after a development worker crash; production builds still prepare eagerly.
+- 867a6ad: Serialize automatic sandbox dependency installations that share a package-manager root, preventing concurrent providers or workspace apps from racing on dependency files. Waiting installations recheck their own package and can proceed after another installation fails.
+- 1a6cb88: Write fallback Vercel service configuration under the Next.js app directory in linked monorepos. This keeps generated eve services discoverable when no active build output directory is found, preventing deployments that omit the agent endpoints.
+
 ## 0.64.0
 
 ### Minor Changes

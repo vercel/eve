@@ -80,7 +80,9 @@ export default defineSandbox(() => environment.open());
 
 eve runs `prepare` while creating a reusable provider artifact, not once for each live session sandbox. Vercel captures a snapshot; Docker captures an image; microsandbox captures a VM snapshot; and just-bash captures a filesystem template.
 
-At runtime, eve passes the recorded artifact directly to the provider when it creates a live sandbox. Runtime does not rebuild or repair a missing artifact. A missing image, snapshot, or template fails with rebuild or redeploy guidance.
+During `eve dev`, startup and authored-source rebuilds do not prepare sandbox environments. The first sandbox access prepares all environments in that compiled generation before opening the requested sandbox. This includes environments declared by subagents and extensions, even if they use different providers. Concurrent requests share the preparation work; a failed preparation can be retried on a later access. Optional provider installation and setup can make that first access slow.
+
+`eve build` still prepares environments eagerly. In production, eve passes the recorded artifact directly to the provider when it creates a live sandbox. Production runtime does not rebuild or repair a missing artifact. A missing image, snapshot, or template fails with rebuild or redeploy guidance.
 
 ### Reuse native resources across sessions
 

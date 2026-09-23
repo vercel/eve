@@ -37,7 +37,7 @@ export interface PendingInputBatch {
 
 /**
  * Returns true when the session holds at least one pending HITL batch
- * (tool approvals or `ask_question` prompts).
+ * (tool approvals or a session-limit continuation prompt).
  */
 export function hasPendingInputBatch(state: SessionStateMap | undefined): boolean {
   return getPendingInputBatches(state).length > 0;

@@ -450,13 +450,12 @@ export interface SessionCallback {
 export interface SessionCapabilities {
   /**
    * True when the session may request input from a human (tool approvals,
-   * `ask_question`). The runtime reads this in every HITL gate:
+   * `ctx.ask()`). The runtime reads this in every HITL gate:
    *
-   * 1. `ask_question` tool registration in `buildToolSet`: the tool is hidden
-   *    from the model when the session cannot request input.
+   * 1. `ctx.ask()` resolves as `unavailable` instead of waiting when the
+   *    session cannot request input.
    * 2. The pending-input park guard: scheduled task sessions without this flag
-   *    fail fast rather than waiting for a response, covering both tool
-   *    approvals and `ask_question` prompts the model has already emitted.
+   *    fail fast rather than waiting for a response to a tool approval.
    */
   readonly requestInput?: boolean;
 }

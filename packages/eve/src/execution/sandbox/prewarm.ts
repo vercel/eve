@@ -103,7 +103,7 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
 
   input.log?.(`eve: initializing ${formatSandboxTemplateCount(targets.length)}...`);
 
-  const results = await Promise.all(
+  const results = await Promise.allSettled(
     targets.map(async ({ context, label, nodeId, provider }) => {
       const logProviderProgress = (message: string) => {
         if (!shouldLogSandboxPrewarmProgress(message)) return;
@@ -130,11 +130,20 @@ export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<vo
       }
     }),
   );
-  const entries = results.map(({ nodeId, provider, result }) => ({
-    artifact: result,
-    nodeId,
-    providerName: provider.providerName,
-  }));
+  // A failed provider must not release the preparation lock while others still write templates.
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+  const entries = results.flatMap((result) =>
+    result.status === "fulfilled"
+      ? [
+          {
+            artifact: result.value.result,
+            nodeId: result.value.nodeId,
+            providerName: result.value.provider.providerName,
+          },
+        ]
+      : [],
+  );
   await preparedArtifactStore.write({ compileDirectoryPath: input.compileDirectoryPath, entries });
   input.log?.(`eve: initialized ${formatSandboxTemplateCount(targets.length)}.`);
 }

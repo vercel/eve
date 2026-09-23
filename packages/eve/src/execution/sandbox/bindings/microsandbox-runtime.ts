@@ -56,6 +56,8 @@ export {
 export type MicrosandboxModule = typeof import("microsandbox");
 
 const MICROSANDBOX_PACKAGE_NAME = "microsandbox";
+const MICROSANDBOX_PACKAGE_VERSION = "0.5.5";
+const MICROSANDBOX_INSTALL_SPECIFIER = `${MICROSANDBOX_PACKAGE_NAME}@${MICROSANDBOX_PACKAGE_VERSION}`;
 const MICROSANDBOX_CONNECT_TIMEOUT_MS = 10_000;
 const MICROSANDBOX_STOP_TIMEOUT_MS = 10_000;
 
@@ -467,7 +469,7 @@ async function restoreMicrosandboxSessionSnapshot(input: {
 
 const MICROSANDBOX_MISSING_PACKAGE_MESSAGE =
   "The microsandbox sandbox provider requires the `microsandbox` package, which is not bundled " +
-  "with eve. Install it in your application (for example `pnpm add -D microsandbox`), or use " +
+  `with eve. Install it in your application (for example \`pnpm add -D ${MICROSANDBOX_INSTALL_SPECIFIER}\`), or use ` +
   "DockerSandbox or VercelSandbox instead.";
 
 /**
@@ -490,6 +492,7 @@ export async function loadMicrosandboxModule(input: {
     input.host.loadOptionalPackage<MicrosandboxModule>({
       autoInstall: input.options.setup.autoInstall,
       importModule: async () => await import("microsandbox"),
+      installPackageName: MICROSANDBOX_INSTALL_SPECIFIER,
       missingMessage: MICROSANDBOX_MISSING_PACKAGE_MESSAGE,
       packageName: MICROSANDBOX_PACKAGE_NAME,
     }),

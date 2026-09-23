@@ -418,12 +418,6 @@ describe("createNodeHarnessTools", () => {
     expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
   });
 
-  it("keeps the compiled framework question tool client-side", async () => {
-    const node = await createNodeWithSourceOwnedTools({ names: ["ask_question"] });
-
-    expect(createNodeHarnessTools({ node }).get("ask_question")?.execute).toBeUndefined();
-  });
-
   it("lowers the compiled framework agent tool as a background tool", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["agent"] });
     const agentTool = createNodeHarnessTools({ node }).get("agent");

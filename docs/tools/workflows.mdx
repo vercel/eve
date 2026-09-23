@@ -44,7 +44,7 @@ export default defineWorkflowTool({
       ],
     });
 
-    if (answer.optionId !== "approve") {
+    if (answer.status !== "answered" || answer.optionId !== "approve") {
       return { deployed: false, reason: "rejected" };
     }
     return { deployed: true, url: await applyDeploy(plan) };
@@ -277,12 +277,30 @@ const answer = await ctx.ask({
   display?: "confirmation" | "select" | "text",
   options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
   allowFreeform?: boolean,
-}); // { optionId?: string; text?: string }
+  dismissible?: boolean,
+});
+// | { status: "answered"; optionId?: string; text?: string }
+// | { status: "dismissed" }
+// | { status: "unavailable" }
 ```
 
 `ctx.ask` publishes an `input.requested` event on the session — rendered the way channels render
-`ask_question` and tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
-It composes with the SDK's own constructs; race it against a deadline:
+tool approvals — and returns an awaitable answer. Awaiting it suspends the run until a response arrives.
+The `ask_question` tool is a workflow tool built on `ctx.ask`.
+
+The answer's `status` tells the body what happened:
+
+- `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
+- `dismissed`: the request set `dismissible: true` and the person sent a message that did not answer
+  it. The message reaches the agent as a normal turn. Only blocking tools can be dismissed this way.
+- `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
+  immediately instead of waiting for an answer no one can give.
+
+A plain follow-up message answers the request when it is the only pending question and the message
+matches an option or the request allows free text. This applies to blocking tools only: answer a
+question from a background tool or a subagent with a structured response.
+
+`ctx.ask` composes with the SDK's own constructs; race it against a deadline:
 
 ```ts
 const pending = ctx.ask({ prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
@@ -290,13 +308,16 @@ const answer = await Promise.race([pending, sleep("4h")]);
 if (answer === undefined) return { deployed: false, reason: "timed out" };
 ```
 
-- The request belongs to the run, not the turn. It stays answerable until it is answered or the run
-  ends. In a background tool that means long after the turn that started it.
+- The request belongs to the run, not the turn. It stays answerable until it is answered, dismissed,
+  or the run ends. In a background tool that means long after the turn that started it.
 - A request is answered once. Ask again for the next answer.
+- Choose option `id`s that read well on their own, such as `approve` or the option's label. A
+  response carries only the `id`. If a person answers after the request has already resolved, for
+  example from an old Slack menu, the agent receives the `id` as a new message, not the label.
 - Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
 - Several requests may be outstanding at once.
-- A response never steers. A new human message while a request is pending follows the session's
-  normal `turnPolicy`.
+- A response never steers. A new human message that does not answer a pending request follows the
+  session's normal `turnPolicy`.
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Both compose: `approval` before the run, `ctx.ask` inside it.
@@ -322,9 +343,9 @@ The first argument is an available agent target. On the root agent, `"agent"` st
 continue an existing child. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
-### Route to a hidden subagent with JEV
+### Route to a hidden subagent with Jev
 
-Use an authored workflow tool when the parent model should decide to delegate, but JEV should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`.
+Use an authored workflow tool when the parent model should decide to delegate, but [Jev](https://vercel.com/i/what-is-jev) should choose the specialist. Set `tool: false` on each specialist so the parent model sees only the routing tool. The specialists remain available through `ctx.agents` and callable through `ctx.agent()`.
 
 If the router may select the root-copy `agent`, author a root `description` that explains which work should stay with a copy of the root. `ctx.agents.agent` always exists in a top-level root workflow, but its `description` is an empty string when omitted from `agent.ts`. `agentRouter()` considers only entries with a non-empty description, so it does not route to an undescribed root copy.
 
@@ -333,7 +354,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   description: "Coordinate cross-specialist tasks that need the root agent's complete toolset.",
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
 });
 ```
 
@@ -342,7 +363,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   description: "Investigation, analysis, and explanation",
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   tool: false,
 });
 ```
@@ -352,12 +373,12 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   description: "Execution and operational changes",
-  model: "openai/gpt-5.6-sol",
+  model: "openai/gpt-6-sol",
   tool: false,
 });
 ```
 
-Define the model-visible router under `agent/tools/`. Build the JEV criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
+Define the model-visible router under `agent/tools/`. Build the Jev criteria from the subagents' effective descriptions, then pass its typed choice directly to `ctx.agent()`:
 
 ```ts title="agent/tools/agent-router.ts"
 import { evaluate } from "eve/ai";
@@ -406,7 +427,7 @@ export default defineWorkflowTool({
 });
 ```
 
-The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. JEV returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
+The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. In a top-level root workflow, `ctx.agents.agent` always represents the root-copy target and carries the root's authored `description` when provided. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
 
@@ -420,11 +441,11 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string, outputSchema?: object }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to JEV, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema` unchanged. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
+Its input is `{ message: string, outputSchema?: object }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation and forwards an optional `outputSchema` unchanged. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 
-This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through JEV.
+This pattern controls specialist selection, not whether the parent model delegates at all. Route before the parent model runs if every incoming request must go through Jev.
 
 ## Report progress: `yield`
 
@@ -515,7 +536,9 @@ async execute({ service }, ctx) {
   }
 
   if (answer === undefined) return { deployed: false, reason: "timed out" };
-  if (answer.optionId !== "approve") return { deployed: false, reason: "rejected" };
+  if (answer.status !== "answered" || answer.optionId !== "approve") {
+    return { deployed: false, reason: "rejected" };
+  }
   return { deployed: true, url: await applyDeploy(plan) };
 }
 ```
@@ -574,7 +597,9 @@ export default defineWorkflowTool({
       ],
     });
 
-    if (decision.optionId !== "approve") return { refunded: false };
+    if (decision.status !== "answered" || decision.optionId !== "approve") {
+      return { refunded: false };
+    }
     return { refunded: true, receipt: await issueRefund(orderId, amount) };
   },
 });

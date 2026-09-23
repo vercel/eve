@@ -252,6 +252,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     const manifest = await compileAgentManifest(discovered.manifest);
 
     const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: app.appRoot,
       manifest,
       moduleMapPath: join(app.appRoot, ".eve", "compile", "module-map.mjs"),
     });

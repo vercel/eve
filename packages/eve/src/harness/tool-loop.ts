@@ -76,7 +76,6 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { projectParkedAgentHandles, resolveAgentsAnnouncement } from "#subagents/handles/prompt.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
@@ -117,10 +116,7 @@ import {
   isHarnessBetweenTurns,
   setHarnessEmissionState,
 } from "#harness/emission.js";
-import {
-  extractQuestionInputRequests,
-  extractToolApprovalInputRequests,
-} from "#harness/input-extraction.js";
+import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 import {
   renderPendingApprovalsInstruction,
   renderPendingApprovalsSnippet,
@@ -689,7 +685,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             historyProjector: config.historyProjector,
             messages: [...session.history],
             model: resolvedModel.model,
-            onCompaction: config.onCompaction,
             requestEnvelopeTokens: getRequestEnvelopeTokens(session),
             resolveModel: config.resolveModel,
             runtimeIdentity: config.runtimeIdentity,
@@ -743,7 +738,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         pendingRequestIds,
         stepInput: stepInput.input,
       }),
-      tools: config.tools,
     });
     const effectiveStepInput = staleConversion.stepInput;
     const preambleStepInput =
@@ -1477,7 +1471,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (execution.kind === "harness") {
         modelTools = buildToolSet({
           backgroundBatch,
-          capabilities: config.capabilities,
           tools: advertisedHarnessTools,
         });
         effectiveTools = modelTools;
@@ -1485,7 +1478,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const flatTools = await buildToolSetWithProviderTools({
           approvedTools,
           backgroundBatch,
-          capabilities: config.capabilities,
           disabledProviderTools: opts.disabledProviderTools,
           modelReference: execution.modelReference,
           tools: advertisedHarnessTools,
@@ -1499,7 +1491,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           const dynamicToolSet = buildToolSetFromDefinitions({
             approvedTools,
             backgroundBatch,
-            capabilities: config.capabilities,
             disabledProviderTools: opts.disabledProviderTools,
             tools: dynamicTools,
           });
@@ -1575,7 +1566,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               historyProjector: config.historyProjector,
               messages: [...messages],
               model: execution.model,
-              onCompaction: config.onCompaction,
               promptMessages: createModelMessages(messages),
               requestEnvelopeTokens,
               resolveModel: config.resolveModel,
@@ -1790,7 +1780,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             )
             .map(([name]) => name);
           const excludedActionToolNames = new Set([
-            ASK_QUESTION_TOOL_NAME,
             FINAL_OUTPUT_TOOL_NAME,
             ...hiddenRuntimeActionToolNames,
           ]);
@@ -2804,13 +2793,7 @@ async function handleStepResult(input: {
     content: result.content ?? [],
     excludedCallIds: invalidInputToolCallIds,
   });
-  const approvalRequestCallIds = new Set(approvalRequests.map((request) => request.action.callId));
-  const questionRequests = extractQuestionInputRequests({
-    toolCalls: result.toolCalls,
-    excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
-    tools: input.coordinationTools,
-  });
-  const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
+  const inputRequests: InputRequest[] = approvalRequests;
   const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
   // Keep outcomes from resumed work ahead of the framework pending-approval
   // message; only the unresolved assistant response belongs to the parked batch.
@@ -3364,7 +3347,6 @@ async function maybeCompact(input: {
   readonly historyProjector?: HistoryViewProjector;
   readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
-  readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
   /** Model-visible prompt used only to decide whether durable history needs compaction. */
   readonly promptMessages?: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
@@ -3476,12 +3458,6 @@ async function maybeCompact(input: {
       )
     : [...ordinary];
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
-
-  if (input.onCompaction) {
-    for (const msg of input.onCompaction()) {
-      messages.push(msg);
-    }
-  }
 
   if (emit) {
     const ctx = contextStorage.getStore();

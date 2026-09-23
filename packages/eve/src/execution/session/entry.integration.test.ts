@@ -30,7 +30,8 @@ import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { defineHook } from "#public/definitions/hook.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#protocol/event-id.js";
-import type { ToolContext } from "#tools/definition.js";
+import { always } from "#tools/approval/policies.js";
+import { defineTool, type ToolContext } from "#tools/definition.js";
 import type {
   AuthorizationDefinition,
   ConnectionPrincipal,
@@ -1234,6 +1235,19 @@ describe("workflowEntry integration", () => {
   it("forwards continued-turn HITL through the rebound caller", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "workflow-entry-delegated-hitl-rebind" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              approval: always(),
+              description: "Apply a change after the user approves it.",
+              execute: () => ({ applied: true }),
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/approve_change.ts",
+        },
+      ],
     });
     const workflowRuntime = createWorkflowRuntime({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
@@ -1280,7 +1294,7 @@ describe("workflowEntry integration", () => {
                 subagentName: "researcher",
               },
               kind: "send",
-              payload: { message: "Use the ask_question tool exactly once to ask for a color." },
+              payload: { message: "Use the approve_change tool exactly once." },
             },
             sessionId: child.runId,
           }),

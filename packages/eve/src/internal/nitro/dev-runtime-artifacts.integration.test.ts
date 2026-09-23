@@ -1033,8 +1033,13 @@ describe("development runtime artifact snapshots", () => {
         {
           agent: {
             agentRoot: reviewerRoot,
-            appRoot: extensionRoot,
+            appRoot: packageRoot,
             extensionMounts: [{ sourceRoot: extensionRoot }],
+          },
+          owner: {
+            kind: "extension",
+            namespace: "crm",
+            packageName: "@acme/crm",
           },
         },
       ],
@@ -1057,7 +1062,7 @@ describe("development runtime artifact snapshots", () => {
 
     expect(rewrittenManifest.subagents[0]?.agent).toMatchObject({
       agentRoot: join(
-        snapshot.snapshotSourceRoot,
+        snapshot.runtimeAppRoot,
         "node_modules",
         "@acme",
         "crm",
@@ -1066,14 +1071,7 @@ describe("development runtime artifact snapshots", () => {
         "subagents",
         "reviewer",
       ),
-      appRoot: join(
-        snapshot.snapshotSourceRoot,
-        "node_modules",
-        "@acme",
-        "crm",
-        "dist",
-        "extension",
-      ),
+      appRoot: join(snapshot.runtimeAppRoot, "node_modules", "@acme", "crm"),
     });
     expect(
       existsSync(

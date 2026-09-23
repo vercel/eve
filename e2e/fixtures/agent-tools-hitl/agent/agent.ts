@@ -10,6 +10,7 @@ const SCOPED_APPROVAL_DIRECTIVE =
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 const APPROVAL_FOLLOWUP_DIRECTIVE =
   /call the (gate|read-status) tool exactly once with marker "([^"]+)"/iu;
+const ASK_QUESTION_DIRECTIVE = /call the ask_question tool exactly once with question "([^"]+)"/iu;
 
 /**
  * Scripted mock for the world suites: untagged evals in this fixture phrase
@@ -48,6 +49,31 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       };
     }
     return `Approved scope: ${scopedApproval[1]}`;
+  }
+
+  const askQuestion = ASK_QUESTION_DIRECTIVE.exec(message);
+  if (askQuestion?.[1] !== undefined) {
+    const roles = request.messages.map((entry) => entry.role);
+    if (roles.lastIndexOf("tool") < roles.lastIndexOf("user")) {
+      return {
+        toolCalls: [
+          {
+            input: {
+              options: [
+                { description: "Ship to the staging environment first.", label: "Staging" },
+                { description: "Ship straight to production.", label: "Production" },
+              ],
+              question: askQuestion[1],
+            },
+            name: "ask_question",
+          },
+        ],
+      };
+    }
+    const output = [...request.toolResults]
+      .reverse()
+      .find((result) => result.name === "ask_question")?.output;
+    return `ask_question result: ${JSON.stringify(output ?? "")}`;
   }
 
   const authProbe = AUTH_PROBE_DIRECTIVE.exec(message);

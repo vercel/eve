@@ -691,6 +691,51 @@ describe("development generation artifacts", () => {
     expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
   });
 
+  it("uses an app-relative workflow id for a workspace agent", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agents/assistant/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agents/assistant/agent/instructions.md": "Use the background tool.",
+        "agents/assistant/agent/tools/request_mission_plan.mjs": [
+          'import { defineWorkflowTool } from "eve/tools";',
+          "",
+          "export default defineWorkflowTool({",
+          '  description: "Run a mission plan.",',
+          '  execution: "background",',
+          "  inputSchema: {},",
+          "  async execute() {",
+          '    "use workflow";',
+          '    return { status: "complete" };',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+        "agents/monitor/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agents/monitor/agent/instructions.md": "Monitor events.",
+      },
+      installDependencies: true,
+      name: "workspace-workflow-tool-id",
+    });
+    const appRoot = join(app.appRoot, "agents", "assistant");
+    const compileResult = await compileAgent({ startPath: appRoot });
+    const generation = await stageDevelopmentGeneration(compileResult);
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        generation.runtimeAppRoot,
+      ),
+    });
+    const sourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "request_mission_plan",
+    )?.sourceId;
+    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[sourceId!] as {
+      default: { execute: { workflowId?: string } };
+    };
+
+    expect(tool.default.execute.workflowId).toBe(
+      "workflow//./agent/tools/request_mission_plan//execute",
+    );
+  });
+
   it("rejects module-level authored workflow directives", async () => {
     const app = await scenarioApp({
       files: {

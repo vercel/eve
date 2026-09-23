@@ -72,6 +72,36 @@ describe("prewarmAppSandboxes", () => {
     expect(secondInputs[0]?.sourceRevision).toBe("sandbox-source-hash");
   });
 
+  it("waits for other providers to finish before reporting a preparation failure", async () => {
+    const graph = createGraph();
+    const child = { ...graph.root, nodeId: "child" };
+    const nodesByNodeId = new Map(graph.nodesByNodeId);
+    nodesByNodeId.set("child", child);
+    let finish!: () => void;
+    const slow = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let calls = 0;
+    let settled = false;
+    const preparation = prewarmAppSandboxes({
+      appRoot: process.cwd(),
+      loadAgentGraph: async () => ({ ...graph, nodesByNodeId }),
+      dispatch: async () => {
+        if (++calls === 1) throw new Error("first provider failed");
+        await slow;
+        return null;
+      },
+      preparedArtifactStore: createMemoryArtifactStore(),
+    }).catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    await vi.waitFor(() => expect(calls).toBe(2));
+    expect(settled).toBe(false);
+    finish();
+    expect(await preparation).toMatchObject({ message: "first provider failed" });
+  });
+
   it.each(["docker", "microsandbox"])(
     "explains that %s is unavailable during Vercel prewarm",
     async (providerName) => {

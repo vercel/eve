@@ -1,6 +1,6 @@
 /**
  * The shared atoms of the transcript's rail grammar. Persistent sections
- * (tool rows, subagent sections, the todo panel) all hang their marks at the
+ * (tool rows, subagent sections) all hang their marks at the
  * same two-cell tool column and elide overflow with the same counted row —
  * one definition keeps the alignment a checked fact instead of a set of
  * parallel comments.

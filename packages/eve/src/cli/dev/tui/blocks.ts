@@ -47,7 +47,6 @@ export type BlockKind =
   | "log"
   | "turn-stats"
   | "session-boundary"
-  | "todo-list"
   | "agent-header";
 
 /**
@@ -256,7 +255,6 @@ function renderBody(
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
-    case "todo-list":
     case "agent-header":
       // Rows arrive fully styled and width-fit from their builders.
       return (block.body ?? "").split("\n");

@@ -213,72 +213,6 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-### `todo`
-
-`todo` maintains a durable todo list for the session.
-
-```sh
-eve add tool/todo
-```
-
-```ts title="agent/tools/todo.ts"
-export { default } from "eve/tools/todo";
-```
-
-Override it. Spreading the definition preserves its durable state key:
-
-```ts title="agent/tools/todo.ts"
-import { defineTool } from "eve/tools";
-import { todo } from "eve/tools/todo";
-
-export default defineTool({
-  ...todo,
-  description: "Track the current implementation plan.",
-});
-```
-
-Disable it:
-
-```ts title="agent/tools/todo.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-### `ask_question`
-
-`ask_question` asks the user for clarification or a choice, then parks the turn until they answer. It appears only when the session can request user input. See [Human-in-the-loop](/docs/human-in-the-loop).
-
-```sh
-eve add tool/ask_question
-```
-
-```ts title="agent/tools/ask_question.ts"
-export { default } from "eve/tools/ask_question";
-```
-
-Replace its request-input behavior with an ordinary authored tool:
-
-```ts title="agent/tools/ask_question.ts"
-import { defineTool } from "eve/tools";
-
-export default defineTool({
-  description: "Record a clarification request.",
-  inputSchema: { type: "object" },
-  async execute(input) {
-    return { recorded: input };
-  },
-});
-```
-
-Disable it:
-
-```ts title="agent/tools/ask_question.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
 ### `agent`
 
 `agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
@@ -364,6 +298,22 @@ You can also add the opt-in framework tools described below.
 ## Opt-in framework tools
 
 These framework-provided tools are not added by default. Add only the ones the agent needs.
+
+### `ask_question`
+
+`ask_question` lets the model ask the user one question, then waits for the answer. The model can offer two or three options, each with a label and a short description, and the user can always type their own answer instead. Channels render the options as native UI, such as Slack select menus. Without the tool, the model can still ask in its reply text and the user answers with their next message. See [Human-in-the-loop](/docs/human-in-the-loop). Add it:
+
+```sh
+eve add tool/ask_question
+```
+
+```ts title="agent/tools/ask_question.ts"
+import { askQuestion } from "eve/tools/ask_question";
+
+export default askQuestion();
+```
+
+`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` resolves as `{ status: "dismissed" }` and the message reaches the model normally. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
 
 ### `glob`
 

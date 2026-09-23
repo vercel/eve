@@ -13,13 +13,13 @@ A typical config selects a model:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
 });
 ```
 
 For a static AI Gateway model ID, you can make the same source change from the
-project root with `eve set --model anthropic/claude-opus-4.8` or from the local
-dev TUI with `/model anthropic/claude-opus-4.8`.
+project root with `eve set --model anthropic/claude-opus-5.5` or from the local
+dev TUI with `/model anthropic/claude-opus-5.5`.
 
 The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `spacexai/grok-4.7`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
@@ -39,9 +39,9 @@ export default defineAgent({
 });
 ```
 
-`openai()` from `eve/models/openai` defaults to `gpt-5.6-luna-fast`. Both helpers accept an optional native provider model ID and use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. During local development they can also use credentials saved through `/login`. Deployments require their API key in the server environment.
+`openai()` from `eve/models/openai` defaults to `gpt-6-luna-fast`. Both helpers accept an optional native provider model ID and use `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`. During local development they can also use credentials saved through `/login`. Deployments require their API key in the server environment.
 
-For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-5.6-luna-fast` and cannot run in a deployment.
+For a local ChatGPT subscription, use `chatgpt()` from `eve/models/openai` and sign in with `/login`. It defaults to `gpt-6-luna-fast` and cannot run in a deployment.
 
 `/login` can switch a static Gateway string to an eve helper and manage its import. `/model` changes the selected model and settings immediately. Custom provider SDK calls and dynamic expressions retain their authored behavior and require manual source edits. You can still install an AI SDK provider package and pass its `LanguageModel` when you need provider-specific configuration.
 
@@ -77,7 +77,7 @@ export default defineAgent({
     events: {
       "session.started": (_event, ctx) => {
         if (ctx.session.auth.initiator?.attributes.plan === "enterprise") {
-          return "anthropic/claude-opus-4.8";
+          return "anthropic/claude-opus-5.5";
         }
 
         return "anthropic/claude-sonnet-5";
@@ -143,7 +143,7 @@ Compaction summarizes older turns as you approach the context window. It's on by
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   compaction: {
     thresholdPercent: 0.75, // default 0.9
   },
@@ -160,7 +160,7 @@ provider-reported tokens or model token cost reaches a configured limit:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   limits: {
     maxInputTokensPerSession: 200_000,
     maxOutputTokensPerSession: 20_000,
@@ -230,7 +230,7 @@ root `agent.ts`:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       world: "@workflow/world-postgres",
@@ -266,7 +266,7 @@ sequential model calls:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       modelCallsPerStep: 4,
@@ -304,7 +304,7 @@ finishes instead:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       retention: 0,

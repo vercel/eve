@@ -74,6 +74,7 @@ function makeSummary(): EveEvalRunSummary {
             score: 0,
             severity: "gate",
             passed: false,
+            errored: false,
             message: "expected hello",
           },
         ],
@@ -102,6 +103,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
         score: 1,
         severity: "gate",
         passed: true,
+        errored: false,
       },
     ],
     result: {

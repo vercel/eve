@@ -44,7 +44,7 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
   const modelId = e2eModel();
   if (typeof modelId !== "string") throw new Error("Warehouse reporting requires a real CI model.");
   const started = await t.send(
-    `Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment. Keep this small checklist in the conversation rather than creating a separate todo list.
+    `Alice is preparing an inventory checklist for Bob's warehouse handoff. Please delegate these three entries to three separate background assistants using the built-in agent tool, so the checks can proceed independently. Include the entry's check reference in each assistant's assignment.
 
 1. check=first: Find the inventory item for the first entry using the inventory lookup tool (probe), and share the item it returns.
 2. check=second: Find the inventory item for the second entry using the inventory lookup tool (probe), and share the item it returns.

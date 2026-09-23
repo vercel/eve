@@ -173,7 +173,7 @@ async function recoverStalePublication(
   }
 }
 
-async function acquireRecoveryLease(
+export async function acquireRecoveryLease(
   recoveryPath: string,
   token: string,
 ): Promise<RecoveryLease | undefined> {

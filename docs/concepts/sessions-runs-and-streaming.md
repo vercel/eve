@@ -77,7 +77,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                                                      |
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                                           |
 | `action.result`           | A tool call returned.                                                                                                                              |
-| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`.                                   |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                           |
 | `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                             |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                                                   |
 | `subagent.completed`      | The parent recorded a successful subagent invocation result; carries the actual output.                                                            |
@@ -210,7 +210,7 @@ Message sends default to `"steer"`. Before assistant output begins, eve interrup
 
 If the session is waiting on a human-in-the-loop approval, respond with the channel’s Approve or Cancel controls. Text messages do not decide an approval; unrelated text starts an ordinary turn while the approval stays pending and answerable. A later structured `inputResponses` answer keyed by its `requestId` still resumes the original tool call, even after intervening turns.
 
-With one question-only batch, an exact option match or permitted freeform response answers `ask_question`. Any other follow-up marks the question unanswered and starts the new turn. With several approval or question batches pending, eve does not guess which batch plain text addresses: the message starts an ordinary turn and the batches stay open. Use structured responses to target requests unambiguously.
+A pending `ctx.ask()` question from a blocking tool, such as `ask_question`, can be answered with plain text. When it is the only pending question, a message that matches an option answers it, and so does any message when the question allows free text. Otherwise eve does not guess which question the text addresses: the message follows the normal `turnPolicy`, questions created with `dismissible: true` resolve as `dismissed`, and other questions stay open. Questions from background tools and subagents always need a structured response. Use structured responses to target requests unambiguously.
 
 A structured response matches any currently pending request by ID, not only the newest batch. It becomes stale only after that request was answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
 

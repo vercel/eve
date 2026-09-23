@@ -159,7 +159,6 @@ describe("buildAgentInfoResponse", () => {
 
     expect(response.kernelEffects).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "request-input" }),
         expect.objectContaining({ action: "subagent-call", kind: "dispatch" }),
       ]),
     );

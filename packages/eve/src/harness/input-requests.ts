@@ -22,10 +22,6 @@ import type {
   ResolvePendingInputResult,
   ResolvedStepInput,
 } from "#harness/hitl/pending-input-resolution.js";
-import {
-  findAnsweredQuestionBatches,
-  resolveQuestionOnlyInputBatches,
-} from "#harness/hitl/question-input-requests.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import {
   clearPendingSessionLimitPrompt,
@@ -77,14 +73,8 @@ export function hasRunnableDeferredStepInput(session: HarnessSession): boolean {
       return route.batch.requests.every((request) =>
         responses.some((response) => response.requestId === request.requestId),
       );
-    case "with-approvals":
-      // An unanswered approval must not prevent an answered question from running.
-      return (
-        findAnsweredApprovalBatches(route.approvalBatches, responses).length > 0 ||
-        findAnsweredQuestionBatches(route.questionBatches, responses).length > 0
-      );
-    case "questions-only":
-      return findAnsweredQuestionBatches(batches, responses).length > 0;
+    case "approvals":
+      return findAnsweredApprovalBatches(batches, responses).length > 0;
   }
 }
 
@@ -100,7 +90,7 @@ export function hasPendingApprovalBatch(session: HarnessSession): boolean {
  *
  * Ordered batches remain independently answerable. Session-limit prompts own
  * resolution while open; approval batches preserve AI SDK's tail-message
- * requirement; question-only batches retain dismiss-and-continue behavior.
+ * requirement.
  */
 export function resolvePendingInput(input: {
   /** The turn currently advancing through the harness tool loop. */
@@ -150,10 +140,10 @@ export function resolvePendingInput(input: {
   }
 
   if (
-    route.kind === "with-approvals" &&
+    route.kind === "approvals" &&
     input.deferMessagesWhileApprovalsPending === true &&
     resolvedStepInput?.message !== undefined &&
-    findAnsweredApprovalBatches(route.approvalBatches, responses).length === 0
+    findAnsweredApprovalBatches(batches, responses).length === 0
   ) {
     return {
       deferredMessage: true,
@@ -185,15 +175,11 @@ export function resolvePendingInput(input: {
   switch (route.kind) {
     case "session-limit":
       return resolveSessionLimitInput({ ...resolverInput, pendingBatch: route.batch });
-    case "with-approvals":
+    case "approvals":
       return resolveApprovalInputBatches({
         ...resolverInput,
-        approvalBatches: route.approvalBatches,
-        questionBatches: route.questionBatches,
         resolveApprovalKey: input.resolveApprovalKey,
       });
-    case "questions-only":
-      return resolveQuestionOnlyInputBatches(resolverInput);
   }
 }
 
@@ -211,9 +197,7 @@ function canContinuePastHistoricalInput(input: {
   if (input.activeTurnId === undefined || input.route.kind === "session-limit") return false;
   if (
     input.responses.length > 0 &&
-    (input.route.kind !== "with-approvals" ||
-      findAnsweredApprovalBatches(input.route.approvalBatches, input.responses).length > 0 ||
-      findAnsweredQuestionBatches(input.route.questionBatches, input.responses).length > 0)
+    findAnsweredApprovalBatches(input.batches, input.responses).length > 0
   ) {
     return false;
   }
@@ -224,51 +208,20 @@ function canContinuePastHistoricalInput(input: {
 
 type PendingInputRoute =
   | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
-  | {
-      readonly approvalBatches: readonly PendingInputBatch[];
-      readonly kind: "with-approvals";
-      readonly questionBatches: readonly PendingInputBatch[];
-    }
-  | { readonly kind: "questions-only" };
-
-type PendingInputBatchDomain = "approval" | "question" | "session-limit";
+  | { readonly kind: "approvals" };
 
 function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputRoute {
-  const classified = batches.map((batch) => ({ batch, domain: classifyPendingInputBatch(batch) }));
-  const limitBatch = classified.find(({ domain }) => domain === "session-limit")?.batch;
+  const limitBatch = batches.find((batch) => isSessionLimitInputBatch(batch));
   if (limitBatch !== undefined) return { batch: limitBatch, kind: "session-limit" };
 
-  const approvalBatches = classified
-    .filter(({ domain }) => domain === "approval")
-    .map(({ batch }) => batch);
-  if (approvalBatches.length > 0) {
-    const approvalSet = new Set(approvalBatches);
-    return {
-      approvalBatches,
-      kind: "with-approvals",
-      questionBatches: batches.filter((batch) => !approvalSet.has(batch)),
-    };
-  }
-
-  return { kind: "questions-only" };
-}
-
-function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
-  for (const request of batch.requests) {
-    switch (request.kind) {
-      case "question":
-      case "session-limit":
-      case "tool-approval":
-        break;
-      default: {
-        const unhandled: never = request.kind;
-        throw new TypeError(`Unhandled pending input request kind: ${String(unhandled)}`);
+  for (const batch of batches) {
+    for (const request of batch.requests) {
+      if (!isApprovalRequest(request)) {
+        throw new TypeError(`Unhandled pending input request kind: ${request.kind}`);
       }
     }
   }
-
-  if (isSessionLimitInputBatch(batch)) return "session-limit";
-  return batch.requests.some((request) => isApprovalRequest(request)) ? "approval" : "question";
+  return { kind: "approvals" };
 }
 
 function canonicalizeInputResponses(responses: readonly InputResponse[]): readonly InputResponse[] {

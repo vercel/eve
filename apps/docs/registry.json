@@ -313,7 +313,7 @@
       "name": "tool/ask_question",
       "type": "registry:item",
       "title": "Ask Question",
-      "description": "Let the agent ask the user a question during a turn.",
+      "description": "Let the agent ask the user one question and wait for the answer.",
       "files": [
         {
           "path": "registry/tools/ask_question.ts",
@@ -371,19 +371,6 @@
           "path": "registry/tools/task_cancel.ts",
           "type": "registry:file",
           "target": "agent/tools/task_cancel.ts"
-        }
-      ]
-    },
-    {
-      "name": "tool/todo",
-      "type": "registry:item",
-      "title": "Todo",
-      "description": "Maintain a durable per-session todo list.",
-      "files": [
-        {
-          "path": "registry/tools/todo.ts",
-          "type": "registry:file",
-          "target": "agent/tools/todo.ts"
         }
       ]
     },

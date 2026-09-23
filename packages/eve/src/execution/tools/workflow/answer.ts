@@ -8,7 +8,17 @@ export async function resumeWorkflowToolRunAnswers(
   responses: readonly InputResponse[] | undefined,
 ): Promise<void> {
   for (const response of responses ?? []) {
-    const answer: ToolInputResponse = { optionId: response.optionId, text: response.text };
+    const answer: ToolInputResponse = {
+      optionId: response.optionId,
+      status: "answered",
+      text: response.text,
+    };
     await resumeHook(answerToken, answer);
   }
+}
+
+/** Resolves a dismissible `ctx.ask()` request the user moved past without answering. */
+export async function resumeWorkflowToolRunDismissal(answerToken: string): Promise<void> {
+  const answer: ToolInputResponse = { status: "dismissed" };
+  await resumeHook(answerToken, answer);
 }

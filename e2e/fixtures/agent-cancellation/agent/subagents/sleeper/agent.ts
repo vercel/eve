@@ -17,11 +17,7 @@ export default defineAgent({
               toolCalls: [
                 {
                   id: "child-question",
-                  input: {
-                    allowFreeform: true,
-                    options: [],
-                    prompt: "What marker should the child return?",
-                  },
+                  input: { question: "What marker should the child return?" },
                   name: "ask_question",
                 },
               ],

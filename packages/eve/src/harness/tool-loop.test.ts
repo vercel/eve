@@ -387,23 +387,6 @@ function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
   ]);
 }
 
-function createQuestionToolMap(): ToolLoopHarnessConfig["tools"] {
-  return new Map([
-    [
-      "ask_question",
-      {
-        behavior: {
-          availability: ["requires-request-input"],
-          handling: { kind: "request-input", request: "question" },
-        },
-        description: "Ask the user a question.",
-        inputSchema: jsonSchema({ type: "object" }),
-        name: "ask_question",
-      },
-    ],
-  ]);
-}
-
 function createScheduleContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, SCHEDULE_APP_AUTH);
@@ -4179,87 +4162,6 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("does not park an invalid ask_question call and continues with its tool error", async () => {
-    setupMockAgent({
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              {
-                input: { prompt: 42 },
-                toolCallId: "question-invalid",
-                toolName: "ask_question",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-          {
-            content: [
-              {
-                output: { type: "error-text", value: "Expected string, received number" },
-                toolCallId: "question-invalid",
-                toolName: "ask_question",
-                type: "tool-result",
-              },
-            ],
-            role: "tool",
-          },
-        ],
-      },
-      toolCalls: [
-        {
-          dynamic: true,
-          error: new Error("Expected string, received number"),
-          input: { prompt: 42 },
-          invalid: true,
-          toolCallId: "question-invalid",
-          toolName: "ask_question",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: new Map([
-          [
-            "ask_question",
-            {
-              description: "Ask the user a question.",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "ask_question",
-            },
-          ],
-        ]),
-      }),
-    );
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          {
-            description: "Ask the user a question.",
-            inputSchema: { type: "object" },
-            name: "ask_question",
-          },
-        ],
-      },
-    });
-
-    const result = await runStep(session, { message: "Ask me a question." });
-
-    expect(typeof result.next).toBe("function");
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(events.some((event) => event.type === "input.requested")).toBe(false);
-    expect(result.session.history.at(-1)?.role).toBe("tool");
-  });
-
   it("feeds non-object tool call input back to the model as a failed tool result", async () => {
     const invalidInput = '"not an object"';
     const errorMessage =
@@ -7544,12 +7446,14 @@ describe("createToolLoopHarness", () => {
   });
 
   it("normalizes provider history before parking on an input request", async () => {
-    const searchCallId = "parallel_search_before_question";
-    const questionCallId = "question-after-search";
+    const searchCallId = "parallel_search_before_gate";
+    const gateCallId = "gate-after-search";
     const webSearchOutput = { results: [], searchId: "search-1" };
-    const questionInput = {
-      options: [{ id: "one", label: "One" }],
-      prompt: "Choose one.",
+    const gateInput = { action: "run" };
+    const approvalRequest = {
+      approvalId: "approval-after-search",
+      toolCallId: gateCallId,
+      type: "tool-approval-request" as const,
     };
     setupMockAgent({
       content: [
@@ -7567,11 +7471,12 @@ describe("createToolLoopHarness", () => {
           type: "tool-result",
         },
         {
-          input: questionInput,
-          toolCallId: questionCallId,
-          toolName: "ask_question",
+          input: gateInput,
+          toolCallId: gateCallId,
+          toolName: "add",
           type: "tool-call",
         },
+        approvalRequest,
       ],
       finishReason: "tool-calls",
       response: {
@@ -7592,11 +7497,12 @@ describe("createToolLoopHarness", () => {
                 type: "tool-result",
               },
               {
-                input: questionInput,
-                toolCallId: questionCallId,
-                toolName: "ask_question",
+                input: gateInput,
+                toolCallId: gateCallId,
+                toolName: "add",
                 type: "tool-call",
               },
+              approvalRequest,
             ],
             role: "assistant",
           },
@@ -7611,9 +7517,9 @@ describe("createToolLoopHarness", () => {
           type: "tool-call",
         },
         {
-          input: questionInput,
-          toolCallId: questionCallId,
-          toolName: "ask_question",
+          input: gateInput,
+          toolCallId: gateCallId,
+          toolName: "add",
           type: "tool-call",
         },
       ],
@@ -7631,7 +7537,6 @@ describe("createToolLoopHarness", () => {
     const harness = createToolLoopHarness(
       createTestConfig("conversation", undefined, {
         capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
       }),
     );
     const result = await harness(
@@ -7639,17 +7544,10 @@ describe("createToolLoopHarness", () => {
         agent: {
           modelReference: { id: "anthropic/claude-sonnet-5" },
           system: "You are a test assistant.",
-          tools: [
-            { description: "Search the web", name: "web_search", inputSchema: null },
-            {
-              description: "Ask the user a question.",
-              name: "ask_question",
-              inputSchema: { type: "object" },
-            },
-          ],
+          tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
         },
       }),
-      { message: "Search, then ask me a question." },
+      { message: "Search, then run the gated tool." },
     );
 
     const pendingResponseMessages = (
@@ -7687,11 +7585,12 @@ describe("createToolLoopHarness", () => {
       {
         content: [
           {
-            input: questionInput,
-            toolCallId: questionCallId,
-            toolName: "ask_question",
+            input: gateInput,
+            toolCallId: gateCallId,
+            toolName: "add",
             type: "tool-call",
           },
+          approvalRequest,
         ],
         role: "assistant",
       },
@@ -8876,202 +8775,6 @@ describe("createToolLoopHarness", () => {
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
-  it("parks a second input batch while an earlier approval stays open", async () => {
-    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
-    const agentResults = [
-      {
-        finishReason: "tool-calls",
-        response: {
-          messages: [
-            {
-              content: [
-                { text: "Which color?", type: "text" },
-                {
-                  input: {
-                    options: [
-                      { id: "red", label: "Red" },
-                      { id: "blue", label: "Blue" },
-                    ],
-                    prompt: "Pick a color.",
-                  },
-                  toolCallId: "question-call",
-                  toolName: "ask_question",
-                  type: "tool-call",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-        text: "",
-        toolCalls: [
-          {
-            input: {
-              options: [
-                { id: "red", label: "Red" },
-                { id: "blue", label: "Blue" },
-              ],
-              prompt: "Pick a color.",
-            },
-            toolCallId: "question-call",
-            toolName: "ask_question",
-            type: "tool-call",
-          },
-        ],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Red it is.", role: "assistant" }] },
-        text: "Red it is.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: {
-          messages: [{ content: "Understood, not running it.", role: "assistant" }],
-        },
-        text: "Understood, not running it.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ] satisfies Record<string, unknown>[];
-    let instanceIndex = 0;
-
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: MockAgentInstance,
-      settings: MockAgentSettings,
-    ) {
-      const result = agentResults[instanceIndex];
-      instanceIndex += 1;
-      if (result === undefined) {
-        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
-      }
-      const { onStepEnd, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepEnd) await onStepEnd(result);
-        return createMockGenerateResult(result);
-      });
-      return this;
-    } as MockAgentConstructor);
-
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "rm -rf /tmp/demo" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Yes" },
-            { id: "cancel", label: "No" },
-          ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: { command: "rm -rf /tmp/demo" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-1",
-              toolCallId: "call-1",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        agent: {
-          modelReference: { id: "test-model" },
-          system: "You are a test assistant.",
-          tools: [
-            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-            {
-              description: "Ask the user a question.",
-              name: "ask_question",
-              inputSchema: { type: "object" },
-            },
-          ],
-        },
-      }),
-    });
-    const config = createTestConfig("conversation", undefined, {
-      capabilities: { requestInput: true },
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-        ...createQuestionToolMap(),
-      ]),
-    });
-
-    // The intervening turn raises its own question batch; the approval batch
-    // must survive it instead of being overwritten.
-    const questionTurn = await createToolLoopHarness(config)(session, {
-      message: "Ask me which color to use.",
-    });
-    expect(questionTurn.next).toBeNull();
-    const questionSettings = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(questionSettings?.toolChoice).not.toBe("none");
-    expect(questionSettings?.tools).toHaveProperty("bash");
-    expect(getPendingInputRequestIds(questionTurn.session.state)).toEqual(
-      new Set(["approval-1", "question-call"]),
-    );
-
-    // Answering the question closes only its own batch.
-    const answered = await createToolLoopHarness(config)(questionTurn.session, {
-      inputResponses: [{ requestId: "question-call", optionId: "red" }],
-    });
-    expect(getPendingInputRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
-    const answeredPrompt = generateCalls[1] ?? [];
-    expect(
-      answeredPrompt.some((message) => JSON.stringify(message.content).includes("question-call")),
-    ).toBe(true);
-    expect(
-      answeredPrompt.some((message) => JSON.stringify(message.content).includes("call-1")),
-    ).toBe(false);
-
-    // The original approval still resolves afterwards.
-    const denied = await createToolLoopHarness(config)(answered.session, {
-      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
-    });
-    expect(hasPendingInputBatch(denied.session.state)).toBe(false);
-    expect(denied.session.history.at(-1)).toEqual({
-      content: "Understood, not running it.",
-      role: "assistant",
-    });
-  });
-
   it("releases a message wedged behind an approval by an earlier version", async () => {
     const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
     const stillHere = {
@@ -9715,437 +9418,6 @@ describe("createToolLoopHarness", () => {
     },
   );
 
-  it("continues deferred input when approval resolution raises another request", async () => {
-    setupMockAgentSequence([
-      {
-        finishReason: "tool-calls",
-        response: {
-          messages: [
-            {
-              content: [
-                {
-                  input: { prompt: "Which color?" },
-                  toolCallId: "question-1",
-                  toolName: "ask_question",
-                  type: "tool-call",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-        text: "",
-        toolCalls: [
-          {
-            input: { prompt: "Which color?" },
-            toolCallId: "question-1",
-            toolName: "ask_question",
-            type: "tool-call",
-          },
-        ],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Handled the deferred message.", role: "assistant" }] },
-        text: "Handled the deferred message.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ]);
-
-    const base = createPendingBashApprovalSession();
-    const session = {
-      ...base,
-      agent: {
-        ...base.agent,
-        tools: [
-          ...base.agent.tools,
-          {
-            description: "Ask the user a question.",
-            inputSchema: { type: "object" },
-            name: "ask_question",
-          },
-        ],
-      },
-    };
-    const config = createTestConfig("conversation", undefined, {
-      capabilities: { requestInput: true },
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-        [
-          "ask_question",
-          {
-            behavior: {
-              availability: ["requires-request-input"],
-              handling: { kind: "request-input", request: "question" },
-            },
-            description: "Ask the user a question.",
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "ask_question",
-          },
-        ],
-      ]),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    const first = await runStep(session, {
-      inputResponses: [{ optionId: "cancel", requestId: "approval-1" }],
-      message: "Use this instead.",
-    });
-
-    expect(typeof first.next).toBe("function");
-    expect(getPendingInputRequestIds(first.session.state)).toEqual(new Set(["question-1"]));
-    if (typeof first.next !== "function") {
-      throw new TypeError("Expected deferred input to continue after the new question.");
-    }
-    const result = await first.next(first.session);
-
-    expect(result.next).toBeNull();
-    expect(hasDeferredStepInput(result.session)).toBe(false);
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(JSON.stringify(result.session.history)).toContain("Use this instead.");
-  });
-
-  it("emits input.requested for ask_question and does not emit actions.requested", async () => {
-    setupMockAgent({
-      content: [],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              { text: "I need a choice.", type: "text" },
-              {
-                input: {
-                  options: [{ id: "one", label: "One" }],
-                  prompt: "Choose one.",
-                },
-                toolCallId: "question-1",
-                toolName: "ask_question",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: {
-            options: [{ id: "one", label: "One" }],
-            prompt: "Choose one.",
-          },
-          toolCallId: "question-1",
-          toolName: "ask_question",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
-      }),
-    );
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          {
-            description: "Ask the user a question.",
-            name: "ask_question",
-            inputSchema: { type: "object" },
-          },
-        ],
-      },
-    });
-
-    const result = await runStep(session, { message: "Choose for me." });
-
-    expect(result.next).toBeNull();
-    expect(events.some((event) => event.type === "actions.requested")).toBe(false);
-    expect(events.find((event) => event.type === "input.requested")).toEqual({
-      data: {
-        requests: [
-          {
-            action: {
-              callId: "question-1",
-              input: {
-                options: [{ id: "one", label: "One" }],
-                prompt: "Choose one.",
-              },
-              kind: "tool-call",
-              toolName: "ask_question",
-            },
-            display: "select",
-            kind: "question",
-            options: [{ id: "one", label: "One" }],
-            prompt: "Choose one.",
-            requestId: "question-1",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_0",
-      },
-      type: "input.requested",
-    });
-  });
-
-  it("delivers a stale ask_question selection as a new user turn while another question is pending", async () => {
-    const nextQuestionInput = {
-      allowFreeform: false,
-      options: [
-        { id: "alpha", label: "Use alpha" },
-        { id: "beta", label: "Use beta" },
-      ],
-      prompt: "Which new context should I use?",
-    };
-    setupMockAgent({
-      content: [],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              {
-                input: nextQuestionInput,
-                toolCallId: "question-2",
-                toolName: "ask_question",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: nextQuestionInput,
-          toolCallId: "question-2",
-          toolName: "ask_question",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-    const nextQuestionImplementation = vi.mocked(ToolLoopAgent).getMockImplementation();
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "I will use the candidate.", role: "assistant" }] },
-      text: "I will use the candidate.",
-      toolCalls: [],
-      toolResults: [],
-    });
-    vi.mocked(ToolLoopAgent).mockImplementationOnce(nextQuestionImplementation!);
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
-      }),
-    );
-    const questionInput = {
-      allowFreeform: true,
-      options: [
-        {
-          description: "Use the current conversation context.",
-          id: "current",
-          label: "Use current context",
-        },
-        {
-          description: "Use the candidate from the earlier question.",
-          id: "candidate",
-          label: "Use STALE-CANDIDATE-7Q4M",
-        },
-      ],
-      prompt: "Which context should I use?",
-    };
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "question-1",
-            input: questionInput,
-            kind: "tool-call",
-            toolName: "ask_question",
-          },
-          allowFreeform: true,
-          display: "select",
-          kind: "question",
-          options: questionInput.options,
-          prompt: questionInput.prompt,
-          requestId: "question-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: questionInput,
-              toolCallId: "question-1",
-              toolName: "ask_question",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        history: [{ content: "Help me choose.", kind: "user" as const, role: "user" }],
-      }),
-    });
-
-    const followupResult = await runStep(session, {
-      message: "Use current context instead.",
-    });
-
-    expect(followupResult.next).toBeNull();
-    expect(hasPendingInputBatch(followupResult.session.state)).toBe(true);
-
-    const secondTurnEventIndex = events.length;
-    const result = await runStep(followupResult.session, {
-      inputResponses: [{ requestId: "question-1", optionId: "candidate" }],
-    });
-
-    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
-    if (agent === undefined) {
-      throw new Error("ToolLoopAgent mock did not return an instance.");
-    }
-    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
-
-    expect(result.next).toBeNull();
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(modelMessages?.at(-1)).toEqual({
-      content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
-      kind: "user" as const,
-      role: "user",
-    });
-    expect(
-      events.slice(secondTurnEventIndex).find((event) => event.type === "message.received"),
-    ).toMatchObject({
-      data: {
-        message: "Use STALE-CANDIDATE-7Q4M",
-      },
-    });
-  });
-
-  it("delivers a stale ask_question selection as a new user turn when nothing is pending", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Understood.", role: "assistant" }] },
-      text: "Understood.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
-      }),
-    );
-    const questionInput = {
-      allowFreeform: true,
-      options: [
-        { id: "current", label: "Use current context" },
-        { id: "candidate", label: "Use STALE-CANDIDATE-7Q4M" },
-      ],
-      prompt: "Which context should I use?",
-    };
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "question-1",
-            input: questionInput,
-            kind: "tool-call",
-            toolName: "ask_question",
-          },
-          allowFreeform: true,
-          display: "select",
-          kind: "question",
-          options: questionInput.options,
-          prompt: questionInput.prompt,
-          requestId: "question-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: questionInput,
-              toolCallId: "question-1",
-              toolName: "ask_question",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        history: [{ content: "Help me choose.", kind: "user" as const, role: "user" }],
-      }),
-    });
-
-    // The follow-up resolves question-1 as freeform; the turn completes with
-    // nothing pending.
-    const followupResult = await runStep(session, {
-      message: "Use current context instead.",
-    });
-
-    expect(followupResult.next).toBeNull();
-    expect(hasPendingInputBatch(followupResult.session.state)).toBe(false);
-
-    const secondTurnEventIndex = events.length;
-    const result = await runStep(followupResult.session, {
-      inputResponses: [{ requestId: "question-1", optionId: "candidate" }],
-    });
-
-    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
-    if (agent === undefined) {
-      throw new Error("ToolLoopAgent mock did not return an instance.");
-    }
-    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
-
-    expect(result.next).toBeNull();
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(modelMessages?.at(-1)).toEqual({
-      content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
-      kind: "user" as const,
-      role: "user",
-    });
-    // The stale selection must not append a second tool result for
-    // question-1: only the freeform answer from the follow-up turn exists.
-    expect(modelMessages?.filter((message: ModelMessage) => message.role === "tool")).toHaveLength(
-      1,
-    );
-    expect(
-      events.slice(secondTurnEventIndex).find((event) => event.type === "message.received"),
-    ).toMatchObject({
-      data: {
-        message: "Use STALE-CANDIDATE-7Q4M",
-      },
-    });
-  });
-
   it("emits compaction.requested and compaction.completed when compaction triggers", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
     vi.mocked(compactMessages).mockResolvedValue([
@@ -10350,7 +9622,6 @@ describe("createToolLoopHarness", () => {
     vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
 
     const { emit, events } = createEventCollector();
-    const onCompaction = vi.fn(() => []);
     const hidden = {
       content: "Hidden internal context.",
       kind: "user" as const,
@@ -10360,7 +9631,6 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, {
         compactOnly: true,
         historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
-        onCompaction,
         resolveModel: vi
           .fn()
           .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
@@ -10393,7 +9663,6 @@ describe("createToolLoopHarness", () => {
       { content: "Dynamic user instructions.", kind: "user" as const, role: "user" },
       { content: "old reply", role: "assistant" },
     ]);
-    expect(onCompaction).toHaveBeenCalledOnce();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
     expect(getCompatibilityEventTypes(events)).toEqual([
       "compaction.requested",
@@ -10712,43 +9981,6 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("invokes onCompaction callback after compaction", async () => {
-    vi.mocked(shouldCompact).mockReturnValue(true);
-    vi.mocked(compactMessages).mockResolvedValue([
-      createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
-      { content: "summary", role: "assistant" },
-    ]);
-
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Resuming.", role: "assistant" }] },
-      text: "Resuming.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const onCompaction = vi
-      .fn()
-      .mockReturnValue([createFrameworkUserMessage("context.state", "[State preserved]")]);
-
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { onCompaction }),
-    );
-    const session = createTestSession({
-      history: [{ content: "old", kind: "user" as const, role: "user" }],
-    });
-
-    const result = await runStep(session, { message: "Continue" });
-
-    expect(onCompaction).toHaveBeenCalledTimes(1);
-    expect(result.session.history).toEqual([
-      { content: "Summary of our conversation so far:", kind: "context.compaction", role: "user" },
-      { content: "summary", role: "assistant" },
-      { content: "[State preserved]", kind: "context.state", role: "user" },
-      { content: "Resuming.", role: "assistant" },
-    ]);
-  });
-
   it("compaction appends a framework continuation when recent window trails with assistant", async () => {
     // Step 1: tool call → harness continues (next === runStep).
     setupMockAgent({
@@ -10829,26 +10061,6 @@ describe("createToolLoopHarness", () => {
       kind: "execution.continuation",
       role: "user",
     });
-  });
-
-  it("does not call onCompaction when compaction does not trigger", async () => {
-    vi.mocked(shouldCompact).mockReturnValue(false);
-
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const onCompaction = vi.fn();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { onCompaction }),
-    );
-    await runStep(createTestSession(), { message: "Hi" });
-
-    expect(onCompaction).not.toHaveBeenCalled();
   });
 
   describe("prompt caching", () => {

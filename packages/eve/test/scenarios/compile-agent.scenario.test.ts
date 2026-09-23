@@ -827,7 +827,7 @@ describe("compileAgent", () => {
         .sort(),
     ).toEqual(["tools/agent.ts", "tools/web_fetch.ts", "tools/web_search.ts"]);
 
-    // Both the wrapped bash and the replacement todo land in `tools` as
+    // Both the wrapped bash and the replacement write_file land in `tools` as
     // ordinary CompiledToolDefinitions. Disabled slots are absent from the
     // effective tool graph and retained only as composition diagnostics.
     const toolsByName = new Map(
@@ -837,7 +837,7 @@ describe("compileAgent", () => {
       ]),
     );
 
-    expect([...toolsByName.keys()].sort()).toEqual(["bash", "todo"]);
+    expect([...toolsByName.keys()].sort()).toEqual(["bash", "write_file"]);
 
     expect(toolsByName.get("bash")).toMatchObject({
       description: "Run a vetted shell command in the project sandbox.",
@@ -846,11 +846,11 @@ describe("compileAgent", () => {
       sourceId: "tools/bash.ts",
       sourceKind: "module",
     });
-    expect(toolsByName.get("todo")).toMatchObject({
+    expect(toolsByName.get("write_file")).toMatchObject({
       description: "Append a note or read the running list of notes.",
-      logicalPath: "tools/todo.ts",
-      name: "todo",
-      sourceId: "tools/todo.ts",
+      logicalPath: "tools/write_file.ts",
+      name: "write_file",
+      sourceId: "tools/write_file.ts",
       sourceKind: "module",
     });
     expect(result.diagnostics).toEqual([]);

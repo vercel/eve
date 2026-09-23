@@ -18,6 +18,7 @@ import {
 } from "#internal/application/cache-metadata.js";
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
+import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import {
   createExtensionExternalDependencyPlugin,
@@ -554,8 +555,9 @@ function patchWorkflowTransformExcludePath(nitro: Nitro, workflowBuildDir: strin
 
 function createApplicationNitroBundlerConfiguration(
   preparedHost: PreparedApplicationHost,
-  preset: "vercel" | undefined,
+  options: { readonly development: boolean; readonly preset: "vercel" | undefined },
 ) {
+  const { preset } = options;
   const configuredBackendNames = collectConfiguredSandboxProviderNames(
     preparedHost.compileResult.manifest,
   );
@@ -591,6 +593,7 @@ function createApplicationNitroBundlerConfiguration(
     ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
   ].flatMap((node) => node.extensionMounts);
   const nitroBundlerPlugins = [
+    options.development ? null : createDevelopmentRuntimePrunePlugin(),
     compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
@@ -702,7 +705,10 @@ export async function createDevelopmentApplicationNitro(
   preparedHost: PreparedDevelopmentApplicationHost,
 ): Promise<Nitro> {
   const nitroBuildDir = preparedHost.workspace.nitroBuildDir;
-  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, undefined);
+  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, {
+    development: true,
+    preset: undefined,
+  });
   const plugins = createApplicationNitroPlugins(preparedHost);
   if (preparedHost.compiledArtifacts.instrumentationPluginPath === undefined) {
     plugins.unshift(
@@ -776,7 +782,10 @@ export async function createProductionApplicationNitro(
   options: ProductionApplicationNitroOptions,
 ): Promise<Nitro> {
   const preset = resolveProductionNitroPreset();
-  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, preset);
+  const bundler = createApplicationNitroBundlerConfiguration(preparedHost, {
+    development: false,
+    preset,
+  });
   const nitroPlugins = createApplicationNitroPlugins(preparedHost);
   nitroPlugins.push(
     resolvePackageSourceFilePath("src/internal/nitro/host/sandbox-shutdown-plugin.ts"),
