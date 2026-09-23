@@ -59,9 +59,9 @@ export default defineAgent({
         expect(new Set(steps).size).toBe(steps.length);
         expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
         // A one-second lease expires mid-step, so the backstop must meet the
-        // single-flight guard. Under the default lease, same-process overlap
-        // can still log this under load; the step and turn counts above are
-        // the guarantee.
+        // single-flight guard. The default lease still logs this in some CI
+        // runs for a reason not yet identified, so there the step and turn
+        // counts above are the guarantee.
         if (leaseSeconds !== undefined) {
           expect(server.stderr()).toContain("Step execution already in flight in this process");
         }
