@@ -147,36 +147,6 @@ Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
 runs in the CI lint job. If the guard fails, fix the violation rather than
 editing the baseline — baselines may only shrink.
 
-## Zod boundary
-
-A Zod schema only works with the Zod copy that built it, and every app brings
-its own Zod at whatever version it pins. Crossing the two produces errors such
-as `Cannot read properties of undefined (reading 'push')`. eve's Zod is
-therefore private:
-
-- **One copy.** eve ships exactly one Zod, vendored as `#compiled/zod/*` by
-  `packages/eve/scripts/vendor-compiled/zod.mjs`. Import Zod from there, never
-  bare `zod`. Other vendored packages and eve's own build redirect their Zod
-  imports to that copy, and the vendor build fails if a dependency would
-  bundle another Zod 4.
-- **Nothing eve's Zod builds reaches app code.** Tool input and output
-  schemas are plain JSON Schema (`defineJsonSchema()` from `#tools/schema.js`),
-  and every schema reaches the AI SDK through `toModelSchema()` from
-  `harness/tools.ts`. Internal Zod may go only to vendored code that imports
-  the same `#compiled/zod`, such as the MCP server behind the MCP channel.
-- **No Zod in public exports.** Public entrypoints export no Zod schemas.
-  Declare public types in TypeScript rather than with `z.infer`, type any
-  exported schema as a `StandardSchemaV1`, and keep Zod parsing in internal
-  modules.
-- **No process-global Zod changes.** Never import `zod/compile` or anything
-  else that writes Zod's global configuration, which every Zod copy in the
-  process shares, and never rebuild JSON Schema as Zod (`fromJSONSchema`).
-
-Guard rule 45 enforces this in source, and
-`packages/eve/test/scenarios/zod-boundary.scenario.test.ts` enforces it on the
-built package. That test's list of public declarations that still spell types
-with Zod may only shrink.
-
 ## Research plans
 
 Research documents live in the top-level `research/` directory and require

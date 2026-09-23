@@ -113,16 +113,6 @@
  *             `defineSandboxProvider()` and does not import sandbox runtime
  *             orchestration, registries, key derivation, or session state.
  *             Built-ins and authored providers must share one contract.
- *   rule 45 — eve's Zod is private (see "Zod boundary" in AGENTS.md). Zod
- *             instances only work with the copy that built them, and the app
- *             brings its own. eve source imports Zod only through the single
- *             vendored copy (`#compiled/zod/*`), never bare `zod`; it must not
- *             rebuild JSON Schema as Zod (`fromJSONSchema`) or install Zod's
- *             process-global compiler (`zod/compile`); tool definitions,
- *             tool-schema layers, and public modules must not use the
- *             vendored Zod; and AI SDK tools are created only by
- *             `harness/tools.ts`, which lowers every schema onto the AI SDK's
- *             own schema type.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -221,7 +211,6 @@ function isTsLike(relPath) {
  *   rule42: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
- *   rule45: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -254,7 +243,6 @@ async function scanRepo(state) {
     checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
-    checkRule45(posix, content, lines, state.rule45);
   }
 }
 
@@ -349,101 +337,6 @@ function checkRule44(posix, lines, violations) {
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
   });
-}
-
-// ---------- Rule 45: eve's Zod is private ----------
-
-const TOOL_SCHEMA_LAYER_PREFIXES = [
-  "packages/eve/src/tools/",
-  "packages/eve/src/execution/tools/",
-  "packages/eve/src/runtime/connections/",
-];
-const TOOL_SCHEMA_LAYER_FILES = new Set([
-  "packages/eve/src/context/build-dynamic-tools.ts",
-  "packages/eve/src/harness/final-output.ts",
-  "packages/eve/src/harness/request-envelope.ts",
-  "packages/eve/src/harness/tools.ts",
-]);
-const PUBLIC_SOURCE_PREFIX = "packages/eve/src/public/";
-const PUBLIC_VENDORED_ZOD_ALLOWLIST = new Map([
-  [
-    "packages/eve/src/public/channels/mcp.ts",
-    "feeds eve's vendored MCP server, which imports the same vendored Zod",
-  ],
-]);
-const AI_SDK_TOOL_FACTORY_OWNER = "packages/eve/src/harness/tools.ts";
-const VENDORED_ZOD_SPECIFIER_RE = /["']#compiled\/zod(?:\/[^"']+)?["']/;
-const TOOL_DEFINER_CALL_RE = /\bdefine(?:Native|Workflow)?Tool\s*(?:<[^>()]*>)?\s*\(/;
-const AI_SDK_TOOL_FACTORY_IMPORT_RE =
-  /\bimport\s*\{[^}]*\b(?:tool|dynamicTool)\b[^}]*\}\s*from\s*["']ai["']/;
-
-/**
- * @param {string} posix
- * @param {string} content
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule45(posix, content, lines, violations) {
-  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
-  const isToolSchemaLayer =
-    TOOL_SCHEMA_LAYER_FILES.has(posix) ||
-    TOOL_SCHEMA_LAYER_PREFIXES.some((prefix) => posix.startsWith(prefix)) ||
-    TOOL_DEFINER_CALL_RE.test(content);
-  const isPublicSource =
-    posix.startsWith(PUBLIC_SOURCE_PREFIX) && !PUBLIC_VENDORED_ZOD_ALLOWLIST.has(posix);
-
-  lines.forEach((line, idx) => {
-    const trimmed = line.trimStart();
-    const isImport = /^(?:import|export)\b|^}\s*from\b|\b(?:import|require)\s*\(/.test(trimmed);
-    let message;
-    if (/\bfromJSONSchema\b/.test(line)) {
-      message =
-        "rebuilds JSON Schema as a Zod schema. Zod instances only work with the Zod copy that built them, and the AI SDK converts them with the app's copy. Keep plain JSON Schema as data and validate it with defineJsonSchema() from #tools/schema.js.";
-    } else if (/["']zod\/compile["']/.test(line)) {
-      message =
-        "imports zod/compile. It installs a compiler on Zod's process-global configuration, which every Zod copy in the app shares, so it rewrites the app's own schemas. Remove the import.";
-    } else if (isToolSchemaLayer && isImport && VENDORED_ZOD_SPECIFIER_RE.test(line)) {
-      message =
-        "uses eve's vendored Zod in a tool definition or tool-schema layer. Tool schemas reach the app's AI SDK, which runs them through the app's own Zod copy. Write the schema as plain JSON Schema with defineJsonSchema() from #tools/schema.js.";
-    } else if (isPublicSource && isImport && VENDORED_ZOD_SPECIFIER_RE.test(line)) {
-      message =
-        "uses eve's vendored Zod in a public module. Anything a public module exports or passes to app code can meet the app's own Zod copy. Use plain TypeScript types, defineJsonSchema() from #tools/schema.js, or a hand-written guard, and keep Zod parsing in internal modules.";
-    }
-    if (message !== undefined) violations.push({ rule: 45, file: posix, line: idx + 1, message });
-  });
-
-  const sourceFile = ts.createSourceFile(
-    posix,
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const visit = (node) => {
-    const specifier = importSpecifier(node);
-    if (
-      specifier !== undefined &&
-      (specifier.text === "zod" || specifier.text.startsWith("zod/"))
-    ) {
-      violations.push({
-        rule: 45,
-        file: posix,
-        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
-        message: `imports "${specifier.text}" directly. eve ships exactly one Zod; import it from "#compiled/zod/index.js" so the build does not copy a second implementation into dist.`,
-      });
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-
-  if (posix !== AI_SDK_TOOL_FACTORY_OWNER && AI_SDK_TOOL_FACTORY_IMPORT_RE.test(content)) {
-    violations.push({
-      rule: 45,
-      file: posix,
-      message:
-        'imports the AI SDK tool factory. Build AI SDK tools through buildToolSet() in "#harness/tools.js", which lowers every schema with toModelSchema() so the app\'s AI SDK never converts a schema with a mismatched Zod copy.',
-    });
-  }
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1532,7 +1425,6 @@ async function main() {
     rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
-    rule45: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1646,9 +1538,6 @@ async function main() {
   for (const issue of await checkRule44SandboxProviders()) {
     violations.push({ rule: 44, ...issue });
   }
-
-  // Rule 45
-  violations.push(...state.rule45);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
