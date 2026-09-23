@@ -147,3 +147,48 @@ it.each(
     expect(stream.locked).toBe(false);
   },
 );
+
+it.each(events)("publishes $type without preparing hook or model context", async (event) => {
+  const ctx = new ContextContainer();
+  ctx.set(SessionIdKey, "parent");
+  ctx.set(AuthKey, null);
+  ctx.set(ChannelKey, { kind: "test" });
+  const hook = vi.fn(() => {
+    throw new Error("publication invoked a hook");
+  });
+  ctx.set(BundleKey, {
+    graph: { root: {} },
+    resolvedAgent: { config: {} },
+    turnAgent: { id: "parent" },
+    subagentRegistry: {},
+    hookRegistry: createRuntimeHookRegistry([
+      {
+        slug: "audit",
+        logicalPath: "hooks/audit.ts",
+        sourceId: "hooks/audit.ts",
+        sourceKind: "module",
+        exportName: undefined,
+        events: { "*": hook },
+      },
+    ]),
+  } as CompiledBundle);
+  vi.mocked(deserializeContext).mockResolvedValue(ctx);
+  vi.mocked(serializeContext).mockReturnValue({});
+  const chunks: Uint8Array[] = [];
+  const stream = new WritableStream<Uint8Array>({
+    write(chunk) {
+      chunks.push(chunk);
+    },
+  });
+  await emitSubagentEventStep({
+    event,
+    sessionWritable: stream,
+    serializedContext: {},
+    sessionState: createTestSessionState({ sessionId: "parent" }),
+  });
+  expect(hook).not.toHaveBeenCalled();
+  expect(ctx.has(SessionKey)).toBe(false);
+  expect(ctx.has(SandboxKey)).toBe(false);
+  expect(chunks).toHaveLength(1);
+  expect(stream.locked).toBe(false);
+});
