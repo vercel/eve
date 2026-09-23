@@ -178,7 +178,11 @@ matrices from the registry:
   narrowly scoped leg with `e2e.additionalModels` entries
   shaped as `{ "name": "short-check-name", "id": "provider/model" }`.
   `e2e.optionalModels` can name selected model legs that should still run and
-  report failures without blocking the aggregate check.
+  report failures without blocking the aggregate check. Fixtures can define
+  `e2e.modelShards` as named, non-empty eval-ID partitions; discovery requires
+  the partitions to assign every discovered eval exactly once and expands each
+  selected model into one job per shard. This partitions only the local model
+  suite; world matrices remain one leg per fixture.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
   workflow. A fixture can set `e2e.worlds` to a subset of registered world
   names, or to `[]` when its evals require local dev behavior; omitting it
@@ -204,6 +208,10 @@ cd "$FIXTURE_DIR"
 pnpm run --if-present e2e:prepare
 EVE_E2E_MODEL="$MODEL" pnpm exec eve eval --strict --junit "$JUNIT_PATH"
 ```
+
+For a sharded fixture, the workflow passes that shard's eval IDs as positional
+arguments to `eve eval`. Each matrix leg has its own checkout, server, JUnit
+file, and failure-artifact name.
 
 Fixtures with generated source can define an `e2e:prepare` script. The local
 model suite runs it before starting the eval server; the self-modification

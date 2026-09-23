@@ -97,7 +97,7 @@ eve then gives you:
 - a reconnectable session stream
 - durable session state across turns
 - a per-agent sandbox with a shared runtime workspace
-- typed runtime helpers accessed through `ctx` (`ctx.session`, `ctx.getSandbox()`, `ctx.getSkill()`)
+- typed runtime helpers accessed through `ctx` (`ctx.session`, `ctx.getSandbox()`)
 
 ## The runtime shape
 

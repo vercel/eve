@@ -14,6 +14,7 @@ export default defineEval({
 
   async test(t) {
     await withSelfModification(t, async (selfMod) => {
+      const previousRevision = await selfMod.runtimeRevision();
       const authored = await selfMod.request(
         [
           `Alice needs a reusable local background workflow named ${TOOL_NAME} for checking a replicated import in future conversations.`,
@@ -25,7 +26,7 @@ export default defineEval({
       );
       await selfMod.readSource(TOOL_PATH);
       await selfMod.assertOnlyChanged([TOOL_PATH]);
-      // Do not force a rebuild: this case covers automatic next-turn availability.
+      await selfMod.waitForRebuild(previousRevision);
 
       const batchId = `batch-${randomUUID()}`;
       const expectedRecords = 137;

@@ -63,7 +63,13 @@ it.each(
     ctx.set(SessionIdKey, "parent");
     ctx.set(AuthKey, null);
     ctx.set(DynamicSkillManifestKey, {
-      policy: [{ name: "policy", description: "Parent delegation policy" }],
+      policy: [
+        {
+          name: "policy",
+          description: "Parent delegation policy",
+          markdown: "Delegate carefully.",
+        },
+      ],
     });
     // SessionKey is virtual: a production deserializer cannot restore it.
     expect(ctx.has(SessionKey)).toBe(false);

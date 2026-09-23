@@ -1120,7 +1120,6 @@ describe("buildToolSet", () => {
       });
       expect(capturedCtx?.session.auth.current?.principalId).toBe("user_current");
       expect(capturedCtx?.getSandbox).toBeTypeOf("function");
-      expect(capturedCtx?.getSkill).toBeTypeOf("function");
     });
 
     it("uses the active principal for schedule approval", async () => {
