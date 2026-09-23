@@ -25,6 +25,7 @@ const plan = {
       fixture: "agent-self-modification",
       model: "openai-sol",
       modelId: "openai/model",
+      reasoning: undefined,
       blocks: [
         { repetition: 0, order: ["baseline", "candidate"] },
         { repetition: 1, order: ["candidate", "baseline"] },
@@ -45,12 +46,17 @@ const sample = (variant, repetition, ms, verdict = "passed") => ({
 });
 
 test("compares matched repetition blocks and retains expected missing samples", () => {
+  const candidateSecond = {
+    ...sample("candidate", 1, 90),
+    measurement: { status: "incomplete", reason: "unsupported-v1" },
+  };
   const report = compareExperiment(plan, [
     sample("baseline", 0, 100),
     sample("candidate", 0, 80),
     sample("baseline", 1, 120),
+    candidateSecond,
   ]);
-  assert.equal(report.complete, false);
+  assert.equal(report.complete, true);
   assert.equal(report.samples.length, 4);
   assert.equal(report.comparisons[0].matched, 1);
   assert.equal(report.comparisons[0].medianPairedDeltaMs, -20);

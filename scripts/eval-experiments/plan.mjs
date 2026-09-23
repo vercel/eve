@@ -22,9 +22,19 @@ export async function createPlan(manifestPath, options = {}) {
   if (!manifestFile.startsWith(`${resolve(root, "experiments")}${sep}`))
     throw new Error("Manifest must be inside the repository experiments/ directory.");
   const matrix = JSON.parse(await readFile(resolve(root, "e2e/matrix.json"), "utf8"));
-  const models = new Map(matrix.models.map((model) => [model.name, model.id]));
-  for (const name of manifest.models)
-    if (!models.has(name)) throw new Error(`Unknown model: ${name}`);
+  const matrixModels = new Map(
+    matrix.models.map((model) => [model.name, { id: model.id, label: model.name }]),
+  );
+  const profileIds = [...new Set(manifest.fixtures.map((fixture) => fixture.metrics))];
+  const profileRegistry = profileIds.map(getProfile);
+  const selectedModels = new Map();
+  for (const name of manifest.models) {
+    const matching = profileRegistry.filter((profile) => profile.supportsModel(name));
+    if (matching.length > 1) throw new Error(`Model alias resolves ambiguously: ${name}`);
+    const modelSettings = matching[0]?.resolveModel(name) ?? matrixModels.get(name);
+    if (!modelSettings) throw new Error(`Unknown model alias: ${name}`);
+    selectedModels.set(name, modelSettings);
+  }
 
   const fixturesRoot = await realpath(resolve(root, "e2e/fixtures"));
   const fixtures = [];
@@ -36,6 +46,7 @@ export async function createPlan(manifestPath, options = {}) {
     const profile = getProfile(fixture.metrics);
     const evalIds = await discoverEvalIds(resolve(fixtureRoot, "evals"));
     profile.validateSelection(fixture.name, fixture.evals, evalIds);
+    profile.validateRunArguments?.(fixture.evals, manifest.repetitions);
     fixtures.push({ ...fixture, metricProfile: profile.id, evals: [...fixture.evals] });
   }
 
@@ -123,6 +134,7 @@ export async function createPlan(manifestPath, options = {}) {
     throw new Error(`Execution budget exceeds 1000 eval invocations: ${globalBudget}`);
   for (const fixture of fixtures)
     for (const modelName of manifest.models) {
+      const modelSettings = selectedModels.get(modelName);
       const rng = seededRandom((seed ^ hash32(`${fixture.name}:${modelName}`)) >>> 0);
       const order = variants.map((v) => v.label);
       for (let i = order.length - 1; i > 0; i--) {
@@ -137,7 +149,9 @@ export async function createPlan(manifestPath, options = {}) {
       schedules.push({
         fixture: fixture.name,
         model: modelName,
-        modelId: models.get(modelName),
+        modelId: modelSettings.id,
+        reasoning: modelSettings.reasoning,
+        label: modelSettings.label ?? modelName,
         blocks,
       });
     }
@@ -154,7 +168,7 @@ export async function createPlan(manifestPath, options = {}) {
     variants,
     diffs,
     fixtures,
-    models: manifest.models.map((name) => ({ name, id: models.get(name) })),
+    models: manifest.models.map((name) => ({ name, ...selectedModels.get(name) })),
     repetitions: manifest.repetitions,
     seed,
     maxConcurrency: manifest.maxConcurrency,

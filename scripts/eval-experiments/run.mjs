@@ -36,6 +36,8 @@ export async function runSchedule({
         fixture: fixture.name,
         model: schedule.model,
         modelId: schedule.modelId,
+        reasoning: schedule.reasoning,
+        modelAlias: schedule.label ?? schedule.model,
         repetition: block.repetition,
         executionOrder: block.order.indexOf(label),
       };
@@ -82,15 +84,19 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, v
     safe(identity.variant),
   );
   await mkdir(attemptDir, { recursive: true });
-  const before = await hashTree(appRoot, profile.guardedFixtureSource);
+  let baselineSource;
   const start = new Date().toISOString();
   await rm(join(appRoot, ".eve", "evals"), { recursive: true, force: true });
   await mkdir(join(appRoot, ".eve", "evals"), { recursive: true });
 
-  const { AI_GATEWAY_API_KEY: _gatewayKey, ...preparationEnv } = env;
   let prepare = await runProcess("pnpm", ["run", "--if-present", "e2e:prepare"], {
     cwd: appRoot,
-    env: preparationEnv,
+    env: {
+      ...env,
+      EVE_E2E_MODEL: identity.modelId,
+      EVE_EVAL_EXPERIMENT: "1",
+      ...(identity.reasoning ? { EVE_E2E_REASONING: identity.reasoning } : {}),
+    },
     timeoutMs: 60_000,
   });
   let result = { exitCode: null, signal: null, timedOut: false, stdout: "", stderr: "" };
@@ -98,6 +104,7 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, v
   if (prepare.exitCode !== 0)
     infrastructureError = `Fixture preparation failed (${prepare.exitCode ?? prepare.signal}).`;
   else {
+    baselineSource = await hashTree(appRoot, profile.guardedFixtureSource);
     result = await runProcess(
       "pnpm",
       [
@@ -113,7 +120,12 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, v
       ],
       {
         cwd: appRoot,
-        env: { ...env, EVE_E2E_MODEL: identity.modelId },
+        env: {
+          ...env,
+          EVE_E2E_MODEL: identity.modelId,
+          EVE_EVAL_EXPERIMENT: "1",
+          ...(identity.reasoning ? { EVE_E2E_REASONING: identity.reasoning } : {}),
+        },
         timeoutMs,
       },
     );
@@ -122,12 +134,12 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, v
       infrastructureError = `Eval process failed with exit code ${result.exitCode ?? result.signal}.`;
   }
 
+  const after = await hashTree(appRoot, profile.guardedFixtureSource);
+  if (baselineSource !== undefined && baselineSource !== after)
+    infrastructureError = "Fixture failed to restore authored source; checkout cannot be reused.";
   const end = new Date().toISOString();
   if (result.stdout) await writeFile(join(attemptDir, "stdout.log"), result.stdout);
   if (result.stderr) await writeFile(join(attemptDir, "stderr.log"), result.stderr);
-  const after = await hashTree(appRoot, profile.guardedFixtureSource);
-  if (before !== after)
-    infrastructureError = "Fixture failed to restore authored source; checkout cannot be reused.";
   try {
     const safeToReuse = await (verifyCheckout ?? defaultVerifyCheckout)(appRoot, profile);
     if (!safeToReuse)
@@ -145,6 +157,7 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, v
   }
   const record = {
     ...identity,
+    cleanupRestoredBaseline: baselineSource === undefined || after === baselineSource,
     invocationId: id,
     startedAt: start,
     completedAt: end,
@@ -156,6 +169,11 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, v
     infrastructureError,
     metricProfile: profile.id,
     modelSettings: await readModelSettings(appRoot, profile),
+    configuredModel: {
+      alias: identity.modelAlias,
+      id: identity.modelId,
+      reasoning: identity.reasoning,
+    },
     buildIdentity: {
       sha: identity.sha,
       eveVersion: await readFile(resolve(appRoot, "../../../packages/eve/package.json"), "utf8")

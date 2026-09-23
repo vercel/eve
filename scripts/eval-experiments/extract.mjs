@@ -5,7 +5,7 @@ import { getProfile } from "./profiles/index.mjs";
 
 export function extractSample(input) {
   const sessions = input.artifact?.result?.sessions;
-  const profile = input.profile ?? getProfile(input.identity.metricProfile);
+  const profile = input.profile ?? getProfile(input.identity?.metricProfile);
   if (input.artifact?.id && input.identity?.eval && input.artifact.id !== input.identity.eval)
     throw new Error(
       `Artifact eval ${input.artifact.id} does not match requested eval ${input.identity.eval}.`,
@@ -46,6 +46,7 @@ export function extractSample(input) {
   if (!childEvents) return incomplete(base, input, "missing-child-capture");
 
   const measurement = profile.extractMeasurement({
+    evalId: input.identity.eval,
     sessions,
     eventsBySession,
     parentSessionId,

@@ -21,6 +21,7 @@ export function compareExperiment(plan, samples) {
             eval: evalId,
             model: schedule.model,
             modelId: schedule.modelId,
+            reasoning: schedule.reasoning,
             repetition: block.repetition,
             executionOrder: block.order.indexOf(label),
           });
@@ -31,6 +32,10 @@ export function compareExperiment(plan, samples) {
     samples
       .filter((sample) => expectedKeys.has(key(sample)))
       .map((sample) => [key(sample), sample]),
+  );
+  const sampleKeys = samples.map(key);
+  const duplicateSamples = samples.filter(
+    (sample, index) => sampleKeys.indexOf(key(sample)) !== index,
   );
   const rows = expected.map(
     (identity) =>
@@ -67,16 +72,18 @@ export function compareExperiment(plan, samples) {
         const pairs = candidateRows
           .map((candidate) => [byRepetition.get(candidate.repetition), candidate])
           .filter(([b, c]) => b && c);
+        const primaryMetric = plan.metricProfiles.find(
+          (item) => item.id === fixture.metricProfile,
+        )?.primaryMetric;
         const matched = pairs.filter(
           ([b, c]) =>
             b.verdict === "passed" &&
             c.verdict === "passed" &&
             b.measurement?.status === "complete" &&
-            c.measurement?.status === "complete",
+            c.measurement?.status === "complete" &&
+            Number.isFinite(b.metrics?.[primaryMetric]) &&
+            Number.isFinite(c.metrics?.[primaryMetric]),
         );
-        const primaryMetric = plan.metricProfiles.find(
-          (item) => item.id === fixture.metricProfile,
-        )?.primaryMetric;
         if (!primaryMetric)
           throw new Error(`Profile has no primary metric: ${fixture.metricProfile}`);
         const deltas = matched.map(([b, c]) => c.metrics[primaryMetric] - b.metrics[primaryMetric]);
@@ -89,6 +96,7 @@ export function compareExperiment(plan, samples) {
           eval: evalId,
           model: schedule.model,
           modelId: schedule.modelId,
+          reasoning: schedule.reasoning,
           baseline: baseline.label,
           candidate: variant.label,
           baselineCorrect: baselineRows.filter((r) => r.verdict === "passed").length,
@@ -156,10 +164,12 @@ export function compareExperiment(plan, samples) {
     diffs: plan.diffs,
     complete:
       unexpected.length === 0 &&
+      duplicateSamples.length === 0 &&
       rows.every(
         (row) => row.verdict !== "missing" && row.verdict !== "unknown" && !row.infrastructureError,
       ),
     unexpectedSamples: unexpected,
+    duplicateSamples,
     correctnessRegressions: comparisons.filter(
       (item) => item.candidateCorrect < item.baselineCorrect,
     ),
@@ -180,12 +190,12 @@ export function renderMarkdown(report) {
     `**Correctness regressions:** ${report.correctnessRegressions.length}`,
     `**All strict evals passed:** ${report.allComparisonsPassCorrectness ? "yes" : "no"}`,
     "",
-    "| Fixture / eval | Model | Candidate | Primary metric | Correctness | Matched | Median paired Δ (ms) | Geomean ratio |",
+    "| Fixture / eval | Model | Reasoning | Candidate | Primary metric | Correctness | Matched | Median paired Δ (ms) | Geomean ratio |",
     "|---|---|---|---:|---:|---:|---:|---:|",
   ];
   for (const row of report.comparisons)
     lines.push(
-      `| ${row.fixture} / ${row.eval} | ${row.model} | ${row.candidate} | ${row.primaryMetric} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${row.matched} | ${format(row.medianPairedDeltaMs)} | ${format(row.geometricMeanRatio)} |`,
+      `| ${row.fixture} / ${row.eval} | ${row.model} | ${row.reasoning ?? "default"} | ${row.candidate} | ${row.primaryMetric} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${row.matched} | ${format(row.medianPairedDeltaMs)} | ${format(row.geometricMeanRatio)} |`,
     );
   lines.push(
     "",

@@ -4,13 +4,37 @@ const agentSourcePaths = [
 ];
 
 const configurationPaths = [agentSourcePaths[1]];
+const casePolicies = new Map([
+  ["self-modification/create-background-replication-check", "background-task"],
+  ["self-modification/create-incident-triage", "single-turn"],
+  ["self-modification/create-shipping-quote", "single-turn"],
+  ["self-modification/repair-order-total", "repair"],
+  ["self-modification/add-agent-browser", "approval"],
+  ["self-modification/add-slack-channel", "approval"],
+  ["self-modification/offer-repair", "repair"],
+]);
+const models = new Map([
+  ["grok-4.7", { id: "spacexai/grok-4.7", label: "grok-4.7" }],
+  [
+    "luna-fast-xhigh",
+    { id: "openai/gpt-5.6-luna-fast", reasoning: "xhigh", label: "luna-fast-xhigh" },
+  ],
+  ["anthropic-opus", { id: "anthropic/claude-opus-5.5", label: "anthropic-opus" }],
+]);
 
 export default {
   id: "self-modification-v1",
   metricSchemaVersion: "self-modification-v1",
-  supportedCases: new Map([
-    ["agent-self-modification", new Set(["self-modification/create-shipping-quote"])],
-  ]),
+  supportedCases: new Map([["agent-self-modification", new Set(casePolicies.keys())]]),
+  models,
+  supportsModel(name) {
+    return models.has(name);
+  },
+  resolveModel(name) {
+    const model = models.get(name);
+    if (!model) throw new Error(`Unknown model alias for ${this.id}: ${name}`);
+    return model;
+  },
   validateSelection(fixtureName, evals, knownEvals) {
     if (!Array.isArray(evals) || evals.length < 1 || evals.length > 10)
       throw new Error("Select 1–10 evals for each fixture.");
@@ -42,7 +66,9 @@ export default {
   primaryMetric: "creationElapsedMs",
   metricNames: ["creationElapsedMs", "childTurnMs", "childToolCalls"],
   targetAgent: "self-modification__agent",
+  casePolicies,
   extractMeasurement({
+    evalId,
     eventsBySession,
     parentSessionId,
     parentTurnId,
@@ -50,6 +76,14 @@ export default {
     childSessionId,
     childEvents,
   }) {
+    const policy = casePolicies.get(evalId);
+    if (policy === "background-task")
+      return { status: "incomplete", reason: "background-task-completion-correlation-unverified" };
+    if (policy !== "single-turn")
+      return {
+        status: "incomplete",
+        reason: `${policy}-profile-required`,
+      };
     const invocation = childEvents.find((event) => event.type === "session.started")?.data
       ?.invocation;
     if (
