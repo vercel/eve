@@ -1,6 +1,6 @@
 import type {
   InternalSandboxSession,
-  MutableNetworkSandboxSession,
+  NetworkPolicySandboxSession,
   SandboxProcess,
   SandboxReadBinaryFileOptions,
   SandboxReadFileOptions,
@@ -33,7 +33,7 @@ export type { InternalSandboxSession };
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
   setNetworkPolicy: (policy: SandboxNetworkPolicy) => Promise<void>,
-): MutableNetworkSandboxSession;
+): NetworkPolicySandboxSession;
 export function buildSandboxSession(primitives: InternalSandboxSession): SandboxSession;
 export function buildSandboxSession(
   primitives: InternalSandboxSession,
@@ -116,8 +116,8 @@ export function buildSandboxSession(
       });
     },
   };
-  if (setNetworkPolicy !== undefined) session.setNetworkPolicy = setNetworkPolicy;
-  return session;
+  if (setNetworkPolicy === undefined) return session;
+  return { ...session, setNetworkPolicy } as NetworkPolicySandboxSession;
 }
 
 /**

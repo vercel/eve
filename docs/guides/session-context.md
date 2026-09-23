@@ -60,7 +60,7 @@ const result = await sandbox.run({ command: "npm test" });
 
 The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
 
-When you need capabilities specific to the configured environment, pass its exported environment object. The return type preserves the environment's session capabilities:
+When you need capabilities specific to the configured environment, pass its exported environment object. The return type preserves the environment's session capabilities. Provider-specific methods such as `setNetworkPolicy()` are not available from the no-argument accessor:
 
 ```ts
 import { environment } from "../sandbox";

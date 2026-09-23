@@ -1,5 +1,7 @@
 import type { SandboxSession } from "eve/sandbox";
 
+import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
+
 import { gitHubRemoteUrl } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
@@ -22,8 +24,7 @@ export interface PreparedSelfModificationWorkspace {
   readonly targetBranch: string;
 }
 
-type CheckoutSandbox = Pick<SandboxSession, "run"> &
-  Required<Pick<SandboxSession, "setNetworkPolicy">>;
+type CheckoutSandbox = Pick<NetworkPolicySandboxSession, "run" | "setNetworkPolicy">;
 
 /** Prepares a token-free remote and immutable target-branch checkout for one child session. */
 export async function prepareSelfModificationWorkspace(input: {

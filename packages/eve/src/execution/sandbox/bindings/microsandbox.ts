@@ -1,4 +1,4 @@
-import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
+import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
 import { enrichMicrosandboxError } from "#execution/sandbox/bindings/microsandbox-create.js";
 import {
   createMicrosandboxHandle,
@@ -39,7 +39,7 @@ export function createMicrosandboxSandboxProvider(
   MicrosandboxSandboxRuntimeOptions,
   MicrosandboxPreparedArtifact,
   MicrosandboxProviderSessionState,
-  MutableNetworkSandboxSession
+  NetworkPolicySandboxSession
 > {
   const createOptions = authoredOptions ?? {};
   const options = resolveMicrosandboxOptions(createOptions);

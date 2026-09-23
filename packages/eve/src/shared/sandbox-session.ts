@@ -109,8 +109,6 @@ export interface SandboxSession extends Pick<
    * The read and write methods already apply this internally.
    */
   resolvePath(path: string): string;
-  /** Applies a firewall policy when the selected provider supports mutable networking. */
-  setNetworkPolicy?(policy: SandboxNetworkPolicy): Promise<void>;
   /**
    * Removes one file or directory from the sandbox filesystem.
    *
@@ -119,19 +117,11 @@ export interface SandboxSession extends Pick<
   removePath(options: SandboxRemovePathOptions): Promise<void>;
 }
 
-/**
- * Sandbox session exposed to authored runtime callbacks through
- * `ctx.getSandbox()`.
- *
- * Unlike the I/O-only session used during sandbox initialization, this handle
- * exposes provider-backed lifecycle operations.
- */
-export interface MutableNetworkSandboxSession extends SandboxSession {
+/** Sandbox session capability exposed by environments with mutable networking. */
+export interface NetworkPolicySandboxSession extends SandboxSession {
   /** Applies a firewall policy to the live sandbox. */
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 }
-
-export type FixedNetworkSandboxSession = Omit<SandboxSession, "setNetworkPolicy">;
 
 export interface RuntimeSandboxSession extends SandboxSession {
   /** Permanently deletes this sandbox and its disposable provider state. */

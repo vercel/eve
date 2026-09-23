@@ -1,6 +1,7 @@
 import type { SandboxSession } from "eve/sandbox";
 
 import { gitHubGitBrokerNetworkPolicy } from "#shared/git.js";
+import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
 
 import { SELF_MODIFICATION_BASELINE_NETWORK_POLICY } from "./network-policy.js";
 
@@ -8,7 +9,7 @@ const MAX_ERROR_OUTPUT = 2_000;
 type CommandSandbox = Pick<SandboxSession, "run">;
 
 export async function withBrokeredGitHubCredential<T>(
-  sandbox: Required<Pick<SandboxSession, "setNetworkPolicy">>,
+  sandbox: Pick<NetworkPolicySandboxSession, "setNetworkPolicy">,
   token: string,
   operation: () => Promise<T>,
 ): Promise<T> {

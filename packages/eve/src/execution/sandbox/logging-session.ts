@@ -7,7 +7,6 @@ import type {
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
 
 const MAX_LOG_VALUE_LENGTH = 240;
@@ -33,14 +32,6 @@ export function createLoggingSandboxSession(input: {
       log?.(`preparation spawn: ${formatCommand(options.command)}`);
       return await session.spawn(options);
     },
-    ...(session.setNetworkPolicy === undefined
-      ? {}
-      : {
-          async setNetworkPolicy(policy: SandboxNetworkPolicy) {
-            log?.(`preparation set network policy: ${formatNetworkPolicy(policy)}`);
-            return await session.setNetworkPolicy!(policy);
-          },
-        }),
     async writeFile(options: SandboxWriteFileOptions) {
       log?.(`preparation write file: ${options.path}`);
       return await session.writeFile(options);
@@ -86,16 +77,6 @@ function formatCapturedOutput(stream: "stderr" | "stdout", output: string): stri
 
 function formatCommand(command: string): string {
   return truncateOneLine(command);
-}
-
-function formatNetworkPolicy(policy: SandboxNetworkPolicy): string {
-  return truncateOneLine(
-    typeof policy === "string"
-      ? policy
-      : JSON.stringify(policy, (key, value: unknown) =>
-          key === "transform" ? "[redacted]" : value,
-        ),
-  );
 }
 
 function truncateOneLine(value: string): string {

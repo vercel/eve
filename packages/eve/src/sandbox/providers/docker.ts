@@ -5,7 +5,7 @@ import type {
 } from "#public/sandbox/docker-sandbox.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import { defineSandboxProvider } from "#shared/sandbox-provider.js";
-import type { MutableNetworkSandboxSession } from "#shared/sandbox-session.js";
+import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
 
 export type {
   DockerSandboxEnvironmentOptions,
@@ -19,7 +19,7 @@ const provider = defineSandboxProvider<
   DockerSandboxRuntimeOptions,
   { readonly imageReference: string },
   { readonly containerName: string; readonly generation: string; readonly version: 2 },
-  MutableNetworkSandboxSession
+  NetworkPolicySandboxSession
 >({
   name: "docker",
   environment(options) {
@@ -31,13 +31,13 @@ export const DockerSandbox = {
   ...provider,
   dockerfile(
     options: DockerfileEnvironmentInput = {},
-  ): SandboxEnvironment<DockerSandboxRuntimeOptions, MutableNetworkSandboxSession> {
+  ): SandboxEnvironment<DockerSandboxRuntimeOptions, NetworkPolicySandboxSession> {
     return provider.environment(options);
   },
   image(
     reference: string,
     options: DockerfileEnvironmentInput = {},
-  ): SandboxEnvironment<DockerSandboxRuntimeOptions, MutableNetworkSandboxSession> {
+  ): SandboxEnvironment<DockerSandboxRuntimeOptions, NetworkPolicySandboxSession> {
     return provider.environment({ ...options, image: reference });
   },
 };

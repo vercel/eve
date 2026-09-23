@@ -12,6 +12,7 @@ import type {
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#public/definitions/sandbox.js";
+import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
@@ -83,7 +84,7 @@ export interface MockSandbox {
    * Direct handle to the underlying sandbox session. Exposed for tests that
    * want to call the session surface outside a `ctx` scope.
    */
-  readonly session: SandboxSession;
+  readonly session: NetworkPolicySandboxSession;
   /** Ordered log of every command received through `run`/`spawn`. */
   readonly commandLog: readonly string[];
   /** Ordered log of every path received through `removePath`. */
@@ -177,7 +178,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     }
   }
 
-  const baseSession: SandboxSession = {
+  const baseSession: NetworkPolicySandboxSession = {
     resolvePath(path: string): string {
       return resolveWorkspacePath(path);
     },
@@ -252,7 +253,7 @@ export function mockSandbox(input: MockSandboxInput = {}): MockSandbox {
     async delete(): Promise<void> {
       await input.delete?.();
     },
-    async get(): Promise<SandboxSession> {
+    async get(): Promise<NetworkPolicySandboxSession> {
       return session;
     },
     async stop(): Promise<void> {

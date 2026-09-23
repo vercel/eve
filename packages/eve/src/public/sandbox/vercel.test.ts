@@ -1,9 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { SessionContext } from "#context/session-context.js";
-import type {
-  MutableNetworkSandboxSession,
-  RuntimeSandboxSessionFor,
-} from "#public/definitions/sandbox.js";
+import type { RuntimeSandboxSessionFor } from "#public/definitions/sandbox.js";
+import type { NetworkPolicySandboxSession } from "#shared/sandbox-session.js";
 import { Drive, VercelSandbox } from "#public/sandbox/vercel.js";
 describe("VercelSandbox", () => {
   it("creates environments", () => {
@@ -17,7 +15,7 @@ describe("VercelSandbox", () => {
     const environment = VercelSandbox.environment();
     const assertTypes = (ctx: SessionContext) => {
       expectTypeOf(ctx.getSandbox(environment)).toEqualTypeOf<
-        Promise<RuntimeSandboxSessionFor<MutableNetworkSandboxSession>>
+        Promise<RuntimeSandboxSessionFor<NetworkPolicySandboxSession>>
       >();
     };
 

@@ -61,7 +61,7 @@ import {
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import type {
   InternalSandboxSession,
-  MutableNetworkSandboxSession,
+  NetworkPolicySandboxSession,
 } from "#shared/sandbox-session.js";
 
 type LiveMicrosandboxOptions = ResolvedMicrosandboxOptions & MicrosandboxSandboxRuntimeOptions;
@@ -75,7 +75,7 @@ export type MicrosandboxPreparedArtifact = {
 
 const activeMicrosandboxSessionHandles = new Map<
   string,
-  SandboxProviderHandle<MutableNetworkSandboxSession>
+  SandboxProviderHandle<NetworkPolicySandboxSession>
 >();
 
 export async function prewarmMicrosandboxTemplate(input: {
@@ -229,7 +229,7 @@ export async function createMicrosandboxHandle(input: {
   readonly runtimeOptions?: MicrosandboxSandboxRuntimeOptions;
   readonly sessionIdentity?: string;
 }): Promise<{
-  readonly handle: SandboxProviderHandle<MutableNetworkSandboxSession>;
+  readonly handle: SandboxProviderHandle<NetworkPolicySandboxSession>;
   readonly state: {
     readonly optionsHash: string;
     readonly sessionIdentity: string;
@@ -379,7 +379,7 @@ function createHandle(
   sandbox: MicrosandboxVm,
   _optionsHash: string,
   onShutdown?: () => void,
-): SandboxProviderHandle<MutableNetworkSandboxSession> {
+): SandboxProviderHandle<NetworkPolicySandboxSession> {
   const session = buildSandboxSession(
     createMicrosandboxInternalSession(sandbox),
     async (policy) => {
@@ -414,8 +414,8 @@ function createActiveMicrosandboxSessionKey(sessionRootPath: string, optionsHash
 
 function cacheHandle(
   key: string,
-  handle: SandboxProviderHandle<MutableNetworkSandboxSession>,
-): SandboxProviderHandle<MutableNetworkSandboxSession> {
+  handle: SandboxProviderHandle<NetworkPolicySandboxSession>,
+): SandboxProviderHandle<NetworkPolicySandboxSession> {
   activeMicrosandboxSessionHandles.set(key, handle);
   return handle;
 }
