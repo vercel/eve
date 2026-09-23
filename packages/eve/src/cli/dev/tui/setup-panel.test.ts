@@ -322,8 +322,8 @@ describe("renderSelectQuestion", () => {
       "  Source: Official eve registry",
       "  Packages: @agent-browser/eve",
       "",
-      "   Add to project",
-      "   Back",
+      "     Add to project",
+      "     Back",
     ]);
   });
 
@@ -440,16 +440,17 @@ describe("renderSelectQuestion", () => {
       80,
     );
 
-    // Completed rows stay semantic rather than borrowing the selection weight.
-    expect(rows).toContain("   ✓ Terminal UI · Already installed");
+    // Completed rows retain an inert cursor rather than borrowing the
+    // available-row selection weight; resting rows retain their checks.
+    expect(rows).toContain("   › Terminal UI · Already installed");
     expect(rows).toContain("   ✓ Web Chat");
-    expect(rows).toContain("   Done");
+    expect(rows).toContain("     Done");
     const warning = rows.indexOf("  ⚠ Overwrote /tmp/weather-agent");
     const success = rows.indexOf("  ✓ Scaffolded channel: web");
-    const done = rows.indexOf("   Done");
-    expect(rows.indexOf("     Slack       · Creates slackbot and deploys to Vercel")).toBeLessThan(
-      warning,
-    );
+    const done = rows.indexOf("     Done");
+    const slack = rows.indexOf("     Slack       · Creates slackbot and deploys to Vercel");
+    expect(slack).toBeGreaterThanOrEqual(0);
+    expect(slack).toBeLessThan(warning);
     expect(warning).toBeLessThan(success);
     expect(success).toBeLessThan(done);
     expect([rows[warning - 1], rows[done - 1]]).toEqual(["", ""]);
@@ -469,7 +470,8 @@ describe("renderSelectQuestion", () => {
     // Completed rows remain dim and never borrow the selected row's weight.
     expect(coloredRow).toContain("\x1b[2mTerminal UI\x1b[22m");
     expect(coloredRow).toContain("\x1b[2m · Already installed\x1b[22m");
-    expect(coloredRow).toContain("\x1b[32m✓\x1b[39m");
+    expect(coloredRow).toContain("\x1b[2m›\x1b[22m");
+    expect(coloredRow).not.toContain("\x1b[32m✓\x1b[39m");
     expect(coloredRow).not.toContain("\x1b[36m");
   });
 
@@ -833,9 +835,9 @@ describe("renderSelectQuestion", () => {
     const text = rows.join("\n");
 
     // The empty filter is a block-cursor field directly above its first result.
-    expect(text).toContain("   search…\n   Model 0");
-    expect(text).toContain("   Model 0");
-    expect(text).toContain("   Model 4");
+    expect(text).toContain("   search…\n     Model 0");
+    expect(text).toContain("     Model 0");
+    expect(text).toContain("     Model 4");
     expect(text).not.toContain("›");
     expect(text).not.toContain("Model 5");
     // The list scrolls silently: no count row, Esc is the whole footer.

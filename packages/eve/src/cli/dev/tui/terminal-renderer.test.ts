@@ -4792,8 +4792,9 @@ describe("TerminalRenderer setup flow session", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Slack channel was not added");
     expect(snapshot).not.toContain("Scaffolding Web Chat channel files");
-    // Completed rows retain their semantic check without borrowing selection weight.
-    expect(snapshot).toContain("✓ Terminal UI · Already installed");
+    // A focused completed row retains a dim inert cursor; resting completed
+    // rows retain their semantic check without borrowing selection weight.
+    expect(snapshot).toContain("› Terminal UI · Already installed");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
     expect(snapshot).toContain("Dependency installation failed.");

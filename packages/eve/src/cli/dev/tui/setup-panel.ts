@@ -370,7 +370,6 @@ function optionRow(input: {
   option: SetupPanelOption;
   isCursor: boolean;
   isChecked: boolean;
-  placeholder: boolean;
   /** Railed lists lead resting rows with the `▏` rail and drop the hint dot. */
   railed?: boolean;
   hintPadding?: number;
@@ -394,7 +393,7 @@ function optionRow(input: {
     accent: option.accent,
     isCursor: input.isCursor,
     state: resolveOptionRowState(option, input.isChecked),
-    placeholder: input.placeholder,
+    placeholder: false,
     presentation: "minimal",
     hintPadding: input.hintPadding,
   });
@@ -652,20 +651,6 @@ function inlineEditOption(
   }
 }
 
-function optionUsesPlaceholder(
-  presentation: SelectPresentation,
-  isTrailingTaskAction: boolean,
-): boolean {
-  // A type-ahead list draws no placeholder dots — the filter row leads instead.
-  const isFiltered = presentation.filter !== undefined && presentation.layout !== "task-list";
-  // Checklists and the explicit menu layouts (stacked, task-list) present every
-  // row as a pickable option, so each carries the placeholder dot.
-  const isMultiSelect = presentation.selection === "multiple";
-  const isMenuLayout = presentation.layout !== "plain";
-
-  return !isFiltered && !isTrailingTaskAction && (isMultiSelect || isMenuLayout);
-}
-
 function appendSelectOptionRows(input: {
   rows: string[];
   state: SetupOptionSelectPanelState;
@@ -731,7 +716,6 @@ function appendSelectOptionRows(input: {
           presentation.selection === "multiple"
             ? state.select.selected.has(option.value)
             : option.checked === true,
-        placeholder: railed || optionUsesPlaceholder(presentation, isTrailingTaskAction),
         railed,
         hintPadding: Math.max(0, visibleLabelWidth - rowOption.label.length),
         theme,
@@ -747,7 +731,7 @@ function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, th
   if (submitIndex < 0) return;
   const onSubmit = cursor === submitIndex;
   const content = onSubmit ? theme.colors.bold("Submit") : theme.colors.dim("Submit");
-  rows.push("", `  ${content}`);
+  rows.push("", `     ${content}`);
 }
 
 function appendSelectNotices(
@@ -826,7 +810,6 @@ function renderActionQuestion(
         option: action,
         isCursor: index === state.cursor,
         isChecked: false,
-        placeholder: true,
         hintPadding: 0,
         theme,
       })}`,
