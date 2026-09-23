@@ -7,7 +7,7 @@ import { detectPackageManager, type PackageManagerKind } from "#setup/package-ma
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
 import { createPromptCommandOutput } from "#setup/cli/index.js";
 import { syncHostFrameworkPreset } from "#setup/vercel-project-framework.js";
-import { WEB_CHANNEL_TEMPLATE } from "#setup/scaffold/create/web-template.js";
+import { WEB_CHANNEL_TEMPLATES } from "#setup/scaffold/create/web-template.js";
 import {
   defineSetupIntegration,
   type SetupApplyContext,
@@ -157,7 +157,9 @@ export async function applyWebSetup(
     project.kind === "workspace-member" ? project.member.appRoot : project.appRoot;
   const channelPath = join(agentAppRoot, "agent", "channels", "eve.ts");
   if (context.force || !(await deps.pathExists(channelPath))) {
-    await deps.writeTextFile(channelPath, WEB_CHANNEL_TEMPLATE, { force: context.force });
+    await deps.writeTextFile(channelPath, WEB_CHANNEL_TEMPLATES.default, {
+      force: context.force,
+    });
   }
   const agentName = project.kind === "workspace-member" ? project.member.name : undefined;
   const webRoot = join(project.environmentRoot, "apps", "web");

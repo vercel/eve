@@ -20,8 +20,7 @@ import {
   WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES,
   WEB_APP_TEMPLATE_FILES,
   WEB_APP_TEMPLATE_PACKAGE_JSON,
-  WEB_CHANNEL_TEMPLATE,
-  WEB_SIGN_IN_WITH_VERCEL_CHANNEL_TEMPLATE,
+  WEB_CHANNEL_TEMPLATES,
 } from "../create/web-template.js";
 import {
   resolveWebPackageVersions,
@@ -530,10 +529,7 @@ async function ensureWebChannel(
   filesSkipped.push(...packageManagerConfiguration.filesSkipped);
 
   if (!options.skipDependencyMutation) {
-    const channelTemplate =
-      options.webAuthentication === "sign-in-with-vercel"
-        ? WEB_SIGN_IN_WITH_VERCEL_CHANNEL_TEMPLATE
-        : WEB_CHANNEL_TEMPLATE;
+    const channelTemplate = WEB_CHANNEL_TEMPLATES[options.webAuthentication ?? "default"];
     const templateFiles = {
       ...WEB_APP_TEMPLATE_FILES,
       ...(options.webAuthentication === "sign-in-with-vercel"
