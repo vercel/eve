@@ -47,10 +47,20 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
               .watchTurn(started.sessionId, { startIndex: initial.session.state.streamIndex })
               .result();
       completed.expectOk();
-      const childOutput =
+      const marker =
         mode === "direct"
-          ? "WORKFLOW-CHILD:Alice's hook audit"
-          : `WORKFLOW-CHILD:hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
+          ? "Alice's hook audit"
+          : `hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
+      const completion = [...initial.events, ...completed.events].find(
+        (event) => event.type === "subagent.completed",
+      );
+      if (completion?.type !== "subagent.completed")
+        throw new Error("The delegated child's completion event is missing.");
+      const childOutput = completion.data.output;
+      t.check(childOutput.startsWith("WORKFLOW-CHILD:"), equals(true)).label(
+        "child returned its report",
+      );
+      t.check(childOutput.includes(marker), equals(true)).label("child report includes its task");
       completed.messageIncludes(childOutput);
 
       const startIndex = completed.session.state.streamIndex;
@@ -92,7 +102,7 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
             },
           },
           channel: {
-            kind: "defineChannel",
+            kind: "channel:skill-context",
             continuationToken: `skill-context:${threadId}`,
             metadata: { topic: "delegated-report", labels: ["context-contract"] },
           },
@@ -122,9 +132,20 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
           equals(last),
         ).label(`${label}: ctx.messages includes the follow-up only after delivery`);
         if (last) {
-          t.check(JSON.stringify(messages).includes(childOutput), equals(true)).label(
-            `${label}: ctx.messages retains the delivered child result`,
-          );
+          const replies = messages
+            .filter((message) => message.role === "assistant")
+            .map((message) =>
+              typeof message.content === "string"
+                ? message.content
+                : message.content
+                    .filter((part) => part.type === "text")
+                    .map((part) => part.text)
+                    .join(""),
+            );
+          t.check(
+            replies.some((reply) => reply.includes(childOutput)),
+            equals(true),
+          ).label(`${label}: ctx.messages retains the delivered child result`);
         }
       }
       t.notEvent("session.failed");
