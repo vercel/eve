@@ -243,6 +243,51 @@ describe("createDockerSandboxBackend prewarm", () => {
     expect(cleanup?.args.at(-1)).toBe(buildContainerName);
   });
 
+  it("reuses a concurrently committed template image", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let peerPublished = false;
+    const { calls, cli } = createFakeDockerCli((args) => {
+      if (args[0] === "image" && args[1] === "inspect") {
+        return peerPublished && args.at(-1) === TEMPLATE_IMAGE
+          ? { exitCode: 0, stdout: "sha256:peer\n" }
+          : { exitCode: 1, stderr: "No such image" };
+      }
+      if (args[0] === "commit") {
+        peerPublished = true;
+        return { exitCode: 1, stderr: `AlreadyExists: image "${TEMPLATE_IMAGE}" already exists` };
+      }
+      return undefined;
+    });
+
+    await expect(
+      createEngine({ cli }).prewarm({
+        runtimeContext: { appRoot },
+        seedFiles: [],
+        templateKey: TEMPLATE_KEY,
+      }),
+    ).resolves.toEqual({ reused: true });
+
+    expect(calls.filter(({ args }) => isImageInspect(args, TEMPLATE_IMAGE))).toHaveLength(2);
+    expect(findCall(calls, (args) => args[0] === "rm" && args[1] === "-f")).toBeDefined();
+  });
+
+  it("preserves commit failures other than a concurrent publication", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    const { cli } = createFakeDockerCli((args) => {
+      if (isImageInspect(args, TEMPLATE_IMAGE)) return { exitCode: 1, stderr: "No such image" };
+      if (args[0] === "commit") return { exitCode: 1, stderr: "disk full" };
+      return undefined;
+    });
+
+    await expect(
+      createEngine({ cli }).prewarm({
+        runtimeContext: { appRoot },
+        seedFiles: [],
+        templateKey: TEMPLATE_KEY,
+      }),
+    ).rejects.toThrow(`Failed to commit sandbox template image "${TEMPLATE_IMAGE}": disk full`);
+  });
+
   it("writes seed files before bootstrap and commits bootstrap outputs", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     let seedWritten = false;

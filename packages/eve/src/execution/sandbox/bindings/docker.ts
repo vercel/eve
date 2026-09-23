@@ -104,6 +104,7 @@ export function createDockerSandboxBackend(
         templateReferenceInput,
       );
 
+      let reused = false;
       prewarmInput.log?.(`checking cached template image "${imageReference}"`);
       if (await dockerImageExists(cli, imageReference)) {
         prewarmInput.log?.("reusing cached template image");
@@ -166,26 +167,36 @@ export function createDockerSandboxBackend(
           `stop template build container "${buildContainerName}"`,
         );
         prewarmInput.log?.(`committing template image "${imageReference}"`);
-        expectDockerSuccess(
-          await cli.run([
-            "commit",
-            "--change",
-            `LABEL ${DOCKER_SANDBOX_LABEL}=1`,
-            "--change",
-            `LABEL ${DOCKER_SANDBOX_LABEL}.role=template`,
-            "--change",
-            `LABEL ${DOCKER_SANDBOX_LABEL}.template-key=${prewarmInput.templateKey}`,
-            buildContainerIdentity,
-            imageReference,
-          ]),
-          `commit sandbox template image "${imageReference}"`,
-        );
+        const commit = await cli.run([
+          "commit",
+          "--change",
+          `LABEL ${DOCKER_SANDBOX_LABEL}=1`,
+          "--change",
+          `LABEL ${DOCKER_SANDBOX_LABEL}.role=template`,
+          "--change",
+          `LABEL ${DOCKER_SANDBOX_LABEL}.template-key=${prewarmInput.templateKey}`,
+          buildContainerIdentity,
+          imageReference,
+        ]);
+        if (commit.exitCode !== 0) {
+          // Template image tags are daemon-scoped while preparation locks are
+          // app-scoped. Concurrent apps can therefore both observe a missing
+          // image; accept only the loser of that exact publication race.
+          const publishedByPeer =
+            /already(?:\s*|-)?exists/i.test(`${commit.stderr}\n${commit.stdout}`) &&
+            (await dockerImageExists(cli, imageReference));
+          if (!publishedByPeer) {
+            expectDockerSuccess(commit, `commit sandbox template image "${imageReference}"`);
+          }
+          reused = true;
+          prewarmInput.log?.("reusing concurrently published template image");
+        }
         await touchDockerTemplateMarker(markerPath, imageReference);
       } finally {
         await cli.run(["rm", "-f", buildContainerName]).catch(() => {});
       }
 
-      return { reused: false };
+      return { reused };
     },
     async create(createInput: SandboxBackendCreateInput): Promise<SandboxBackendHandle> {
       await ensureDaemon();
