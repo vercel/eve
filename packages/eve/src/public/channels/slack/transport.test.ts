@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveSlackTransportOptions } from "#public/channels/slack/transport.js";
 
@@ -43,5 +43,69 @@ describe("resolveSlackTransportOptions", () => {
         fileBaseUrl: "https://sim.example/files#top",
       }),
     ).toThrow(/api\.fileBaseUrl must carry no query string or fragment/);
+  });
+});
+
+describe("the fetch resolveSlackTransportOptions returns", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Records which transport a URL travelled on. */
+  function transports(api: Parameters<typeof resolveSlackTransportOptions>[0]) {
+    const seen: string[] = [];
+    const supplied = vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+      seen.push(`supplied ${String(input instanceof Request ? input.url : input)}`);
+      return new Response("");
+    });
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
+      seen.push(`global ${String(input instanceof Request ? input.url : input)}`);
+      return new Response("");
+    });
+    const resolved = resolveSlackTransportOptions({ ...api, fetch: supplied as never });
+    return { seen, fetch: resolved?.fetch };
+  }
+
+  it("carries a call to the configured api base", async () => {
+    const { seen, fetch: confined } = transports({ apiBaseUrl: "https://sim.example/api" });
+    await confined?.("https://sim.example/api/chat.postMessage");
+    expect(seen).toEqual(["supplied https://sim.example/api/chat.postMessage"]);
+  });
+
+  it("leaves a host the stand-in names on the global fetch", async () => {
+    const { seen, fetch: confined } = transports({ apiBaseUrl: "https://sim.example/api" });
+    // The `upload_url` from `files.getUploadURLExternal` and a `url_private` download
+    // are addressed by data, so a credential-attaching wrapper must not see them.
+    await confined?.("https://files.slack.com/upload/abc");
+    await confined?.(new Request("https://attacker.example/steal"));
+    expect(seen).toEqual([
+      "global https://files.slack.com/upload/abc",
+      "global https://attacker.example/steal",
+    ]);
+  });
+
+  it("carries a call to a fileBaseUrl on another origin", async () => {
+    const { seen, fetch: confined } = transports({
+      apiBaseUrl: "https://sim.example/api",
+      fileBaseUrl: "https://files.sim.example/",
+    });
+    await confined?.("https://files.sim.example/F123/report.csv");
+    expect(seen).toEqual(["supplied https://files.sim.example/F123/report.csv"]);
+  });
+
+  it("carries every Slack host when no base is configured", async () => {
+    const { seen, fetch: confined } = transports({});
+    await confined?.("https://slack.com/api/chat.postMessage");
+    await confined?.("https://files.slack.com/a/b/report.csv");
+    expect(seen).toEqual([
+      "supplied https://slack.com/api/chat.postMessage",
+      "supplied https://files.slack.com/a/b/report.csv",
+    ]);
+  });
+
+  it("stays undefined when no fetch is supplied", () => {
+    expect(
+      resolveSlackTransportOptions({ apiBaseUrl: "https://sim.example/api" })?.fetch,
+    ).toBeUndefined();
   });
 });

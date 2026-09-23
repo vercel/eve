@@ -13,14 +13,20 @@ import {
 /** Fetch implementation used for Slack traffic. */
 export type SlackFetch = typeof globalThis.fetch;
 
+/** Where the vendored transport sends a call with no `apiBaseUrl` configured. */
+const SLACK_API_BASE_URL = "https://slack.com/api/";
+
 /**
  * Slack API transport overrides. The base URLs say where a call may go:
  * `apiBaseUrl` defaults to `https://slack.com/api/`, and `fileBaseUrl` falls back to
  * `apiBaseUrl` for attachment downloads. Both are absolute http or https URLs
- * carrying no query string or fragment. `fetch` says how all Slack traffic travels,
- * downloads from Slack's own file hosts included: it replaces the global fetch, which
- * attaches the per-call header a host behind an authenticating proxy requires, and
- * observes or stubs the traffic.
+ * carrying no query string or fragment.
+ *
+ * `fetch` says how the traffic travels: it replaces the global fetch, which attaches
+ * the per-call header a host behind an authenticating proxy requires, and observes or
+ * stubs the calls. It is confined to the configured bases' origins, so a wrapper may
+ * attach a credential without checking each destination itself. With no base
+ * configured every call goes to Slack's own hosts and it sees all of them.
  */
 export interface SlackTransportOptions {
   readonly apiBaseUrl?: string;
@@ -41,7 +47,41 @@ export function resolveSlackTransportOptions(
   const apiBaseUrl = slackBaseHref(api.apiBaseUrl, "api.apiBaseUrl");
   const fileBaseUrl =
     api.fileBaseUrl === undefined ? apiBaseUrl : slackBaseHref(api.fileBaseUrl, "api.fileBaseUrl");
-  return { apiBaseUrl, fetch: api.fetch, fileBaseUrl };
+  return { apiBaseUrl, fetch: confineFetch(api.fetch, apiBaseUrl, fileBaseUrl), fileBaseUrl };
+}
+
+/**
+ * Confines a caller-supplied `fetch` to the origins of the configured bases. Traffic
+ * to any other host travels on the global fetch.
+ *
+ * Two credentialed calls are addressed by data rather than by config: the `upload_url`
+ * that `files.getUploadURLExternal` answers with, and the `url_private` a download
+ * arrives on. Both let the host on the far end name where eve sends the next request,
+ * so a `fetch` that attaches credentials for a stand-in carries them wherever that
+ * stand-in points. eve knows which hosts were configured, so the confinement belongs
+ * here and a wrapper attaches its credential unconditionally.
+ *
+ * With no base configured every call already goes to Slack's own hosts, and the
+ * supplied fetch sees all of them.
+ */
+function confineFetch(
+  custom: SlackFetch | undefined,
+  apiBaseUrl: string | undefined,
+  fileBaseUrl: string | undefined,
+): SlackFetch | undefined {
+  if (custom === undefined) return undefined;
+  if (apiBaseUrl === undefined && fileBaseUrl === undefined) return custom;
+  const origins = new Set(
+    [apiBaseUrl ?? SLACK_API_BASE_URL, fileBaseUrl ?? SLACK_API_BASE_URL].map(
+      (base) => new URL(base).origin,
+    ),
+  );
+  return (target, init) => {
+    const origin = URL.parse(target instanceof Request ? target.url : String(target))?.origin;
+    return origin !== undefined && origins.has(origin)
+      ? custom(target, init)
+      : globalThis.fetch(target, init);
+  };
 }
 
 /** The options an outbound Slack Web API call is made with. */

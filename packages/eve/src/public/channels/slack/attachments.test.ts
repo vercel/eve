@@ -302,14 +302,33 @@ describe("createSlackFetchFile", () => {
     ).toBeNull();
   });
 
-  it("downloads from Slack's own file host on api.fetch", async () => {
-    const globalSpy = vi.spyOn(globalThis, "fetch");
+  it("downloads from Slack's own file host on the global fetch, past a stand-in's api.fetch", async () => {
+    const globalFetch = pngFetch();
+    vi.stubGlobal("fetch", globalFetch);
     const apiFetch = pngFetch();
 
     const result = await fetchFileFor({
       apiBaseUrl: "http://localhost:3000/api/slack",
       fetch: apiFetch,
     })("https://files.slack.com/files-pri/T01-F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(globalFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    // A stand-in's api.fetch attaches that stand-in's credentials, and this URL
+    // arrives in an inbound payload.
+    expect(apiFetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("downloads from Slack's own file host on api.fetch when no base is configured", async () => {
+    const globalSpy = vi.spyOn(globalThis, "fetch");
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({ fetch: apiFetch })(
+      "https://files.slack.com/files-pri/T01-F01/cat.png",
+    );
 
     expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
     expect(apiFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {

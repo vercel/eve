@@ -433,15 +433,13 @@ bearer token itself.
 ```ts
 slackChannel({
   api: {
-    apiBaseUrl: "http://localhost:3000/api/slack",
+    apiBaseUrl: "https://slack-simulator.example/api/slack",
     fetch: (input, init) => {
-      const proxyKey = process.env.SLACK_PROXY_KEY;
-      if (proxyKey === undefined) throw new Error("SLACK_PROXY_KEY is required.");
       const headers = new Headers(init?.headers);
-      headers.set("x-proxy-key", proxyKey);
+      headers.set("x-vercel-protection-bypass", process.env.SLACK_SIMULATOR_BYPASS_SECRET ?? "");
       return fetch(input, { ...init, headers });
     },
-    fileBaseUrl: "http://localhost:3000/files",
+    fileBaseUrl: "https://slack-simulator.example/files",
   },
   credentials: { botToken: process.env.SLACK_BOT_TOKEN },
 });
@@ -449,7 +447,7 @@ slackChannel({
 
 The bases say where a call may go. `apiBaseUrl` is the base Slack Web API method names resolve against, and defaults to `https://slack.com/api/`. `fileBaseUrl` adds a base for attachment downloads and falls back to `apiBaseUrl`: a download URL under it is fetched with the bot token, in addition to `files.slack.com` and Enterprise Grid file URLs. Every other URL passes through to the model provider unchanged. Both bases must be absolute `http:` or `https:` URLs carrying no query string or fragment; `slackChannel()` throws on one that is not, naming the option. A missing trailing slash is added, so `https://sim.example/api` sends `chat.postMessage` to `https://sim.example/api/chat.postMessage`.
 
-`api.fetch` says how the traffic travels. It replaces the global `fetch` for every Slack Web API call and every attachment download, Slack's own file hosts included — use it to attach the per-call header a host behind an authenticating proxy requires.
+`api.fetch` says how the traffic travels. It replaces the global `fetch` for calls to the configured bases — use it to attach the per-call header a host behind an authenticating proxy requires, as the example does for a simulator behind Vercel Deployment Protection. eve confines it to those bases' origins, so that header reaches the simulator alone: `files.slack.com`, and any other host Slack names in a response or an inbound payload, keep the global `fetch`. A wrapper therefore attaches its credential unconditionally. With no base configured every call already goes to Slack's own hosts, and `api.fetch` carries all of them, which is what observes or stubs the traffic in a test.
 
 ### Delivery
 
