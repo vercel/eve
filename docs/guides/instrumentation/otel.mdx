@@ -147,18 +147,17 @@ Runs data is retained for 30 days.
 
 ## Enable tracing on Vercel
 
-A deployed eve project needs at least one
-[sampling rule with a rate above 0%](https://vercel.com/docs/tracing/always-on-tracing#enable-always-on-tracing)
-before Vercel collects traces. We recommend setting the rate to **100%** for
-eve projects so every matching request is traced.
-
-Select your team and project, then open
+New eve deployments automatically sample 100% of requests. Existing
+eve deployments need a sampling rule configured for the Vercel project to
+collect traces. To enable tracing for an existing deployment, select your team
+and project, then open
 [**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):
 
 1. Select **Add Sampling Rule**.
 2. Choose **All Environments**, **Production**, or **Preview**.
 3. Set **Rate** to `100%`.
-4. Select **Save**.
+4. Leave **Request Path Prefix** blank to sample requests on every path.
+5. Select **Save**.
 
 Tracing starts as soon as you save the rule. You can also manage sampling
 rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
