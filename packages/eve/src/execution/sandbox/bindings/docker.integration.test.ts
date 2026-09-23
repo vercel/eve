@@ -248,6 +248,55 @@ describe("Docker provider prewarm", () => {
     expect(cleanup?.args.at(-1)).toBe(buildContainerName);
   });
 
+  it("reuses a concurrently committed template image", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let publishedReference: string | undefined;
+    const { calls, cli } = createFakeDockerCli((args) => {
+      if (args[0] === "image" && args[1] === "inspect") {
+        return publishedReference === args.at(-1)
+          ? { exitCode: 0, stdout: "sha256:peer\n" }
+          : { exitCode: 1, stderr: "No such image" };
+      }
+      if (args[0] === "commit") {
+        publishedReference = args.at(-1);
+        return {
+          exitCode: 1,
+          stderr: `AlreadyExists: image "${publishedReference}" already exists`,
+        };
+      }
+      return undefined;
+    });
+
+    const result = await createEngine({ cli }).prepare({ appRoot, seedFiles: [] });
+    expect(result.imageReference).toBe(publishedReference);
+    expect(
+      calls.filter(({ args }) =>
+        publishedReference === undefined ? false : isImageInspect(args, publishedReference),
+      ),
+    ).toHaveLength(2);
+    expect(findCall(calls, (args) => args[0] === "rm" && args[1] === "-f")).toBeDefined();
+  });
+
+  it("preserves commit failures other than a concurrent publication", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let committedReference: string | undefined;
+    const { cli } = createFakeDockerCli((args) => {
+      if (args[0] === "image" && args[1] === "inspect") {
+        return { exitCode: 1, stderr: "No such image" };
+      }
+      if (args[0] === "commit") {
+        committedReference = args.at(-1);
+        return { exitCode: 1, stderr: "disk full" };
+      }
+      return undefined;
+    });
+
+    await expect(createEngine({ cli }).prepare({ appRoot, seedFiles: [] })).rejects.toThrow(
+      /Failed to commit sandbox template image .*: disk full/u,
+    );
+    expect(committedReference).toMatch(/^eve-sandbox-template:/u);
+  });
+
   it("mounts compiled resources read-only while hydrating a writable template", async () => {
     const appRoot = await createScratchDirectory("eve-docker-sandbox-");
     const resourcesPath = join(appRoot, "compiled-resources");

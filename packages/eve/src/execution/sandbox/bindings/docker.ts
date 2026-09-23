@@ -276,20 +276,29 @@ export function createDockerSandboxProvider(
           `stop template build container "${buildContainerName}"`,
         );
         context.log?.(`committing template image "${imageReference}"`);
-        expectDockerSuccess(
-          await cli.run([
-            "commit",
-            "--change",
-            `LABEL ${DOCKER_SANDBOX_LABEL}=1`,
-            "--change",
-            `LABEL ${DOCKER_SANDBOX_LABEL}.role=template`,
-            "--change",
-            `LABEL ${DOCKER_SANDBOX_LABEL}.template-key=${templateKey}`,
-            buildContainerIdentity,
-            imageReference,
-          ]),
-          `commit sandbox template image "${imageReference}"`,
-        );
+        const commit = await cli.run([
+          "commit",
+          "--change",
+          `LABEL ${DOCKER_SANDBOX_LABEL}=1`,
+          "--change",
+          `LABEL ${DOCKER_SANDBOX_LABEL}.role=template`,
+          "--change",
+          `LABEL ${DOCKER_SANDBOX_LABEL}.template-key=${templateKey}`,
+          buildContainerIdentity,
+          imageReference,
+        ]);
+        if (commit.exitCode !== 0) {
+          // Template image tags are daemon-scoped while preparation locks are
+          // app-scoped. Concurrent apps can therefore both observe a missing
+          // image; accept only the loser of that exact publication race.
+          const publishedByPeer =
+            /already(?:\s*|-)?exists/iu.test(`${commit.stderr}\n${commit.stdout}`) &&
+            (await dockerImageExists(cli, imageReference));
+          if (!publishedByPeer) {
+            expectDockerSuccess(commit, `commit sandbox template image "${imageReference}"`);
+          }
+          context.log?.("reusing concurrently published template image");
+        }
         await touchDockerTemplateMarker(markerPath, imageReference);
       } finally {
         await cli.run(["rm", "-f", buildContainerName]).catch(() => {});
