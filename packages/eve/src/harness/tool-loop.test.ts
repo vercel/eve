@@ -5743,7 +5743,7 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("allows the model to refresh stale read results", async () => {
+    it("permits fresh reads in the empty-response retry instruction", async () => {
       const staleReadCall = {
         input: { resource: "report" },
         toolCallId: "stale-read-1",
@@ -5833,7 +5833,7 @@ describe("createToolLoopHarness", () => {
           kind: "execution.retry",
           role: "user",
         });
-        expect(retryMessages.at(-1)?.content).not.toContain("do not re-run tools");
+        expect(retryMessages.at(-1)?.content).not.toMatch(/do not re-run tools/i);
       } finally {
         warnSpy.mockRestore();
       }

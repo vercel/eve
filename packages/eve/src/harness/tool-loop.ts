@@ -2478,12 +2478,12 @@ function rethrowNoOutputAsEmptyResponse(error: unknown): never {
 }
 
 /**
- * Wire-only note the empty-response reissue appends to its retry. Results
- * from earlier requests may be stale, while calls completed for the current
- * request must not be repeated. Each recovery stage declares its own
+ * Wire-only note the empty-response reissue appends to its retry. Reads may
+ * be refreshed when earlier results are stale; completed writes and other
+ * side effects must not be repeated. Each recovery stage declares its own
  * follow-up text: tool recovery prepends {@link buildDisabledToolNote} as
- * a system note (its toolset change busts the prompt cache anyway), this one trails as
- * a user note to keep the cached prefix valid.
+ * a system note (its toolset change busts the prompt cache anyway), while
+ * this one trails as a user note to keep the cached prefix valid.
  */
 const EMPTY_RESPONSE_NUDGE =
   "Your previous reply was empty and was not delivered. Continue the current user request. Reuse completed results when they satisfy the request. If existing results are stale or insufficient, use the appropriate read tools to get fresh results. Do not repeat writes or other side effects that already completed. Do not mention this notice.";
