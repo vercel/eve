@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { selfModificationMetrics } from "../../experiments/self-modification-metrics.mjs";
-import { deriveSelfModificationLifecycle } from "./measurements/self-modification-lifecycle.mjs";
+const derive = (sessions) => selfModificationMetrics.derive({ result: { sessions } });
 
 const event = (type, id, at, data, sessionId) => ({ type, data, meta: { id, at, sessionId } });
 function childSession(sessionId, parentSessionId, parentTurnId, callId, events = []) {
@@ -82,7 +82,16 @@ test("derives independently evidenced durations and a zero-valid tool count", ()
   assert.equal(result.parentTurnToFinalChildCompletion.value, 5000);
   assert.equal(result.totalChildDuration.value, 3000);
   assert.equal(result.toolCalls.value, 0);
-  assert.equal(result.parentTurnToFinalChildCompletion.evidence.length, 3);
+  assert.deepEqual(result.parentTurnToFinalChildCompletion.evidence, [
+    { sessionId: "parent", eventId: "parent-start" },
+    { sessionId: "parent", eventId: "delegation" },
+    { sessionId: "child", eventId: "child-completed" },
+  ]);
+  assert.deepEqual(result.totalChildDuration.evidence, [
+    { sessionId: "child", eventId: "child-start" },
+    { sessionId: "child", eventId: "child-completed" },
+  ]);
+  assert.deepEqual(result.toolCalls.evidence, result.totalChildDuration.evidence);
 });
 
 test("measures total child turns for every self-modification eval", () => {
@@ -171,7 +180,7 @@ test("sums child turn durations across approval pauses and later delegations", (
       "later-child",
     ),
   ]);
-  const result = deriveSelfModificationLifecycle([...sessions, laterChild]);
+  const result = derive([...sessions, laterChild]);
   assert.equal(result.parentTurnToFinalChildCompletion.value, 14_000);
   assert.equal(result.totalChildDuration.value, 8_000);
   assert.equal(result.toolCalls.value, 1);
@@ -212,7 +221,135 @@ test("rejects conflicting event identities and incomplete tool-call identities",
   );
   const sessionsWithMalformedAction = captures();
   sessionsWithMalformedAction[1].events.splice(-1, 0, action);
-  const result = deriveSelfModificationLifecycle(sessionsWithMalformedAction);
+  const result = derive(sessionsWithMalformedAction);
   assert.equal(result.toolCalls.status, "unavailable");
   assert.equal(result.totalChildDuration.status, "measured");
+});
+
+test("keeps experiment missingness policy and reason codes", () => {
+  const unavailable = (reason) => ({ status: "unavailable", reason });
+  const cases = [
+    [
+      "missing-delegation",
+      (sessions) => {
+        sessions[0].events.pop();
+      },
+    ],
+    [
+      "missing-delegation-identities",
+      (sessions) => {
+        delete sessions[0].events[1].data.callId;
+      },
+    ],
+    [
+      "child-session-reused",
+      (sessions) => {
+        sessions[0].events[1].data.childSessionId = "parent";
+      },
+    ],
+    [
+      "missing-child-capture",
+      (sessions) => {
+        sessions.pop();
+      },
+    ],
+    [
+      "child-invocation-mismatch",
+      (sessions) => {
+        sessions[1].events[0].data.invocation.parentCallId = "other";
+      },
+    ],
+    [
+      "missing-child-turn",
+      (sessions) => {
+        sessions[1].events.splice(1);
+      },
+    ],
+    [
+      "missing-child-turn-identity",
+      (sessions) => {
+        delete sessions[1].events[1].data.turnId;
+      },
+    ],
+    [
+      "child-turn-incomplete",
+      (sessions) => {
+        sessions[1].events.pop();
+      },
+    ],
+    [
+      "ambiguous-child-turn",
+      (sessions) => {
+        sessions[1].events.push({
+          ...sessions[1].events[2],
+          meta: { ...sessions[1].events[2].meta, id: "duplicate-completion" },
+        });
+      },
+    ],
+    [
+      "child-turn-start-missing",
+      (sessions) => {
+        sessions[1].events.push(
+          event("turn.completed", "orphan", "2026-01-01T00:00:06Z", { turnId: "other" }, "child"),
+        );
+      },
+    ],
+  ];
+  for (const [reason, mutate] of cases) {
+    const sessions = captures();
+    mutate(sessions);
+    const result = derive(sessions);
+    assert.deepEqual(
+      Object.keys(result).sort(),
+      Object.keys(selfModificationMetrics.metrics).sort(),
+    );
+    for (const measurement of Object.values(result))
+      assert.deepEqual(measurement, unavailable(reason));
+  }
+});
+
+test("only parent latency depends on unique parent starts", () => {
+  const sessions = captures();
+  sessions[0].events.push({
+    ...sessions[0].events[0],
+    meta: { ...sessions[0].events[0].meta, id: "duplicate-start" },
+  });
+  const result = derive(sessions);
+  assert.equal(result.parentTurnToFinalChildCompletion.reason, "ambiguous-parent-turn-start");
+  assert.equal(result.totalChildDuration.value, 3000);
+  assert.equal(result.toolCalls.value, 0);
+});
+
+test("the experiment requires valid child durations before counting tools", () => {
+  for (const [at, reason] of [
+    ["invalid", "missing-child-timestamp"],
+    ["2026-01-01T00:00:06Z", "negative-duration"],
+  ]) {
+    const sessions = captures();
+    sessions[1].events[1].meta.at = at;
+    const result = derive(sessions);
+    assert.equal(result.parentTurnToFinalChildCompletion.value, 5000);
+    assert.deepEqual(result.totalChildDuration, { status: "unavailable", reason });
+    assert.deepEqual(result.toolCalls, { status: "unavailable", reason });
+  }
+});
+
+test("repeated child delegations do not double-count turns or tool calls", () => {
+  const sessions = captures();
+  sessions[0].events.push(
+    event(
+      "subagent.called",
+      "later-call",
+      "2026-01-01T00:00:04Z",
+      {
+        ...sessions[0].events[1].data,
+        callId: "later-call",
+      },
+      "parent",
+    ),
+  );
+  const result = derive(sessions);
+  assert.equal(result.parentTurnToFinalChildCompletion.value, 5000);
+  assert.equal(result.totalChildDuration.value, 3000);
+  assert.equal(result.toolCalls.value, 0);
 });

@@ -12,7 +12,15 @@ Source values are whole immutable commit trees and configuration values are expl
 
 For the self-modification fixture, `parent` controls the user-facing agent that receives the request, delegates the edit, and uses the changed agent in verification conversations. `selfModification` controls the child agent that edits the source. Neither override is required: omitted models keep their authored defaults. To isolate editing-model differences, vary only `selfModification`; to compare each model across the whole workflow, override both scopes in each configuration.
 
-Measurement definitions live alongside experiments in `experiments/`; the self-modification metric schema is in `experiments/self-modification-metrics.mjs`. Definitions can import lifecycle-specific evidence helpers from the harness. Each measurement definition is a plain synchronous ESM object. Its declared metric keys and metadata define report metrics; namespace is assigned in the experiment. Derivation receives the validated captured eval, including its eval ID, and must be deterministic and side-effect-free. A thrown derive function or invalid metric result is an analysis error. Correctness, execution health, and measurement missingness remain independent.
+Measurement definitions and derivation logic live together in `experiments/`; see `experiments/self-modification-metrics.mjs`. The experiment owns metric names, event selection, and which missing evidence makes each metric unavailable. The harness provides reusable helpers under `scripts/eval-experiments/measurements/`, not experiment-specific metric bundles:
+
+- `events.mjs`: `captureSessions` validates and deduplicates event identities and provides evidence references; `selectEvents` filters by event type and exact data fields.
+- `lifecycle.mjs`: `delegatedSessions` verifies child invocation links, `parentTurnStarts` finds unique parent starts, and `completedTurns` pairs all turns in selected sessions, including resumed turns.
+- `metrics.mjs`: `elapsedTime` measures a wall-clock span, `totalTurnDuration` sums active turn durations, and `totalToolCalls` counts distinct requested tool-call IDs per session. Each returns a measurement with evidence or an unavailable reason.
+
+Lifecycle helpers return `status: "ready"` with the selected evidence or `status: "unavailable"` with a reason. Malformed capture shapes and conflicting identities throw instead. Helpers do not decide dependencies between metrics: for example, the self-modification experiment requires valid child durations before counting tools, while `totalToolCalls` itself does not require timestamps.
+
+Each measurement definition is a plain synchronous ESM object. Its declared metric keys and metadata define report metrics; namespace is assigned in the experiment. Derivation receives the validated captured eval, including its eval ID, and must be deterministic and side-effect-free. A thrown derive function or invalid metric result is an analysis error. Correctness, execution health, and measurement missingness remain independent.
 
 ## Dispatch
 
