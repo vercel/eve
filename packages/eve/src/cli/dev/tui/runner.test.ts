@@ -492,6 +492,17 @@ const AGENT_INFO: AgentInfoResult = createTestAgentInfoResult({
   name: "Weather Agent",
 });
 
+function harnessAgentInfo(harnessId: string): AgentInfoResult {
+  const { model: _model, ...agent } = AGENT_INFO.agent;
+  return {
+    ...AGENT_INFO,
+    agent: {
+      ...agent,
+      harness: { id: harnessId, source: AGENT_INFO.agent.config },
+    },
+  };
+}
+
 beforeEach(() => {
   // The runner normalizes header endpoints from the real process.env; a
   // developer shell exporting gateway credentials must not leak into these
@@ -664,6 +675,36 @@ describe("EveTUIRunner agent header", () => {
     expect(renderer.readPrompt).toHaveBeenCalled();
   });
 
+  it("adds the local harness Gateway endpoint to the startup header", async () => {
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "token");
+    const headers: AgentTUIAgentHeader[] = [];
+    const renderer = fakeRenderer({
+      renderAgentHeader: (header) => headers.push(header),
+    });
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(harnessAgentInfo("claude-code"));
+
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      client,
+      detectProjectIdentity: vi.fn(async () => undefined),
+      name: "Weather Agent",
+      renderer,
+      serverUrl: "http://localhost:3000",
+      session: stubSession(),
+    });
+
+    await runner.run();
+
+    expect(headers).toHaveLength(1);
+    expect(headers[0]?.harnessEndpoint).toEqual({
+      kind: "gateway",
+      connected: true,
+      credential: "oidc",
+    });
+  });
+
   it("still renders a header when info cannot be fetched", async () => {
     const headers: AgentTUIAgentHeader[] = [];
     const renderer = fakeRenderer({
@@ -765,8 +806,8 @@ describe("EveTUIRunner agent header", () => {
     await runner.run();
 
     expect(headers).toHaveLength(2);
-    expect(headers[0]?.info?.agent.model.id).toBe("gpt-5");
-    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-5");
+    expect(headers[0]?.info?.agent.model?.id).toBe("gpt-5");
+    expect(headers[1]?.info?.agent.model?.id).toBe("anthropic/claude-sonnet-5");
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(session.send).toHaveBeenCalledTimes(2);
   });
@@ -823,7 +864,7 @@ describe("EveTUIRunner agent header", () => {
     await settleAsyncWork();
 
     expect(headers).toHaveLength(2);
-    expect(headers[1]?.info?.agent.model.id).toBe("anthropic/claude-sonnet-5");
+    expect(headers[1]?.info?.agent.model?.id).toBe("anthropic/claude-sonnet-5");
     expect(client.info).toHaveBeenCalledTimes(3);
     expect(session.send).not.toHaveBeenCalled();
 
@@ -4329,8 +4370,9 @@ describe("EveTUIRunner boot setup detection", () => {
   it("normalizes a committed local key after automatic provider setup", async () => {
     const clearSetupWarning = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
-    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
-      info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
+    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) => {
+      const endpoint = info?.agent.model?.endpoint;
+      return endpoint?.kind === "gateway" && !endpoint.connected
         ? [
             {
               kind: "attention" as const,
@@ -4338,8 +4380,8 @@ describe("EveTUIRunner boot setup detection", () => {
               command: "/model" as const,
             },
           ]
-        : [],
-    );
+        : [];
+    });
     const { client, runner } = providerSetupRefreshRunner({
       refreshInfo: async () => {
         vi.stubEnv("AI_GATEWAY_API_KEY", "test-key");
@@ -4356,12 +4398,12 @@ describe("EveTUIRunner boot setup detection", () => {
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
     expect(client.info).toHaveBeenCalledTimes(2);
-    expect(detect.mock.calls.at(-1)?.[0].info?.agent.model.endpoint).toEqual({
+    expect(detect.mock.calls.at(-1)?.[0].info?.agent.model?.endpoint).toEqual({
       kind: "gateway",
       connected: true,
       credential: "api-key",
     });
-    expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
+    expect(headers.map((header) => header.info?.agent.model?.endpoint)).toEqual([
       { kind: "gateway", connected: true, credential: "api-key" },
     ]);
   });
@@ -4370,8 +4412,9 @@ describe("EveTUIRunner boot setup detection", () => {
     const clearSetupWarning = vi.fn();
     const renderCommandResult = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
-    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
-      info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
+    const detect = vi.fn(({ info }: { info?: AgentInfoResult }) => {
+      const endpoint = info?.agent.model?.endpoint;
+      return endpoint?.kind === "gateway" && !endpoint.connected
         ? [
             {
               kind: "attention" as const,
@@ -4379,8 +4422,8 @@ describe("EveTUIRunner boot setup detection", () => {
               command: "/model" as const,
             },
           ]
-        : [],
-    );
+        : [];
+    });
     const { client, runner } = providerSetupRefreshRunner({
       refreshInfo: async () => {
         throw new Error("info unavailable");
@@ -4399,7 +4442,7 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(renderCommandResult).not.toHaveBeenCalled();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect).not.toHaveBeenCalled();
-    expect(headers.at(-1)?.info?.agent.model.endpoint).toMatchObject({
+    expect(headers.at(-1)?.info?.agent.model?.endpoint).toMatchObject({
       kind: "gateway",
       connected: true,
     });

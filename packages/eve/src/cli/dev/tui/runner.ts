@@ -34,6 +34,7 @@ import {
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
   SubagentRun,
@@ -80,6 +81,7 @@ import {
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
   normalizeLocalModelEndpoint,
+  resolveLocalHarnessEndpoint,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -252,6 +254,7 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  harnessEndpoint?: ModelEndpointStatus;
 };
 
 export type AgentTUIRenderer = {
@@ -734,6 +737,10 @@ export class EveTUIRunner {
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
     const headerInfo =
       this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
+    const harnessEndpoint =
+      this.#appRoot !== undefined && headerInfo?.agent.harness !== undefined
+        ? resolveLocalHarnessEndpoint(process.env)
+        : undefined;
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined || this.#startupActive) return headerInfo;
@@ -743,6 +750,7 @@ export class EveTUIRunner {
       serverUrl,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
+    if (harnessEndpoint !== undefined) header.harnessEndpoint = harnessEndpoint;
     this.#renderer.renderAgentHeader?.(header);
     return headerInfo;
   }
@@ -790,7 +798,7 @@ export class EveTUIRunner {
 
     const initialAgentOnboarding =
       (this.#onboard ||
-        (this.#agentInfo?.agent.model.endpoint?.kind === "gateway" &&
+        (this.#agentInfo?.agent.model?.endpoint?.kind === "gateway" &&
           !this.#agentInfo.agent.model.endpoint.connected)) &&
       this.#appRoot !== undefined &&
       this.#promptCommandHandler !== undefined &&
@@ -1333,7 +1341,7 @@ export class EveTUIRunner {
             agentInfoRefreshPending = false;
           });
         }
-        const endpoint = this.#agentInfo?.agent.model.endpoint;
+        const endpoint = this.#agentInfo?.agent.model?.endpoint;
         const shouldRefreshChatGptAuth =
           endpoint?.kind === "chatgpt" &&
           (endpoint.state === "signed-out" || endpoint.state === "reauth-required");
@@ -1755,7 +1763,7 @@ export class EveTUIRunner {
     if (handler === undefined)
       return { message: `/${command.name} is not available in this session.` };
 
-    const endpoint = this.#agentInfo?.agent.model.endpoint;
+    const endpoint = this.#agentInfo?.agent.model?.endpoint;
     const baseContext: PromptCommandHandlerContext = {
       ...input,
       renderer: this.#renderer,
@@ -2080,8 +2088,8 @@ function formatAgentUpdateNotice(
   previousInfo: AgentInfoResult | undefined,
   nextInfo: AgentInfoResult | undefined,
 ): string {
-  const previousModel = previousInfo?.agent.model.id;
-  const nextModel = nextInfo?.agent.model.id;
+  const previousModel = previousInfo?.agent.model?.id;
+  const nextModel = nextInfo?.agent.model?.id;
 
   if (previousModel !== undefined && nextModel !== undefined && previousModel !== nextModel) {
     return `Agent updated: Model ${previousModel} -> ${nextModel}`;

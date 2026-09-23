@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -1069,6 +1070,60 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     } finally {
       await rm(storeRoot, { force: true, recursive: true });
     }
+  });
+
+  it("preserves package-relative assets for AI SDK harness adapters", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/read_harness_asset.ts": [
+          'import { readBridgeAsset } from "@ai-sdk/harness-fixture";',
+          "",
+          "export const result = await readBridgeAsset();",
+          "",
+        ].join("\n"),
+      },
+      name: "ai-sdk-harness-adapter-assets",
+    });
+    const adapterRoot = join(app.appRoot, "node_modules", "@ai-sdk", "harness-fixture");
+    await mkdir(join(adapterRoot, "bridge"), { recursive: true });
+    await writeFile(
+      join(adapterRoot, "package.json"),
+      JSON.stringify(
+        {
+          exports: "./index.js",
+          name: "@ai-sdk/harness-fixture",
+          type: "module",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(adapterRoot, "index.js"),
+      [
+        'import { readFile } from "node:fs/promises";',
+        "",
+        "export async function readBridgeAsset() {",
+        '  return await readFile(new URL("./bridge/payload.txt", import.meta.url), "utf8");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(adapterRoot, "bridge", "payload.txt"), "adapter asset\n");
+
+    const code = await bundleAuthoredModuleForGeneration(
+      join(app.appRoot, "agent", "read_harness_asset.ts"),
+    );
+    const bundleDirectory = join(app.appRoot, ".eve", "test-generation");
+    const bundlePath = join(bundleDirectory, "harness-adapter.mjs");
+    await mkdir(bundleDirectory, { recursive: true });
+    await writeFile(bundlePath, code);
+
+    const namespace = (await import(pathToFileURL(bundlePath).href)) as {
+      readonly result?: unknown;
+    };
+    expect(namespace.result).toBe("adapter asset\n");
+    expect(code).toMatch(/from\s*["']@ai-sdk\/harness-fixture["']/);
   });
 
   it("keeps configured dependency subpaths importable after externalizing them", async () => {

@@ -1,0 +1,18 @@
+{
+  "name": "weather-harness-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev",
+    "build": "eve build",
+    "start": "eve start",
+    "info": "eve info",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ai-sdk/harness-claude-code": "catalog:",
+    "@ai-sdk/harness-codex": "catalog:",
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  }
+}

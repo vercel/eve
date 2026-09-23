@@ -1,5 +1,12 @@
 import type { AgentInfoResult } from "#client/types.js";
 
+export type TestAgentInfoResult = Omit<AgentInfoResult, "agent"> & {
+  readonly agent: Omit<AgentInfoResult["agent"], "harness" | "model"> & {
+    readonly harness?: never;
+    readonly model: NonNullable<AgentInfoResult["agent"]["model"]>;
+  };
+};
+
 export function createTestAgentInfoResult(
   input: {
     readonly agentRoot?: string;
@@ -7,7 +14,7 @@ export function createTestAgentInfoResult(
     readonly modelId?: string;
     readonly name?: string;
   } = {},
-): AgentInfoResult {
+): TestAgentInfoResult {
   const agentRoot = input.agentRoot ?? "/tmp/test-agent/agent";
   const appRoot = input.appRoot ?? "/tmp/test-agent";
   const owner = { kind: "application" as const };

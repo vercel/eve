@@ -33,6 +33,8 @@ import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
+import { isNeverApprovalPolicy } from "#tools/approval/policies.js";
+import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 
 const log = createLogger("execution.node-step");
 
@@ -94,6 +96,27 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
   const tools = createNodeHarnessTools({ node: input.node });
   const instrumentation = input.instrumentation;
   const sessionInstrumentation = instrumentation?.prepareExecution();
+  const harnessAgent =
+    input.node.turnAgent.harness === undefined
+      ? undefined
+      : {
+          harness: input.node.turnAgent.harness,
+          /*
+           * eve already materializes skills under $HOME/.agents/skills. Claude Code
+           * is the only supported harness that discovers skills elsewhere, under
+           * $HOME/.claude/skills; forwarding skills to other harnesses would make
+           * their AI SDK adapters collide with eve-owned skill directories.
+           */
+          skills:
+            input.node.turnAgent.harness.harnessId === "claude-code"
+              ? input.node.agent.skills.map((skill) => ({
+                  content: skill.markdown,
+                  description: skill.description,
+                  name: skill.name,
+                }))
+              : [],
+          tools: createHarnessAgentTools({ node: input.node, tools }),
+        };
   const step = createToolLoopHarness({
     steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
@@ -103,6 +126,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
+    harnessAgent,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
     resolveStepDynamicTools: (resolveInput) =>
@@ -199,6 +223,44 @@ export function createNodeHarnessTools(input: {
     if (definition !== null) {
       tools.set(tool.name, definition);
     }
+  }
+
+  return tools;
+}
+
+export function createHarnessAgentTools(input: {
+  readonly node: ResolvedRuntimeAgentNode;
+  readonly tools: HarnessToolMap;
+}): HarnessToolMap {
+  const tools = new Map<string, HarnessToolDefinition>();
+
+  for (const prepared of input.node.turnAgent.tools) {
+    const definition = input.tools.get(prepared.name);
+    if (definition?.execute === undefined) {
+      continue;
+    }
+    if (prepared.task?.workflowId === subagentToolExecuteWorkflowReference.workflowId) {
+      tools.set(prepared.name, definition);
+      continue;
+    }
+    if (
+      prepared.kind !== "authored-tool" ||
+      prepared.owner.kind === "framework" ||
+      prepared.task !== undefined
+    ) {
+      continue;
+    }
+    if (definition.approval !== undefined && !isNeverApprovalPolicy(definition.approval)) {
+      throw new Error(
+        `Harness-backed agents do not support approval-required eve tools yet. Tool "${definition.name}" must omit approval or use approval: never().`,
+      );
+    }
+    if (definition.toModelOutput !== undefined) {
+      throw new Error(
+        `Harness-backed agents do not support eve tools with toModelOutput yet. Tool "${definition.name}" must omit toModelOutput.`,
+      );
+    }
+    tools.set(prepared.name, definition);
   }
 
   return tools;

@@ -28,7 +28,7 @@ function toChatGptEndpoint(state: ChatGptAuthState | undefined) {
   return endpoint;
 }
 
-/** Projects v4 exclusively from the effective compiled graph. */
+/** Projects v5 exclusively from the effective compiled graph. */
 export function buildAgentInfoResponse(
   data: AgentInfoManifestData,
   input: {
@@ -44,47 +44,60 @@ export function buildAgentInfoResponse(
   }
   const composition = collectCompositionDiagnostics(manifest);
   const remoteAgents = collectRemoteAgents(manifest);
+  const agentBase = {
+    agentRoot: manifest.agentRoot,
+    appRoot: manifest.appRoot,
+    config: { ...configSource, binding: configSource.binding },
+    description: manifest.config.description,
+    name: manifest.config.name,
+    nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    outputSchema: manifest.config.outputSchema,
+  };
+  const agent: AgentInfoResponse["agent"] =
+    manifest.config.harness !== undefined
+      ? {
+          ...agentBase,
+          harness: {
+            id: manifest.config.harness.harnessId,
+            source: toModuleSource(manifest, manifest.config.harness.source),
+          },
+        }
+      : {
+          ...agentBase,
+          model:
+            manifest.config.dynamicModel === undefined
+              ? {
+                  contextWindowTokens: manifest.config.model.contextWindowTokens,
+                  endpoint: resolveModelEndpointStatus(
+                    manifest.config.model.routing,
+                    input.gatewayCredentials,
+                    toChatGptEndpoint(input.chatgptAuth),
+                  ),
+                  id: manifest.config.model.id,
+                  providerOptions: sanitizeProviderOptionsForInfo(
+                    manifest.config.model.providerOptions,
+                  ),
+                  reasoning: manifest.config.reasoning,
+                  routing: manifest.config.model.routing,
+                  source:
+                    manifest.config.model.source === undefined
+                      ? undefined
+                      : toModuleSource(manifest, manifest.config.model.source),
+                }
+              : {
+                  reasoning: manifest.config.reasoning,
+                  routing: {
+                    kind: "dynamic",
+                    resolver: renderDynamicResolver(manifest, {
+                      ...manifest.config.dynamicModel,
+                      slug: "model",
+                    }),
+                  },
+                },
+        };
 
   return {
-    agent: {
-      agentRoot: manifest.agentRoot,
-      appRoot: manifest.appRoot,
-      config: { ...configSource, binding: configSource.binding },
-      description: manifest.config.description,
-      model:
-        manifest.config.dynamicModel === undefined
-          ? {
-              contextWindowTokens: manifest.config.model.contextWindowTokens,
-              endpoint: resolveModelEndpointStatus(
-                manifest.config.model.routing,
-                input.gatewayCredentials,
-                toChatGptEndpoint(input.chatgptAuth),
-              ),
-              id: manifest.config.model.id,
-              providerOptions: sanitizeProviderOptionsForInfo(
-                manifest.config.model.providerOptions,
-              ),
-              reasoning: manifest.config.reasoning,
-              routing: manifest.config.model.routing,
-              source:
-                manifest.config.model.source === undefined
-                  ? undefined
-                  : toModuleSource(manifest, manifest.config.model.source),
-            }
-          : {
-              reasoning: manifest.config.reasoning,
-              routing: {
-                kind: "dynamic",
-                resolver: renderDynamicResolver(manifest, {
-                  ...manifest.config.dynamicModel,
-                  slug: "model",
-                }),
-              },
-            },
-      name: manifest.config.name,
-      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-      outputSchema: manifest.config.outputSchema,
-    },
+    agent,
     capabilities: { devRoutes: input.mode === "development" },
     channels: {
       routes: manifest.channelRoutes.effective.map((route) => ({

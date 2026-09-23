@@ -1,4 +1,5 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
+import type { HarnessV1, HarnessV1Skill } from "@ai-sdk/harness";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
@@ -62,11 +63,18 @@ export type SessionAgent = SessionAgentBase &
   (
     | {
         readonly dynamicModel?: never;
+        readonly harnessId?: never;
         readonly modelReference: RuntimeModelReference;
       }
     | {
         readonly dynamicModel: true;
+        readonly harnessId?: never;
         readonly modelReference?: RuntimeModelReference;
+      }
+    | {
+        readonly dynamicModel?: never;
+        readonly harnessId: string;
+        readonly modelReference?: never;
       }
   );
 
@@ -270,6 +278,25 @@ export type HandleEventFn = (
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
+export interface HarnessAgentExecutionConfig {
+  readonly harness: HarnessV1;
+  /**
+   * Static authored skills projected to the AI SDK harness contract. Only the
+   * skill name, description, and primary Markdown content are supported;
+   * sibling files are not forwarded.
+   *
+   * TODO: Include active dynamic skills once their complete content can be
+   * projected at this boundary.
+   */
+  readonly skills: readonly HarnessV1Skill[];
+  /**
+   * Static authored tools and subagent delegation tools projected to HarnessAgent.
+   * Dynamic tools, authored workflows, task cancellation, and approval-requiring
+   * authored tools remain unsupported.
+   */
+  readonly tools: HarnessToolMap;
+}
+
 /**
  * Dependencies injected into the tool-loop harness at construction time.
  */
@@ -292,6 +319,12 @@ export interface ToolLoopHarnessConfig {
   readonly historyProjector?: HistoryViewProjector;
   /** Execution-prepared view of the history supplied to the first harness step. */
   readonly historyView?: PreparedHistoryView;
+  /**
+   * Live authored AI SDK HarnessAgent configuration retained at the tool-loop
+   * boundary. It stays outside durable session state because the harness
+   * contains methods.
+   */
+  readonly harnessAgent?: HarnessAgentExecutionConfig;
   /**
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.

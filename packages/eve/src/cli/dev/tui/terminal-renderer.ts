@@ -83,6 +83,7 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
+import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { inspectError, type LogRecord } from "#internal/logging.js";
 import {
@@ -296,6 +297,7 @@ export type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  harnessEndpoint?: ModelEndpointStatus;
 };
 
 type DisplayModes = {
@@ -684,8 +686,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#startupHeader = undefined;
     this.#title = options.name;
     if (
-      this.#agentHeader?.info?.agent.model.routing.kind !== "dynamic" ||
-      options.info?.agent.model.routing.kind !== "dynamic"
+      this.#agentHeader?.info?.agent.model?.routing.kind !== "dynamic" ||
+      options.info?.agent.model?.routing.kind !== "dynamic"
     ) {
       this.#resolvedModelId = undefined;
     }
@@ -4532,8 +4534,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       input.devBuild = this.#devBuildStatus;
     }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
-    const agentModel = this.#agentHeader?.info?.agent.model;
-    if (agentModel?.routing.kind === "dynamic") {
+    const agent = this.#agentHeader?.info?.agent;
+    const agentModel = agent?.model;
+    if (agent?.harness !== undefined) {
+      input.model = agent.harness.id;
+    } else if (agentModel?.routing.kind === "dynamic") {
       input.model =
         this.#resolvedModelId === undefined
           ? "dynamic model"
@@ -4548,7 +4553,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     // The runner resolves model-provider state with `/info` before caching this
     // header, so the status bar consumes that shared snapshot.
-    const endpoint = agentModel?.endpoint;
+    const endpoint =
+      agent?.harness === undefined ? agentModel?.endpoint : this.#agentHeader?.harnessEndpoint;
     if (endpoint !== undefined) input.endpoint = endpoint;
     // Token flow lives in the end-of-turn coda, not the persistent bar — a
     // live counter mostly restates the last step's context size.

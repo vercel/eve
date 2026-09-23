@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import { createVercelSandbox as createVercelImplementation } from "#execution/sandbox/bindings/vercel.js";
+import { getVercelSandboxForSandboxSession } from "#execution/sandbox/bindings/vercel-session-registry.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 
 // The credential fallback consults the developer's Vercel CLI auth and the
@@ -157,6 +158,12 @@ afterEach(() => {
 });
 
 describe("createVercelSandbox", () => {
+  it("registers every public session with its native Vercel sandbox", async () => {
+    const { handle, sessionSandbox } = await createTestVercelSession();
+
+    expect(getVercelSandboxForSandboxSession({ session: handle.sandbox })).toBe(sessionSandbox);
+  });
+
   it("creates a session from the prepared snapshot artifact without looking up the template sandbox", async () => {
     const sessionSandbox = createMockSandbox({ name: "session-key" });
     const sandboxModule = {
@@ -189,7 +196,9 @@ describe("createVercelSandbox", () => {
 
   it("reuses template identity until authored source or resources change", async () => {
     async function prepareName(input: {
-      createOptions?: NonNullable<Parameters<typeof createVercelImplementation>[0]>["createOptions"];
+      createOptions?: NonNullable<
+        Parameters<typeof createVercelImplementation>[0]
+      >["createOptions"];
       resourcesKey?: string;
       sourceRevision: string;
     }) {

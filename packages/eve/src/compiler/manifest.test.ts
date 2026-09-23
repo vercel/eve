@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { resolveAgent } from "#runtime/resolve-agent.js";
+import type { HarnessV1 } from "@ai-sdk/harness";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
   compiledAgentManifestSchema,
@@ -11,7 +13,7 @@ import {
   validateCompiledModuleMap,
 } from "#compiler/validate-artifact.js";
 
-describe("compiled agent manifest v50", () => {
+describe("compiled agent manifest v51", () => {
   it("round-trips a real compiled graph through the serialized schema", async () => {
     const { manifest } = await compileFromMemory({
       agent: {
@@ -30,6 +32,36 @@ describe("compiled agent manifest v50", () => {
     expect(parsed.config.experimental?.workflow?.retention).toBe(0);
     expect(parsed.config.limits?.maxTokenCostUsdPerSession).toBe(1.5);
     expect(() => validateCompiledAgentManifest(parsed)).not.toThrow();
+  });
+
+  it("serializes harness identity and rehydrates the live authored instance", async () => {
+    const harness = {
+      builtinTools: {},
+      harnessId: "test-harness",
+      specificationVersion: "harness-v1",
+      async doStart() {
+        throw new Error("Not implemented in this test.");
+      },
+    } as HarnessV1;
+    const { manifest, moduleMap } = await compileFromMemory({
+      agent: { harness },
+      model: "unused",
+    });
+
+    expect(manifest.config).toMatchObject({
+      harness: {
+        harnessId: "test-harness",
+        source: { logicalPath: "agent.ts", sourceKind: "module" },
+      },
+    });
+    expect(manifest.config).not.toHaveProperty("model");
+    expect(JSON.stringify(manifest.config)).not.toContain("doStart");
+    const parsed = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(manifest)));
+    expect(parsed.config).toMatchObject({ harness: { harnessId: "test-harness" } });
+    expect(manifest.bindings[manifest.config.source.sourceId]?.usage.runtimeEntry).toBe(true);
+
+    const resolved = await resolveAgent({ manifest, moduleMap });
+    expect(resolved.config?.harness).toBe(harness);
   });
 
   it("round-trips agent tool configuration and disabled tool names", async () => {

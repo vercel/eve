@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import { createCurrentMessages } from "#harness/current-messages.js";
 
 describe("createCurrentMessages", () => {
+  it("tracks new context and input separately from persisted native harness history", () => {
+    const previous = { role: "user" as const, content: "old", kind: "user" as const };
+    const delivery = {
+      role: "user" as const,
+      content: "result arrived",
+      kind: "execution.background_task" as const,
+    };
+    const current = createCurrentMessages([previous, delivery], {
+      currentTurnMessages: [delivery],
+      freshMessages: [delivery],
+    });
+    current.add("[Task state]", "context.state");
+
+    expect(current.freshNonSystemMessages).toEqual([
+      { role: "user", content: "[Task state]", kind: "context.state" },
+      delivery,
+    ]);
+    expect(current.nonSystemMessages).toEqual([previous, ...current.freshNonSystemMessages]);
+  });
   it("partitions existing history by role", () => {
     const current = createCurrentMessages([
       { role: "system", content: "system" },

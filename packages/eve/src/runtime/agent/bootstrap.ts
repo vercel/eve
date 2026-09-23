@@ -1,6 +1,5 @@
-import type { HarnessModelMessage } from "#harness/messages.js";
-
-import { createFrameworkUserMessage } from "#harness/messages.js";
+import type { HarnessV1 } from "@ai-sdk/harness";
+import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -61,16 +60,25 @@ export type RuntimeTurnAgent = RuntimeTurnAgentBase &
     | {
         readonly configResolver?: never;
         readonly dynamicModel?: never;
+        readonly harness?: never;
         readonly model: RuntimeModelReference;
       }
     | {
         readonly dynamicModel: RuntimeDynamicModelReference;
         readonly configResolver?: never;
+        readonly harness?: never;
+        readonly model?: never;
+      }
+    | {
+        readonly configResolver?: never;
+        readonly dynamicModel?: never;
+        readonly harness: HarnessV1;
         readonly model?: never;
       }
     | {
         readonly configResolver: true;
         readonly dynamicModel?: never;
+        readonly harness?: never;
         readonly model?: never;
       }
   );
@@ -134,7 +142,8 @@ export function createResolvedRuntimeTurnAgent(input: {
   };
 
   if (config === undefined) return { ...base, configResolver: true };
-  return config.dynamicModel === undefined
-    ? { ...base, model: config.model }
-    : { ...base, dynamicModel: config.dynamicModel };
+  if (config.harness !== undefined) return { ...base, harness: config.harness };
+  if (config.dynamicModel !== undefined) return { ...base, dynamicModel: config.dynamicModel };
+  if (config.model !== undefined) return { ...base, model: config.model };
+  throw new Error("Expected a resolved agent execution configuration.");
 }

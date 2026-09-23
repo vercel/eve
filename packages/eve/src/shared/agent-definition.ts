@@ -1,4 +1,5 @@
 import type { CallSettings, LanguageModel } from "ai";
+import type { HarnessV1 } from "@ai-sdk/harness";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -49,6 +50,11 @@ export type InternalAgentModelDefinition = {
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
   providerOptions?: Record<string, JsonObject>;
+};
+
+export type InternalAgentHarnessDefinition = {
+  harnessId: string;
+  source: ModuleSourceRef;
 };
 
 /**
@@ -311,20 +317,31 @@ export interface AgentWorkflowDefinition {
  * Compiled-side agent definition. Carries a `name` because the compiler
  * stamps the path-derived `agentId` onto every compiled agent node.
  */
-export type InternalAgentDefinition = {
+type InternalAgentDefinitionBase = {
   name: string;
   description?: string;
   build?: AgentBuildDefinition;
   compaction?: InternalAgentCompactionDefinition;
   defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
-  model: InternalAgentModelDefinition;
   outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   tool?: boolean;
   limits?: AgentLimitsDefinition;
 };
+
+export type InternalAgentDefinition = InternalAgentDefinitionBase &
+  (
+    | {
+        harness: InternalAgentHarnessDefinition;
+        model?: never;
+      }
+    | {
+        harness?: never;
+        model: InternalAgentModelDefinition;
+      }
+  );
 
 /**
  * Shared public definition for an agent.
@@ -388,6 +405,7 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
     | {
         /** Language model used for agent turns. */
         readonly model: PublicAgentStaticModelDefinition;
+        readonly harness?: never;
         /** Optional context-window override for the static model. */
         readonly modelContextWindowTokens?: number;
         readonly modelOptions?: AgentModelOptionsDefinition;
@@ -395,6 +413,14 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
     | {
         /** Resolver that must select a concrete model before model-dependent work. */
         readonly model: PublicAgentDynamicModelDefinition;
+        readonly harness?: never;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
+      }
+    | {
+        /** AI SDK harness used for agent turns. */
+        readonly harness: HarnessV1;
+        readonly model?: never;
         readonly modelContextWindowTokens?: never;
         readonly modelOptions?: never;
       }

@@ -486,6 +486,7 @@
     "@ai-sdk/anthropic": "catalog:",
     "@ai-sdk/code-mode": "catalog:",
     "@ai-sdk/google": "catalog:",
+    "@ai-sdk/harness": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
     "@ai-sdk/otel": "catalog:",
