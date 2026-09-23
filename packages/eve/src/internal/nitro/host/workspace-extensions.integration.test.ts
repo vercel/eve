@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import {
   resolveDevelopmentSourceRoot,
 } from "#internal/nitro/dev-runtime-source-snapshot.js";
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
+import { resolveExtensionBuildLockPath } from "#internal/nitro/host/extension-build-lock.js";
 
 const mocks = vi.hoisted(() => ({
   buildExtensionPackage: vi.fn(async () => undefined),
@@ -229,6 +230,32 @@ describe("buildWorkspaceExtensions", () => {
     await buildWorkspaceExtensions(appRoot);
 
     expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+  });
+
+  it("builds a shared stale extension once when agent builds run concurrently", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    const packageRoot = join(appRoot, "packages", "alpha");
+    mocks.buildExtensionPackage.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await writeDistributionManifest(packageRoot, { builtAt: FUTURE });
+    });
+
+    await Promise.all([buildWorkspaceExtensions(appRoot), buildWorkspaceExtensions(appRoot)]);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+    await expect(stat(resolveExtensionBuildLockPath(packageRoot))).rejects.toThrow();
+  });
+
+  it("takes over an extension build lock abandoned by a crashed build", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    const lockPath = resolveExtensionBuildLockPath(join(appRoot, "packages", "alpha"));
+    await mkdir(lockPath, { recursive: true });
+    await utimes(lockPath, PAST, PAST);
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+    await expect(stat(lockPath)).rejects.toThrow();
   });
 
   it("names the workspace extension and the command to run when its build fails", async () => {

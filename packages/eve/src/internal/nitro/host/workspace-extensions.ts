@@ -23,6 +23,7 @@ import {
   tryReadExtensionBuildConfig,
   type ExtensionBuildConfig,
 } from "#internal/nitro/host/build-extension.js";
+import { withExtensionBuildLock } from "#internal/nitro/host/extension-build-lock.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 /**
@@ -65,7 +66,9 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
         !sameBuildInputs(previous, extension) ||
         changedPaths?.some((path) => affectsExtensionBuild(path, extension)) === true
       ) {
-        await buildExtensionPackage(extension.packageRoot, extension.config);
+        await withExtensionBuildLock(extension.packageRoot, async () => {
+          await buildExtensionPackage(extension.packageRoot, extension.config);
+        });
       }
     }),
   );
@@ -78,8 +81,9 @@ export async function prepareDevelopmentWorkspaceExtensions(input: {
  * build. Package manager lifecycle hooks such as `prepare` do not reliably run
  * (no-op installs and `--ignore-scripts` skip them), so production builds must
  * not assume an extension's gitignored distribution already exists. Extensions
- * whose distribution is newer than every build input are skipped, which also
- * keeps repeated calls from racing on the same output directory.
+ * whose distribution is newer than every build input are skipped. Builds hold
+ * a per-package lock and recheck freshness under it, so parallel agent builds
+ * that share an extension build it once.
  */
 export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
   const extensions = await discoverWorkspaceExtensions(appRoot);
@@ -87,7 +91,10 @@ export async function buildWorkspaceExtensions(appRoot: string): Promise<void> {
     extensions.map(async (extension) => {
       if (await isExtensionDistributionCurrent(extension)) return;
       try {
-        await buildExtensionPackage(extension.packageRoot, extension.config);
+        await withExtensionBuildLock(extension.packageRoot, async () => {
+          if (await isExtensionDistributionCurrent(extension)) return;
+          await buildExtensionPackage(extension.packageRoot, extension.config);
+        });
       } catch (error) {
         // The message embeds the build error; a cause would print it twice.
         throw new Error(
