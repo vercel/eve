@@ -95,33 +95,13 @@ function AgentMessageParts({
   readonly parts: readonly EveMessagePart[];
   readonly showCaret: boolean;
 }) {
-  const elements: ReactNode[] = [];
-  let pendingActivity: ActivityPart[] = [];
-
-  const flushActivity = (isSettled: boolean) => {
-    if (pendingActivity.length === 0) return;
-    const activity = pendingActivity;
-    elements.push(
-      <ActivityGroup
-        canRespond={canRespond}
-        isSettled={isSettled}
-        key={`activity:${activity.map(partKey).join(":")}`}
-        onInputResponses={onInputResponses}
-        parts={activity}
-      />,
-    );
-    pendingActivity = [];
-  };
-
-  parts.forEach((part, index) => {
-    if (part.type === "dynamic-tool" || part.type === "reasoning") {
-      pendingActivity.push(part);
-      return;
-    }
-
-    flushActivity(true);
+  const activity = parts.filter(
+    (part): part is ActivityPart => part.type === "dynamic-tool" || part.type === "reasoning",
+  );
+  const text = parts.flatMap((part, index) => {
+    if (part.type === "dynamic-tool" || part.type === "reasoning") return [];
     const key = partKey(part, index);
-    elements.push(
+    return [
       <AgentMessagePart
         isUser={isUser}
         key={key}
@@ -129,11 +109,21 @@ function AgentMessageParts({
         showCaret={showCaret && index === lastTextIndex}
         streamKey={`${messageId}:${key}`}
       />,
-    );
+    ];
   });
 
-  flushActivity(!showCaret);
-  return elements;
+  return activity.length > 0
+    ? [
+        <ActivityGroup
+          canRespond={canRespond}
+          isSettled={!showCaret}
+          key={`activity:${messageId}`}
+          onInputResponses={onInputResponses}
+          parts={activity}
+        />,
+        ...text,
+      ]
+    : text;
 }
 
 function AgentMessagePart({
