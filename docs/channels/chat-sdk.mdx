@@ -168,7 +168,7 @@ chatSdkChannel({
 
 ### Human-in-the-loop (HITL)
 
-HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` for you. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
+HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` for you. On adapters that cannot render cards, the plain-text fallback lists every option's ID and label, or asks for a typed answer when the request is freeform. A reply forwarded through `send` resolves the pending request by option ID, label, or freeform text. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
 
 ```ts
 chatSdkChannel({
