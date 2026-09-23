@@ -267,7 +267,7 @@ function renderUser(block: Block, width: number, theme: Theme): string[] {
   const bar =
     block.promptOrigin === "steer" ? theme.colors.yellow(theme.glyph.user) : theme.glyph.user;
   const lines = wrap(block.body ?? "", width - 2);
-  return lines.map((line) => `${bar} ${line}`);
+  return lines.map((line) => `${bar} ${theme.colors.bold(line)}`);
 }
 
 function renderProse(

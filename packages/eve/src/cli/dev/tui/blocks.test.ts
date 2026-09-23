@@ -300,7 +300,15 @@ describe("renderBlockLines", () => {
       colorTheme,
       { activityPulse: "▪" },
     );
-    expect(rows).toEqual(["\x1b[33m│\x1b[39m go"]);
+    expect(rows).toEqual(["\x1b[33m│\x1b[39m \x1b[1mgo\x1b[22m"]);
+  });
+
+  it("bolds a sent user message behind an uncolored gutter", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const rows = renderBlockLines({ kind: "user", body: "hello" }, 80, colorTheme, {
+      activityPulse: "▪",
+    });
+    expect(rows).toEqual(["│ \x1b[1mhello\x1b[22m"]);
   });
 
   it("pulses the in-progress subagent mark by intensity, with a quiet label", () => {
