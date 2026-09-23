@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  assertSafeSkillId,
-  createSandboxSkillHandle,
-  loadSkillFromSandbox,
-} from "#runtime/skills/sandbox-access.js";
+import { assertSafeSkillId, createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
@@ -19,66 +15,6 @@ describe("assertSafeSkillId", () => {
     for (const value of ["", " skill", ".skill", "../skill", "a/b", "a\\b", "C:skill"]) {
       expect(() => assertSafeSkillId(value)).toThrow("Expected skill id");
     }
-  });
-});
-
-describe("loadSkillFromSandbox", () => {
-  it("reads SKILL.md from the sandbox and strips frontmatter", async () => {
-    const sandbox = mockSandbox({
-      commands: {
-        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
-      },
-      initialFiles: {
-        "/home/agent/.agents/skills/research/SKILL.md":
-          "---\nname: research\ndescription: x\n---\n# Research\n",
-      },
-    });
-
-    await expect(loadSkillFromSandbox(sandbox.access, "research")).resolves.toBe("# Research\n");
-  });
-
-  it("does not read an ordinary workspace skills subtree when HOME is usable", async () => {
-    const sandbox = mockSandbox({
-      commands: {
-        [HOME_PROBE_COMMAND]: { exitCode: 0, stderr: "", stdout: "/home/agent\n" },
-      },
-      initialFiles: {
-        "/workspace/skills/research/SKILL.md": "# Research\n",
-      },
-    });
-
-    await expect(loadSkillFromSandbox(sandbox.access, "research")).rejects.toThrow(
-      'No skill named "research" at /home/agent/.agents/skills/research/SKILL.md.',
-    );
-  });
-
-  it("reads the legacy workspace skill path when HOME is unavailable", async () => {
-    const sandbox = mockSandbox({
-      initialFiles: {
-        "/workspace/skills/research/SKILL.md": "# Research\n",
-      },
-    });
-
-    await expect(loadSkillFromSandbox(sandbox.access, "research")).resolves.toBe("# Research\n");
-  });
-
-  it("throws when the skill is missing", async () => {
-    const sandbox = mockSandbox();
-
-    await expect(loadSkillFromSandbox(sandbox.access, "missing")).rejects.toThrow(
-      'No skill named "missing"',
-    );
-  });
-
-  it("lists available skill names when the requested id is missing", async () => {
-    const sandbox = mockSandbox();
-
-    await expect(
-      loadSkillFromSandbox(sandbox.access, "talk-like-a-dog", [
-        "custom__talk-like-a-dog",
-        "research",
-      ]),
-    ).rejects.toThrow("Available skills: custom__talk-like-a-dog, research.");
   });
 });
 

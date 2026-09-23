@@ -6,6 +6,8 @@ import {
   type MaterializableSkillPackage,
   normalizeSkillPackage,
   removeSkillPackageFromSandbox,
+  skillPackageRevision,
+  stripSkillFrontmatter,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -16,11 +18,13 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   type DurableDynamicSkillMetadata,
+  type DynamicSkillManifest,
   DynamicSkillManifestKey,
+  DynamicSkillSandboxKey,
   SandboxKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
-import { resolveSandboxSkillRoot } from "#shared/skill-paths.js";
+import type { SandboxState } from "#sandbox/state.js";
 
 const log = createLogger("dynamic-skills");
 
@@ -66,16 +70,81 @@ interface DynamicSkillResolution {
   readonly named: readonly { name: string; entry: SkillPackageDefinition }[];
 }
 
-async function formatDynamicSkillAnnouncement(input: {
+interface SandboxSkillPackage {
+  readonly revision: string;
+  readonly skill: MaterializableSkillPackage;
+}
+
+function formatDynamicSkillAnnouncement(manifest: DynamicSkillManifest): string {
+  const skills = Object.values(manifest)
+    .flat()
+    .map(({ description, name, revision }) => ({
+      description,
+      hasFiles: revision !== undefined,
+      name,
+    }));
+  return formatAvailableSkillsSection(skills) ?? "Available skills: none";
+}
+
+function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillMetadata {
+  return {
+    description: skill.description,
+    markdown: stripSkillFrontmatter(skill.markdown),
+    name: skill.name,
+    ...(skill.files.length > 1 ? { revision: skillPackageRevision(skill) } : {}),
+  };
+}
+
+function sandboxIdentity(state: SandboxState): string | null {
+  return state.session === null ? null : JSON.stringify(state.session);
+}
+
+/**
+ * Writes only packages with supporting files. Markdown-only skills are served
+ * from durable context, so they never need a sandbox. A package is skipped when
+ * its revision is unchanged and was written to the same persisted sandbox.
+ */
+async function syncDynamicSkillFiles(input: {
   readonly ctx: ContextContainer;
-  readonly manifest: Readonly<Record<string, readonly DurableDynamicSkillMetadata[]>>;
-}): Promise<string> {
-  const sandbox = await input.ctx.require(SandboxKey).get();
-  const skillRoot = sandbox === null ? undefined : await resolveSandboxSkillRoot({ sandbox });
-  return (
-    formatAvailableSkillsSection(Object.values(input.manifest).flat(), { skillRoot }) ??
-    "Available skills: none"
+  readonly previous: ReadonlyMap<string, string>;
+  readonly next: ReadonlyMap<string, SandboxSkillPackage>;
+}): Promise<void> {
+  const { ctx, previous, next } = input;
+  if (previous.size === 0 && next.size === 0) return;
+
+  const access = ctx.require(SandboxKey);
+  const written = ctx.get(DynamicSkillSandboxKey) ?? {};
+  const identity = sandboxIdentity(await access.captureState());
+  const isWritten = (name: string) => identity !== null && written[name] === identity;
+
+  const stale = [...previous.keys()].filter((name) => !next.has(name) && isWritten(name));
+  const pending = [...next.values()].filter(
+    ({ revision, skill }) => previous.get(skill.name) !== revision || !isWritten(skill.name),
   );
+  if (stale.length === 0 && pending.length === 0) return;
+
+  const sandbox = await access.get();
+  if (sandbox === null) return;
+
+  // Forget touched packages first so a failed write is never skipped later.
+  const nextWritten = { ...written };
+  for (const name of previous.keys()) {
+    if (!next.has(name)) delete nextWritten[name];
+  }
+  for (const { skill } of pending) delete nextWritten[skill.name];
+  ctx.set(DynamicSkillSandboxKey, { ...nextWritten });
+
+  for (const name of stale) {
+    await removeSkillPackageFromSandbox({ name, sandbox });
+  }
+  const current = sandboxIdentity(await access.captureState());
+  for (const { skill } of pending) {
+    // Replace the directory so files omitted from the new revision disappear.
+    await removeSkillPackageFromSandbox({ name: skill.name, sandbox });
+    await writeSkillPackageToSandbox({ sandbox, skill });
+    if (current !== null) nextWritten[skill.name] = current;
+  }
+  ctx.set(DynamicSkillSandboxKey, nextWritten);
 }
 
 // ---------------------------------------------------------------------------
@@ -102,9 +171,9 @@ export const PendingSkillAnnouncementKey = new ContextKey<string>("eve.pendingSk
 
 /**
  * Dispatches a stream event to dynamic skill resolvers. On a matching
- * event: runs handlers, materializes resolved skills to the sandbox,
- * cleans up removed skills, and stores a pending announcement for the
- * tool-loop to inject.
+ * event: runs handlers, stores instructions in durable context, syncs
+ * changed supporting files to the sandbox, and stores a pending
+ * announcement for the tool-loop to inject.
  */
 export async function dispatchDynamicSkillEvent(input: {
   readonly ctx: ContextContainer;
@@ -115,15 +184,11 @@ export async function dispatchDynamicSkillEvent(input: {
   const { ctx, resolvers, event, messages } = input;
 
   // Build phase: rebuild announcement from durable manifest when the
-  // virtual key is empty (step boundary crossed). Sandbox files persist;
-  // only the announcement needs rebuilding.
+  // virtual key is empty (step boundary crossed).
   if (ctx.get(PendingSkillAnnouncementKey) === undefined) {
     const manifest = ctx.get(DynamicSkillManifestKey);
     if (manifest !== undefined && Object.keys(manifest).length > 0) {
-      ctx.setVirtualContext(
-        PendingSkillAnnouncementKey,
-        await formatDynamicSkillAnnouncement({ ctx, manifest }),
-      );
+      ctx.setVirtualContext(PendingSkillAnnouncementKey, formatDynamicSkillAnnouncement(manifest));
     }
   }
 
@@ -177,22 +242,32 @@ export async function dispatchDynamicSkillEvent(input: {
 
   if (updates.length === 0) return;
 
+  // Only resolvers that just ran are synced; package bytes for the others
+  // are not retained across steps.
   const newManifest = { ...manifest };
+  const previous = new Map<string, string>();
+  const next = new Map<string, SandboxSkillPackage>();
   for (const { resolver, skills } of updates) {
+    for (const { name, revision } of manifest[resolver.slug] ?? []) {
+      if (revision !== undefined) previous.set(name, revision);
+    }
     if (skills.length === 0) {
       delete newManifest[resolver.slug];
-    } else {
-      newManifest[resolver.slug] = skills.map((skill) => ({
-        description: skill.description,
-        name: skill.name,
-      }));
+      continue;
     }
+    newManifest[resolver.slug] = skills.map((skill) => {
+      const durable = toDurableSkill(skill);
+      if (durable.revision !== undefined) {
+        next.set(skill.name, { revision: durable.revision, skill });
+      }
+      return durable;
+    });
   }
 
-  // A dynamic skill whose name matches an authored skill overrides it: the
-  // dynamic write overwrites the authored file at the same sandbox path, so
-  // load_skill returns the dynamic body. Two dynamic resolvers emitting the
-  // same name is a genuine ambiguity and still throws.
+  // A dynamic skill whose name matches an authored skill overrides it:
+  // load_skill prefers the dynamic body, and supporting files replace the
+  // authored package at the same sandbox path. Two dynamic resolvers
+  // emitting the same name is a genuine ambiguity and still throws.
   const dynamicSkillOwners = new Map<string, string>();
   for (const [resolverSlug, skills] of Object.entries(newManifest)) {
     for (const { name } of skills) {
@@ -206,38 +281,8 @@ export async function dispatchDynamicSkillEvent(input: {
     }
   }
 
-  const sandbox = await ctx.require(SandboxKey).get();
-
-  if (sandbox !== null) {
-    const finalDynamicSkillNames = new Set(
-      Object.values(newManifest)
-        .flat()
-        .map((skill) => skill.name),
-    );
-    const removedSkillNames = new Set<string>();
-
-    for (const { resolver } of updates) {
-      for (const skill of manifest[resolver.slug] ?? []) {
-        if (!finalDynamicSkillNames.has(skill.name)) {
-          removedSkillNames.add(skill.name);
-        }
-      }
-    }
-
-    for (const name of removedSkillNames) {
-      await removeSkillPackageFromSandbox({ name, sandbox });
-    }
-
-    for (const { skills } of updates) {
-      for (const skill of skills) {
-        await writeSkillPackageToSandbox({ sandbox, skill });
-      }
-    }
-  }
+  await syncDynamicSkillFiles({ ctx, next, previous });
 
   ctx.set(DynamicSkillManifestKey, newManifest);
-  ctx.setVirtualContext(
-    PendingSkillAnnouncementKey,
-    await formatDynamicSkillAnnouncement({ ctx, manifest: newManifest }),
-  );
+  ctx.setVirtualContext(PendingSkillAnnouncementKey, formatDynamicSkillAnnouncement(newManifest));
 }

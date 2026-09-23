@@ -111,16 +111,18 @@ describe("load_skill executor", () => {
     expect(get).toHaveBeenCalledOnce();
   });
 
-  it("loads an active dynamic skill from the sandbox instead of a same-named authored skill", async () => {
-    const sandbox = mockSandbox({
-      initialFiles: {
-        "/workspace/skills/policy/SKILL.md": "# Dynamic policy\n",
-      },
-    });
+  it("loads an active dynamic skill from durable context without opening the sandbox", async () => {
+    const get = vi.fn(async () => null);
     const ctx = new ContextContainer();
-    ctx.set(SandboxKey, sandbox.access);
+    ctx.set(SandboxKey, {
+      captureState: async () => ({ session: null }),
+      get,
+      stop: async () => {},
+    });
     ctx.set(DynamicSkillManifestKey, {
-      policy: [{ description: "Apply the dynamic policy", name: "policy" }],
+      policy: [
+        { description: "Apply the dynamic policy", markdown: "# Dynamic policy\n", name: "policy" },
+      ],
     });
     const execute = skillToolExecutor(ctx, [
       {
@@ -136,6 +138,7 @@ describe("load_skill executor", () => {
     await expect(
       contextStorage.run(ctx, () => execute({ skill: "policy" }, {} as never)),
     ).resolves.toBe("# Dynamic policy\n");
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("surfaces dynamic skill names when the requested id is missing", async () => {
@@ -143,8 +146,8 @@ describe("load_skill executor", () => {
     ctx.set(SandboxKey, mockSandbox().access);
     ctx.set(DynamicSkillManifestKey, {
       custom: [
-        { description: "Talk like a dog", name: "custom__talk-like-a-dog" },
-        { description: "Bark", name: "custom__bark" },
+        { description: "Talk like a dog", markdown: "# Woof", name: "custom__talk-like-a-dog" },
+        { description: "Bark", markdown: "# Bark", name: "custom__bark" },
       ],
     });
     const execute = skillToolExecutor(ctx);

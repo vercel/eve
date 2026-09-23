@@ -1,10 +1,9 @@
 import { z } from "#compiled/zod/index.js";
 
 import { loadContext } from "#context/container.js";
-import { DynamicSkillManifestKey, SandboxKey } from "#context/keys.js";
+import { DynamicSkillManifestKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { loadSkillFromSandbox } from "#runtime/skills/sandbox-access.js";
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
@@ -14,57 +13,32 @@ type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
 /**
  * Executes the `load_skill` tool.
  *
- * Returns authored skill instructions directly from the resolved agent.
- * Active dynamic skills take precedence and remain sandbox-backed because
- * their full package content is currently materialized there at runtime.
+ * Returns instructions from memory without a sandbox: authored skills from the
+ * resolved agent and dynamic skills from durable context. Dynamic skills take
+ * precedence over authored skills with the same name.
  */
 async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   const ctx = loadContext();
   const { skill } = args;
-  const authoredSkills = ctx.require(BundleKey).resolvedAgent.skills;
-  const dynamicSkillNames = availableDynamicSkillNames(ctx);
-  const availableSkills = [
-    ...new Set([...authoredSkills.map((entry) => entry.name), ...dynamicSkillNames]),
-  ].sort();
+  const skills = [
+    ...Object.values(ctx.get(DynamicSkillManifestKey) ?? {}).flat(),
+    ...ctx.require(BundleKey).resolvedAgent.skills,
+  ];
+  const selected = skills.find((entry) => entry.name === skill);
+  if (selected !== undefined) return selected.markdown;
 
-  try {
-    if (dynamicSkillNames.includes(skill)) {
-      const sandbox = ctx.get(SandboxKey);
-      if (sandbox === undefined) {
-        throw new Error(
-          `The dynamic skill "${skill}" requires sandbox access on the runtime context.`,
-        );
-      }
-      return await loadSkillFromSandbox(sandbox, skill, availableSkills);
-    }
+  const availableSkills = [...new Set(skills.map((entry) => entry.name))].sort();
+  const message = formatSkillNotFoundError(skill, availableSkills);
+  const connectionName = ctx
+    .get(ConnectionRegistryKey)
+    ?.getConnectionNames()
+    .find((name) => name.toLowerCase() === skill.toLowerCase());
+  if (connectionName === undefined) throw new Error(message);
 
-    const authoredSkill = authoredSkills.find((entry) => entry.name === skill);
-    if (authoredSkill !== undefined) {
-      return authoredSkill.markdown;
-    }
-
-    throw new Error(formatSkillNotFoundError(skill, availableSkills));
-  } catch (error) {
-    const connectionName = ctx
-      .get(ConnectionRegistryKey)
-      ?.getConnectionNames()
-      .find((name) => name.toLowerCase() === skill.toLowerCase());
-    if (connectionName === undefined || availableSkills.includes(skill)) throw error;
-
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `${message} "${connectionName}" is an installed connection, not a skill. ` +
-        `Use connection_search with connection "${connectionName}" to find its tools.`,
-      { cause: error },
-    );
-  }
-}
-
-function availableDynamicSkillNames(ctx: ReturnType<typeof loadContext>): string[] {
-  const dynamic = Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
-    .flat()
-    .map((entry) => entry.name);
-  return [...new Set(dynamic)].sort();
+  throw new Error(
+    `${message} "${connectionName}" is an installed connection, not a skill. ` +
+      `Use connection_search with connection "${connectionName}" to find its tools.`,
+  );
 }
 
 function formatSkillNotFoundError(skill: string, availableSkills: readonly string[]): string {

@@ -3,7 +3,7 @@ import type { SkillHandle } from "#shared/skill-types.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import { loadContext } from "#context/container.js";
-import { SandboxKey, SessionKey } from "#context/keys.js";
+import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js";
 
 /**
  * Builds a {@link SessionContext} from the active ALS scope.
@@ -42,6 +42,8 @@ export function buildCallbackContext(): SessionContext {
               throw new Error("The active sandbox runtime does not support deletion.");
             }
             await access.delete(options);
+            // A recreated sandbox can reuse the same persisted identity.
+            ctx.delete(DynamicSkillSandboxKey);
           },
           async () => await access.stop(),
         );

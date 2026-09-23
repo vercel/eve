@@ -3,8 +3,6 @@ import type { SandboxAccess } from "#sandbox/state.js";
 import type { SkillHandle } from "#shared/skill-types.js";
 import { resolveSandboxSkillReadPaths } from "#shared/skill-paths.js";
 
-const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
-
 /**
  * Validates a skill id before it is used as one path segment under
  * the sandbox skill root.
@@ -23,39 +21,6 @@ export function assertSafeSkillId(id: string): asserts id is string {
       'Expected skill id to be a non-empty safe path segment without whitespace, separators, "." prefix, or "..".',
     );
   }
-}
-
-/**
- * Reads one skill's instruction markdown from the current sandbox.
- *
- * Returns the SKILL.md body with any YAML frontmatter stripped, so the
- * model receives plain markdown as the tool result. Throws when the id
- * is unsafe or the file does not exist; the AI SDK forwards the error
- * to the model as a tool-error result. `availableNames`, when given, is
- * listed in the not-found error so the model can correct a wrong id.
- */
-export async function loadSkillFromSandbox(
-  access: SandboxAccess,
-  id: string,
-  availableNames: readonly string[] = [],
-): Promise<string> {
-  assertSafeSkillId(id);
-  const sandbox = await requireSandboxSession(access);
-  const paths = await resolveSandboxSkillReadPaths({
-    name: id,
-    relativePath: "SKILL.md",
-    sandbox,
-  });
-
-  for (const path of paths) {
-    const instructions = await sandbox.readTextFile({ path });
-    if (instructions !== null) {
-      return instructions.replace(FRONTMATTER_PATTERN, "");
-    }
-  }
-
-  const hint = availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
-  throw new Error(`No skill named "${id}" at ${paths[0]}.${hint}`);
 }
 
 /**
