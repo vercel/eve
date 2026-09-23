@@ -94,7 +94,6 @@ it.each(
       expect(stream.locked).toBe(false);
       expect(received).toEqual(JSON.parse(new TextDecoder().decode(chunks[0])));
       expect(ctx.has(SandboxKey)).toBe(true);
-      expect(hookCtx.getSkill("policy").name).toBe("policy");
       calls.push(kind);
       if (fails) throw new Error("subagent subscriber failed");
       ctx.set(SessionTitleKey, "Research event received");

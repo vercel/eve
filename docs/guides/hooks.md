@@ -89,7 +89,7 @@ failed stop, follows the normal
 For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
 parent session. Typed handlers and `*` handlers receive this context even when
 the subagent event arrives between parent turns. These hooks can use
-`ctx.getSandbox()` and `ctx.getSkill()` against the parent session.
+`ctx.getSandbox()` against the parent session.
 
 ### Narrowing tool results
 

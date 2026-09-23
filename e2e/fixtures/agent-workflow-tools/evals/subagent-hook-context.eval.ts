@@ -77,12 +77,11 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
           ),
       );
       t.eventsSatisfy(
-        "hooks read the parent skill and persist sandbox files for the next turn",
+        "hooks persist parent sandbox files for the next turn",
         () =>
           Array.isArray(observations) &&
           observations.every(
             (record: SubagentHookObservation & { sandboxCallId: string | null }) =>
-              record.policy.includes("DELEGATION-POLICY:") &&
               record.sandboxCallId === record.callId,
           ),
       );
