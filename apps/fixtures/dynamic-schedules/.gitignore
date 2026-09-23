@@ -1,0 +1,4 @@
+.vercel
+.env*
+.eve
+.output

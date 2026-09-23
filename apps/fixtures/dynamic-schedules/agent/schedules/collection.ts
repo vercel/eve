@@ -12,7 +12,7 @@ export default defineScheduleCollection({
     developmentProjectId: process.env.EVE_TEST_ONLY_DYNAMIC_SCHEDULES_VERCEL_PROJECT_ID,
   }),
   scope: "fixture",
-  tools: true,
+  tools: { invoke: true },
   run({ input }) {
     console.log(`[dynamic-schedules] ${input.message}`);
   },

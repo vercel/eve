@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev",
+    "dev:vercel": "node ./scripts/dev-vercel.mjs",
     "build": "eve build",
     "start": "eve start",
     "info": "eve info",
