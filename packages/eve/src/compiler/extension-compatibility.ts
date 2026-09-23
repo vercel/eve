@@ -23,7 +23,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
     current: 56,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 56],
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 56],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -59,13 +59,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       51: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       52: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
-      55: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
     },
   },
   dynamicTool: {
     current: 53,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 53,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 53,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -95,12 +94,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       49: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       50: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       51: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
-      52: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
     },
   },
   channel: {
     current: 30,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 30],
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 30],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -113,7 +111,6 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       26: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
       27: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
-      29: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
     },
   },
   schedule: {
@@ -136,17 +133,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   connection: {
     current: 25,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25],
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 25],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
-      24: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
     },
   },
   hook: {
     current: 26,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 26],
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 26],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -159,16 +155,9 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       24: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
-      25: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
     },
   },
-  skill: {
-    current: 2,
-    supported: [2],
-    dropped: {
-      1: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
-    },
-  },
+  skill: { current: 2, supported: [1, 2], dropped: {} },
   dynamicSkill: {
     current: 21,
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21],
@@ -187,10 +176,9 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   config: { current: 1, supported: [1], dropped: {} },
   state: {
     current: 8,
-    supported: [1, 2, 3, 4, 5, 8],
+    supported: [1, 2, 3, 4, 5, 7, 8],
     dropped: {
       6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
-      7: "ctx.getSkill and SkillHandle were removed; the model reads skill files with sandbox tools, and code should import shared data from lib/.",
     },
   },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
