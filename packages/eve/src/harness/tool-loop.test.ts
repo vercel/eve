@@ -5612,6 +5612,9 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("empty model response recovery", () => {
+    const emptyResponseNudge =
+      "Your previous reply was empty and was not delivered. Continue the current user request. Reuse completed results when they satisfy the request. If existing results are stale or insufficient, use the appropriate read tools to get fresh results. Do not repeat writes or other side effects that already completed. Do not mention this notice.";
+
     const emptyResult: Record<string, unknown> = {
       content: [],
       finishReason: "other",
@@ -5727,7 +5730,7 @@ describe("createToolLoopHarness", () => {
           role: string;
         }>;
         expect(reissueMessages.at(-1)).toMatchObject({
-          content: expect.stringContaining("was not delivered"),
+          content: emptyResponseNudge,
           kind: "execution.retry",
           role: "user",
         });
@@ -5738,6 +5741,177 @@ describe("createToolLoopHarness", () => {
               typeof message.content === "string" && message.content.includes("was not delivered"),
           ),
         ).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("allows the model to refresh stale read results", async () => {
+      const staleReadCall = {
+        input: { resource: "report" },
+        toolCallId: "stale-read-1",
+        toolName: "read_report",
+        type: "tool-call" as const,
+      };
+      const staleReadResult = {
+        ...staleReadCall,
+        output: { type: "json" as const, value: { rows: 1 } },
+        type: "tool-result" as const,
+      };
+      const tools = new Map([
+        [
+          "read_report",
+          {
+            description: "Read the report.",
+            execute: vi.fn().mockResolvedValue({ rows: 2 }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "read_report",
+          },
+        ],
+        [
+          "write_report",
+          {
+            description: "Write the report.",
+            execute: vi.fn().mockResolvedValue({ saved: true }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "write_report",
+          },
+        ],
+      ]);
+      const session = createTestSession({
+        agent: {
+          modelReference: { id: "test-model" },
+          system: "You are a test assistant.",
+          tools: [
+            {
+              description: "Read the report.",
+              inputSchema: { type: "object" },
+              name: "read_report",
+            },
+            {
+              description: "Write the report.",
+              inputSchema: { type: "object" },
+              name: "write_report",
+            },
+          ],
+        },
+        history: [
+          { content: "Read the report.", kind: "user", role: "user" },
+          { content: [staleReadCall], role: "assistant" },
+          { content: [staleReadResult], role: "tool" },
+        ],
+      });
+      const refreshRequest = "Read the report again and tell me how many rows it has now.";
+
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit, { tools }));
+
+      try {
+        await runStep(session, { message: refreshRequest });
+
+        const retryCall = vi.mocked(ToolLoopAgent).mock.calls[1]?.[0];
+        const retryAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const retryMessages = retryAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+
+        expect(retryCall?.tools).toMatchObject({
+          read_report: expect.anything(),
+          write_report: expect.anything(),
+        });
+        expect(retryMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ content: refreshRequest, role: "user" }),
+            expect.objectContaining({ content: [staleReadCall], role: "assistant" }),
+            expect.objectContaining({ content: [staleReadResult], role: "tool" }),
+          ]),
+        );
+        expect(retryMessages.at(-1)).toMatchObject({
+          content: emptyResponseNudge,
+          kind: "execution.retry",
+          role: "user",
+        });
+        expect(retryMessages.at(-1)?.content).not.toContain("do not re-run tools");
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("warns the model not to repeat a completed write", async () => {
+      const writeCall = {
+        input: { report: "updated" },
+        toolCallId: "write-1",
+        toolName: "write_report",
+        type: "tool-call" as const,
+      };
+      const writeResult = {
+        ...writeCall,
+        output: { type: "json" as const, value: { saved: true } },
+        type: "tool-result" as const,
+      };
+      const completedWrite = {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [writeCall], role: "assistant" },
+            { content: [writeResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [writeCall],
+        toolResults: [writeResult],
+      };
+      const tools = new Map([
+        [
+          "write_report",
+          {
+            description: "Write the report.",
+            execute: vi.fn().mockResolvedValue({ saved: true }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "write_report",
+          },
+        ],
+      ]);
+
+      setupMockAgentSequence([completedWrite, emptyResult, successResult]);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit, { tools }));
+
+      try {
+        const first = await runStep(createTestSession(), { message: "Update the report." });
+        expect(typeof first.next).toBe("function");
+        if (typeof first.next !== "function") throw new Error("Expected a tool continuation.");
+
+        await first.next(first.session);
+
+        expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(3);
+        const retryAgent = vi.mocked(ToolLoopAgent).mock.results[2]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const retryMessages = retryAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(retryMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ content: [writeCall], role: "assistant" }),
+            expect.objectContaining({ content: [writeResult], role: "tool" }),
+          ]),
+        );
+        expect(retryMessages.at(-1)).toMatchObject({
+          content: emptyResponseNudge,
+          kind: "execution.retry",
+          role: "user",
+        });
+        expect(retryMessages.at(-1)?.content).toContain(
+          "Do not repeat writes or other side effects that already completed.",
+        );
       } finally {
         warnSpy.mockRestore();
       }
