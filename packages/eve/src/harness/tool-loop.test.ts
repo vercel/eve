@@ -80,7 +80,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { recordWorkflowTaskView, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
@@ -2951,6 +2951,46 @@ describe("createToolLoopHarness", () => {
     expect(result.session.outputSchema).toBe(schema);
     expect(events.some((event) => event.type === "result.completed")).toBe(false);
     expect(events.at(-1)?.type).toBe("session.waiting");
+  });
+
+  it("parks a task turn without completing the session while durable background work is pending", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Still working.", role: "assistant" }] },
+      text: "Still working.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("task", emit));
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(recordBackgroundTask(createTestSession()), { message: "Continue" }),
+    );
+
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ notifyCaller: true, output: "Still working." });
+    expect(events.some((event) => event.type === "session.completed")).toBe(false);
+    expect(events.at(-1)?.type).toBe("session.waiting");
+
+    const completed = await contextStorage.run(new ContextContainer(), () =>
+      runStep(
+        {
+          ...result.session,
+          state: recordWorkflowTaskView(result.session.state, {
+            lastOutput: { data: "MCP-CHILD-ANSWER", type: "result" },
+            metadata: { kind: "report-probe", name: "analysis" },
+            status: "completed",
+            taskId: "analysis",
+          }),
+        },
+        { message: "Background work finished." },
+      ),
+    );
+
+    expect(completed.next).toEqual({ done: true, output: "Still working." });
+    expect(events.filter((event) => event.type === "session.completed")).toHaveLength(1);
+    expect(events.at(-1)?.type).toBe("session.completed");
   });
 
   it("fails a task turn as an error when structured output is not produced", async () => {

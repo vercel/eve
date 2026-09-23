@@ -56,11 +56,99 @@ export default mcpChannel({
 `,
     "agent/instructions.md": "Follow the deterministic mock-model lifecycle.\n",
   },
+  dependencies: { "just-bash": "3.4.2" },
   installDependencies: true,
   name: "mcp-agent-channel",
 };
 
+const MCP_BACKGROUND_SUBAGENT_DESCRIPTOR: ScenarioAppDescriptor = {
+  files: {
+    "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+const model = mockModel((request) => {
+  const messages = JSON.stringify(request.messages);
+  if (messages.includes("MCP-CHILD-ANSWER")) {
+    return "MCP-CHILD-ANSWER";
+  }
+  if (request.toolResults.some((result) => result.name === "researcher")) {
+    return "MCP-FIRST-TURN-STATUS";
+  }
+  return {
+    toolCalls: [{
+      id: "delegate-1",
+      input: { message: "Return the durable child answer." },
+      name: "researcher",
+    }],
+  };
+});
+
+export default defineAgent({
+  description: "Delegates every MCP request to the researcher subagent.",
+  model,
+  modelContextWindowTokens: 32_000,
+});
+`,
+    "agent/channels/mcp.ts": `import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: (request) => {
+    const principalId = request.headers.get("x-test-principal");
+    return principalId === null
+      ? null
+      : { attributes: {}, authenticator: "scenario", principalId, principalType: "user" };
+  },
+});
+`,
+    "agent/instructions.md": "Delegate the request to the declared researcher subagent.\n",
+    "agent/subagents/researcher/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  description: "Returns the durable child answer.",
+  model: mockModel(() => "MCP-CHILD-ANSWER"),
+  modelContextWindowTokens: 32_000,
+});
+`,
+    "agent/subagents/researcher/instructions.md": "Reply with the requested answer.\n",
+  },
+  dependencies: { "just-bash": "3.4.2" },
+  installDependencies: true,
+  name: "mcp-background-subagent",
+};
+
 describe("MCP agent channel", () => {
+  it(
+    "returns a background subagent result from a durable MCP invocation",
+    async () => {
+      const app = await scenarioApp(MCP_BACKGROUND_SUBAGENT_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const started = await callTool(server.url, "alice", "modern", "agent_start", {
+          message: "Delegate this request and return the researcher result.",
+        });
+        const invocationId = requiredString(started.invocationId, "invocationId");
+        const completed = await pollInvocation(server.url, "alice", "modern", invocationId, [
+          "completed",
+        ]);
+
+        expect(completed).toMatchObject({
+          result: "MCP-CHILD-ANSWER",
+          status: "completed",
+        });
+      } catch (error) {
+        throw new Error(
+          [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),
+          { cause: error },
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
   it(
     "runs a durable input lifecycle through modern and legacy Nitro requests",
     async () => {
