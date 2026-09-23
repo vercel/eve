@@ -1,3 +1,4 @@
+import { throwIfAborted } from "#client/abort-signal.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   EVE_STREAM_CONTROL_VERSION,
@@ -297,7 +298,7 @@ export async function openStreamBody(
   }
 
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
-    input.signal?.throwIfAborted();
+    throwIfAborted(input.signal);
     const url = createClientUrl(
       input.host,
       input.path,
@@ -305,7 +306,7 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
-    input.signal?.throwIfAborted();
+    throwIfAborted(input.signal);
     const connectionController = new AbortController();
     const signal = input.signal
       ? AbortSignal.any([input.signal, connectionController.signal])

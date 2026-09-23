@@ -1,3 +1,4 @@
+import { throwIfAborted } from "#client/abort-signal.js";
 import { Client } from "#client/client.js";
 import type {
   ActiveTurn,
@@ -525,7 +526,7 @@ export class EveAgentStore<TData> {
         }),
         input.signal,
       );
-      input.signal?.throwIfAborted();
+      throwIfAborted(input.signal);
     }
     const session = this.#session;
     let reader: SessionEventReader | undefined;
