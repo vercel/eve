@@ -52,7 +52,7 @@ Run evals from the fixture directory:
 
 ```sh
 cd e2e/fixtures/agent-basic-runtime
-EVE_E2E_MODEL="openai/gpt-5.6-sol" pnpm exec eve eval --strict
+EVE_E2E_MODEL="openai/gpt-6-sol" pnpm exec eve eval --strict
 ```
 
 Mock-model runs work anywhere with no provider credentials, which makes them
@@ -135,7 +135,7 @@ evals as a second `eve eval` invocation after the main suite. Without the
 alias env (local matrix, plain `eve eval --strict`) the eval skips.
 
 Most fixture agents resolve `EVE_E2E_MODEL`
-through `@eve-e2e/config`, defaulting to `openai/gpt-5.6-sol` for local runs.
+through `@eve-e2e/config`, defaulting to `openai/gpt-6-sol` for local runs.
 Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an OpenAI evaluation-model instance for `openai/gpt-5.6-luna` until CI has access to Jev. The adapter uses Gateway's Responses endpoint and `AI_GATEWAY_API_KEY`, independently of the agent matrix. A bare Luna string targets Gateway's native evaluation API and is not supported. Deterministic judge coverage in `agent-evaluate` passes a fixture evaluation model explicitly.
 
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn

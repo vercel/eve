@@ -23,7 +23,7 @@ const agent: AgentDefinition = defineAgent({
         }
         // Turn selections are durable; the step resolver supplies the live mock.
         return {
-          model: typeof model === "string" ? model : "openai/gpt-5.6-sol",
+          model: typeof model === "string" ? model : "openai/gpt-6-sol",
           modelContextWindowTokens: 1_000_000,
         };
       },
