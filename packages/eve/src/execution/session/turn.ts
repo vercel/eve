@@ -164,7 +164,7 @@ export class SessionExecution {
         const canPark =
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
-          result.completion?.kind === "yielded" ||
+          result.settled?.notifyCaller === false ||
           this.input.mode === "conversation";
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
         return {

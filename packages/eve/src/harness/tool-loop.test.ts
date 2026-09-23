@@ -2969,7 +2969,7 @@ describe("createToolLoopHarness", () => {
     );
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: "Still working." });
+    expect(result.settledTurn).toEqual({ notifyCaller: true, output: "Still working." });
     expect(events.some((event) => event.type === "session.completed")).toBe(false);
     expect(events.at(-1)?.type).toBe("session.waiting");
 

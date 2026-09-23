@@ -58,21 +58,22 @@ describe("SessionExecution background task checkpoints", () => {
       onInterrupt: () => () => {},
     };
     const sessionState = state("");
+    const settled = { notifyCaller: false, output: "Verification is running." };
     vi.mocked(turnStep).mockResolvedValue({
       action: "park",
-      completion: { kind: "yielded" },
       hasPendingAuthorization: false,
       hasPendingInputBatch: false,
       serializedContext: {},
       sessionState,
+      settled,
     });
 
     await expect(
       createExecution({ inbox, mode: "task", sessionState }).runTurn(undefined),
     ).resolves.toEqual({
       authorizationAttemptIds: undefined,
-      completion: { kind: "yielded" },
       kind: "park",
+      settled,
     });
   });
 
