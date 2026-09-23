@@ -123,7 +123,7 @@ export function defineJsonSchema<T = unknown>(
   check?: (value: T) => string | undefined,
 ): ToolSchema<T> {
   const emit = (): Record<string, unknown> => structuredClone(schema) as Record<string, unknown>;
-  return {
+  const toolSchema = {
     "~standard": {
       version: 1,
       vendor: "eve",
@@ -134,7 +134,12 @@ export function defineJsonSchema<T = unknown>(
       jsonSchema: { input: emit, output: emit },
     },
   } as ToolSchema<T>;
+  plainJsonSchemas.add(toolSchema);
+  return toolSchema;
 }
+
+/** Schemas built by {@link defineJsonSchema}, which reach the model exactly as written. */
+const plainJsonSchemas = new WeakSet<object>();
 
 /**
  * Permissive schema lowered onto model-visible tools whose definitions
@@ -152,6 +157,9 @@ export const UNSPECIFIED_INPUT_SCHEMA: ToolSchema = defineJsonSchema({});
  * app's `zod` copy to convert or parse a schema built by another copy — a
  * mismatch that crashes JSON Schema conversion across Zod minor versions.
  * AI SDK-native schemas (already wrapped, or lazy) pass through.
+ *
+ * Library schemas get the object closing the AI SDK applies to them itself;
+ * plain JSON Schema from {@link defineJsonSchema} is advertised as written.
  */
 export function toModelSchema(schema: FlexibleSchema, direction: SchemaDirection): FlexibleSchema;
 export function toModelSchema(
@@ -166,14 +174,54 @@ export function toModelSchema(
     return schema;
   }
   const source = schema as StandardSchemaV1;
-  return jsonSchema(() => serializeSchema(source, direction) as JSONSchema7, {
-    validate: async (value) => {
-      const result = await source["~standard"].validate(value);
-      return result.issues === undefined
-        ? { success: true, value: result.value }
-        : { success: false, error: new TypeValidationError({ value, cause: result.issues }) };
+  const verbatim = plainJsonSchemas.has(source);
+  return jsonSchema(
+    () => {
+      const json = serializeSchema(source, direction);
+      return (verbatim ? json : closeObjectSchemas(json)) as JSONSchema7;
     },
-  }) satisfies Schema;
+    {
+      validate: async (value) => {
+        const result = await source["~standard"].validate(value);
+        return result.issues === undefined
+          ? { success: true, value: result.value }
+          : { success: false, error: new TypeValidationError({ value, cause: result.issues }) };
+      },
+    },
+  ) satisfies Schema;
+}
+
+/**
+ * Mirrors the AI SDK's `addAdditionalPropertiesToJsonSchema`: every object
+ * schema without a subschema for extra keys gets `additionalProperties: false`.
+ * Returns a copy; library emitters may cache the schemas they return.
+ */
+function closeObjectSchemas(schema: unknown): unknown {
+  if (!isObject(schema)) return schema;
+  const node: Record<string, unknown> = { ...schema };
+  const { type } = node;
+  if (type === "object" || (Array.isArray(type) && type.includes("object"))) {
+    node.additionalProperties = isObject(node.additionalProperties)
+      ? closeObjectSchemas(node.additionalProperties)
+      : false;
+    if (isObject(node.properties)) node.properties = mapValues(node.properties, closeObjectSchemas);
+  }
+  if (Array.isArray(node.items)) node.items = node.items.map(closeObjectSchemas);
+  else if (isObject(node.items)) node.items = closeObjectSchemas(node.items);
+  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    const list = node[keyword];
+    if (Array.isArray(list)) node[keyword] = list.map(closeObjectSchemas);
+  }
+  if (isObject(node.definitions))
+    node.definitions = mapValues(node.definitions, closeObjectSchemas);
+  return node;
+}
+
+function mapValues(
+  record: Record<string, unknown>,
+  map: (value: unknown) => unknown,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, map(value)]));
 }
 
 function toSchema(
@@ -373,13 +421,18 @@ function buildValidator(schema: JsonObject): Validator | string {
     // The validator annotates the schema objects it walks, so it gets a copy.
     const copy = structuredClone(schema) as Record<string, unknown>;
     const problem = prepareForValidation(copy);
-    return problem ?? new Validator(copy, "2020-12");
+    // Collect every failure, not just the first, so one retry can fix them all.
+    return problem ?? new Validator(copy, "2020-12", false);
   } catch (error) {
     return toErrorMessage(error);
   }
 }
 
 const JSON_TYPES = new Set(["array", "boolean", "integer", "null", "number", "object", "string"]);
+const EXCLUSIVE_BOUNDS = [
+  ["exclusiveMinimum", "minimum"],
+  ["exclusiveMaximum", "maximum"],
+] as const;
 const SUBSCHEMA_KEYWORDS = [
   "additionalItems",
   "additionalProperties",
@@ -414,6 +467,16 @@ function prepareForValidation(schema: unknown): string | undefined {
   }
   const node = schema as Record<string, unknown>;
   delete node.format;
+  // Draft-04 and OpenAPI 3.0 write exclusive bounds as booleans beside `minimum`/`maximum`.
+  for (const [flag, bound] of EXCLUSIVE_BOUNDS) {
+    if (typeof node[flag] !== "boolean") continue;
+    if (node[flag] && typeof node[bound] === "number") {
+      node[flag] = node[bound];
+      delete node[bound];
+    } else {
+      delete node[flag];
+    }
+  }
 
   const { enum: values, pattern, required, type } = node;
   if (type !== undefined && !(Array.isArray(type) ? type.every(isJsonType) : isJsonType(type))) {
@@ -483,20 +546,70 @@ function isRegExpSource(value: unknown): boolean {
   }
 }
 
+const CLOSED_OBJECT_KEYWORD = /\/(?:additional|unevaluated)Properties$/;
+
+interface Failure {
+  readonly keyword: string;
+  readonly location: string;
+  readonly message: string;
+  /** Location of the closed object that rejected this key. */
+  readonly object?: string;
+}
+
 /**
  * The validator reports each failure as a chain from the root to the failing
  * keyword. Only the deepest unit of each chain carries information the model
- * can act on; the rest restate its location.
+ * can act on; the rest restate its location, as a `$ref` unit does for the
+ * failure it wraps.
+ *
+ * A closed object reports an extra key as a parent unit plus a bare "False
+ * boolean schema." child, so that pair becomes one "Unrecognized key" issue.
+ * Without short-circuiting, the validator also reports declared keys that
+ * failed their own schema that way; those repeats are dropped.
  */
 function toIssues(errors: readonly OutputUnit[]): StandardSchemaV1.Issue[] {
-  return errors
-    .filter((error, index) => {
-      const next = errors[index + 1];
-      return next === undefined || !next.instanceLocation.startsWith(`${error.instanceLocation}/`);
+  const failures: Failure[] = [];
+  for (let index = 0; index < errors.length; index++) {
+    const unit = errors[index]!;
+    const rejected = errors[index + 1];
+    if (CLOSED_OBJECT_KEYWORD.test(unit.keywordLocation) && rejected?.keyword === "false") {
+      const key = decodePointer(rejected.instanceLocation).at(-1);
+      failures.push({
+        keyword: "false",
+        location: rejected.instanceLocation,
+        message: `Unrecognized key: ${JSON.stringify(key)}`,
+        object: unit.instanceLocation,
+      });
+      index++;
+    } else {
+      failures.push({
+        keyword: unit.keyword,
+        location: unit.instanceLocation,
+        message: unit.error,
+      });
+    }
+  }
+
+  const relevant = failures.filter(
+    (failure) =>
+      failure.object === undefined ||
+      !failures.some(
+        (other) =>
+          other.object === undefined &&
+          (other.location === failure.location ||
+            other.location.startsWith(`${failure.location}/`)),
+      ),
+  );
+  return relevant
+    .filter((failure, index) => {
+      const next = relevant[index + 1];
+      if (next === undefined) return true;
+      if (next.location.startsWith(`${failure.location}/`)) return false;
+      return !(failure.keyword === "$ref" && next.location === failure.location);
     })
-    .map((error) => {
-      const path = decodePointer(error.instanceLocation);
-      return path.length === 0 ? { message: error.error } : { message: error.error, path };
+    .map(({ location, message, object }) => {
+      const path = decodePointer(object ?? location);
+      return path.length === 0 ? { message } : { message, path };
     });
 }
 

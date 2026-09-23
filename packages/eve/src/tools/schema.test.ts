@@ -190,6 +190,67 @@ describe("defineJsonSchema", () => {
     expect(validate(schema, instance("long"))).toHaveProperty("issues");
   });
 
+  it("reads draft-04 boolean exclusive bounds", () => {
+    const source = {
+      properties: {
+        percent: {
+          exclusiveMaximum: true,
+          exclusiveMinimum: true,
+          maximum: 100,
+          minimum: 0,
+          type: "number",
+        },
+        ratio: { exclusiveMaximum: false, maximum: 1, type: "number" },
+      },
+      type: "object",
+    };
+    const schema = defineJsonSchema(source);
+
+    expect(validate(schema, { percent: 50, ratio: 1 })).toHaveProperty("value");
+    expect(validate(schema, { percent: 100 })).toHaveProperty("issues");
+    expect(validate(schema, { percent: 0 })).toHaveProperty("issues");
+    expect(validate(schema, { ratio: 1.5 })).toHaveProperty("issues");
+    expect(serializeInputSchema(schema)).toEqual(source);
+  });
+
+  it("reports unrecognized keys and every failure at once", () => {
+    const schema = defineJsonSchema({
+      $defs: { count: { type: "integer" } },
+      additionalProperties: false,
+      properties: {
+        command: { type: "string" },
+        count: { $ref: "#/$defs/count" },
+        options: {
+          additionalProperties: false,
+          properties: { depth: { type: "integer" } },
+          type: "object",
+        },
+      },
+      required: ["command"],
+      type: "object",
+    });
+
+    expect(validate(schema, { command: "ls", cwd: "/" })).toEqual({
+      issues: [{ message: 'Unrecognized key: "cwd"' }],
+    });
+    expect(validate(schema, { command: 1, count: "2", cwd: "/" })).toEqual({
+      issues: [
+        { message: 'Instance type "number" is invalid. Expected "string".', path: ["command"] },
+        { message: 'Instance type "string" is invalid. Expected "integer".', path: ["count"] },
+        { message: 'Unrecognized key: "cwd"' },
+      ],
+    });
+    expect(validate(schema, { command: "ls", options: { color: true, depth: "deep" } })).toEqual({
+      issues: [
+        {
+          message: 'Instance type "string" is invalid. Expected "integer".',
+          path: ["options", "depth"],
+        },
+        { message: 'Unrecognized key: "color"', path: ["options"] },
+      ],
+    });
+  });
+
   it("enforces draft-07 property-list dependencies", () => {
     const schema = defineJsonSchema({ dependencies: { card: ["billing_address"] } });
 
@@ -336,13 +397,16 @@ describe("toModelSchema", () => {
     }
   });
 
-  it("emits JSON Schema from the source's own library", async () => {
-    const zodSchema = z.strictObject({ city: z.string() });
+  it("emits library schemas as the AI SDK would and plain JSON Schema as written", async () => {
+    const zodSchema = z.object({ city: z.string(), units: z.object({ system: z.string() }) });
     const jsonSource = { properties: { city: { type: "string" } }, type: "object" };
+    const { $schema: _version, ...aiSdkJsonSchema } = await asSchema(zodSchema).jsonSchema;
 
-    expect(await asSchema(toModelSchema(zodSchema, "input")).jsonSchema).toEqual(
-      serializeInputSchema(zodSchema),
-    );
+    expect(await asSchema(toModelSchema(zodSchema, "input")).jsonSchema).toEqual(aiSdkJsonSchema);
+    expect(aiSdkJsonSchema).toMatchObject({
+      additionalProperties: false,
+      properties: { units: { additionalProperties: false } },
+    });
     expect(await asSchema(toModelSchema(defineJsonSchema(jsonSource), "input")).jsonSchema).toEqual(
       jsonSource,
     );
