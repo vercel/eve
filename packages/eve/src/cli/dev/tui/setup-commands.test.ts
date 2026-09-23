@@ -8,7 +8,6 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import {
   runTuiSetupCommand,
-  SETUP_FLOW_CONFIG,
   type TuiSetupCommandInput,
   type TuiSetupCommandRenderer,
   type TuiSetupFlows,
@@ -78,6 +77,7 @@ function run(input: {
   useDefaultPrompter?: boolean;
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
+  initialRegistryAddress?: string;
 }) {
   const { upgradeChoice } = input;
   const fake = createFakePrompter(
@@ -90,6 +90,9 @@ function run(input: {
     flows: input.flows,
   };
   if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
+  if (input.initialRegistryAddress !== undefined) {
+    commandInput.initialRegistryAddress = input.initialRegistryAddress;
+  }
   if (input.useDefaultPrompter !== true) commandInput.createPrompter = () => fake.prompter;
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
@@ -173,18 +176,6 @@ describe("runTuiSetupCommand", () => {
     expect(renderer.setStatus).toHaveBeenCalledWith("Adding Web Chat · 1 of 4");
   });
 
-  it("uses the build pulse for every setup command except deploy", () => {
-    expect(
-      Object.fromEntries(
-        Object.entries(SETUP_FLOW_CONFIG).map(([command, config]) => [command, config.indicator]),
-      ),
-    ).toEqual({
-      login: "pulse",
-      add: "pulse",
-      deploy: "spinner",
-    });
-  });
-
   const installed = {
     kind: "installed" as const,
     title: "Agent Browser",
@@ -238,9 +229,9 @@ describe("runTuiSetupCommand", () => {
       }),
     ).resolves.toEqual({
       message:
-        "Setup not finished\n" +
         "Finish with `eve add channel/slack --skip-install`\n" +
         "⚠ Wait for the Slack request to expire before retrying.",
+      summary: "Added channel/slack · setup not finished",
       cancelled: true,
       preserveFlowDiagnostics: false,
     });
@@ -279,6 +270,7 @@ describe("runTuiSetupCommand", () => {
 
     await expect(run({ command: "add", flows })).resolves.toEqual({
       message: "Refusing to overwrite github.ts",
+      summary: "Couldn't add connection/github",
       tone: "error",
       preserveFlowDiagnostics: false,
     });
@@ -318,7 +310,25 @@ describe("runTuiSetupCommand", () => {
 
     await expect(result).resolves.toEqual({
       message: "",
+      summary: "channel/slack not added",
       cancelled: true,
+      preserveFlowDiagnostics: false,
+    });
+  });
+
+  it("summarizes an addressed add that fails before any item settles", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => {
+        throw new Error("Registry unavailable.");
+      }),
+    });
+
+    await expect(
+      run({ command: "add", flows, initialRegistryAddress: "connection/sentry" }),
+    ).resolves.toEqual({
+      message: "Registry unavailable.",
+      summary: "Couldn't add connection/sentry",
+      tone: "error",
       preserveFlowDiagnostics: false,
     });
   });

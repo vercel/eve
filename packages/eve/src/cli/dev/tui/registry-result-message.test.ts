@@ -3,15 +3,15 @@ import { describe, expect, it } from "vitest";
 import { registryCommandOutcome } from "./registry-result-message.js";
 
 describe("registryCommandOutcome", () => {
-  it("leaves a plain installation to the echoed command's gutter", () => {
+  it("leaves a plain installation to its summary", () => {
     expect(
       registryCommandOutcome({
         outcomes: [{ kind: "installed", title: "connection/notion", facts: [], output: [] }],
       }),
-    ).toEqual({ status: "success", message: "" });
+    ).toEqual({ status: "success", summary: "Added connection/notion", message: "" });
   });
 
-  it("hangs one installation's facts under the command", () => {
+  it("hangs one installation's facts under its summary", () => {
     expect(
       registryCommandOutcome({
         outcomes: [
@@ -28,6 +28,7 @@ describe("registryCommandOutcome", () => {
       }),
     ).toEqual({
       status: "success",
+      summary: "Added channel/photon",
       message:
         "Agent phone number  +15551234567\nMode                dev\nConfigured MCP connection.",
     });
@@ -49,8 +50,8 @@ describe("registryCommandOutcome", () => {
       ),
     ).toEqual({
       status: "cancelled",
+      summary: "Added channel/slack · setup not finished",
       message:
-        "Setup not finished\n" +
         "Finish with `eve add channel/slack --skip-install`\n" +
         "⚠ Wait for the Slack request to expire before retrying.",
     });
@@ -59,7 +60,7 @@ describe("registryCommandOutcome", () => {
   it("reports a cancellation before installation without detail", () => {
     expect(
       registryCommandOutcome({ outcomes: [{ kind: "cancelled", title: "connection/sentry" }] }),
-    ).toEqual({ status: "cancelled", message: "" });
+    ).toEqual({ status: "cancelled", summary: "connection/sentry not added", message: "" });
   });
 
   it("splits a failure's retry hint onto its own line", () => {
@@ -76,6 +77,7 @@ describe("registryCommandOutcome", () => {
       }),
     ).toEqual({
       status: "error",
+      summary: "Couldn't add channel/slack",
       message:
         "Vercel CLI is not authenticated.\nTry again with `eve add channel/slack --skip-install`.",
     });
@@ -92,6 +94,7 @@ describe("registryCommandOutcome", () => {
       }),
     ).toEqual({
       status: "error",
+      summary: "Added 1 of 3 items",
       message: "✓ Web Chat\n– Slack\n⨯ GitHub\n  Installation failed.",
     });
   });

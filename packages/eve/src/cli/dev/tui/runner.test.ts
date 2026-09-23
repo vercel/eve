@@ -2134,6 +2134,7 @@ describe("EveTUIRunner initial input", () => {
           ? "Connect a model with /login when you’re ready."
           : "Could not connect. Retry with /login.",
         result === "error" ? "error" : undefined,
+        undefined,
       );
     },
   );
@@ -3343,6 +3344,7 @@ describe("EveTUIRunner remote authentication", () => {
         expect(renderCommandResult).toHaveBeenCalledWith(
           expect.stringContaining("Check project permissions"),
           "error",
+          undefined,
         );
     },
   );
@@ -3371,6 +3373,7 @@ describe("EveTUIRunner remote authentication", () => {
     expect(renderCommandResult).toHaveBeenCalledWith(
       expect.stringContaining("updated Trusted Sources for inbound"),
       "error",
+      undefined,
     );
   });
 
@@ -4959,5 +4962,9 @@ it("keeps the result of an explicit login command after onboarding", async () =>
   await runner.run();
 
   expect(handle).toHaveBeenCalledTimes(2);
-  expect(renderer.renderCommandResult).toHaveBeenCalledExactlyOnceWith("Connected.", undefined);
+  expect(renderer.renderCommandResult).toHaveBeenCalledExactlyOnceWith(
+    "Connected.",
+    undefined,
+    undefined,
+  );
 });

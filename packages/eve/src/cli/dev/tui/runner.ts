@@ -284,7 +284,7 @@ export type AgentTUIRenderer = {
   clearSetupWarning?(): void;
   /** Commits the startup `/deploy` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
-  renderCommandResult?(text: string, status?: CommandResultStatus): void;
+  renderCommandResult?(text: string, status?: CommandResultStatus, summary?: string): void;
   readonly setupFlow?: SetupFlowRenderer;
   /**
    * The renderer's full-screen local trace viewer, opened by `/traces`.
@@ -415,6 +415,8 @@ export interface PromptCommandOutcome {
   message?: string;
   /** Promotes an outcome to a top-level status. */
   tone?: "success" | "error";
+  /** Replaces the echoed invocation once the command settles. */
+  summary?: string;
   /** Post-command work after setup settles. */
   effect?: VercelStatusEffect | ModelAccessChange;
   cancelled?: true;
@@ -1747,14 +1749,19 @@ export class EveTUIRunner {
     }
   }
 
-  #renderCommandOutcome(text: string | undefined, status?: CommandResultStatus): void {
+  #renderCommandOutcome(
+    text: string | undefined,
+    status?: CommandResultStatus,
+    summary?: string,
+  ): void {
     if (this.#renderer.renderCommandResult !== undefined) {
-      if (text !== undefined || status !== undefined) {
-        this.#renderer.renderCommandResult(text ?? "", status);
+      if (text !== undefined || status !== undefined || summary !== undefined) {
+        this.#renderer.renderCommandResult(text ?? "", status, summary);
       }
       return;
     }
-    if (text !== undefined && text.length > 0) this.#renderer.renderNotice?.(text);
+    const notice = [summary, text].filter((part) => part !== undefined && part !== "").join("\n");
+    if (notice !== "") this.#renderer.renderNotice?.(notice);
   }
 
   async #handleExtensionCommand(
@@ -1840,7 +1847,7 @@ export class EveTUIRunner {
       (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
       (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
     if (!suppressTranscript && input.trigger !== "startup")
-      this.#renderCommandOutcome(outcome?.message, commandResultStatus(outcome));
+      this.#renderCommandOutcome(outcome?.message, commandResultStatus(outcome), outcome?.summary);
     this.#refreshHeaderFromRemoteConnection();
     return outcome;
   }

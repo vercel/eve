@@ -233,7 +233,7 @@ function renderBody(
     case "flow":
       return renderFlow(block, width, theme);
     case "command":
-      return renderCommand(block, theme);
+      return renderCommand(block, theme, context);
     case "question":
     case "connection-auth":
       return renderPreformatted(block, width, theme);
@@ -432,22 +432,31 @@ function paintCommands(line: string, theme: Theme): string {
 }
 
 /**
- * A slash command invocation. Its gutter carries the settled outcome — `✓`,
- * `⨯`, or `─` — and stays the user `│` while running or when the command only
- * reports. The `❯` glyph remains exclusive to live input because the TUI tests
+ * A slash command invocation. Its gutter pulses while the command runs, then
+ * carries the settled outcome — `✓`, `⨯`, or `─` — or the user `│` when the
+ * command only reports. A settled summary replaces the invocation, dimmed as a
+ * record. The `❯` glyph remains exclusive to live input because the TUI tests
  * use `❯` to detect a ready prompt.
  */
-function renderCommand(block: Block, theme: Theme): string[] {
+function renderCommand(block: Block, theme: Theme, context: RenderBlockContext): string[] {
   const c = theme.colors;
+  if (block.result !== undefined) {
+    return [`${commandGutter(block, theme)} ${c.dim(block.result)}`];
+  }
   const gutter =
-    block.status === "done"
-      ? c.green(theme.glyph.success)
-      : block.status === "error"
-        ? c.red(theme.glyph.error)
-        : block.status === "cancelled"
-          ? c.yellow(theme.glyph.dash)
-          : c.cyan(theme.glyph.user);
+    block.live === true ? c.yellow(context.activityPulse) : commandGutter(block, theme);
   return [`${gutter} ${c.bold(block.body ?? "")}`];
+}
+
+function commandGutter(block: Block, theme: Theme): string {
+  const c = theme.colors;
+  return block.status === "done"
+    ? c.green(theme.glyph.success)
+    : block.status === "error"
+      ? c.red(theme.glyph.error)
+      : block.status === "cancelled"
+        ? c.yellow(theme.glyph.dash)
+        : c.cyan(theme.glyph.user);
 }
 
 /**

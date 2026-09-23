@@ -24,7 +24,9 @@ export function registryItemProgress(renderer: {
 
 export interface RegistryCommandOutcome {
   status: CommandResultStatus;
-  /** Detail hung under the echoed `/add`; empty when the gutter says it all. */
+  /** Replaces the echoed `/add` once it settles. */
+  summary: string;
+  /** Detail hung under the summary; empty when the summary says it all. */
   message: string;
 }
 
@@ -48,11 +50,25 @@ function outcomeDetails(outcome: RegistrySessionOutcome): string[] {
       ];
     }
     case "incomplete":
-      return ["Setup not finished", `Finish with \`${outcome.resumeCommand}\``];
+      return [`Finish with \`${outcome.resumeCommand}\``];
     case "failed":
       return outcome.message.replace(" Try again with `", "\nTry again with `").split("\n");
     case "cancelled":
       return [];
+  }
+}
+
+/** The one-line record of an `/add` item left in place of its invocation. */
+export function registryOutcomeSummary(outcome: RegistrySessionOutcome): string {
+  switch (outcome.kind) {
+    case "installed":
+      return `Added ${outcome.title}`;
+    case "incomplete":
+      return `Added ${outcome.title} · setup not finished`;
+    case "failed":
+      return `Couldn't add ${outcome.title}`;
+    case "cancelled":
+      return `${outcome.title} not added`;
   }
 }
 
@@ -63,15 +79,21 @@ function outcomeStatus(outcomes: readonly RegistrySessionOutcome[]): CommandResu
 }
 
 /**
- * Summarizes an `/add` session for the echoed command: the gutter carries the
- * outcome, so one item only adds its details, and several items list one
- * marked row each.
+ * Summarizes an `/add` session in place of its echoed command. One item folds
+ * into the summary itself; several items list one marked row each.
  */
 export function registryCommandOutcome(
   result: RegistrySessionResult,
   notes: readonly string[] = [],
 ): RegistryCommandOutcome {
   const { outcomes } = result;
+  const added = outcomes.filter(
+    (outcome) => outcome.kind === "installed" || outcome.kind === "incomplete",
+  ).length;
+  const summary =
+    outcomes.length === 1
+      ? registryOutcomeSummary(outcomes[0]!)
+      : `Added ${added} of ${outcomes.length} items`;
   const lines =
     outcomes.length === 1
       ? outcomeDetails(outcomes[0]!)
@@ -80,5 +102,5 @@ export function registryCommandOutcome(
           ...outcomeDetails(outcome).map((line) => `  ${line}`),
         ]);
   lines.push(...notes.map((note) => `⚠ ${note}`));
-  return { status: outcomeStatus(outcomes), message: lines.join("\n") };
+  return { status: outcomeStatus(outcomes), summary, message: lines.join("\n") };
 }

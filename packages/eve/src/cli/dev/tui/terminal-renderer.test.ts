@@ -1849,40 +1849,52 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
-  it("draws a successful command's outcome into its echo's gutter", () => {
+  it("pulses a running command's gutter", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add connection/notion");
-    renderer.renderCommandResult("", "success");
+
+    expect(screen.snapshot()).toMatch(/^[▪ ] \/add connection\/notion$/m);
+    expect(screen.snapshot()).not.toContain("│ /add connection/notion");
+    renderer.shutdown();
+  });
+
+  it("replaces a settled command with its dimmed summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/notion");
+    renderer.renderCommandResult("", "success", "Added connection/notion");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^✓ \/add connection\/notion$/m);
+    expect(snapshot).toMatch(/^✓ Added connection\/notion$/m);
+    expect(snapshot).not.toContain("/add connection/notion");
     expect(snapshot).not.toContain("⎿");
+    expect(screen.rawOutput()).toContain("\u001b[2mAdded connection/notion");
   });
 
-  it("hangs a settled command's details under its marked echo", () => {
+  it("hangs a settled command's details under its summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add channel/slack");
     renderer.renderCommandResult(
-      "Setup not finished\nFinish with `eve add channel/slack --skip-install`",
+      "Finish with `eve add channel/slack --skip-install`",
       "cancelled",
+      "Added channel/slack · setup not finished",
     );
     renderer.shutdown();
 
-    const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^─ \/add channel\/slack\n {3}⎿ {2}Setup not finished$/m);
-    expect(snapshot).toContain("      Finish with `eve add channel/slack --skip-install`");
+    expect(screen.snapshot()).toMatch(
+      /^─ Added channel\/slack · setup not finished\n {3}⎿ {2}Finish with `eve add channel\/slack --skip-install`$/m,
+    );
   });
 
-  it("replaces the user gutter when a command fails", () => {
+  it("keeps the invocation when a settled command has no summary", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/add connection/sentry");
-    renderer.renderCommandResult("npm install exited with code 1", "error");
+    renderer.renderCommandInvocation("/deploy");
+    renderer.renderCommandResult("Deployed: https://example.vercel.app", "success");
     renderer.shutdown();
 
-    const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^⨯ \/add connection\/sentry$/m);
-    expect(snapshot).not.toContain("│ /add connection/sentry");
+    expect(screen.snapshot()).toMatch(
+      /^✓ \/deploy\n {3}⎿ {2}Deployed: https:\/\/example.vercel.app$/m,
+    );
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
@@ -2710,7 +2722,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         .split("\n")
         .findIndex((line) => line.includes("Hello"));
       renderer.setStartupPhase("connecting");
-      renderer.setupFlow.begin("Connect a model", "pulse");
+      renderer.setupFlow.begin("Connect a model");
       const interrupt = renderer.setupFlow.waitForInterrupt();
       renderer.setupFlow.setStatus("Connecting with Vercel…");
       expect(screen.snapshot()).toContain("Connecting with Vercel");
@@ -2761,7 +2773,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("restores the startup draft after a masked key question is cancelled", async () => {
     const { renderer, input, screen } = makeRenderer();
     renderer.beginStartupDraft({ initialDraft: "My message", title: "Agent" });
-    renderer.setupFlow.begin("Connect a model", "pulse");
+    renderer.setupFlow.begin("Connect a model");
     const answer = renderer.setupFlow.readText({ message: "API key", mask: true });
     input.type("private-test-key");
     expect(screen.snapshot()).not.toContain("private-test-key");
@@ -4552,7 +4564,7 @@ describe("TerminalRenderer setup flow session", () => {
     const message =
       "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
 
-    renderer.setupFlow.begin("Add to your agent", "pulse");
+    renderer.setupFlow.begin("Add to your agent");
     const answer = renderer.setupFlow.readSelect({
       kind: "single",
       message,
@@ -4575,7 +4587,7 @@ describe("TerminalRenderer setup flow session", () => {
     vi.useFakeTimers();
     try {
       const { screen, renderer } = makeRenderer();
-      renderer.setupFlow.begin("Add integration", "pulse");
+      renderer.setupFlow.begin("Add integration");
       renderer.beginSubagent({ callId: "background", name: "researcher" });
       renderer.backgroundSubagent({ callId: "background" });
       let release!: () => void;
@@ -4599,7 +4611,7 @@ describe("TerminalRenderer setup flow session", () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.renderNotice("anchor");
-    renderer.setupFlow.begin("Add integration", "pulse");
+    renderer.setupFlow.begin("Add integration");
     let inherited = false;
     await renderer.setupFlow.withInheritedStdio(async () => {
       inherited = true;
@@ -4619,7 +4631,7 @@ describe("TerminalRenderer setup flow session", () => {
 
   it("discards input without interrupting a non-interruptible flow", async () => {
     const { input, renderer } = makeRenderer();
-    renderer.setupFlow.begin("Add to your agent", "pulse");
+    renderer.setupFlow.begin("Add to your agent");
     const interrupt = renderer.setupFlow.waitForInterrupt({ interruptible: false });
     let interrupted = false;
     void interrupt.promise.then(() => {
@@ -4640,7 +4652,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
 
-      renderer.setupFlow.begin("Configure the agent model", "pulse");
+      renderer.setupFlow.begin("Configure the agent model");
       renderer.setupFlow.setStatus("Checking the project…");
       expect(screen.snapshot()).toContain("▪ Checking the project…");
 
@@ -4658,7 +4670,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
 
-      renderer.setupFlow.begin("Add to your agent", "pulse");
+      renderer.setupFlow.begin("Add to your agent");
       renderer.setupFlow.setStatus("Installing Slack and dependencies…");
       expect(screen.snapshot()).not.toContain("5s");
 
@@ -4673,7 +4685,7 @@ describe("TerminalRenderer setup flow session", () => {
   it("uses the attention color for an external-action pulse", () => {
     const { screen, renderer } = makeRenderer();
 
-    renderer.setupFlow.begin("Agent connections", "pulse");
+    renderer.setupFlow.begin("Agent connections");
     renderer.setupFlow.setStatus({
       kind: "external-action",
       text: "Waiting for you to complete setup in the browser…",
@@ -4695,7 +4707,7 @@ describe("TerminalRenderer setup flow session", () => {
       unicode: false,
     });
 
-    renderer.setupFlow.begin("Configure the agent model", "pulse");
+    renderer.setupFlow.begin("Configure the agent model");
     renderer.setupFlow.setStatus("Checking the project...");
 
     expect(screen.snapshot()).toContain("* Checking the project...");

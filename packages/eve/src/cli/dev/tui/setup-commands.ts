@@ -16,21 +16,21 @@ import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
 import { registryCommandOutcome, registryItemProgress } from "./registry-result-message.js";
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
-import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
+import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
 export type TuiSetupCommand = Exclude<PromptCommandExtensionName, "model">;
 
 /**
- * Panel title and loading indicator per command. The bordered panel never
- * repeats the echoed command verbatim, but it keeps a constant title as flows
- * move past their opening question.
+ * Panel title per command. The bordered panel never repeats the echoed command
+ * verbatim, but it keeps a constant title as flows move past their opening
+ * question.
  */
 export const SETUP_FLOW_CONFIG = {
-  login: { title: "", indicator: "pulse" },
-  add: { title: "", indicator: "pulse" },
-  deploy: { title: "", indicator: "spinner" },
-} satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
+  login: { title: "" },
+  add: { title: "" },
+  deploy: { title: "" },
+} satisfies Record<TuiSetupCommand, { title: string }>;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation" | "waitForInterrupt">;
@@ -89,6 +89,8 @@ export interface TuiSetupCommandResult {
   partial?: true;
   /** Promotes an outcome to a top-level status. */
   tone?: "success" | "error";
+  /** Replaces the echoed invocation once the command settles. */
+  summary?: string;
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
@@ -204,7 +206,7 @@ export async function runTuiSetupCommand(
           outcomePromise,
           interrupt.promise.then((interrupt) => ({ kind: "interrupt" as const, interrupt })),
         ]);
-        if (settled.kind === "outcome") return settled.value;
+        if (settled.kind === "outcome") return withAddSummary(input, settled.value);
         if (
           command === "add" &&
           settled.interrupt === "escape" &&
@@ -216,13 +218,12 @@ export async function runTuiSetupCommand(
           interrupted = true;
           controller.abort(new WizardCancelledError());
           const outcome = await execution;
-          return outcome.partial === true
-            ? outcome
-            : {
-                ...outcome,
-                ...cancelledSetupResult(),
-                tone: undefined,
-              };
+          return withAddSummary(
+            input,
+            outcome.partial === true
+              ? outcome
+              : { ...outcome, ...cancelledSetupResult(), tone: undefined, summary: undefined },
+          );
         }
       } finally {
         interrupt.dispose();
@@ -360,12 +361,26 @@ async function executeSetupCommand(
   }
 }
 
+/** Every `/add` outcome leaves a summary in place of its invocation. */
+function withAddSummary(
+  input: TuiSetupCommandInput,
+  outcome: TuiSetupCommandResult,
+): TuiSetupCommandResult {
+  const address = input.initialRegistryAddress;
+  if (input.command !== "add" || outcome.summary !== undefined || address === undefined) {
+    return outcome;
+  }
+  if (outcome.tone === "error") return { ...outcome, summary: `Couldn't add ${address}` };
+  if (outcome.cancelled === true) return { ...outcome, summary: `${address} not added` };
+  return outcome;
+}
+
 function registryResult(
   result: RegistrySessionResult,
   warnings: readonly string[],
 ): TuiSetupCommandResult {
-  const { status, message } = registryCommandOutcome(result, warnings);
-  const outcome: TuiSetupCommandResult = { message, preserveFlowDiagnostics: false };
+  const { status, summary, message } = registryCommandOutcome(result, warnings);
+  const outcome: TuiSetupCommandResult = { message, summary, preserveFlowDiagnostics: false };
   if (status === "cancelled") outcome.cancelled = true;
   else outcome.tone = status;
   return outcome;
@@ -377,10 +392,11 @@ function withRegistryResults(
   warnings: readonly string[],
 ): TuiSetupCommandResult {
   if (!(error instanceof RegistryFlowFailedError)) return outcome;
-  const completed = registryResult(error.completed, warnings).message;
+  const completed = registryResult(error.completed, warnings);
   return {
     ...outcome,
-    message: [completed, outcome.message].filter((part) => part !== "").join("\n"),
+    summary: completed.summary,
+    message: [completed.message, outcome.message].filter((part) => part !== "").join("\n"),
     partial: true,
     tone: "error",
     preserveFlowDiagnostics: false,

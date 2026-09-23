@@ -63,7 +63,6 @@ import {
 import { renderFlowDrawer } from "./flow-drawer.js";
 import type {
   SetupEditableSelectResult,
-  SetupFlowIndicator,
   SetupFlowInterrupt,
   SetupFlowRenderer,
   SetupFlowStatus,
@@ -234,8 +233,6 @@ function completedTurnStatus(input: {
   return "Done";
 }
 
-type SetupFlowIndicatorState = { kind: "spinner" } | { kind: "pulse"; startedAtMs: number };
-
 type SetupFlowStatusState =
   | { kind: "progress"; text: string; startedAtMs: number }
   | { kind: "external-action"; text: string; emphasis: string; startedAtMs: number };
@@ -245,7 +242,8 @@ type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: num
 type SetupFlowState = {
   title: string;
   navigation?: PlannerNavigation;
-  indicator: SetupFlowIndicatorState;
+  /** When the flow's pulse started, so its blink stays on a steady beat. */
+  startedAtMs: number;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
   status?: SetupFlowStatusState;
@@ -637,7 +635,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
-    begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    begin: (title) => this.#beginSetupFlow(title),
     setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
@@ -2000,13 +1998,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Settles the pending command echo with the outcome's status, then hangs any
-   * detail text under it with the elbow. Without an echo, a successful outcome
-   * carries its own check mark.
+   * Settles the pending command echo with the outcome's status, optionally
+   * replacing the invocation with a summary, then hangs any detail text under
+   * it with the elbow. Without an echo, a successful outcome carries its own
+   * check mark.
    */
-  renderCommandResult(text: string, status?: CommandResultStatus): void {
+  renderCommandResult(text: string, status?: CommandResultStatus, summary?: string): void {
     const content = stripAnsi(text);
-    const echo = this.#settleCommandEcho(status);
+    const echo = this.#settleCommandEcho(status, summary);
     if (content.trim().length === 0) {
       if (echo !== undefined) this.#paint();
       return;
@@ -2023,7 +2022,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * The echo stays live, and so out of scrollback, until its command settles:
-   * the outcome is drawn into its gutter.
+   * its gutter pulses meanwhile, then carries the outcome.
    */
   #pushCommandEcho(body: string): void {
     this.#settleCommandEcho();
@@ -2032,11 +2031,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock(block);
   }
 
-  #settleCommandEcho(status?: CommandResultStatus): Block | undefined {
+  #settleCommandEcho(status?: CommandResultStatus, summary?: string): Block | undefined {
     const block = this.#pendingCommandEcho;
     if (block === undefined) return undefined;
     this.#pendingCommandEcho = undefined;
     block.live = false;
+    if (summary !== undefined) block.result = stripTerminalControls(summary);
     if (status === "success") block.status = "done";
     else if (status !== undefined) block.status = status;
     return block;
@@ -2047,16 +2047,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * every flow line, question, and status renders inside it; the transcript
    * above stays untouched.
    */
-  #beginSetupFlow(title: string, indicator: SetupFlowIndicator = "spinner"): void {
+  #beginSetupFlow(title: string): void {
     this.#start();
     if (this.#startupEditor === undefined) this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    const indicatorState: SetupFlowIndicatorState =
-      indicator === "pulse" ? { kind: "pulse", startedAtMs: Date.now() } : { kind: "spinner" };
     this.#setupFlow = {
       title: stripTerminalControls(title),
-      indicator: indicatorState,
+      startedAtMs: Date.now(),
       lines: [],
       outputBuffer: [],
     };
@@ -2747,7 +2745,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#setupFlow === undefined) {
       this.#setupFlow = {
         title: "",
-        indicator: { kind: "spinner" },
+        startedAtMs: Date.now(),
         lines: [],
         outputBuffer: [],
         // Fabricated for a bare question (no begin/end pair) — closed with
@@ -4348,12 +4346,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #setupFlowIndicator(flow: SetupFlowState, status?: SetupFlowStatusState): FlowPanelIndicator {
-    if (flow.indicator.kind === "spinner") {
-      return { glyph: this.#spinnerFrame(), color: "yellow" };
-    }
     return {
       glyph: this.#progressPulseGlyph(
-        flow.indicator.startedAtMs,
+        flow.startedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
       ),
       color: status?.kind === "external-action" ? "yellow" : "green",

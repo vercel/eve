@@ -145,7 +145,7 @@ export function createPromptCommandHandler(
       }
       const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
       const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(flowConfig.title, flowConfig.indicator);
+      flow.begin(flowConfig.title);
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
