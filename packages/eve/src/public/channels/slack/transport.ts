@@ -34,20 +34,34 @@ export interface SlackTransportOptions {
   readonly fileBaseUrl?: string;
 }
 
+/** Options this module has already checked, confined and resolved. */
+const resolvedTransports = new WeakSet<object>();
+
 /**
  * Checks the configured bases and resolves each to the directory href that method
- * names and file paths resolve against, throwing on one eve cannot reach. Call it
- * where the channel is constructed: `fileBaseUrl` absorbs its fallback here, and
- * every outbound call then reads a resolved string.
+ * names and file paths resolve against, throwing on one eve cannot reach.
+ * `fileBaseUrl` absorbs its fallback here, `fetch` is confined here, and every
+ * outbound call then reads a resolved string.
+ *
+ * Resolving an already-resolved value returns it unchanged, so `slackChannel()`
+ * can resolve once at construction — where a bad base belongs — while an entry
+ * point reached without a channel resolves for itself.
  */
 export function resolveSlackTransportOptions(
   api: SlackTransportOptions | undefined,
 ): SlackTransportOptions | undefined {
   if (api === undefined) return undefined;
+  if (resolvedTransports.has(api)) return api;
   const apiBaseUrl = slackBaseHref(api.apiBaseUrl, "api.apiBaseUrl");
   const fileBaseUrl =
     api.fileBaseUrl === undefined ? apiBaseUrl : slackBaseHref(api.fileBaseUrl, "api.fileBaseUrl");
-  return { apiBaseUrl, fetch: confineFetch(api.fetch, apiBaseUrl, fileBaseUrl), fileBaseUrl };
+  const resolved = {
+    apiBaseUrl,
+    fetch: confineFetch(api.fetch, apiBaseUrl, fileBaseUrl),
+    fileBaseUrl,
+  };
+  resolvedTransports.add(resolved);
+  return resolved;
 }
 
 /**

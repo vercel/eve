@@ -402,13 +402,12 @@ messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
 ```ts
-import { callSlackApi, resolveSlackTransportOptions } from "eve/channels/slack";
+import { callSlackApi } from "eve/channels/slack";
 import { connectSlackCredentials } from "@vercel/connect/eve";
 
 const { botToken } = connectSlackCredentials("slack/my-agent");
-const api = resolveSlackTransportOptions({ apiBaseUrl: process.env.SLACK_API_BASE_URL });
 const response = await callSlackApi({
-  api,
+  api: { apiBaseUrl: process.env.SLACK_API_BASE_URL },
   botToken,
   context: { teamId: "T0123456789" },
   operation: "reactions.get",
@@ -420,10 +419,10 @@ if (!response.ok) throw new Error(String(response.error));
 `callSlackApi` resolves function-form tokens (secret managers, Connect
 rotation) with the supplied `context` at call time and form-encodes the body — the only safe default,
 since Slack's JSON support is partial (`conversations.replies` rejects
-JSON). It has no channel to inherit
-[`api`](#point-the-channel-at-a-different-slack-api-host) from, so pass the same one the
-channel was given, through `resolveSlackTransportOptions` — that is where the bases are
-checked and resolved. An `apiBaseUrl` of `undefined` keeps Slack's own host.
+JSON). It takes the same
+[`api`](#point-the-channel-at-a-different-slack-api-host) the channel takes, checked and
+confined the same way, so a call made without a channel carries the same guarantees. An
+`apiBaseUrl` of `undefined` keeps Slack's own host.
 
 `resolveSlackBotToken` materializes a `SlackBotToken` to a string when you need the
 bearer token itself.

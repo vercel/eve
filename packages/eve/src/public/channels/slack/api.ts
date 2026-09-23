@@ -35,6 +35,7 @@ import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import {
   callSlackApiTrackingResponse,
+  resolveSlackTransportOptions,
   slackApiOptions,
   type SlackTransportOptions,
 } from "#public/channels/slack/transport.js";
@@ -89,6 +90,9 @@ export type SlackApiResponse = SlackPrimitiveApiResponse;
  * and form-encoded. Form is the only safe default: Slack's JSON support
  * is partial (e.g. `conversations.replies` rejects JSON). Returns the
  * raw JSON response; callers inspect `response.ok` themselves.
+ *
+ * `api` takes the same value {@link slackChannel} does and is checked and
+ * confined here, so a call made without a channel carries the same guarantees.
  */
 export async function callSlackApi(input: {
   readonly api?: SlackTransportOptions;
@@ -100,7 +104,9 @@ export async function callSlackApi(input: {
   return callSlackApiTrackingResponse(
     input.operation,
     normalizeSlackApiBody(input.body),
-    slackApiOptions(input.api, () => resolveSlackBotToken(input.botToken, input.context)),
+    slackApiOptions(resolveSlackTransportOptions(input.api), () =>
+      resolveSlackBotToken(input.botToken, input.context),
+    ),
   );
 }
 

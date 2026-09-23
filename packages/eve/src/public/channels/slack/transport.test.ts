@@ -109,3 +109,26 @@ describe("the fetch resolveSlackTransportOptions returns", () => {
     ).toBeUndefined();
   });
 });
+
+describe("resolving an already-resolved value", () => {
+  it("returns it unchanged rather than re-wrapping", () => {
+    const once = resolveSlackTransportOptions({ apiBaseUrl: "https://sim.example/api" });
+    expect(resolveSlackTransportOptions(once)).toBe(once);
+  });
+
+  it("leaves the confinement single-layered", async () => {
+    const seen: string[] = [];
+    const supplied = async (input: Parameters<typeof fetch>[0]) => {
+      seen.push(String(input));
+      return new Response("");
+    };
+    const once = resolveSlackTransportOptions({
+      apiBaseUrl: "https://sim.example/api",
+      fetch: supplied as never,
+    });
+    const twice = resolveSlackTransportOptions(once);
+    expect(twice?.fetch).toBe(once?.fetch);
+    await twice?.fetch?.("https://sim.example/api/chat.postMessage");
+    expect(seen).toEqual(["https://sim.example/api/chat.postMessage"]);
+  });
+});

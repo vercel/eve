@@ -1016,16 +1016,15 @@ describe("api transport options", () => {
     expect(String(globalFetch.mock.calls[0]?.[0])).toBe("https://slack.com/api/auth.test");
   });
 
-  it("sends the call to the configured base on api.fetch", async () => {
+  it("checks and resolves a base it is handed directly", async () => {
     const globalFetch = okFetch();
     vi.stubGlobal("fetch", globalFetch);
     const apiFetch = okFetch();
 
+    // No trailing slash and never passed through resolveSlackTransportOptions:
+    // the call resolves its own options.
     await callSlackApi({
-      api: resolveSlackTransportOptions({
-        apiBaseUrl: "http://localhost:3000/api/slack",
-        fetch: apiFetch,
-      }),
+      api: { apiBaseUrl: "http://localhost:3000/api/slack", fetch: apiFetch },
       body: {},
       botToken: "xoxb-test",
       operation: "auth.test",
@@ -1033,5 +1032,30 @@ describe("api transport options", () => {
 
     expect(String(apiFetch.mock.calls[0]?.[0])).toBe("http://localhost:3000/api/slack/auth.test");
     expect(globalFetch).not.toHaveBeenCalled();
+  });
+
+  it("confines a fetch it is handed directly", async () => {
+    const globalFetch = okFetch();
+    vi.stubGlobal("fetch", globalFetch);
+    const apiFetch = okFetch();
+    const api = { apiBaseUrl: "http://localhost:3000/api/slack", fetch: apiFetch };
+
+    await callSlackApi({ api, body: {}, botToken: "xoxb-test", operation: "auth.test" });
+    await (resolveSlackTransportOptions(api)?.fetch ?? fetch)("https://files.slack.com/upload/abc");
+
+    expect(globalFetch.mock.calls.map((call) => String(call[0]))).toEqual([
+      "https://files.slack.com/upload/abc",
+    ]);
+  });
+
+  it("names the option a base it cannot reach belongs to", async () => {
+    await expect(
+      callSlackApi({
+        api: { apiBaseUrl: "/api/slack" },
+        body: {},
+        botToken: "xoxb-test",
+        operation: "auth.test",
+      }),
+    ).rejects.toThrow(/api\.apiBaseUrl must be an absolute http or https URL/);
   });
 });
