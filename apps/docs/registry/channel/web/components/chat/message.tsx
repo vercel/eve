@@ -3,14 +3,7 @@
 "use client";
 
 import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
-import {
-  BrainIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CheckIcon,
-  Loader2Icon,
-  XIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
@@ -323,20 +316,12 @@ function ActivityGroup({
 }) {
   const isWorking =
     !isSettled || parts.some((part) => part.type === "reasoning" && part.state === "streaming");
-  const [open, setOpen] = useState(isWorking);
-
-  useEffect(() => {
-    if (isWorking) setOpen(true);
-  }, [isWorking]);
+  const [open, setOpen] = useState(false);
 
   return (
     <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
-        {isWorking ? (
-          <Loader2Icon className="size-4 animate-spin" />
-        ) : (
-          <BrainIcon className="size-4" />
-        )}
+        {isWorking ? <Loader2Icon className="size-4 animate-spin" /> : null}
         <span>{isWorking ? "Working..." : "Activity"}</span>
         <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>

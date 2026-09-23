@@ -1,14 +1,7 @@
 "use client";
 
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "eve/client";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CheckIcon,
-  Loader2Icon,
-  WrenchIcon,
-  XIcon,
-} from "lucide-react";
+import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -98,12 +91,9 @@ export function SubagentTraces({ traces }: { readonly traces: readonly SubagentT
 }
 
 function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
-  const [open, setOpen] = useState(trace.status === "running");
-  useEffect(() => {
-    setOpen(trace.status === "running");
-  }, [trace.status]);
+  const [open, setOpen] = useState(false);
 
-  const detailCount = trace.tools.length;
+  const detailCount = trace.steps.length + trace.tools.length;
   return (
     <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
@@ -117,9 +107,7 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
       <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
         {detailCount === 0 ? (
           <p className="text-sm">
-            {trace.status === "running"
-              ? "Waiting for the subagent to begin…"
-              : "No tool activity."}
+            {trace.status === "running" ? "Waiting for the subagent to begin…" : "No activity."}
           </p>
         ) : (
           <TraceTimeline trace={trace} />
@@ -130,16 +118,22 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
 }
 
 function TraceTimeline({ trace }: { readonly trace: SubagentTrace }) {
+  const entries = [...trace.steps.filter((step) => step.reasoning), ...trace.tools].sort(
+    (left, right) => left.order - right.order,
+  );
+
   return (
-    <div className="space-y-1.5 pb-1 pl-1">
-      {trace.tools.map((tool) => (
-        <div className="flex gap-2" key={tool.callId}>
-          <div className="flex w-4 shrink-0 justify-center pt-1">
-            <TraceStatus status={tool.status} />
+    <div className="space-y-2 pb-1">
+      {entries.map((entry) =>
+        "callId" in entry ? (
+          <SubagentToolRow key={entry.callId} tool={entry} />
+        ) : (
+          <div className="text-sm leading-6" key={entry.id}>
+            <p className="mb-1 text-xs text-muted-foreground/70">Reasoning</p>
+            <p className="whitespace-pre-wrap">{entry.reasoning}</p>
           </div>
-          <SubagentToolRow tool={tool} />
-        </div>
-      ))}
+        ),
+      )}
     </div>
   );
 }
@@ -150,35 +144,37 @@ function SubagentToolRow({ tool }: { readonly tool: SubagentTraceTool }) {
     tool.input !== undefined || tool.output !== undefined || tool.errorText !== undefined;
 
   return (
-    <div className="min-w-0 flex-1">
+    <div className="min-w-0">
       <button
         className={cn(
-          "flex w-full items-center gap-1.5 text-left text-sm leading-6 text-muted-foreground",
-          hasDetails && "group/tool hover:text-foreground",
+          "flex max-w-full items-center gap-2 py-0.5 text-left text-sm leading-6 text-muted-foreground transition-colors",
+          hasDetails ? "group/tool cursor-pointer hover:text-foreground" : "cursor-default",
         )}
         disabled={!hasDetails}
         onClick={() => setOpen((current) => !current)}
         type="button"
       >
-        <WrenchIcon className="size-3.5 shrink-0" />
+        <TraceStatus status={tool.status} />
         <span className="truncate">{formatName(tool.name)}</span>
         <span className="text-muted-foreground/70">· {toolStatusLabel(tool.status)}</span>
         {hasDetails ? (
           <ChevronRightIcon
             className={cn(
-              "ml-auto size-3 shrink-0 transition-transform",
-              open ? "rotate-90" : "opacity-0 group-hover/tool:opacity-100",
+              "size-3 shrink-0 transition-all",
+              open ? "rotate-90 opacity-100" : "opacity-0 group-hover/tool:opacity-100",
             )}
           />
         ) : null}
       </button>
       {open ? (
-        <div className="mt-1 space-y-1.5 border-border/40 border-l pl-3 text-xs leading-5">
-          <TracePayload label="input" value={tool.input} />
-          {tool.output !== undefined ? <TracePayload label="result" value={tool.output} /> : null}
-          {tool.errorText ? (
-            <TracePayload label="error" tone="error" value={tool.errorText} />
-          ) : null}
+        <div className="ml-2 border-l border-border/40 py-0.5 pl-3">
+          <div className="space-y-1.5">
+            <TracePayload label="input" value={tool.input} />
+            {tool.output !== undefined ? <TracePayload label="result" value={tool.output} /> : null}
+            {tool.errorText ? (
+              <TracePayload label="error" tone="error" value={tool.errorText} />
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>
