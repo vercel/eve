@@ -1,5 +1,5 @@
 import type { ContentPart, ModelMessage, ToolSet } from "ai";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import type { InputRequest } from "#shared/input.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";

@@ -2,7 +2,7 @@ import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
 import pc from "#compiled/picocolors/index.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import {
   assertNoLegacyProjectLinkDirectory,

@@ -8,7 +8,7 @@ import {
   runVercelCaptureStdout,
   type RunVercelCaptureResult,
 } from "#setup/primitives/run-vercel.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 export const LINQ_TRIGGER_PATH = "/eve/v1/linq";
 export const LINQ_TRIGGER_EVENTS = ["message.received", "reaction.added", "reaction.removed"];

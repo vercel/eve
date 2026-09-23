@@ -18,6 +18,7 @@ import { isBuiltin } from "node:module";
 import { join, parse, relative } from "node:path";
 
 import { buildWithNitroRolldown } from "./nitro-rolldown.mjs";
+import vendoredZod from "./vendor-compiled/zod.mjs";
 import { createVendoredDependencyWarningFilter } from "./vendor-warning-log.mjs";
 
 /**
@@ -207,6 +208,35 @@ function isExternalPackageSpecifier(source) {
   return false;
 }
 
+const VENDORED_ZOD_IMPORTS = new Map(
+  Object.entries(vendoredZod.sharedSpecifiers).map(([specifier, outputPath]) => [
+    specifier,
+    `#compiled/zod/${outputPath}.js`,
+  ]),
+);
+
+/**
+ * eve ships one Zod. Every Zod import that reaches the build, including ones
+ * inside bundled dependencies such as `@vercel/sdk`, resolves to the vendored
+ * copy instead of copying Zod's sources into `dist/src/node_modules`.
+ */
+function createVendoredZodPlugin() {
+  return {
+    name: "eve:vendored-zod",
+    resolveId(source, importer) {
+      if (source !== "zod" && !source.startsWith("zod/")) return null;
+      const id = VENDORED_ZOD_IMPORTS.get(source);
+      if (id === undefined) {
+        throw new Error(
+          `${importer ?? "eve"} imports "${source}", which eve's vendored Zod does not export. ` +
+            `Add it to sharedSpecifiers in scripts/vendor-compiled/zod.mjs.`,
+        );
+      }
+      return { id, external: true };
+    },
+  };
+}
+
 async function collectSourceFiles(directory, relativeRoot = "") {
   const entries = await readdir(directory, { withFileTypes: true });
   const sourceFiles = [];
@@ -263,6 +293,7 @@ await buildWithNitroRolldown({
   external: isExternalPackageSpecifier,
   platform: "node",
   plugins: [
+    createVendoredZodPlugin(),
     createStripUnusedRolldownRuntimeImportPlugin(),
     createDynamicToolTransformPlugin(),
     createWorkflowMetadataTransformPlugin(),

@@ -58,6 +58,11 @@ catalog:
   vitest: "4.1.10"
   zod: "4.5.4"
 
+overrides:
+  # eve ships one vendored Zod (packages/eve/scripts/vendor-compiled/zod.mjs).
+  # @vercel/oidc's config reader pins its own, which would bundle extra copies.
+  "@vercel/cli-config>zod": "catalog:"
+
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
