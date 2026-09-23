@@ -1,4 +1,3 @@
-import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
@@ -86,7 +85,9 @@ describe("createPromptCommandHandler", () => {
         context(),
       ),
     ).resolves.toEqual({
-      message: `Model changed to ${pc.bold("anthropic/claude-opus-4.6")}. Live on your next prompt.`,
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.6",
+      tone: "success",
     });
     expect(applyModel).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
@@ -109,6 +110,8 @@ describe("createPromptCommandHandler", () => {
       handler.handle({ type: "extension", name: "model", argument: "openai/gpt-5.4" }, context()),
     ).resolves.toEqual({
       message: "Model is pinned to the external provider `anthropic`.",
+      summary: "Couldn't change the model",
+      tone: "error",
     });
     expect(applyModel).not.toHaveBeenCalled();
   });

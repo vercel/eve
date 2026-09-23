@@ -58,59 +58,58 @@ export function createPromptCommandHandler(
           };
         }
         const appRoot = target.agentRoot ?? target.workspaceRoot;
+        const usage = modelFailure(
+          "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
+        );
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
-          const {
-            changeAgentModel,
-            changeAgentModelSettings,
-            formatApplyModelOutcome,
-            formatApplyModelSettingsOutcome,
-          } = await import("#setup/flows/model-source-change.js");
+          const { changeAgentModel, changeAgentModelSettings } =
+            await import("#setup/flows/model-source-change.js");
           const [slug, reasoning, ...extra] = command.argument.split(/\s+/u);
-          if (slug === undefined || extra.length > 0) {
-            return {
-              message: "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
-            };
-          }
+          if (slug === undefined || extra.length > 0) return usage;
           if (
             reasoning !== undefined &&
             !["default", "none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoning)
           ) {
-            return {
-              message: "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
-            };
+            return usage;
           }
           // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
           const refusal = await checkRefusal(appRoot);
-          if (refusal !== null) {
-            return { message: refusal };
-          }
+          if (refusal !== null) return modelFailure(refusal);
+          const requested = reasoning === undefined ? slug : `${slug} ${reasoning}`;
           if (reasoning !== undefined) {
+            const outcome = await changeAgentModelSettings({
+              appRoot,
+              patch: {
+                model: { kind: "set", value: slug },
+                reasoning:
+                  reasoning === "default"
+                    ? { kind: "remove" }
+                    : { kind: "set", value: reasoning as AgentReasoningDefinition },
+                gatewayServiceTier: { kind: "keep" },
+              },
+            });
+            if (outcome.kind === "rejected") return modelFailure(outcome.message);
             return {
-              message: formatApplyModelSettingsOutcome(
-                await changeAgentModelSettings({
-                  appRoot,
-                  patch: {
-                    model: { kind: "set", value: slug },
-                    reasoning:
-                      reasoning === "default"
-                        ? { kind: "remove" }
-                        : { kind: "set", value: reasoning as AgentReasoningDefinition },
-                    gatewayServiceTier: { kind: "keep" },
-                  },
-                }),
-              ),
+              message: "",
+              summary:
+                outcome.kind === "unchanged"
+                  ? `Model already set to ${requested}`
+                  : `Model set to ${requested}`,
+              ...(outcome.kind === "changed" && { tone: "success" as const }),
             };
           }
           const applyModel = options.applyModel ?? changeAgentModel;
-          return { message: formatApplyModelOutcome(await applyModel({ appRoot, slug })) };
+          const outcome = await applyModel({ appRoot, slug });
+          if (outcome.kind === "rejected") return modelFailure(outcome.message);
+          return outcome.kind === "unchanged"
+            ? { message: "", summary: `Model already set to ${outcome.model}` }
+            : { message: "", summary: `Model set to ${outcome.to}`, tone: "success" };
         } catch (error) {
-          return {
-            message: `Couldn't change the model: ${toErrorMessage(error)}`,
-          };
+          return modelFailure(toErrorMessage(error));
         }
       }
 
@@ -175,4 +174,8 @@ export function createPromptCommandHandler(
       }
     },
   };
+}
+
+function modelFailure(message: string): PromptCommandOutcome {
+  return { message, summary: "Couldn't change the model", tone: "error" };
 }

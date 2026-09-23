@@ -1,5 +1,6 @@
 import type { ModelAccessChange, ModelConnectionSelection } from "#shared/model-connection.js";
 import { runModelLogin } from "#setup/flows/model-login.js";
+import { LOGIN_CONNECTION_OPTIONS } from "#setup/flows/model-login-options.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
@@ -206,7 +207,7 @@ export async function runTuiSetupCommand(
           outcomePromise,
           interrupt.promise.then((interrupt) => ({ kind: "interrupt" as const, interrupt })),
         ]);
-        if (settled.kind === "outcome") return withAddSummary(input, settled.value);
+        if (settled.kind === "outcome") return withCommandSummary(input, settled.value);
         if (
           command === "add" &&
           settled.interrupt === "escape" &&
@@ -218,7 +219,7 @@ export async function runTuiSetupCommand(
           interrupted = true;
           controller.abort(new WizardCancelledError());
           const outcome = await execution;
-          return withAddSummary(
+          return withCommandSummary(
             input,
             outcome.partial === true
               ? outcome
@@ -266,22 +267,31 @@ async function executeSetupCommand(
           connectionMessage: "",
           withConnectionUpdate: input.withExclusiveTerminal,
         });
-        return result.kind === "cancelled"
-          ? {
-              message: "Connect a model with /login when you’re ready.",
-              cancelled: true,
-              preserveFlowDiagnostics: false,
-            }
-          : {
-              message: "Connected. Start chatting · /add to extend your agent",
-              tone: "success",
-              effect: {
-                kind: "model-access-changed",
-                reload: result.reload,
-                ...(result.model && { model: result.model }),
-              },
-              preserveFlowDiagnostics: false,
-            };
+        if (result.kind === "cancelled") {
+          return {
+            // Onboarding has no echoed `/login` to summarize, so it keeps the hint.
+            message:
+              input.initialModelStep === "provider"
+                ? "Connect a model with /login when you’re ready."
+                : "",
+            cancelled: true,
+            preserveFlowDiagnostics: false,
+          };
+        }
+        const connection = LOGIN_CONNECTION_OPTIONS.find(
+          (option) => option.value === input.initialLoginConnection,
+        );
+        return {
+          message: "",
+          summary: connection === undefined ? "Connected" : `Connected with ${connection.label}`,
+          tone: "success",
+          effect: {
+            kind: "model-access-changed",
+            reload: result.reload,
+            ...(result.model && { model: result.model }),
+          },
+          preserveFlowDiagnostics: false,
+        };
       }
       case "add": {
         const flow = await flows.runRegistryFlow({
@@ -311,6 +321,7 @@ async function executeSetupCommand(
           return {
             message:
               "Not linked to a Vercel project. Run eve deploy in an interactive terminal to link it.",
+            tone: "error",
             preserveFlowDiagnostics: true,
           };
         }
@@ -318,12 +329,14 @@ async function executeSetupCommand(
           return {
             message:
               "ChatGPT subscription models are local-only. Switch to an AI Gateway or server-authenticated model before deploying.",
+            tone: "error",
             preserveFlowDiagnostics: true,
           };
         }
         return {
-          message:
-            result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
+          message: "",
+          summary:
+            result.productionUrl === undefined ? "Deployed" : `Deployed to ${result.productionUrl}`,
           tone: "success",
           preserveFlowDiagnostics: true,
           effect: { kind: "deployed" },
@@ -361,17 +374,31 @@ async function executeSetupCommand(
   }
 }
 
-/** Every `/add` outcome leaves a summary in place of its invocation. */
-function withAddSummary(
+function fallbackSummaries(
+  input: TuiSetupCommandInput,
+): { error: string; cancelled: string } | undefined {
+  switch (input.command) {
+    case "add": {
+      const address = input.initialRegistryAddress;
+      if (address === undefined) return undefined;
+      return { error: `Couldn't add ${address}`, cancelled: `${address} not added` };
+    }
+    case "login":
+      return { error: "Couldn't connect a model", cancelled: "Login cancelled" };
+    case "deploy":
+      return { error: "Couldn't deploy", cancelled: "Deploy cancelled" };
+  }
+}
+
+/** Failed and cancelled outcomes leave a summary in place of their invocation too. */
+function withCommandSummary(
   input: TuiSetupCommandInput,
   outcome: TuiSetupCommandResult,
 ): TuiSetupCommandResult {
-  const address = input.initialRegistryAddress;
-  if (input.command !== "add" || outcome.summary !== undefined || address === undefined) {
-    return outcome;
-  }
-  if (outcome.tone === "error") return { ...outcome, summary: `Couldn't add ${address}` };
-  if (outcome.cancelled === true) return { ...outcome, summary: `${address} not added` };
+  const summaries = fallbackSummaries(input);
+  if (outcome.summary !== undefined || summaries === undefined) return outcome;
+  if (outcome.tone === "error") return { ...outcome, summary: summaries.error };
+  if (outcome.cancelled === true) return { ...outcome, summary: summaries.cancelled };
   return outcome;
 }
 

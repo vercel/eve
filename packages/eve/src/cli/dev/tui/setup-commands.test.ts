@@ -69,7 +69,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "add" | "deploy";
+  command: "add" | "deploy" | "login";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -78,6 +78,7 @@ function run(input: {
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
   initialRegistryAddress?: string;
+  initialLoginConnection?: TuiSetupCommandInput["initialLoginConnection"];
 }) {
   const { upgradeChoice } = input;
   const fake = createFakePrompter(
@@ -90,6 +91,9 @@ function run(input: {
     flows: input.flows,
   };
   if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
+  if (input.initialLoginConnection !== undefined) {
+    commandInput.initialLoginConnection = input.initialLoginConnection;
+  }
   if (input.initialRegistryAddress !== undefined) {
     commandInput.initialRegistryAddress = input.initialRegistryAddress;
   }
@@ -276,10 +280,38 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
+  it("summarizes a login with its connection", async () => {
+    const flows = fakeFlows({
+      runModelLogin: vi.fn(async () => ({ kind: "ready" as const, reload: false })),
+    });
+
+    await expect(
+      run({ command: "login", flows, initialLoginConnection: "vercel" }),
+    ).resolves.toMatchObject({
+      message: "",
+      summary: "Connected with Vercel Account",
+      tone: "success",
+    });
+  });
+
+  it("summarizes a cancelled login without the onboarding hint", async () => {
+    const flows = fakeFlows({
+      runModelLogin: vi.fn(async () => ({ kind: "cancelled" as const })),
+    });
+
+    await expect(run({ command: "login", flows })).resolves.toEqual({
+      message: "",
+      summary: "Login cancelled",
+      cancelled: true,
+      preserveFlowDiagnostics: false,
+    });
+  });
+
   it("reports the production URL after a deploy", async () => {
     const flows = fakeFlows();
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
-      message: "Deployed: https://my-agent.vercel.app",
+      message: "",
+      summary: "Deployed to https://my-agent.vercel.app",
       tone: "success",
       preserveFlowDiagnostics: true,
       effect: { kind: "deployed" },
@@ -426,6 +458,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
         "Vercel denied access to that team — check your team access and SSO, then retry /deploy.",
+      summary: "Couldn't deploy",
       tone: "error",
       preserveFlowDiagnostics: true,
     });
@@ -460,6 +493,7 @@ describe("runTuiSetupCommand", () => {
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message: "The Vercel CLI isn't installed — run /deploy to install it, then retry /deploy.",
+      summary: "Couldn't deploy",
       tone: "error",
       preserveFlowDiagnostics: true,
     });
