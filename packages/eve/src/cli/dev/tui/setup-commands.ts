@@ -7,8 +7,6 @@ import {
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
 
-import { runModelFlow } from "#setup/flows/model.js";
-import type { ProviderSelection } from "#setup/provider-settings.js";
 import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
@@ -23,7 +21,7 @@ import type { PromptCommandExtensionName } from "./prompt-commands.js";
 import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
-export type TuiSetupCommand = PromptCommandExtensionName;
+export type TuiSetupCommand = Exclude<PromptCommandExtensionName, "model">;
 
 /**
  * Panel title and loading indicator per command. The bordered panel never
@@ -32,19 +30,15 @@ export type TuiSetupCommand = PromptCommandExtensionName;
  */
 export const SETUP_FLOW_CONFIG = {
   login: { title: "Connecting your model", indicator: "pulse" },
-  model: { title: "Configure the agent model", indicator: "pulse" },
   add: { title: "Add to your agent", indicator: "pulse" },
   deploy: { title: "Deploy to Vercel", indicator: "spinner" },
 } satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<
-    SetupFlowRenderer,
-    "readProviderPicker" | "readModelPicker" | "setNavigation" | "waitForInterrupt"
-  >;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation" | "waitForInterrupt">;
 
 type MuteableSetupRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelPicker" | "setNavigation">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation">;
 
 export type OnboardingScreenEvent = {
   screen:
@@ -83,7 +77,6 @@ export interface TuiSetupCommandInput {
 export interface TuiSetupFlows {
   runModelLogin?: typeof runModelLogin;
   runInstallVercelCliFlow: typeof runInstallVercelCliFlow;
-  runModelFlow: typeof runModelFlow;
   runRegistryFlow: typeof runRegistryFlow;
   runDeployFlow: typeof runDeployFlow;
 }
@@ -119,8 +112,6 @@ function muteableRenderer(
       isMuted() ? Promise.resolve(undefined) : renderer.readEditableSelect(options),
     readProviderPicker: (options) =>
       isMuted() ? Promise.resolve(undefined) : renderer.readProviderPicker(options),
-    readModelPicker: (options) =>
-      isMuted() ? Promise.resolve(undefined) : renderer.readModelPicker(options),
     readText: (options) => (isMuted() ? Promise.resolve(undefined) : renderer.readText(options)),
     readAcknowledge: (options) =>
       isMuted() ? Promise.resolve() : renderer.readAcknowledge(options),
@@ -245,7 +236,6 @@ async function executeSetupCommand(
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
     runInstallVercelCliFlow,
-    runModelFlow,
     runRegistryFlow,
     runDeployFlow,
     ...input.flows,
@@ -277,46 +267,6 @@ async function executeSetupCommand(
               },
               preserveFlowDiagnostics: false,
             };
-      }
-      case "model": {
-        const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
-          appRoot: input.agentRoot ?? appRoot,
-          environmentRoot: appRoot,
-          prompter,
-          signal,
-          chatGptAccountLabel: input.chatGptAccountLabel,
-          deps: {
-            pickModelSettings: (request) => renderer.readModelPicker(request),
-          },
-        };
-        if (input.initialModelStep !== undefined) {
-          modelInput.initialStep = input.initialModelStep;
-        }
-        if (input.onOnboardingScreen !== undefined) {
-          modelInput.onScreen = (screen) => input.onOnboardingScreen?.({ screen });
-        }
-        const result = await flows.runModelFlow(modelInput);
-        if (result.kind === "cancelled") {
-          return cancelledSetupResult();
-        }
-        // One line per completed menu action: the apply line (it already
-        // distinguishes success from a rejected slug), then the provider
-        // selection when that sub-flow also ran.
-        const lines: string[] = [];
-        if (result.modelMessage !== undefined) lines.push(result.modelMessage);
-        if (result.providerSelection !== undefined) {
-          lines.push(providerSelectionMessage(result.providerSelection));
-        }
-        const outcome: TuiSetupCommandResult = {
-          message: lines.join("\n"),
-          preserveFlowDiagnostics: false,
-        };
-        // A model edit can also move routing between AI Gateway and ChatGPT.
-        // The runner rebuilds authored artifacts before refreshing model access.
-        if (result.accessChanged) {
-          outcome.effect = { kind: "model-access-changed", reload: true };
-        }
-        return outcome;
       }
       case "add": {
         const flow = await flows.runRegistryFlow({
@@ -547,11 +497,4 @@ function vercelActionMessage(kind: string, command: string): string | undefined 
     default:
       return undefined;
   }
-}
-
-function providerSelectionMessage(selection: ProviderSelection): string {
-  if (selection === "chatgpt") return "ChatGPT subscription selected.";
-  return selection === "ai-gateway-project"
-    ? "AI Gateway via Project selected."
-    : "AI Gateway via API key selected.";
 }

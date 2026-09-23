@@ -439,7 +439,7 @@ function paintCommands(line: string, theme: Theme): string {
 function renderCommand(block: Block, theme: Theme): string[] {
   const c = theme.colors;
   const status = block.status === "error" ? `${c.red(theme.glyph.error)} ` : "";
-  return [`${c.cyan(theme.glyph.user)} ${status}${c.blue(block.body ?? "")}`];
+  return [`${c.cyan(theme.glyph.user)} ${status}${c.bold(block.body ?? "")}`];
 }
 
 /**

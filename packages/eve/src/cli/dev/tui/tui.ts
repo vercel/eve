@@ -24,6 +24,7 @@ import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
+import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
@@ -50,6 +51,40 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   startup?: DevelopmentTuiStartup;
 }
 
+function inlineArgumentSuggestions(appRoot: string) {
+  return async (command: "model" | "add"): Promise<readonly PromptArgumentSuggestion[]> => {
+    if (command === "model") {
+      const { gatewayModelCapabilities } = await import("#setup/boxes/model-capabilities.js");
+      const { fetchGatewayCatalog, modelOptionsFromCatalog } =
+        await import("#setup/boxes/select-model.js");
+      const catalog = await fetchGatewayCatalog().catch(() => undefined);
+      return modelOptionsFromCatalog(catalog).map((option) => {
+        const reasoning = gatewayModelCapabilities(catalog, option.value)?.reasoningLevels;
+        return {
+          value: option.value,
+          label: option.value,
+          hint: option.hint,
+          ...(reasoning === undefined || reasoning.length === 0
+            ? {}
+            : {
+                next: [
+                  { value: "default", label: "default" },
+                  ...reasoning.map((value) => ({ value, label: value })),
+                ],
+              }),
+        };
+      });
+    }
+    const { browseRegistryCatalog } = await import("#cli/commands/registry.js");
+    const catalog = await browseRegistryCatalog(appRoot);
+    return catalog.items.map((item) => ({
+      value: item.address,
+      label: item.name,
+      hint: item.description ?? item.address,
+    }));
+  };
+}
+
 export interface DevelopmentTuiStartup {
   readonly diagnostics: DevDiagnostics | undefined;
   readonly renderer: TerminalRenderer;
@@ -68,6 +103,7 @@ export async function startDevelopmentTuiStartup(
   const renderer = new TerminalRenderer({
     ...input,
     diagnostics,
+    argumentSuggestions: inlineArgumentSuggestions(input.appRoot),
     onExitRequest: input.onExitRequest,
   });
   renderer.beginStartupDraft({
@@ -173,6 +209,9 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     serverUrl,
     promptCommandHandler: createPromptCommandHandler({ target }),
     availablePromptCommands: promptCommandsFor(target.kind),
+    ...(target.kind === "local"
+      ? { argumentSuggestions: inlineArgumentSuggestions(target.workspaceRoot) }
+      : {}),
     formatTransportError: (error) =>
       isVercelAuthChallenge(error)
         ? formatRemoteAuthChallengeMessage(serverUrl)

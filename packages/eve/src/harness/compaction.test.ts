@@ -725,6 +725,28 @@ describe("compactMessages: tool-result cap heuristic", () => {
 });
 
 describe("compactMessages: forced summary", () => {
+  it("uses the model's default temperature when summarizing", async () => {
+    const { generateText } = await import("ai");
+    const summarizer = vi.mocked(generateText);
+    summarizer.mockResolvedValue({
+      text: "forced checkpoint",
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    await compactMessages(
+      [user("old message"), assistant("old reply")],
+      {} as Parameters<typeof compactMessages>[1],
+      { recentWindowSize: 10, threshold: ROOMY },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(summarizer.mock.calls[0]?.[0]).not.toHaveProperty("temperature");
+  });
+
   it.each(["", " \n\t"])(
     "rejects a blank checkpoint without replacing history (%j)",
     async (text) => {
