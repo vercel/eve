@@ -24,6 +24,7 @@ apps/benchmarks/evals/*/.eve-authoring-bootstrap.json
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
+packages/eve/src/extensions/code/extension/
 playwright-report/
 test-results/
 

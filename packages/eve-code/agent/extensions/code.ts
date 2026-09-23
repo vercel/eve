@@ -1,3 +1,3 @@
-import code from "eve-code";
+import code from "eve/extensions/code";
 
 export default code({});

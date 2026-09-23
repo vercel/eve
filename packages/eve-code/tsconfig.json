@@ -3,9 +3,6 @@
     "target": "ES2023",
     "module": "esnext",
     "moduleResolution": "bundler",
-    "paths": {
-      "eve-code": ["./extension/extension.ts"]
-    },
     "allowImportingTsExtensions": true,
     "rewriteRelativeImportExtensions": true,
     "types": ["node"],

@@ -1,4 +1,4 @@
-/** Consumer-facing helpers exported as `eve-code/sandbox`. */
+/** Consumer-facing helpers exported as `eve/extensions/code/sandbox`. */
 import type { SandboxSession } from "eve/sandbox";
 
 import { commandFailureDetail } from "./command-failure.ts";

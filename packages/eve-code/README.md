@@ -1,14 +1,19 @@
-# eve-code
+# eve/extensions/code
 
-`eve-code` is an eve extension for coding work. It contributes `apply_patch`, computer use, `gh`, `grep`, investigation and PR skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn; GitHub credentials are scoped to one repository and leased for each `gh` tool invocation. Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
+`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, computer use, `gh`, `grep`, investigation and PR skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn; GitHub credentials are scoped to one repository and leased for each `gh` tool invocation. Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
 
-This private package is staged for extraction from `internal-agents/packages/eve-code` at commit `67e53bdc4`. The original package and its e0 and v consumers remain in internal-agents until publication and consumer migration are handled separately.
+It ships inside the `eve` package. This private `@eve/code` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/code/extension` and publishes it with these entry points:
+
+- `eve/extensions/code`: the extension
+- `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
+- `eve/extensions/code/tools`: `apply_patch`, `computer_use`, `gh`, and `grep`
+- `eve/extensions/code/prwatch`: PR-watch primitives for consumer-owned workflow tools
 
 ## Mount
 
 ```ts
 // agent/extensions/code.ts
-import code from "eve-code";
+import code from "eve/extensions/code";
 
 export default code({
   // Optional; omit to mount without Connect-backed Vercel authentication.
@@ -30,7 +35,11 @@ Install CLI tooling and computer-use assets in the environment's `prepare` callb
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import { installCodeTooling, installComputerUse, startComputerUse } from "eve-code/sandbox";
+import {
+  installCodeTooling,
+  installComputerUse,
+  startComputerUse,
+} from "eve/extensions/code/sandbox";
 
 export const environment = VercelSandbox.environment({
   prepare: async (sandbox) => {
@@ -46,7 +55,7 @@ export default defineSandbox(async () => {
 });
 ```
 
-eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve-code alone does not rebuild an existing prepared artifact.
+eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve alone does not rebuild an existing prepared artifact.
 
 Mounting the extension exposes `computer_use` but does not install or start its driver. The prepared artifact captures files, not running processes; the `defineSandbox()` selector starts the driver once for each new durable sandbox. If the driver exits or the provider resumes only filesystem state, call `startComputerUse` again before using the tool; resuming a sandbox does not rerun the selector. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
 
@@ -54,17 +63,17 @@ Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commi
 
 ## Non-Connect escape hatch
 
-Consumers with a PAT, benchmark token, or another credential provider can omit the corresponding connector and call `authenticateGitHub` or `authenticateVercel` from `eve-code/sandbox` in their own sandbox lifecycle. These helpers support firewall, command-delivery, and broker options for consumer-owned commands; they do not configure the extension's `gh` tool.
+Consumers with a PAT, benchmark token, or another credential provider can omit the corresponding connector and call `authenticateGitHub` or `authenticateVercel` from `eve/extensions/code/sandbox` in their own sandbox lifecycle. These helpers support firewall, command-delivery, and broker options for consumer-owned commands; they do not configure the extension's `gh` tool.
 
 ## Develop in this workspace
 
-Build the local framework and extension in dependency order:
+Rebuild eve after editing `extension/`; the local agent under `agent/` mounts the built `eve/extensions/code`:
 
 ```sh
-pnpm exec turbo run build --filter=eve-code
-pnpm --filter eve-code typecheck
-pnpm --filter eve-code test
-pnpm --filter eve-code test:scenario
+pnpm --filter eve build
+pnpm --filter @eve/code typecheck
+pnpm --filter @eve/code test
+pnpm --filter @eve/code test:scenario
 pnpm exec oxlint packages/eve-code
 pnpm exec oxfmt --check packages/eve-code
 ```

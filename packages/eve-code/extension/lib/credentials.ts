@@ -75,7 +75,7 @@ async function brokerRules(
 
   const byHost = headersBySandbox.get(sandbox) ?? new Map();
   for (const [host, headers] of Object.entries(rules)) {
-    byHost.set(host, { ...(byHost.get(host) ?? {}), ...headers });
+    byHost.set(host, { ...byHost.get(host), ...headers });
   }
   headersBySandbox.set(sandbox, byHost);
   const previous = policyQueues.get(sandbox) ?? Promise.resolve();
