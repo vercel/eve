@@ -1884,6 +1884,11 @@
           "target": "components/chat/message.tsx"
         },
         {
+          "path": "registry/channel/web/components/chat/subagent-traces.tsx",
+          "type": "registry:file",
+          "target": "components/chat/subagent-traces.tsx"
+        },
+        {
           "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
           "type": "registry:file",
           "target": "components/ai-elements/chain-of-thought.tsx"
