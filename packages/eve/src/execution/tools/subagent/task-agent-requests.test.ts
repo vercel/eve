@@ -6,15 +6,20 @@ import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
-import { handleSubagentEvent } from "#execution/tools/subagent/handle-event.js";
+import {
+  emitSubagentEventStep,
+  dispatchSessionEventHooksStep,
+} from "#execution/tools/subagent/emit-event-step.js";
+import { stampTestEvent } from "#internal/testing/events.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
   dispatchTaskAgentInvocationStep: vi.fn(),
   settleTaskAgentInvocationStep: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/handle-event.js", () => ({
-  handleSubagentEvent: vi.fn(),
+vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
+  emitSubagentEventStep: vi.fn(),
+  dispatchSessionEventHooksStep: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
@@ -34,7 +39,13 @@ const result: RuntimeSubagentChildResult = {
   subagentName: "research",
 };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(dispatchSessionEventHooksStep).mockImplementation(async (input) => ({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  }));
+});
 
 describe("workflow-owned agent requests", () => {
   it("reuses the settlement step's flushed trace context during workflow replay", async () => {
@@ -65,33 +76,65 @@ describe("workflow-owned agent requests", () => {
     expect(replay).toEqual(settled);
   });
 
-  it("emits completion and acknowledges only after settlement", async () => {
-    const updatedState = { sessionId: "updated" } as never;
-    vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
-      settled: true,
-      completion: {
-        type: "subagent.completed",
+  it.each([false, true])(
+    "runs completion hooks after publication and before acknowledgement (hook fails: %s)",
+    async (fails) => {
+      const updatedState = { sessionId: "updated" } as never;
+      const hookState = { sessionId: "hooked" } as never;
+      const completion = {
+        type: "subagent.completed" as const,
         data: { callId: "nested", subagentName: "research", output: "done" },
-      },
-      serializedContext: {},
-      sessionState: updatedState,
-    });
-    const publication = Promise.withResolvers<Awaited<ReturnType<typeof handleSubagentEvent>>>();
-    vi.mocked(handleSubagentEvent).mockReturnValue(publication.promise);
-    const applying = applyTaskAgentRequest(
-      { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
-      { sessionWritable: {} as never, serializedContext: {}, sessionState },
-    );
-    await vi.waitFor(() => expect(handleSubagentEvent).toHaveBeenCalledOnce());
-    expect(resumeHookStep).not.toHaveBeenCalled();
-    publication.resolve({ serializedContext: {}, sessionState: updatedState });
-    expect((await applying).sessionState).toBe(updatedState);
-    expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
-      "reply",
-      { kind: "agent-settled", callId: "nested" },
-      { ifPresent: true },
-    );
-  });
+      };
+      const event = stampTestEvent(completion);
+      vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
+        settled: true,
+        completion,
+        serializedContext: {},
+        sessionState: updatedState,
+      });
+      const publication =
+        Promise.withResolvers<Awaited<ReturnType<typeof emitSubagentEventStep>>>();
+      const hooks =
+        Promise.withResolvers<Awaited<ReturnType<typeof dispatchSessionEventHooksStep>>>();
+      vi.mocked(emitSubagentEventStep).mockReturnValue(publication.promise);
+      vi.mocked(dispatchSessionEventHooksStep).mockReturnValue(hooks.promise);
+      const applying = applyTaskAgentRequest(
+        { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
+        { sessionWritable: {} as never, serializedContext: {}, sessionState },
+      );
+      await vi.waitFor(() => expect(emitSubagentEventStep).toHaveBeenCalledOnce());
+      expect(dispatchSessionEventHooksStep).not.toHaveBeenCalled();
+      expect(resumeHookStep).not.toHaveBeenCalled();
+      publication.resolve({ event, suppressed: false, serializedContext: { channel: true } });
+      await vi.waitFor(() =>
+        expect(dispatchSessionEventHooksStep).toHaveBeenCalledExactlyOnceWith({
+          event,
+          suppressed: false,
+          serializedContext: { channel: true },
+          sessionState: updatedState,
+        }),
+      );
+      expect(resumeHookStep).not.toHaveBeenCalled();
+      if (fails) {
+        const rejected = expect(applying).rejects.toThrow("hook failed");
+        hooks.reject(new Error("hook failed"));
+        await rejected;
+        expect(emitSubagentEventStep).toHaveBeenCalledOnce();
+        expect(resumeHookStep).not.toHaveBeenCalled();
+      } else {
+        hooks.resolve({ serializedContext: { hook: true }, sessionState: hookState });
+        expect(await applying).toEqual({
+          serializedContext: { hook: true },
+          sessionState: hookState,
+        });
+        expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
+          "reply",
+          { kind: "agent-settled", callId: "nested" },
+          { ifPresent: true },
+        );
+      }
+    },
+  );
 
   it("does not acknowledge a failed settlement", async () => {
     vi.mocked(settleTaskAgentInvocationStep).mockRejectedValue(new Error("write failed"));
@@ -123,7 +166,11 @@ describe("workflow-owned agent requests", () => {
       kind: "dispatched",
       sessionState,
     });
-    vi.mocked(handleSubagentEvent).mockResolvedValue({ serializedContext, sessionState });
+    vi.mocked(emitSubagentEventStep).mockResolvedValue({
+      event,
+      suppressed: false,
+      serializedContext,
+    });
 
     const applied = await applyTaskAgentRequest(
       {
@@ -138,7 +185,7 @@ describe("workflow-owned agent requests", () => {
       { sessionWritable: {} as never, serializedContext, sessionState },
     );
 
-    expect(handleSubagentEvent).toHaveBeenCalledWith({
+    expect(emitSubagentEventStep).toHaveBeenCalledWith({
       event,
       sessionWritable: {},
       serializedContext,

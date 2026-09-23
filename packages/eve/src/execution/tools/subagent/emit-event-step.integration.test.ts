@@ -10,11 +10,12 @@ import {
   SessionTitleKey,
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { dispatchSessionEventHooksStep } from "#execution/session/dispatch-event-hooks-step.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import { handleSubagentEvent } from "#execution/tools/subagent/handle-event.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import {
+  emitSubagentEventStep,
+  dispatchSessionEventHooksStep,
+} from "#execution/tools/subagent/emit-event-step.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -135,12 +136,17 @@ it.each(
         chunks.push(chunk);
       },
     });
-    const emitted = handleSubagentEvent({
+    const sessionState = createTestSessionState({ sessionId: "parent" });
+    const published = await emitSubagentEventStep({
       event,
       sessionWritable: stream,
       serializedContext: {},
-      sessionState: createTestSessionState({ sessionId: "parent" }),
+      sessionState,
     });
+    expect(calls).toEqual(["adapter", "stream"]);
+    expect(ctx.has(SessionKey)).toBe(false);
+    expect(ctx.has(SandboxKey)).toBe(false);
+    const emitted = dispatchSessionEventHooksStep({ ...published, sessionState });
     const firstHandler = subscription === "wildcard" ? "wildcard" : "typed";
     if (fails) {
       await expect(emitted).rejects.toThrow("subagent subscriber failed");
@@ -225,6 +231,7 @@ it("does not prepare context when no hook subscribes to the published event", as
   vi.mocked(deserializeContext).mockResolvedValue(ctx);
   const input = {
     event: stampTestEvent(events[0]!),
+    suppressed: false,
     serializedContext: { channel: true },
     sessionState: createTestSessionState({ sessionId: "parent" }),
   };
@@ -234,4 +241,18 @@ it("does not prepare context when no hook subscribes to the published event", as
   });
   expect(ctx.has(SessionKey)).toBe(false);
   expect(ctx.has(SandboxKey)).toBe(false);
+});
+
+it("skips suppressed events without restoring hook context", async () => {
+  const input = {
+    event: stampTestEvent(events[0]!),
+    suppressed: true,
+    serializedContext: { channel: true },
+    sessionState: createTestSessionState(),
+  };
+  expect(await dispatchSessionEventHooksStep(input)).toEqual({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  });
+  expect(deserializeContext).not.toHaveBeenCalled();
 });
