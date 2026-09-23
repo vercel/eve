@@ -17,13 +17,16 @@ import {
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
-/** Checkpoints publication separately from authored hook execution. */
+/** Publishes a subagent notification, then runs its hooks without model preparation. */
 export async function emitSubagentEventStep(input: {
   readonly event: UnstampedMessageStreamEvent;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<PublishedSessionEvent & { readonly serializedContext: Record<string, unknown> }> {
+}): Promise<{
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}> {
   "use step";
 
   const ctx = await deserializeContext(input.serializedContext);
@@ -34,51 +37,36 @@ export async function emitSubagentEventStep(input: {
     sessionWritable: input.sessionWritable,
     sessionId: input.sessionState.sessionId,
   });
+  let emitted: PublishedSessionEvent;
   try {
-    const emitted = await contextStorage.run(ctx, () => sink.emit(input.event));
-    return { ...emitted, serializedContext: serializeContext(ctx) };
+    emitted = await contextStorage.run(ctx, () => sink.emit(input.event));
   } finally {
     sink.release();
   }
-}
-
-export async function dispatchSessionEventHooksStep(
-  input: PublishedSessionEvent & {
-    readonly serializedContext: Record<string, unknown>;
-    readonly sessionState: DurableSessionState;
-  },
-): Promise<{
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}> {
-  "use step";
-
-  if (input.suppressed) {
-    return { serializedContext: input.serializedContext, sessionState: input.sessionState };
-  }
-  const ctx = await deserializeContext(input.serializedContext);
+  let sessionState = input.sessionState;
   const bundle = ctx.require(BundleKey);
   const registry = bundle.hookRegistry;
   if (
-    (registry.streamEventsByType.get(input.event.type)?.length ?? 0) === 0 &&
-    registry.streamEventsWildcard.length === 0
+    !emitted.suppressed &&
+    ((registry.streamEventsByType.get(emitted.event.type)?.length ?? 0) > 0 ||
+      registry.streamEventsWildcard.length > 0)
   ) {
-    return { serializedContext: input.serializedContext, sessionState: input.sessionState };
+    const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
+    const session = hydrateDurableSession({
+      durable: readDurableSession(sessionState),
+      turnAgent: effectiveAgent.turnAgent,
+      compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
+    });
+    const scoped = await withContextScope(ctx, session, async (enriched) => {
+      await dispatchStreamEventHooks({ ctx, registry, event: emitted.event });
+      return { result: undefined, session: enriched };
+    });
+    sessionState = createDurableSessionState({
+      session: reconcileSessionContinuationToken(ctx, scoped.session),
+    });
   }
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    durable: readDurableSession(input.sessionState),
-    turnAgent: effectiveAgent.turnAgent,
-    compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
-  });
-  const scoped = await withContextScope(ctx, session, async (enriched) => {
-    await dispatchStreamEventHooks({ ctx, registry, event: input.event });
-    return { result: undefined, session: enriched };
-  });
   return {
     serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({
-      session: reconcileSessionContinuationToken(ctx, scoped.session),
-    }),
+    sessionState,
   };
 }

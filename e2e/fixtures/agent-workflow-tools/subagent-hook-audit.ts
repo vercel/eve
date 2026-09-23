@@ -7,7 +7,6 @@ export interface SubagentHookObservation {
   readonly callId: string;
   readonly eventId: string;
   readonly policy: string;
-  readonly retryEventId?: string;
   readonly sessionId: string;
   readonly output?: string;
 }
@@ -32,21 +31,6 @@ export async function recordSubagentHook(
     path: `subagent-hook-${event.meta.id}-${subscriber}.txt`,
     content: event.data.callId,
   });
-  let retryEventId: string | undefined;
-  if (
-    subscriber === "wildcard" &&
-    event.type === "subagent.completed" &&
-    (event.data.output.includes("hook-audit:") || event.data.output.includes("Alice's hook audit"))
-  ) {
-    const path = `subagent-hook-retry-${event.data.callId}.txt`;
-    const previous = await sandbox.readTextFile({ path });
-    if (previous === null) {
-      // The sandbox survives the hook step's failed attempt; context writes do not.
-      await sandbox.writeTextFile({ path, content: event.meta.id });
-      throw new Error("Retry the hook after its event was published.");
-    }
-    retryEventId = previous;
-  }
   subagentHookAudit.update((observations) => [
     ...observations,
     {
@@ -55,7 +39,6 @@ export async function recordSubagentHook(
       callId: event.data.callId,
       eventId: event.meta.id,
       policy,
-      retryEventId,
       sessionId: ctx.session.id,
       output: event.type === "subagent.completed" ? event.data.output : undefined,
     },

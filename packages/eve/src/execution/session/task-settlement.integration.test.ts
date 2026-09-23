@@ -1,13 +1,8 @@
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
-import { stampTestEvent } from "#internal/testing/events.js";
 
 vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
   emitSubagentEventStep: vi.fn(),
-  dispatchSessionEventHooksStep: vi.fn(async (input) => ({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  })),
 }));
 
 import { expect, it, vi } from "vitest";
@@ -35,8 +30,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
       .mockReset()
       .mockImplementation(async (input) => ({
         serializedContext: {},
-        event: stampTestEvent(input.event),
-        suppressed: false,
+        sessionState: input.sessionState,
       }));
     let state = createTestSessionState();
     let session = state.snapshot.session;
@@ -178,8 +172,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
       ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
       return {
         serializedContext: input.serializedContext,
-        event: stampTestEvent(input.event),
-        suppressed: false,
+        sessionState: input.sessionState,
       };
     });
     const deliver = async (outcome: TaskView) => {
