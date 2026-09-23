@@ -100,9 +100,7 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
     <Collapsible className="w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
         <TraceStatus status={trace.status} />
-        <span className="min-w-0 truncate">
-          {trace.status === "running" ? "Delegating to" : "Delegated to"} {formatName(trace.name)}
-        </span>
+        <code className="min-w-0 truncate font-mono text-[11px]">{trace.name}</code>
         <span className="text-muted-foreground/70">· {traceStatusLabel(trace.status)}</span>
         <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
@@ -161,13 +159,6 @@ function traceStatusLabel(status: SubagentTrace["status"]) {
   if (status === "running") return "Working";
   if (status === "failed") return "Failed";
   return "Complete";
-}
-
-function formatName(name: string) {
-  return name
-    .replace(/^subagent:/, "")
-    .replace(/__/g, " · ")
-    .replace(/[_-]/g, " ");
 }
 
 function TraceStatus({ status }: { readonly status: "complete" | "failed" | "running" }) {
