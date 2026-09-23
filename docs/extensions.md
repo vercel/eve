@@ -336,7 +336,7 @@ export default defineHook({
 
 ### Bundled development extensions
 
-Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server; production builds do not include it. If you want to use self-modification in production, run `eve add eve/self-modification` to create an authored mount. An authored mount ships with your production build and replaces the bundled version during local development. See [Self-Modification](./guides/self-modification) for setup and behavior.
+Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server. Bundled development extensions are not included in production builds. See [Self-Modification](./guides/self-modification) for the local workflow.
 
 ### Compatibility
 

@@ -23,7 +23,7 @@ Web Chat installs a project-level Next.js application. It cannot be added to an 
 
 If you do not know an item name yet, run `eve add` without an argument. Its help output shows how to search the registry with `eve registry search <query>`.
 
-Extensions may create a mount under `agent/extensions/`. For example, `eve add eve/self-modification` creates an authored self-modification mount that is included in production builds; use it when you want self-modification beyond local development. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation integrations write one destination file under `agent/instrumentation/`, so you can install and configure multiple exporters independently. Configure generated files and required environment variables before running your agent.
+Extensions may create a mount under `agent/extensions/`. For example, `eve add eve/self-modification` creates an authored self-modification mount. Connections write their initial definition under `agent/connections/` and install `@vercel/connect` when required. Instrumentation integrations write one destination file under `agent/instrumentation/`, so you can install and configure multiple exporters independently. Configure generated files and required environment variables before running your agent.
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the item's declared flows from the beginning.
 

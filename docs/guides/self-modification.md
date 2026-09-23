@@ -27,7 +27,7 @@ Pass `--no-default-extensions` when you do not want `eve dev` to mount bundled d
 eve dev --no-default-extensions
 ```
 
-This disables the complete bundled default set for that server, including self-modification. It does not remove files from your project or disable extensions that you have explicitly mounted under `agent/extensions/`. See [Extensions](../extensions#bundled-development-extensions) to learn how an authored mount differs from the bundled development extension.
+This disables the complete bundled default set for that server, including self-modification. It does not remove files from your project or disable extensions that you have explicitly mounted under `agent/extensions/`.
 
 ## What to read next
 
