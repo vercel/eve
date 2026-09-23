@@ -1248,7 +1248,6 @@ async function handleEventPost(input: {
             receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
-            credentials: config.credentials,
             handler,
             installationTeamId,
             kind,
@@ -1267,7 +1266,6 @@ async function handleEventPost(input: {
             receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
-            credentials: config.credentials,
             handler,
             installationTeamId,
             kind,
@@ -1297,7 +1295,6 @@ async function handleEventPost(input: {
             receivingBotUserId,
             from: input.from,
             resolveSession: input.resolveSession,
-            credentials: config.credentials,
             handler: config.onMessage!,
             installationTeamId,
             kind: "channel_message",
@@ -1365,7 +1362,6 @@ async function dispatchSlackMessage(input: {
   readonly receivingBotUserId: string | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
-  readonly credentials: SlackChannelCredentials | undefined;
   readonly handler: NonNullable<SlackChannelConfig["onMessage"]>;
   readonly installationTeamId: string | undefined;
   readonly kind: "app_mention" | "channel_message" | "direct_message";
@@ -1445,7 +1441,6 @@ async function dispatchSlackMessage(input: {
     input.kind === "direct_message" || isPrivateConversation ? "private" : "public";
   await deliverSlackMessage({
     botUserId: input.receivingBotUserId,
-    credentials: input.credentials,
     kind: input.kind,
     isPrivateConversation,
     isMentioned: isBotMentioned,
@@ -1547,7 +1542,6 @@ async function verifyInbound(
 async function deliverSlackMessage(input: {
   readonly botUserId: string | undefined;
   readonly sessionOperations: SlackSessionOperations;
-  readonly credentials: SlackChannelCredentials | undefined;
   readonly isPrivateConversation: boolean;
   readonly isMentioned: boolean;
   readonly kind: string;
