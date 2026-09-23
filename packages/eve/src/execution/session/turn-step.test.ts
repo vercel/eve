@@ -1802,10 +1802,37 @@ describe("turnStep", () => {
         principalType: "user",
         subject: "U456",
       } satisfies SessionAuthContext,
+      expectedMessageAuth: {
+        attributes: { user_id: "U456" },
+        authenticator: "slack-webhook",
+        issuer: "slack",
+        principalId: "slack:U456",
+        principalType: "user",
+        subject: "U456",
+      } satisfies SessionAuthContext,
+      payloads: [{ message: "follow up" }],
       title: "replaces the previous caller",
     },
-    { expected: null, title: "clears the previous caller" },
-  ])("$title from deliver-time auth", async ({ expected }) => {
+    {
+      expected: null,
+      expectedMessageAuth: null,
+      payloads: [{ message: "follow up" }],
+      title: "clears the previous caller",
+    },
+    {
+      expected: {
+        attributes: { user_id: "U456" },
+        authenticator: "slack-webhook",
+        issuer: "slack",
+        principalId: "slack:U456",
+        principalType: "user",
+        subject: "U456",
+      } satisfies SessionAuthContext,
+      expectedMessageAuth: undefined,
+      payloads: [{ message: "first" }, { message: "" }],
+      title: "does not attribute a message from a coalesced delivery",
+    },
+  ])("$title from deliver-time auth", async ({ expected, expectedMessageAuth, payloads }) => {
     const bundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -1845,21 +1872,24 @@ describe("turnStep", () => {
     ctx.set(SessionIdKey, "session-1");
 
     let observed: SessionAuthContext | null | undefined;
+    let observedMessageAuth: SessionAuthContext | null | undefined;
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (session): Promise<StepResult> => {
+      return async (session, stepInput): Promise<StepResult> => {
         observed = loadContext().get(AuthKey);
+        observedMessageAuth = stepInput?.messageAuth;
         return { next: null, session };
       };
     });
 
     await turnStep({
-      input: { auth: expected, kind: "deliver", payloads: [{ message: "follow up" }] },
+      input: { auth: expected, kind: "deliver", payloads },
       sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
       sessionState: createStubSessionState(),
     });
 
     expect(observed).toEqual(expected);
+    expect(observedMessageAuth).toEqual(expectedMessageAuth);
   });
 
   it("projects inherited task tool activity while routing HITL only to the parent callback", async () => {

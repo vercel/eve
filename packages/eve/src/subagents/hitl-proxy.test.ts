@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import type { SubagentInputRequestHookPayload } from "#channel/types.js";
+import {
+  toProxyInputRequestEntries,
+  upsertProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { InputRequest } from "#shared/input.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 function createSession(state?: Record<string, unknown>): HarnessSession {
@@ -403,4 +408,112 @@ describe("routeDeliverPayload message resolution", () => {
       { optionId: "1", requestId: "ask-1" },
     ]);
   });
+
+  it("answers a proxied child session-limit prompt from matching text", () => {
+    const request = makeProxyInputRequest("child-limit", "session-limit");
+    const session = proxyRequestSession(request);
+    const routed = routeDeliverPayload({
+      payload: { message: "continue" },
+      resolveMessage: true,
+      state: session.state,
+    });
+
+    expect(routed.forSelf).toBeUndefined();
+    expect(routed.forChildren).toMatchObject([
+      {
+        childContinuationToken: "child-token",
+        payload: { inputResponses: [{ optionId: "continue", requestId: "child-limit" }] },
+        retireRequestIds: ["child-limit"],
+      },
+    ]);
+  });
+
+  it("answers a proxied child tool approval from matching text", () => {
+    const request = makeProxyInputRequest("child-approval", "tool-approval");
+    const session = proxyRequestSession(request);
+    const routed = routeDeliverPayload({
+      payload: { message: "approve" },
+      resolveMessage: true,
+      state: session.state,
+    });
+
+    expect(routed.forSelf).toBeUndefined();
+    expect(routed.forChildren).toMatchObject([
+      {
+        childContinuationToken: "child-token",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "child-approval" }] },
+        retireRequestIds: ["child-approval"],
+      },
+    ]);
+  });
+
+  it("keeps matching text on the parent when multiple child requests are pending", () => {
+    const firstRequest = makeProxyInputRequest("child-approval-1", "tool-approval");
+    const secondRequest = makeProxyInputRequest("child-approval-2", "tool-approval");
+    const session = upsertProxyInputRequests({
+      entries: toProxyInputRequestEntries({
+        callId: "child-call-2",
+        childContinuationToken: "child-token-2",
+        childSessionId: "child-session-2",
+        event: { requests: [secondRequest], sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        kind: "subagent-input-request",
+        subagentName: "second-child",
+      }),
+      forChildContinuationToken: "child-token-2",
+      session: proxyRequestSession(firstRequest),
+    });
+    const routed = routeDeliverPayload({
+      payload: { message: "approve" },
+      resolveMessage: true,
+      state: session.state,
+    });
+
+    expect(routed.forSelf).toEqual({ message: "approve" });
+    expect(routed.forChildren).toEqual([]);
+  });
+
+  function proxyRequestSession(request: InputRequest): HarnessSession {
+    const hookPayload: SubagentInputRequestHookPayload = {
+      callId: "child-call",
+      childContinuationToken: "child-token",
+      childSessionId: "child-session",
+      event: { requests: [request], sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      kind: "subagent-input-request",
+      subagentName: "child",
+    };
+    return upsertProxyInputRequests({
+      entries: toProxyInputRequestEntries(hookPayload),
+      forChildContinuationToken: hookPayload.childContinuationToken,
+      session: createSession(),
+    });
+  }
+
+  function makeProxyInputRequest(
+    requestId: string,
+    kind: "session-limit" | "tool-approval",
+  ): InputRequest {
+    const action = {
+      callId: `${requestId}-call`,
+      input: {},
+      kind: "tool-call" as const,
+      toolName: kind === "session-limit" ? "session_limit_continuation" : "gated",
+    };
+    return {
+      action,
+      allowFreeform: false,
+      kind,
+      options:
+        kind === "session-limit"
+          ? [
+              { id: "continue", label: "Approve" },
+              { id: "stop", label: "Stop" },
+            ]
+          : [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+      prompt: kind === "session-limit" ? "Continue?" : "Approve?",
+      requestId,
+    };
+  }
 });

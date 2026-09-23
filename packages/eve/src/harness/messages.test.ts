@@ -115,6 +115,42 @@ describe("coalesceTurnInputs", () => {
     expect(result).toEqual({ message: "hello\n\nworld" });
   });
 
+  it("preserves message attribution when coalescing context-only input", () => {
+    const messageAuth = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user",
+    } as const;
+
+    expect(
+      coalesceTurnInputs({ context: ["prior context"] }, { message: "approve", messageAuth }),
+    ).toEqual({
+      context: ["prior context"],
+      message: "approve",
+      messageAuth,
+    });
+  });
+
+  it("drops message attribution when coalescing multiple messages", () => {
+    const firstAuth = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user",
+    } as const;
+    const secondAuth = { ...firstAuth, principalId: "user-2" };
+
+    expect(
+      coalesceTurnInputs(
+        { message: "approve first", messageAuth: firstAuth },
+        { message: "approve second", messageAuth: secondAuth },
+      ),
+    ).toEqual({ message: "approve first\n\napprove second" });
+  });
+
   it("reduces three messages sequentially", () => {
     const messages: StepInput[] = [{ message: "a" }, { message: "b" }, { message: "c" }];
     const result = messages.reduce(coalesceTurnInputs);

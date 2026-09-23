@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
+import {
+  getApprovalAuditState,
+  settleDirectApprovalResponse,
+} from "#harness/approval-candidates.js";
 import {
   coordinateApprovalDelivery,
   shouldPrepareApprovalReplayTools,
@@ -150,6 +153,57 @@ describe("coordinateApprovalDelivery", () => {
       ),
     ).toEqual([request.requestId]);
   });
+
+  it("resolves a matching text reply for a response-authorized approval when the message is attributed", async () => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedSession(),
+      stepInput: { message: "approve", messageAuth: responder },
+      tools: new Map(),
+    });
+
+    expect(result.kind).toBe("continue-coordination");
+    expect(result.stepInput?.message).toBeUndefined();
+    expect(getApprovalAuditState(result.session.state).activeCandidates).toMatchObject([
+      { requestId: request.requestId, responder: { principalId: responder.principalId } },
+    ]);
+  });
+
+  it("does not map one attributed text reply to multiple protected approvals", async () => {
+    const secondRequest: InputRequest = {
+      ...request,
+      action: { ...request.action, callId: "call-2", toolName: "gate-2" },
+      prompt: "Approve tool call: gate-2",
+      requestId: "approval-2",
+    };
+    const parked = appendPendingInputBatch({
+      requests: [request, secondRequest],
+      responseAuthRequiredRequestIds: [request.requestId, secondRequest.requestId],
+      responseMessages: [],
+      session: { ...parkedSession(), state: undefined },
+    });
+    const stepInput = { message: "approve", messageAuth: responder };
+
+    expect(shouldPrepareApprovalReplayTools({ session: parked, stepInput })).toBe(false);
+
+    const result = await coordinateApprovalDelivery({ now: 100, session: parked, stepInput, tools: new Map() });
+
+    expect(result.stepInput?.message).toBe("approve");
+    expect(result.stepInput?.attributedInputResponses).toBeUndefined();
+    expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
+  });
+
+  it("does not resolve a response-authorized approval from unattributed text", async () => {
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedSession(),
+      stepInput: { message: "approve", messageAuth: null },
+      tools: new Map(),
+    });
+
+    expect(result.stepInput?.message).toBe("approve");
+    expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
+  });
 });
 
 describe("text approval replay preparation", () => {
@@ -194,6 +248,15 @@ describe("text approval replay preparation", () => {
         stepInput: { message: "approve" },
       }),
     ).toBe(false);
+  });
+
+  it("prepares tools for a matching attributed text reply to a response-authorized approval", () => {
+    expect(
+      shouldPrepareApprovalReplayTools({
+        session: sessionWithRequests([request], [request.requestId]),
+        stepInput: { message: "approve", messageAuth: responder },
+      }),
+    ).toBe(true);
   });
 
   it("does not interpret text when multiple batches are pending", () => {

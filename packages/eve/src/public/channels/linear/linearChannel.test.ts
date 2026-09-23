@@ -204,7 +204,41 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it("delivers prompted values as messages for the harness to resolve", async () => {
+  it("delivers prompted values as messages and attributes them to the activity user", async () => {
+    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
+    const payload = sessionPayload();
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        {
+          ...payload,
+          action: "prompted",
+          agentSession: {
+            ...(payload.agentSession as Record<string, unknown>),
+            creatorId: "session_creator",
+          },
+          agentActivity: {
+            content: { body: "approve", type: "prompt" },
+            id: "activity_prompt",
+            userId: "reply_user",
+          },
+        },
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.inputResponses).toBeUndefined();
+    expect(input.message).toBe("approve");
+    expect(input.auth).toMatchObject({
+      authenticator: "linear-agent-webhook",
+      principalId: "linear:reply_user",
+      principalType: "user",
+    });
+    expect(input.auth?.attributes).not.toHaveProperty("user");
+  });
+
+  it("does not attribute a prompted reply to the session creator when no activity user is present", async () => {
     const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
     const { send } = await firePost(
       channel,
@@ -214,17 +248,12 @@ describe("linearChannel inbound Agent Session events", () => {
           agentActivity: {
             content: { body: "approve", type: "prompt" },
             id: "activity_prompt",
-            user: { id: "user_1" },
-            userId: "user_1",
           },
         }),
       ),
     );
 
-    expect(send).toHaveBeenCalledTimes(1);
-    const [, input] = send.mock.calls[0]!;
-    expect(input.inputResponses).toBeUndefined();
-    expect(input.message).toBe("approve");
+    expect(send.mock.calls[0]?.[1].auth).toBeNull();
   });
 
   it("attaches authenticated Linear upload images to prompted messages", async () => {
