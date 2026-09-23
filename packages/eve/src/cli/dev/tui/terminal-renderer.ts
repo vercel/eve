@@ -181,6 +181,8 @@ import {
 
 type SetupOptionPanelState = Exclude<SetupSelectPanelState, { kind: "actions" }>;
 
+const ARGUMENT_CATALOG_LOADING_DELAY_MS = 500;
+
 export type TerminalInput = {
   isTTY?: boolean;
   on(event: "data", listener: (chunk: Buffer) => void): TerminalInput;
@@ -482,7 +484,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #argumentSuggestions?: TerminalRendererOptions["argumentSuggestions"];
   readonly #argumentCatalogs = new Map<
     ArgumentTypeaheadState["command"],
-    { kind: "loading" } | { kind: "ready"; suggestions: readonly PromptArgumentSuggestion[] }
+    | { kind: "loading"; visible: boolean }
+    | { kind: "ready"; suggestions: readonly PromptArgumentSuggestion[] }
+  >();
+  readonly #argumentCatalogLoadingTimers = new Map<
+    ArgumentTypeaheadState["command"],
+    ReturnType<typeof setTimeout>
   >();
   /**
    * Whether the empty input row invites with a rotating placeholder. Only
@@ -687,11 +694,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     const catalog = this.#argumentCatalogs.get(query.command);
     if (catalog === undefined) {
-      this.#argumentCatalogs.set(query.command, { kind: "loading" });
-      void this.#argumentSuggestions(query.command)
+      this.#argumentCatalogs.set(query.command, { kind: "loading", visible: false });
+      const command = query.command;
+      this.#argumentCatalogLoadingTimers.set(
+        command,
+        setTimeout(() => {
+          this.#argumentCatalogLoadingTimers.delete(command);
+          const pending = this.#argumentCatalogs.get(command);
+          if (pending?.kind !== "loading") return;
+          this.#argumentCatalogs.set(command, { kind: "loading", visible: true });
+          this.#paint();
+        }, ARGUMENT_CATALOG_LOADING_DELAY_MS),
+      );
+      void this.#argumentSuggestions(command)
         .catch(() => [])
         .then((suggestions) => {
-          this.#argumentCatalogs.set(query.command, { kind: "ready", suggestions });
+          const timer = this.#argumentCatalogLoadingTimers.get(command);
+          if (timer !== undefined) clearTimeout(timer);
+          this.#argumentCatalogLoadingTimers.delete(command);
+          this.#argumentCatalogs.set(command, { kind: "ready", suggestions });
           if (this.#inputActive) this.#syncTypeahead(this.#inputText);
           this.#paint();
         });
@@ -712,7 +733,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #typeaheadDrawerRows(width: number): string[] {
     const query = argumentTypeaheadQuery(this.#inputText);
     const catalog = query === undefined ? undefined : this.#argumentCatalogs.get(query.command);
-    if (catalog?.kind === "loading" && query !== undefined) {
+    if (catalog?.kind === "loading" && catalog.visible && query !== undefined) {
       return [
         clip(
           this.#theme.colors.dim(`Loading ${argumentTypeaheadLoadingLabel(query.command)}…`),
@@ -2999,6 +3020,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   shutdown(): void {
     this.#stop();
+    for (const timer of this.#argumentCatalogLoadingTimers.values()) clearTimeout(timer);
+    this.#argumentCatalogLoadingTimers.clear();
     // The parting line: the boot banner's dim counterpart, written after the
     // terminal is restored so it lands as the session's last scrollback row.
     // Gated on the session having ever gone live (Ctrl-C stops the terminal
