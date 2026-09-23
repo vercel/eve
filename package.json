@@ -41,7 +41,7 @@
     "syncpack": "15.3.3",
     "turbo": "2.10.12",
     "typescript": "catalog:",
-    "vercel": "59.5.0"
+    "vercel": "59.23.2"
   },
   "engines": {
     "node": ">=24"
