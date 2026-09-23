@@ -4495,7 +4495,7 @@ describe("EveTUIRunner command outcome rendering", () => {
   });
 
   it("dispatches /loglevel to the renderer and reports the outcome", async () => {
-    const results: string[] = [];
+    const results: Array<{ text: string; summary?: string }> = [];
     const modes: string[] = [];
     const prompts: Array<string | undefined> = [
       "/loglevel none",
@@ -4507,7 +4507,7 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
-      renderCommandResult: (text) => results.push(text),
+      renderCommandResult: (text, _status, summary) => results.push({ text, summary }),
       renderStream: vi.fn(async () => {}),
       logDisplayMode: () => "all",
       setLogDisplayMode: (mode) => modes.push(mode),
@@ -4518,9 +4518,9 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     expect(modes).toEqual(["none", "sandbox"]);
     expect(results).toHaveLength(3);
-    expect(results[0]).toContain("hidden");
-    expect(results[1]).toContain('Unknown log level "bogus"');
-    expect(results[2]).toContain("sandbox");
+    expect(results[0]?.summary).toContain("hidden");
+    expect(results[1]?.text).toContain('Unknown log level "bogus"');
+    expect(results[2]?.summary).toContain("sandbox");
     expect(session.send).not.toHaveBeenCalled();
   });
 

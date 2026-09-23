@@ -2015,42 +2015,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     this.dismissCommandInvocation();
     this.#inputActive = false;
-    let cursor = 0;
-    this.#questionPanel = (width) =>
-      renderQuestionPanel(
-        {
-          prompt: "Commands",
-          options: commands.map((command) => ({
-            id: command.name,
-            label: `/${command.name}${command.argumentHint === undefined ? "" : ` ${command.argumentHint}`}`,
-            description: command.description,
-          })),
-          cursor,
-          allowFreeform: false,
-          editor: EMPTY_LINE,
-          caretVisible: false,
-        },
-        this.#theme,
-        width,
-      );
+    let state = typeaheadFor(commands, "/");
+    this.#questionPanel = (width) => [
+      `  ${this.#theme.colors.dim("Commands")}`,
+      "",
+      ...renderCommandSuggestions(state, this.#theme, width),
+      "",
+      `  ${this.#theme.colors.dim("Esc to close")}`,
+    ];
     this.#status = "";
     this.#paint();
     return await new Promise((resolve) => {
       this.#consumeKey = (key) => {
         if (key.type === "up" || key.type === "ctrl-p") {
-          cursor = (cursor - 1 + commands.length) % commands.length;
+          state = moveTypeaheadSelection(state, -1);
           this.#paint();
         } else if (key.type === "down" || key.type === "ctrl-n") {
-          cursor = (cursor + 1) % commands.length;
+          state = moveTypeaheadSelection(state, 1);
           this.#paint();
         } else if (key.type === "enter") {
-          const command = commands[cursor];
+          const command = selectedTypeaheadCommand(state);
           this.#closeTransientPanel();
-          resolve(
-            command === undefined
-              ? undefined
-              : `/${command.name}${command.takesArgument ? " " : ""}`,
-          );
+          resolve(command === undefined ? undefined : typeaheadCompletion(command));
         } else if (key.type === "escape" || key.type === "ctrl-c") {
           this.#closeTransientPanel();
           resolve(undefined);

@@ -1090,7 +1090,11 @@ export class EveTUIRunner {
         // Like /help, /loglevel renders locally: it adjusts the renderer's
         // own log filter, so it works without a prompt-command handler.
         if (command?.type === "loglevel") {
-          this.#renderCommandOutcome(this.#applyLogLevelCommand(command.argument));
+          const outcome = this.#applyLogLevelCommand(command.argument);
+          const error =
+            outcome.startsWith("/loglevel is not available") ||
+            outcome.startsWith("Unknown log level");
+          this.#renderCommandOutcome(error ? outcome : "", error ? "error" : "success", outcome);
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
