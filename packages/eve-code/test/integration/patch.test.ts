@@ -382,7 +382,6 @@ function memorySandbox(
       }
       return { exitCode: 0, stdout: "", stderr: "" };
     },
-    async setNetworkPolicy() {},
     async spawn() {
       throw new Error("not used by this test");
     },

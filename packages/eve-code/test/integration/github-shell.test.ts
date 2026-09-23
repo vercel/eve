@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectTokenParams } from "@vercel/connect";
-import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
+import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 
 import {
   executeGitHubShell,
@@ -11,7 +15,7 @@ import {
   type GitHubShellInput,
 } from "../../extension/lib/github-shell.ts";
 
-type NetworkPolicy = Parameters<MutableNetworkSandboxSession["setNetworkPolicy"]>[0];
+type NetworkPolicy = Parameters<NetworkPolicySandboxSession["setNetworkPolicy"]>[0];
 
 const CONFIG = {
   connector: "github/citron-compass",
@@ -23,8 +27,9 @@ const CONFIG = {
     const allow = Object.fromEntries(
       Object.entries(rules ?? {}).map(([host, entries]) => [host, [...entries]]),
     );
-    if (sandbox.setNetworkPolicy === undefined) throw new Error("test sandbox lacks networking");
-    await sandbox.setNetworkPolicy(rules ? { allow: { "*": [], ...allow } } : "allow-all");
+    await (sandbox as NetworkPolicySandboxSession).setNetworkPolicy(
+      rules ? { allow: { "*": [], ...allow } } : "allow-all",
+    );
   },
 };
 
@@ -362,7 +367,7 @@ function fakeSandbox(
   policies: NetworkPolicy[] = [],
 ): SandboxSession {
   const sandbox: Pick<SandboxSession, "resolvePath" | "run" | "removePath"> &
-    Pick<MutableNetworkSandboxSession, "setNetworkPolicy"> = {
+    Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
     resolvePath(path: string) {
       if (path === ".") return "/workspace";
       if (path.startsWith("/")) return path;
@@ -377,5 +382,5 @@ function fakeSandbox(
       policies.push(policy);
     },
   };
-  return sandbox as SandboxSession;
+  return sandbox as NetworkPolicySandboxSession;
 }

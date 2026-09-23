@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
+import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 
 import { authenticateGitHub, authenticateVercel } from "../../extension/lib/credentials.ts";
 
@@ -43,8 +47,7 @@ test("custom broker receives complete rules for each credential", async () => {
 });
 
 test("firewall delivery fails precisely without mutable network policy", async () => {
-  const { setNetworkPolicy: _omitted, ...fixed } = fakeSandbox({});
-  const sandbox = fixed as SandboxSession;
+  const sandbox = fakeSandbox({}) as SandboxSession;
 
   for (const authenticate of [authenticateGitHub, authenticateVercel]) {
     await assert.rejects(
@@ -72,10 +75,10 @@ function fakeSandbox(input: {
   commands?: string[];
   writes?: Map<string, string>;
   setPolicy?: (policy: unknown) => void;
-}): SandboxSession {
+}): NetworkPolicySandboxSession {
   const writes = input.writes ?? new Map<string, string>();
   const sandbox: Pick<SandboxSession, "resolvePath" | "readTextFile" | "writeTextFile" | "run"> &
-    Pick<MutableNetworkSandboxSession, "setNetworkPolicy"> = {
+    Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
     resolvePath(path: string) {
       return `/workspace/${path}`.replace(/\/$/u, "");
     },
@@ -93,5 +96,5 @@ function fakeSandbox(input: {
       input.setPolicy?.(policy);
     },
   };
-  return sandbox as SandboxSession;
+  return sandbox as NetworkPolicySandboxSession;
 }
