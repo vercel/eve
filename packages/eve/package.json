@@ -471,9 +471,10 @@
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
     "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
     "test:watch": "pnpm run build:compiled && vitest --config vitest.unit.config.ts",
-    "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
+    "typecheck": "pnpm run check:chat-message-renderer && pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
+    "check:chat-message-renderer": "node ../../scripts/sync-chat-message-renderer.mjs --check",
     "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs",
     "test:vercel": "vitest run --config vitest.vercel.config.ts"
   },

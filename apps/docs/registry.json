@@ -1874,6 +1874,16 @@
           "target": "components.json"
         },
         {
+          "path": "registry/channel/web/components/chat/markdown.tsx",
+          "type": "registry:file",
+          "target": "components/chat/markdown.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/chat/message.tsx",
+          "type": "registry:file",
+          "target": "components/chat/message.tsx"
+        },
+        {
           "path": "registry/channel/web/components/ai-elements/chain-of-thought.tsx",
           "type": "registry:file",
           "target": "components/ai-elements/chain-of-thought.tsx"

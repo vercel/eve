@@ -98,3 +98,32 @@ input,
 textarea {
   font: inherit;
 }
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--foreground) 45%,
+    var(--muted-foreground) 90%
+  );
+  background-size: 220% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-text 1.8s linear infinite;
+}
+
+@keyframes shimmer-text {
+  from {
+    background-position: 120% 0;
+  }
+
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+  }
+}
