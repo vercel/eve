@@ -129,8 +129,8 @@ it.each(
     const chunks: Uint8Array[] = [];
     const stream = new WritableStream<Uint8Array>({
       write(chunk) {
-        expect(ctx.has(SessionKey)).toBe(false);
-        expect(ctx.has(SandboxKey)).toBe(false);
+        expect(ctx.has(SessionKey)).toBe(true);
+        expect(ctx.has(SandboxKey)).toBe(true);
         calls.push("stream");
         chunks.push(chunk);
       },
@@ -220,6 +220,47 @@ it.each(events)(
     expect(stream.locked).toBe(false);
   },
 );
+
+it("fails hook context setup before publishing so a retry cannot duplicate the event", async () => {
+  const ctx = new ContextContainer();
+  ctx.set(SessionIdKey, "parent");
+  ctx.set(AuthKey, null);
+  ctx.set(ChannelKey, { kind: "test" });
+  const hook = vi.fn();
+  const bundle: Partial<CompiledBundle> = {
+    resolvedAgent: { config: {} } as CompiledBundle["resolvedAgent"],
+    turnAgent: { id: "parent" } as CompiledBundle["turnAgent"],
+    hookRegistry: createRuntimeHookRegistry([
+      {
+        slug: "audit",
+        logicalPath: "hooks/audit.ts",
+        sourceId: "hooks/audit.ts",
+        sourceKind: "module",
+        exportName: undefined,
+        events: { "*": hook },
+      },
+    ]),
+  };
+  ctx.set(BundleKey, bundle as CompiledBundle);
+  vi.mocked(deserializeContext).mockResolvedValue(ctx);
+  const chunks: Uint8Array[] = [];
+  const stream = new WritableStream<Uint8Array>({
+    write(chunk) {
+      chunks.push(chunk);
+    },
+  });
+  await expect(
+    emitSubagentEventStep({
+      event: events[0]!,
+      sessionWritable: stream,
+      serializedContext: {},
+      sessionState: { ...createTestSessionState({ sessionId: "parent" }), version: 0 as never },
+    }),
+  ).rejects.toThrow("Unsupported session checkpoint");
+  expect(chunks).toHaveLength(0);
+  expect(hook).not.toHaveBeenCalled();
+  expect(stream.locked).toBe(false);
+});
 
 it("does not prepare context when no hook subscribes to the published event", async () => {
   const ctx = new ContextContainer();
