@@ -22,13 +22,13 @@ export type AgentInputResponse = {
 };
 
 export function AgentMessage({
-  after,
+  activityAfter,
   canRespond,
   isStreaming,
   message,
   onInputResponses,
 }: {
-  readonly after?: ReactNode;
+  readonly activityAfter?: ReactNode;
   readonly canRespond: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
@@ -57,6 +57,7 @@ export function AgentMessage({
         )}
       >
         <AgentMessageParts
+          activityAfter={activityAfter}
           canRespond={canRespond}
           isUser={isUser}
           lastTextIndex={lastTextIndex}
@@ -65,13 +66,13 @@ export function AgentMessage({
           parts={message.parts}
           showCaret={isStreaming && message.role === "assistant"}
         />
-        {after}
       </div>
     </article>
   );
 }
 
 function AgentMessageParts({
+  activityAfter,
   canRespond,
   isUser,
   lastTextIndex,
@@ -80,6 +81,7 @@ function AgentMessageParts({
   parts,
   showCaret,
 }: {
+  readonly activityAfter?: ReactNode;
   readonly canRespond: boolean;
   readonly isUser: boolean;
   readonly lastTextIndex: number;
@@ -105,18 +107,20 @@ function AgentMessageParts({
     ];
   });
 
-  return activity.length > 0
-    ? [
-        ...text,
-        <ActivityGroup
-          canRespond={canRespond}
-          isSettled={!showCaret}
-          key={`activity:${messageId}`}
-          onInputResponses={onInputResponses}
-          parts={activity}
-        />,
-      ]
-    : text;
+  if (activity.length === 0 && !activityAfter) return text;
+
+  return [
+    ...text,
+    <ActivityGroup
+      canRespond={canRespond}
+      isSettled={!showCaret}
+      key={`activity:${messageId}`}
+      onInputResponses={onInputResponses}
+      parts={activity}
+    >
+      {activityAfter}
+    </ActivityGroup>,
+  ];
 }
 
 function AgentMessagePart({
@@ -338,11 +342,13 @@ export function ActivityContent({
 
 function ActivityGroup({
   canRespond,
+  children,
   isSettled,
   onInputResponses,
   parts,
 }: {
   readonly canRespond: boolean;
+  readonly children?: ReactNode;
   readonly isSettled: boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly parts: readonly ActivityPart[];
@@ -351,32 +357,26 @@ function ActivityGroup({
     !isSettled || parts.some((part) => part.type === "reasoning" && part.state === "streaming");
   const [open, setOpen] = useState(false);
 
-  const label = summarizeActivity(parts, isWorking);
-
   return (
     <Collapsible className="mt-2 w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
         {isWorking ? <Loader2Icon className="size-3 animate-spin" /> : null}
-        <span>{label}</span>
+        <span>{isWorking ? "Working…" : "Show activity"}</span>
         <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2 ml-1 border-l border-border/60 pl-3 text-muted-foreground">
-        <ActivityContent
-          canRespond={canRespond}
-          isSettled={isSettled}
-          onInputResponses={onInputResponses}
-          parts={parts}
-        />
+        {parts.length > 0 ? (
+          <ActivityContent
+            canRespond={canRespond}
+            isSettled={isSettled}
+            onInputResponses={onInputResponses}
+            parts={parts}
+          />
+        ) : null}
+        {children}
       </CollapsibleContent>
     </Collapsible>
   );
-}
-
-function summarizeActivity(parts: readonly ActivityPart[], isWorking: boolean) {
-  const tools = parts.filter((part): part is EveDynamicToolPart => part.type === "dynamic-tool");
-  if (isWorking) return "Working…";
-  if (tools.length === 0) return "Thought through response";
-  return summarizeToolGroup(tools, getToolGroupStatus(tools));
 }
 
 function ToolGroup({

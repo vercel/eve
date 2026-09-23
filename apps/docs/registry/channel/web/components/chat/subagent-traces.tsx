@@ -84,7 +84,7 @@ export function useSubagentTraces(events: readonly MessageStreamEvent[]): readon
 export function SubagentTraces({ traces }: { readonly traces: readonly SubagentTrace[] }) {
   if (traces.length === 0) return null;
   return (
-    <div className="mt-3 space-y-2">
+    <div className="mt-2 space-y-2">
       {traces.map((trace) => (
         <SubagentTraceView key={trace.callId} trace={trace} />
       ))}
@@ -97,16 +97,16 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
 
   const detailCount = trace.steps.length + trace.tools.length;
   return (
-    <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
+    <Collapsible className="w-full" onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
         <TraceStatus status={trace.status} />
         <span className="min-w-0 truncate">
           {trace.status === "running" ? "Delegating to" : "Delegated to"} {formatName(trace.name)}
         </span>
         <span className="text-muted-foreground/70">· {traceStatusLabel(trace.status)}</span>
-        <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
+        <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
+      <CollapsibleContent className="mt-2 border-l border-border/60 pl-3 text-muted-foreground">
         {detailCount === 0 ? (
           <p className="text-sm">
             {trace.status === "running" ? "Waiting for the subagent to begin…" : "No activity."}

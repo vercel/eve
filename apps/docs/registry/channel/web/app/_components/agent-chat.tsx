@@ -152,7 +152,7 @@ export function AgentChat({
               message.id === lastMessage.id ? null : (
                 <Fragment key={message.id}>
                   <AgentMessage
-                    after={
+                    activityAfter={
                       message.role === "assistant" ? (
                         <SubagentTraces
                           traces={subagentTraces.filter(
