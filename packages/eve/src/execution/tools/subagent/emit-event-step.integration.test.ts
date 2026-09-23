@@ -10,6 +10,9 @@ import {
   SessionTitleKey,
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { dispatchSessionEventHooksStep } from "#execution/session/dispatch-event-hooks-step.js";
+import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { stampTestEvent } from "#internal/testing/events.js";
 import { handleSubagentEvent } from "#execution/tools/subagent/handle-event.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
@@ -208,4 +211,27 @@ it.each(events)("publishes $type without preparing hook or model context", async
   expect(ctx.has(SandboxKey)).toBe(false);
   expect(chunks).toHaveLength(1);
   expect(stream.locked).toBe(false);
+});
+
+it("does not prepare context when no hook subscribes to the published event", async () => {
+  const ctx = new ContextContainer();
+  const bundle: Partial<CompiledBundle> = {
+    hookRegistry: createEmptyHookRegistry(),
+    get turnAgent(): never {
+      throw new Error("unsubscribed event prepared runtime context");
+    },
+  };
+  ctx.set(BundleKey, bundle as CompiledBundle);
+  vi.mocked(deserializeContext).mockResolvedValue(ctx);
+  const input = {
+    event: stampTestEvent(events[0]!),
+    serializedContext: { channel: true },
+    sessionState: createTestSessionState({ sessionId: "parent" }),
+  };
+  expect(await dispatchSessionEventHooksStep(input)).toEqual({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  });
+  expect(ctx.has(SessionKey)).toBe(false);
+  expect(ctx.has(SandboxKey)).toBe(false);
 });
