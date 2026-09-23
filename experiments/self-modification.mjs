@@ -1,4 +1,4 @@
-import { selfModificationMetrics } from "../scripts/eval-experiments/measurements/self-modification.mjs";
+import { selfModificationMetrics } from "./self-modification-metrics.mjs";
 
 /** @satisfies {import('../scripts/eval-experiments/types.ts').Experiment} */
 export default {

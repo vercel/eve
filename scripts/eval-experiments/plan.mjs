@@ -91,7 +91,6 @@ export async function createPlan(definitionPath, options = {}) {
     measurementBundles[namespace] = {
       version: bundle.version,
       metrics: bundle.metrics,
-      cases: bundle.cases ?? [],
     };
   }
   const metricNames = Object.entries(measurementBundles).flatMap(([namespace, bundle]) =>

@@ -16,7 +16,6 @@ export type Measurement =
 export interface MeasurementBundle {
   version: number;
   metrics: Record<string, { unit: string; direction: "lower" | "higher" | "neutral" }>;
-  cases?: readonly string[];
   derive(captured: CapturedEval): Record<string, Measurement>;
 }
 

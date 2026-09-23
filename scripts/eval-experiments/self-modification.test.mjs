@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveSelfModificationMetrics } from "./measurements/self-modification.mjs";
+import { selfModificationMetrics } from "../../experiments/self-modification-metrics.mjs";
 import { deriveSelfModificationLifecycle } from "./measurements/self-modification-lifecycle.mjs";
 
 const event = (type, id, at, data, sessionId) => ({ type, data, meta: { id, at, sessionId } });
@@ -75,7 +75,10 @@ function captures() {
 const evalId = "self-modification/create-shipping-quote";
 
 test("derives independently evidenced durations and a zero-valid tool count", () => {
-  const result = deriveSelfModificationMetrics(evalId, captures());
+  const result = selfModificationMetrics.derive({
+    id: evalId,
+    result: { sessions: captures() },
+  });
   assert.equal(result.parentTurnToFinalChildCompletion.value, 5000);
   assert.equal(result.totalChildDuration.value, 3000);
   assert.equal(result.toolCalls.value, 0);
@@ -93,7 +96,10 @@ test("measures total child turns for every self-modification eval", () => {
     "repair-order-total",
   ];
   for (const name of evals) {
-    const result = deriveSelfModificationMetrics(`self-modification/${name}`, captures());
+    const result = selfModificationMetrics.derive({
+      id: `self-modification/${name}`,
+      result: { sessions: captures() },
+    });
     assert.equal(result.parentTurnToFinalChildCompletion.status, "measured", name);
     assert.equal(result.totalChildDuration.status, "measured", name);
     assert.equal(result.toolCalls.status, "measured", name);
@@ -171,14 +177,18 @@ test("sums child turn durations across approval pauses and later delegations", (
   assert.equal(result.toolCalls.value, 1);
 });
 
-test("keeps unsupported evals not-applicable and per-metric missingness independent", () => {
+test("returns unavailable when supported eval evidence is missing", () => {
   assert.equal(
-    deriveSelfModificationMetrics("unsupported", []).parentTurnToFinalChildCompletion.status,
-    "not-applicable",
+    selfModificationMetrics.derive({ id: evalId, result: { sessions: undefined } })
+      .parentTurnToFinalChildCompletion.status,
+    "unavailable",
   );
   const sessions = captures();
   sessions[0].events = sessions[0].events.filter((item) => item.type !== "turn.started");
-  const result = deriveSelfModificationMetrics(evalId, sessions);
+  const result = selfModificationMetrics.derive({
+    id: evalId,
+    result: { sessions },
+  });
   assert.equal(result.parentTurnToFinalChildCompletion.status, "unavailable");
   assert.equal(result.totalChildDuration.status, "measured");
   assert.equal(result.toolCalls.status, "measured");
@@ -190,7 +200,7 @@ test("rejects conflicting event identities and incomplete tool-call identities",
     event("different.event", "delegation", "2026-01-01T00:00:01Z", {}, "parent"),
   );
   assert.throws(
-    () => deriveSelfModificationMetrics(evalId, sessions),
+    () => selfModificationMetrics.derive({ id: evalId, result: { sessions } }),
     /Conflicting event identity/,
   );
   const action = event(
