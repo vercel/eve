@@ -5492,15 +5492,65 @@ describe("TerminalRenderer command typeahead", () => {
     expect(screen.snapshot()).toContain("│ /quit");
   });
 
+  it("replaces a submitted /help invocation with its transient drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("/help");
+    input.enter();
+    expect(await prompt).toBe("/help");
+
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    expect(screen.snapshot()).toContain("┃ /help");
+    expect(screen.snapshot()).not.toContain("│ /help");
+    input.send("\x1b");
+    expect(await choice).toBeUndefined();
+    expect(screen.snapshot()).not.toContain("┃ /help");
+    expect(screen.snapshot()).not.toContain("│ /help");
+    renderer.shutdown();
+  });
+
   it("lets /help choose a command without retaining the drawer", async () => {
     const { input, renderer, screen } = makeRenderer();
     const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
 
-    expect(screen.snapshot()).toContain("Commands");
+    const open = screen.snapshot();
+    expect(open).toContain("┃ /help");
+    expect(open).toContain("/model");
+    expect(open).toContain("↑/↓ move · Enter select · Esc close");
+    expect(open.match(/─{20,}/g)).toHaveLength(2);
+    expect(open).not.toMatch(/\b1\. \/model/);
     input.down();
     input.enter();
     expect(await choice).toBe("/reset");
-    expect(screen.snapshot()).not.toContain("Commands");
+    expect(screen.snapshot()).not.toContain("┃ /help");
+    renderer.shutdown();
+  });
+
+  it("keeps the selected help command visible on short terminals", async () => {
+    const { input, renderer, screen } = makeRenderer(80, 10);
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    for (let i = 0; i < 8; i += 1) input.down();
+    expect(screen.snapshot()).toContain("/traces");
+    expect(screen.snapshot()).toContain("┃ /help");
+    input.enter();
+    expect(await choice).toBe("/traces ");
+    renderer.shutdown();
+  });
+
+  it("replaces a submitted /info invocation with its transient drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("/info");
+    input.enter();
+    expect(await prompt).toBe("/info");
+
+    const panel = renderer.showInfoPanel("Application");
+    expect(screen.snapshot()).toContain("┃ /info");
+    expect(screen.snapshot()).not.toContain("│ /info");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("┃ /info");
+    expect(screen.snapshot()).not.toContain("│ /info");
     renderer.shutdown();
   });
 
@@ -5510,13 +5560,41 @@ describe("TerminalRenderer command typeahead", () => {
       "\x1b[36mApplication\x1b[39m\n\x1b[1mAgent\x1b[22m: Weather",
     );
 
-    expect(screen.snapshot()).toContain("Application");
-    expect(screen.snapshot()).toContain("Agent: Weather");
-    expect(screen.snapshot()).not.toContain("[36m");
+    const open = screen.snapshot();
+    expect(open).toContain("┃ /info");
+    expect(open).toContain("Application");
+    expect(open).toContain("Agent: Weather");
+    expect(open).toContain("Esc to close");
+    expect(open.match(/─{20,}/g)).toHaveLength(2);
+    expect(open).not.toContain("[36m");
     input.send("\x1b");
     await panel;
+    expect(screen.snapshot()).not.toContain("┃ /info");
     expect(screen.snapshot()).not.toContain("Agent: Weather");
     renderer.shutdown();
+  });
+
+  it("scrolls long info drawers within the terminal before closing", async () => {
+    const { input, renderer, screen } = makeRenderer(60, 10);
+    const panel = renderer.showInfoPanel(
+      Array.from({ length: 12 }, (_, i) => `Entry ${i}`).join("\n"),
+    );
+    expect(screen.snapshot()).toContain("Entry 0");
+    expect(screen.snapshot()).toContain("↑/↓ scroll · Esc close");
+    for (let i = 0; i < 10; i += 1) input.down();
+    expect(screen.snapshot()).toContain("Entry 11");
+    expect(screen.snapshot()).not.toContain("Entry 0");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Entry 11");
+    renderer.shutdown();
+  });
+
+  it("resolves an open transient drawer on shutdown", async () => {
+    const { renderer } = makeRenderer();
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    renderer.shutdown();
+    expect(await choice).toBeUndefined();
   });
 
   it("moves the suggestion highlight with arrows instead of recalling history", async () => {
@@ -5537,10 +5615,15 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
   });
 
-  it("leaves drawer commands out of prompt history", async () => {
+  it("leaves transient commands and setup drawers out of prompt history", async () => {
     const { input, renderer } = makeRenderer();
 
-    for (const text of ["an earlier prompt", "/model anthropic/claude-opus-4.6 default"]) {
+    for (const text of [
+      "an earlier prompt",
+      "/model anthropic/claude-opus-4.6 default",
+      "/help",
+      "/info",
+    ]) {
       const prompt = renderer.readPrompt();
       input.type(text);
       input.enter();

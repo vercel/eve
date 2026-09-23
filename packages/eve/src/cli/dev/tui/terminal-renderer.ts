@@ -61,7 +61,7 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
-import { renderFlowDrawer } from "./flow-drawer.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowInterrupt,
@@ -590,6 +590,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pendingEchoedPrompt?: string;
   /** The open HITL question overlay, painted above the input area. */
   #questionPanel?: (width: number) => string[];
+  #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
+  #transientPanelClose?: () => void;
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
   /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
@@ -1053,7 +1055,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
             // Recalling a drawer command reopens its drawer, which takes over
             // ↑/↓ and would trap history navigation at that entry.
             const submitted = parsePromptCommand(prompt);
-            if (submitted?.type !== "extension" || !isArgumentTypeaheadCommand(submitted.name)) {
+            if (
+              submitted?.type !== "help" &&
+              submitted?.type !== "info" &&
+              (submitted?.type !== "extension" || !isArgumentTypeaheadCommand(submitted.name))
+            ) {
               this.#promptHistory.add(prompt);
             }
             this.#inputActive = false;
@@ -2004,28 +2010,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /**
-   * Settles the pending command echo with the outcome's status, optionally
-   * replacing the invocation with a summary, then hangs any detail text under
-   * it with the elbow. Without an echo, a successful outcome carries its own
-   * check mark.
-   */
   /** Lets `/help` select a command without leaving a transcript row. */
   async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
     this.#start();
     this.dismissCommandInvocation();
     this.#inputActive = false;
     let state = typeaheadFor(commands, "/");
-    this.#questionPanel = (width) => [
-      `  ${this.#theme.colors.dim("Commands")}`,
-      "",
-      ...renderCommandSuggestions(state, this.#theme, width),
-      "",
-      `  ${this.#theme.colors.dim("Esc to close")}`,
-    ];
+    this.#transientPanel = (width) => {
+      const rows = renderCommandSuggestions(state, this.#theme, width);
+      const visible = Math.max(1, this.#height() - 7);
+      const start = Math.max(0, Math.min(state.selectedIndex - visible + 1, rows.length - visible));
+      return renderTransientDrawer(
+        "/help",
+        rows.slice(start, start + visible),
+        ["↑/↓ move · Enter select · Esc close"],
+        this.#theme,
+        width,
+      );
+    };
     this.#status = "";
     this.#paint();
     return await new Promise((resolve) => {
+      this.#transientPanelClose = () => resolve(undefined);
       this.#consumeKey = (key) => {
         if (key.type === "up" || key.type === "ctrl-p") {
           state = moveTypeaheadSelection(state, -1);
@@ -2051,27 +2057,51 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     this.dismissCommandInvocation();
     this.#inputActive = false;
-    this.#questionPanel = (width) => {
-      const rows: string[] = [];
-      for (const line of stripAnsi(text).split("\n"))
-        rows.push(...wrapVisibleLine(line, Math.max(8, width - 4)).map((part) => `  ${part}`));
-      rows.push("", `  ${this.#theme.colors.dim("Esc to close")}`);
-      return rows;
+    const plainText = stripAnsi(text);
+    let scroll = 0;
+    const infoRows = (width: number) =>
+      plainText
+        .split("\n")
+        .flatMap((line) =>
+          wrapVisibleLine(line, Math.max(1, width - 4)).map((part) => `  ${part}`),
+        );
+    this.#transientPanel = (width) => {
+      const rows = infoRows(width);
+      const visible = Math.max(1, this.#height() - 7);
+      scroll = Math.min(scroll, Math.max(0, rows.length - visible));
+      return renderTransientDrawer(
+        "/info",
+        rows.slice(scroll, scroll + visible),
+        [rows.length > visible ? "↑/↓ scroll · Esc close" : "Esc to close"],
+        this.#theme,
+        width,
+      );
     };
     this.#status = "";
     this.#paint();
     await new Promise<void>((resolve) => {
+      this.#transientPanelClose = resolve;
       this.#consumeKey = (key) => {
-        if (key.type !== "escape" && key.type !== "ctrl-c" && key.type !== "enter") return;
-        this.#closeTransientPanel();
-        resolve();
+        if (key.type === "up" || key.type === "ctrl-p") {
+          scroll = Math.max(0, scroll - 1);
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          const visible = Math.max(1, this.#height() - 7);
+          scroll = Math.min(scroll + 1, Math.max(0, infoRows(this.#width()).length - visible));
+          this.#paint();
+        } else if (key.type === "escape" || key.type === "ctrl-c" || key.type === "enter") {
+          this.#closeTransientPanel();
+          resolve();
+        }
       };
       this.#attachInput();
     });
   }
 
   #closeTransientPanel(): void {
-    this.#questionPanel = undefined;
+    this.#transientPanel = undefined;
+    this.#consumeKey = undefined;
+    this.#transientPanelClose = undefined;
     this.#detachInput();
     this.#paint();
   }
@@ -2085,6 +2115,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  /**
+   * Settles the pending command echo with the outcome's status, optionally
+   * replacing the invocation with a summary, then hangs any detail text under
+   * it with the elbow. Without an echo, a successful outcome carries its own
+   * check mark.
+   */
   renderCommandResult(text: string, status?: CommandResultStatus, summary?: string): void {
     const content = stripAnsi(text);
     const echo = this.#settleCommandEcho(status, summary);
@@ -3263,6 +3299,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   };
 
   #stop() {
+    const closeTransientPanel = this.#transientPanelClose;
+    if (closeTransientPanel !== undefined) {
+      this.#transientPanelClose = undefined;
+      this.#transientPanel = undefined;
+      this.#consumeKey = undefined;
+      closeTransientPanel();
+    }
     // An open trace viewer must leave the alt screen before teardown, and its
     // awaited `open()` resolves so the runner loop can observe the shutdown.
     this.#closeTraceViewer();
@@ -4434,6 +4477,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #footerRows(width: number): string[] {
     const c = this.#theme.colors;
     const rows: string[] = [""];
+
+    if (this.#transientPanel !== undefined) {
+      const drawer = this.#transientPanel(width);
+      return [...drawer.rows, ...drawer.controls];
+    }
 
     // The HITL question overlay owns the footer down to the status bar —
     // no indicator or hint row beneath it (the panel carries its own).
