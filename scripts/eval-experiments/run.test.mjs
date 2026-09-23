@@ -31,7 +31,8 @@ test("runs each scheduled attempt sequentially and records failed evals without 
         { label: "baseline", sha: "a" },
         { label: "candidate", sha: "b" },
       ],
-      fixtures: [{ name: "sample", evals: ["case"] }],
+      metricProfiles: [{ id: "self-modification-v1", metricSchemaVersion: "self-modification-v1" }],
+      fixtures: [{ name: "sample", metricProfile: "self-modification-v1", evals: ["case"] }],
     };
     const schedule = {
       fixture: "sample",

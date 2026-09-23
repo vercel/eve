@@ -5,13 +5,21 @@ import { compareExperiment } from "./compare.mjs";
 const plan = {
   experimentSha: "experiment",
   manifestHash: "hash",
-  metricSchemaVersion: "self-modification-v1",
+  metricProfiles: [
+    {
+      id: "self-modification-v1",
+      metricSchemaVersion: "self-modification-v1",
+      primaryMetric: "creationElapsedMs",
+    },
+  ],
   repetitions: 2,
   variants: [
     { label: "baseline", sha: "a" },
     { label: "candidate", sha: "b" },
   ],
-  fixtures: [{ name: "agent-self-modification", evals: ["create"] }],
+  fixtures: [
+    { name: "agent-self-modification", metricProfile: "self-modification-v1", evals: ["create"] },
+  ],
   matrix: [
     {
       fixture: "agent-self-modification",
@@ -27,6 +35,7 @@ const plan = {
 const sample = (variant, repetition, ms, verdict = "passed") => ({
   variant,
   fixture: "agent-self-modification",
+  metricProfile: "self-modification-v1",
   eval: "create",
   model: "openai-sol",
   repetition,

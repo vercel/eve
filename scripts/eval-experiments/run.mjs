@@ -4,7 +4,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
-const GUARDED_SOURCE = "agent";
+import { getProfile } from "./profiles/index.mjs";
+
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
 /** Execute one preplanned fixture/model schedule against already-built variant checkouts. */
@@ -15,6 +16,7 @@ export async function runSchedule({
   outputDir,
   env = process.env,
   timeoutMs = 20 * 60_000,
+  verifyCheckout,
 }) {
   const records = [];
   const unsafe = new Set();
@@ -25,7 +27,9 @@ export async function runSchedule({
       const identity = {
         experimentSha: plan.experimentSha,
         manifestHash: plan.manifestHash,
-        metricSchemaVersion: plan.metricSchemaVersion,
+        metricProfile: fixture.metricProfile,
+        metricSchemaVersion: plan.metricProfiles.find((item) => item.id === fixture.metricProfile)
+          ?.metricSchemaVersion,
         variant: label,
         sha: variant.sha,
         configurationExperiment: variant.configurationExperiment ?? false,
@@ -46,13 +50,16 @@ export async function runSchedule({
         if (!checkouts[variant.label]) throw new Error(`No prepared checkout for ${variant.label}`);
         const appRoot = join(checkout, "e2e", "fixtures", fixture.name);
         try {
-          records.push(await invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs }));
+          records.push(
+            await invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, verifyCheckout }),
+          );
         } catch (error) {
           if (!error.record) throw error;
           records.push(error.record);
           if (
             String(error.message).includes("failed to restore") ||
-            String(error.message).includes("checkout lock")
+            String(error.message).includes("cleanup check failed") ||
+            String(error.message).includes("cleanup verification failed")
           )
             unsafe.add(label);
         }
@@ -63,8 +70,9 @@ export async function runSchedule({
   return records;
 }
 
-async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs }) {
+async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs, verifyCheckout }) {
   const id = `${safe(identity.variant)}-${safe(identity.model)}-r${identity.repetition}`;
+  const profile = getProfile(fixture.metricProfile);
   const attemptDir = join(
     outputDir,
     "raw",
@@ -74,7 +82,7 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs })
     safe(identity.variant),
   );
   await mkdir(attemptDir, { recursive: true });
-  const before = await hashTree(appRoot, GUARDED_SOURCE);
+  const before = await hashTree(appRoot, profile.guardedFixtureSource);
   const start = new Date().toISOString();
   await rm(join(appRoot, ".eve", "evals"), { recursive: true, force: true });
   await mkdir(join(appRoot, ".eve", "evals"), { recursive: true });
@@ -117,15 +125,15 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs })
   const end = new Date().toISOString();
   if (result.stdout) await writeFile(join(attemptDir, "stdout.log"), result.stdout);
   if (result.stderr) await writeFile(join(attemptDir, "stderr.log"), result.stderr);
-  const after = await hashTree(appRoot, GUARDED_SOURCE);
+  const after = await hashTree(appRoot, profile.guardedFixtureSource);
   if (before !== after)
     infrastructureError = "Fixture failed to restore authored source; checkout cannot be reused.";
   try {
-    await stat(join(appRoot, ".eve-self-modification-eval.lock"));
-    infrastructureError =
-      "Self-modification checkout lock remains after eval; checkout cannot be reused.";
+    const safeToReuse = await (verifyCheckout ?? defaultVerifyCheckout)(appRoot, profile);
+    if (!safeToReuse)
+      infrastructureError = "Fixture cleanup check failed; checkout cannot be reused.";
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    infrastructureError = `Fixture cleanup verification failed: ${error.message}`;
   }
   let artifact;
   try {
@@ -146,7 +154,8 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs })
     correctnessOutcome:
       result.exitCode === 0 ? "passed" : result.exitCode === 1 ? "failed" : "unknown",
     infrastructureError,
-    modelSettings: await readModelSettings(appRoot),
+    metricProfile: profile.id,
+    modelSettings: await readModelSettings(appRoot, profile),
     buildIdentity: {
       sha: identity.sha,
       eveVersion: await readFile(resolve(appRoot, "../../../packages/eve/package.json"), "utf8")
@@ -162,17 +171,14 @@ async function invoke({ appRoot, fixture, identity, outputDir, env, timeoutMs })
   return record;
 }
 
-async function readModelSettings(appRoot) {
-  const paths = {
-    fixtureParent: join(appRoot, "agent/agent.ts"),
-    selfModificationAgent: resolve(
-      appRoot,
-      "../../../packages/eve/src/self-modification/extension/subagents/agent/agent.ts",
-    ),
-  };
+async function defaultVerifyCheckout(appRoot, profile) {
+  return profile.verifyCheckoutRestored ? profile.verifyCheckoutRestored(appRoot) : true;
+}
+
+async function readModelSettings(appRoot, profile) {
   const values = {};
-  for (const [name, path] of Object.entries(paths)) {
-    const content = await readFile(path, "utf8").catch(() => "");
+  for (const [name, relativePath] of Object.entries(profile.modelSettingsPaths)) {
+    const content = await readFile(resolve(appRoot, relativePath), "utf8").catch(() => "");
     values[name] =
       content.match(/model\s*:\s*([^,\n]+)/)?.[1]?.trim() ?? "not-explicit-in-agent-source";
   }

@@ -5,12 +5,10 @@ import { readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { getProfile } from "./profiles/index.mjs";
+
 const execFile = promisify(execFileCallback);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const ALLOWED_DIFFS = new Set([
-  "packages/eve/src/self-modification/extension/subagents/agent/instructions.ts",
-  "packages/eve/src/self-modification/extension/subagents/agent/agent.ts",
-]);
 const LABEL = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,39}$/;
 const SHA = /^[a-f0-9]{40}$/;
 
@@ -33,31 +31,23 @@ export async function createPlan(manifestPath, options = {}) {
   for (const fixture of manifest.fixtures) {
     const fixtureRoot = await realpath(resolve(fixturesRoot, fixture.name));
     if (!fixtureRoot.startsWith(`${fixturesRoot}${sep}`)) throw new Error("Invalid fixture path.");
-    if (fixture.name !== "agent-self-modification")
-      throw new Error(`Unknown fixture: ${fixture.name}`);
     const packageJson = JSON.parse(await readFile(resolve(fixtureRoot, "package.json"), "utf8"));
     if (packageJson.name !== fixture.name) throw new Error(`Unknown fixture: ${fixture.name}`);
-    if (fixture.metrics !== "self-modification-v1")
-      throw new Error(`Unknown metrics profile: ${fixture.metrics}`);
-    if (
-      fixture.name !== "agent-self-modification" ||
-      fixture.evals.some((id) => id !== "self-modification/create-shipping-quote")
-    )
-      throw new Error(
-        "self-modification-v1 currently supports only agent-self-modification/self-modification/create-shipping-quote.",
-      );
+    const profile = getProfile(fixture.metrics);
     const evalIds = await discoverEvalIds(resolve(fixtureRoot, "evals"));
-    for (const id of fixture.evals)
-      if (!evalIds.has(id)) throw new Error(`Unknown eval ${id} in ${fixture.name}`);
-    fixtures.push({ ...fixture, evals: [...fixture.evals] });
+    profile.validateSelection(fixture.name, fixture.evals, evalIds);
+    fixtures.push({ ...fixture, metricProfile: profile.id, evals: [...fixture.evals] });
   }
 
-  const experimentManifestPath = manifestFile;
   const experimentSha = await git(root, ["rev-parse", "HEAD"]);
+  const manifestRelativePath = manifestFile
+    .slice(root.length + 1)
+    .split(sep)
+    .join("/");
   const manifestInExperimentCommit = await git(root, [
     "cat-file",
     "-e",
-    `${experimentSha}:${experimentManifestPath.slice(root.length + 1)}`,
+    `${experimentSha}:${manifestRelativePath}`,
   ]).then(
     () => true,
     () => false,
@@ -84,7 +74,14 @@ export async function createPlan(manifestPath, options = {}) {
       candidate.sha,
     ]);
     const paths = changed.split("\n").filter(Boolean);
-    const disallowed = paths.filter((path) => !ALLOWED_DIFFS.has(path));
+    const profiles = [...new Set(manifest.fixtures.map((fixture) => fixture.metrics))].map(
+      getProfile,
+    );
+    const allowedDiffPaths = new Set(profiles.flatMap((profile) => [...profile.allowedDiffPaths]));
+    const configurationPaths = new Set(
+      profiles.flatMap((profile) => [...profile.configurationPaths]),
+    );
+    const disallowed = paths.filter((path) => !allowedDiffPaths.has(path));
     if (disallowed.length)
       throw new Error(
         `Variant ${candidate.label} changes disallowed paths:\n${disallowed.join("\n")}`,
@@ -108,14 +105,16 @@ export async function createPlan(manifestPath, options = {}) {
       candidate: candidate.label,
       paths,
       patch,
-      configurationExperiment: paths.includes(
-        "packages/eve/src/self-modification/extension/subagents/agent/agent.ts",
-      ),
+      configurationExperiment: paths.some((path) => configurationPaths.has(path)),
+      configurationPaths: paths.filter((path) => configurationPaths.has(path)),
     });
   }
 
-  const configurationChanged = diffs.some((diff) => diff.configurationExperiment);
-  for (const variant of variants) variant.configurationExperiment = configurationChanged;
+  for (const variant of variants) {
+    variant.configurationExperiment = diffs.some(
+      (diff) => diff.candidate === variant.label && diff.configurationExperiment,
+    );
+  }
 
   const seed = manifest.seed >>> 0;
   const schedules = [];
@@ -147,7 +146,11 @@ export async function createPlan(manifestPath, options = {}) {
     version: 1,
     experimentSha,
     manifestHash: createHash("sha256").update(bytes).digest("hex"),
-    metricSchemaVersion: "self-modification-v1",
+    metricProfiles: [...new Set(fixtures.map((fixture) => fixture.metricProfile))].map((id) => ({
+      id,
+      metricSchemaVersion: getProfile(id).metricSchemaVersion,
+      primaryMetric: getProfile(id).primaryMetric,
+    })),
     variants,
     diffs,
     fixtures,
@@ -205,10 +208,12 @@ function validateManifest(m) {
     throw new Error("Model names must be unique valid identifiers.");
   if (new Set(m.fixtures.map((fixture) => fixture.name)).size !== m.fixtures.length)
     throw new Error("Fixture names must be unique.");
+  if (new Set(m.fixtures.map((fixture) => fixture.metrics)).size > 1)
+    throw new Error("All fixtures in one experiment must use the same metrics profile.");
   const caseCount = m.fixtures.reduce((sum, f) => {
     if (
       !LABEL.test(f.name ?? "") ||
-      f.metrics !== "self-modification-v1" ||
+      typeof f.metrics !== "string" ||
       !Array.isArray(f.evals) ||
       f.evals.length < 1 ||
       f.evals.length > 10

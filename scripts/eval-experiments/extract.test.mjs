@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { extractSample } from "./extract.mjs";
+import { getProfile } from "./profiles/index.mjs";
 
 const event = (type, id, at, data, sessionId) => ({ type, data, meta: { id, at, sessionId } });
 function input({ child = [], parent = [], sessions = true, verdict = "passed" } = {}) {
@@ -11,7 +12,9 @@ function input({ child = [], parent = [], sessions = true, verdict = "passed" } 
       eval: "self-modification/create-shipping-quote",
       model: "openai-sol",
       repetition: 0,
+      metricProfile: "self-modification-v1",
     },
+    profile: getProfile("self-modification-v1"),
     verdict,
     artifact: {
       result: {
@@ -141,8 +144,7 @@ test("keeps missing capture, boundaries, parked input, and failed turns incomple
 });
 
 test("rejects ambiguous delegation and reused child turn capture", () => {
-  const base = input({ child: [completed] });
-  const duplicateDelegation = structuredClone(base);
+  const duplicateDelegation = input({ child: [completed] });
   duplicateDelegation.artifact.result.sessions[0].events.push(
     event(
       "subagent.called",

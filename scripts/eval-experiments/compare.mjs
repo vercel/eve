@@ -13,6 +13,10 @@ export function compareExperiment(plan, samples) {
           expected.push({
             variant: label,
             sha: variant.sha,
+            metricProfile: fixture.metricProfile,
+            metricSchemaVersion: plan.metricProfiles.find(
+              (item) => item.id === fixture.metricProfile,
+            )?.metricSchemaVersion,
             fixture: fixture.name,
             eval: evalId,
             model: schedule.model,
@@ -21,7 +25,13 @@ export function compareExperiment(plan, samples) {
             executionOrder: block.order.indexOf(label),
           });
       }
-  const indexed = new Map(samples.map((sample) => [key(sample), sample]));
+  const expectedKeys = new Set(expected.map(key));
+  const unexpected = samples.filter((sample) => !expectedKeys.has(key(sample)));
+  const indexed = new Map(
+    samples
+      .filter((sample) => expectedKeys.has(key(sample)))
+      .map((sample) => [key(sample), sample]),
+  );
   const rows = expected.map(
     (identity) =>
       indexed.get(key(identity)) ?? {
@@ -40,6 +50,7 @@ export function compareExperiment(plan, samples) {
         const baselineRows = rows.filter(
           (r) =>
             r.fixture === schedule.fixture &&
+            r.metricProfile === fixture.metricProfile &&
             r.eval === evalId &&
             r.model === schedule.model &&
             r.variant === baseline.label,
@@ -47,6 +58,7 @@ export function compareExperiment(plan, samples) {
         const candidateRows = rows.filter(
           (r) =>
             r.fixture === schedule.fixture &&
+            r.metricProfile === fixture.metricProfile &&
             r.eval === evalId &&
             r.model === schedule.model &&
             r.variant === variant.label,
@@ -62,11 +74,14 @@ export function compareExperiment(plan, samples) {
             b.measurement?.status === "complete" &&
             c.measurement?.status === "complete",
         );
-        const deltas = matched.map(
-          ([b, c]) => c.metrics.creationElapsedMs - b.metrics.creationElapsedMs,
-        );
+        const primaryMetric = plan.metricProfiles.find(
+          (item) => item.id === fixture.metricProfile,
+        )?.primaryMetric;
+        if (!primaryMetric)
+          throw new Error(`Profile has no primary metric: ${fixture.metricProfile}`);
+        const deltas = matched.map(([b, c]) => c.metrics[primaryMetric] - b.metrics[primaryMetric]);
         const ratios = matched
-          .map(([b, c]) => c.metrics.creationElapsedMs / b.metrics.creationElapsedMs)
+          .map(([b, c]) => c.metrics[primaryMetric] / b.metrics[primaryMetric])
           .filter((ratio) => Number.isFinite(ratio) && ratio > 0);
         const excludedCount = plan.repetitions - matched.length;
         const comparison = {
@@ -82,6 +97,9 @@ export function compareExperiment(plan, samples) {
           baselineSkipped: baselineRows.filter((r) => r.verdict === "skipped").length,
           baselineTimeouts: baselineRows.filter((r) => r.timedOut).length,
           baselineInfrastructureErrors: baselineRows.filter((r) => r.infrastructureError).length,
+          baselineMissingMetrics: baselineRows.filter((r) => r.measurement?.status !== "complete")
+            .length,
+          baselineMissingSamples: baselineRows.filter((r) => r.verdict === "missing").length,
           planned: plan.repetitions,
           failures: candidateRows.filter((r) => r.verdict === "failed").length,
           skipped: candidateRows.filter((r) => r.verdict === "skipped").length,
@@ -102,8 +120,10 @@ export function compareExperiment(plan, samples) {
             baseline: baselineRows.filter((r) => r.verdict === "passed").length,
             candidate: candidateRows.filter((r) => r.verdict === "passed").length,
           },
-          baselineMedianMs: median(matched.map(([b]) => b.metrics.creationElapsedMs)),
-          candidateMedianMs: median(matched.map(([, c]) => c.metrics.creationElapsedMs)),
+          metricProfile: fixture.metricProfile,
+          primaryMetric,
+          baselineMedianMs: median(matched.map(([b]) => b.metrics[primaryMetric])),
+          candidateMedianMs: median(matched.map(([, c]) => c.metrics[primaryMetric])),
           medianPairedDeltaMs: median(deltas),
           geometricMeanRatio: geometricMean(ratios),
         };
@@ -132,11 +152,14 @@ export function compareExperiment(plan, samples) {
     version: 1,
     experimentSha: plan.experimentSha,
     manifestHash: plan.manifestHash,
-    metricSchemaVersion: plan.metricSchemaVersion,
+    metricProfiles: plan.metricProfiles,
     diffs: plan.diffs,
-    complete: rows.every(
-      (row) => row.verdict !== "missing" && row.verdict !== "unknown" && !row.infrastructureError,
-    ),
+    complete:
+      unexpected.length === 0 &&
+      rows.every(
+        (row) => row.verdict !== "missing" && row.verdict !== "unknown" && !row.infrastructureError,
+      ),
+    unexpectedSamples: unexpected,
     correctnessRegressions: comparisons.filter(
       (item) => item.candidateCorrect < item.baselineCorrect,
     ),
@@ -157,12 +180,12 @@ export function renderMarkdown(report) {
     `**Correctness regressions:** ${report.correctnessRegressions.length}`,
     `**All strict evals passed:** ${report.allComparisonsPassCorrectness ? "yes" : "no"}`,
     "",
-    "| Fixture / eval | Model | Candidate | Correctness | Matched | Median paired Δ (ms) | Geomean ratio |",
-    "|---|---|---:|---:|---:|---:|---:|",
+    "| Fixture / eval | Model | Candidate | Primary metric | Correctness | Matched | Median paired Δ (ms) | Geomean ratio |",
+    "|---|---|---|---:|---:|---:|---:|---:|",
   ];
   for (const row of report.comparisons)
     lines.push(
-      `| ${row.fixture} / ${row.eval} | ${row.model} | ${row.candidate} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${row.matched} | ${format(row.medianPairedDeltaMs)} | ${format(row.geometricMeanRatio)} |`,
+      `| ${row.fixture} / ${row.eval} | ${row.model} | ${row.candidate} | ${row.primaryMetric} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${row.matched} | ${format(row.medianPairedDeltaMs)} | ${format(row.geometricMeanRatio)} |`,
     );
   lines.push(
     "",

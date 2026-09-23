@@ -1,6 +1,6 @@
 # Eval latency experiments
 
-This internal harness compares correctness-eval runs across immutable git snapshots. It does not add latency assertions or alter required checks. The initial profile is deliberately limited to simple self-modification creation cases and `self-modification-v1` event metrics.
+This internal harness compares correctness-eval runs across immutable git snapshots. It does not add latency assertions or alter required checks.
 
 ## Dispatch
 
@@ -11,7 +11,7 @@ gh workflow run eval-experiment.yml --ref my-experiment-branch \
   -f manifest=experiments/self-modification-latency.json
 ```
 
-Every candidate SHA describes its whole tree. Restore the baseline files between independent variants. Model aliases are resolved from `e2e/matrix.json` and full model IDs are recorded. The manifest-only commit is experiment metadata, not a candidate measurement. The Actions run executes the unmodified fixture correctness eval with `--strict --verbose --max-concurrency 1 --skip-report`; fixture timeout, judge, setup, teardown, and source restoration remain authoritative.
+Every candidate SHA describes its whole tree. Restore the baseline files between independent variants. Model aliases are resolved from `e2e/matrix.json` and full model IDs are recorded. The manifest-only commit is experiment metadata, not a candidate measurement. Metrics profiles are registered under `scripts/eval-experiments/profiles/`; a profile controls supported fixture/eval selections, allowed variant diff paths, fixture restoration checks, observed model settings, and metric extraction. The planner and comparator consume profile metadata rather than embedding those selectors. The Actions run executes the unmodified fixture correctness eval with `--strict --verbose --max-concurrency 1 --skip-report`; fixture timeout, judge, setup, teardown, and source restoration remain authoritative.
 
 ## Artifacts and local report regeneration
 

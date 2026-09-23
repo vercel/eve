@@ -1,39 +1,28 @@
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-export const METRIC_SCHEMA_VERSION = "self-modification-v1";
-const TARGET_AGENT = "self-modification__agent";
-const TERMINAL_FAILURES = new Set(["turn.failed", "turn.cancelled"]);
+import { getProfile } from "./profiles/index.mjs";
 
-/** Normalize one per-eval artifact. Session arrays are authoritative; the top-level event stream is not merged. */
 export function extractSample(input) {
   const sessions = input.artifact?.result?.sessions;
-  const base = { ...input.identity, metricSchemaVersion: METRIC_SCHEMA_VERSION };
-  if (!Array.isArray(sessions))
-    return {
-      ...base,
-      verdict: input.verdict,
-      measurement: { status: "incomplete", reason: "missing-session-capture" },
-    };
+  const profile = input.profile ?? getProfile(input.identity.metricProfile);
+  if (input.artifact?.id && input.identity?.eval && input.artifact.id !== input.identity.eval)
+    throw new Error(
+      `Artifact eval ${input.artifact.id} does not match requested eval ${input.identity.eval}.`,
+    );
+  const base = {
+    ...input.identity,
+    metricProfile: profile.id,
+    metricSchemaVersion: profile.metricSchemaVersion,
+  };
+  if (!Array.isArray(sessions)) return incomplete(base, input, "missing-session-capture");
 
-  const eventsBySession = new Map();
-  for (const session of sessions) {
-    if (typeof session.sessionId !== "string" || !Array.isArray(session.events)) continue;
-    const unique = new Map();
-    for (const event of session.events) {
-      const id = event?.meta?.id;
-      const key = typeof id === "string" ? id : `unidentified:${unique.size}`;
-      if (!unique.has(key)) unique.set(key, event);
-    }
-    eventsBySession.set(session.sessionId, [...unique.values()]);
-  }
-
+  const eventsBySession = indexSessionEvents(sessions);
   const delegations = [];
   for (const [sessionId, events] of eventsBySession) {
     for (const event of events) {
-      if (event?.type === "subagent.called" && event.data?.name === TARGET_AGENT) {
+      if (event.type === "subagent.called" && event.data?.name === profile.targetAgent)
         delegations.push({ parentSessionId: sessionId, event });
-      }
     }
   }
   if (delegations.length !== 1)
@@ -42,6 +31,7 @@ export function extractSample(input) {
       input,
       delegations.length ? "ambiguous-delegation" : "missing-delegation",
     );
+
   const { parentSessionId, event: called } = delegations[0];
   const { childSessionId, turnId: parentTurnId, callId } = called.data ?? {};
   if (!called.meta?.id) return incomplete(base, input, "missing-event-identity");
@@ -54,104 +44,42 @@ export function extractSample(input) {
   if (childSessionId === parentSessionId) return incomplete(base, input, "child-session-reused");
   const childEvents = eventsBySession.get(childSessionId);
   if (!childEvents) return incomplete(base, input, "missing-child-capture");
-  const invocation = childEvents.find((event) => event.type === "session.started")?.data
-    ?.invocation;
-  if (
-    !invocation ||
-    invocation.kind !== "subagent" ||
-    invocation.parentCallId !== callId ||
-    invocation.parentSessionId !== parentSessionId ||
-    invocation.parentTurnId !== parentTurnId
-  )
-    return incomplete(base, input, "child-invocation-mismatch");
-  const parentEvents = eventsBySession.get(parentSessionId);
-  const parentStart = parentEvents?.find(
-    (event) => event.type === "turn.started" && event.data?.turnId === parentTurnId,
-  );
-  if (!parentStart) return incomplete(base, input, "missing-parent-turn-start");
-  if (!parentStart.meta?.id) return incomplete(base, input, "missing-event-identity");
 
-  const starts = childEvents.filter((event) => event.type === "turn.started");
-  const failures = childEvents.filter(
-    (event) => TERMINAL_FAILURES.has(event.type) || event.type === "session.failed",
-  );
-  if (failures.length) return incomplete(base, input, "child-turn-failed");
-  const completions = childEvents.filter((event) => event.type === "turn.completed");
-  if (starts.length !== 1 || completions.length !== 1)
-    return incomplete(
-      base,
-      input,
-      starts.length > 1 || completions.length > 1
-        ? "ambiguous-child-turn"
-        : "missing-child-turn-boundary",
-    );
-  const start = starts[0];
-  const completed = completions[0];
-  const turnId = start.data?.turnId;
-  if (!turnId || completed.data?.turnId !== turnId)
-    return incomplete(base, input, "child-turn-mismatch");
-  if (!start.meta?.id || !completed.meta?.id)
-    return incomplete(base, input, "missing-event-identity");
-  if (
-    childEvents.some((item) => item.type === "input.requested" && item.data?.turnId === turnId) ||
-    completed.data?.status === "waiting" ||
-    childEvents.some(
-      (item) =>
-        item.type === "session.waiting" &&
-        Date.parse(item.meta?.at ?? "") <= Date.parse(completed.meta?.at ?? ""),
-    )
-  )
-    return incomplete(base, input, "child-turn-parked");
-
-  const parentAt = Date.parse(parentStart.meta?.at ?? "");
-  const childStartAt = Date.parse(start.meta?.at ?? "");
-  const childEndAt = Date.parse(completed.meta?.at ?? "");
-  if (![parentAt, childStartAt, childEndAt].every(Number.isFinite))
-    return incomplete(base, input, "missing-timestamp");
-  const creationElapsedMs = childEndAt - parentAt;
-  const childTurnMs = childEndAt - childStartAt;
-  if (creationElapsedMs < 0 || childTurnMs < 0)
-    return incomplete(base, input, "negative-elapsed-time");
-  const toolCalls = new Set(
-    childEvents
-      .filter((item) => item.type === "actions.requested")
-      .flatMap((item) =>
-        (item.data?.actions ?? [])
-          .filter((action) => action.kind === "tool-call")
-          .map((action) => action.callId)
-          .filter(Boolean),
-      ),
-  );
+  const measurement = profile.extractMeasurement({
+    sessions,
+    eventsBySession,
+    parentSessionId,
+    parentTurnId,
+    called,
+    childSessionId,
+    childEvents,
+  });
+  if (measurement.status !== "complete") return incomplete(base, input, measurement.reason);
   return {
     ...base,
     verdict: resolveVerdict(input),
-    observedModelSettings: {
-      parent: [...(eventsBySession.get(parentSessionId) ?? [])]
-        .filter((event) => event.type === "step.started")
-        .map((event) => event.data?.modelId)
-        .filter(Boolean),
-      child: childEvents
-        .filter((event) => event.type === "step.started")
-        .map((event) => event.data?.modelId)
-        .filter(Boolean),
-    },
     measurement: { status: "complete" },
-    metrics: { creationElapsedMs, childTurnMs, childToolCalls: toolCalls.size },
-    events: {
-      parentStart: ref(parentStart),
-      childStart: ref(start),
-      childCompletion: ref(completed),
-      delegation: ref(called),
-      childSessionId,
-      parentSessionId,
-      callId,
-    },
+    metrics: measurement.metrics,
+    observedModelSettings: measurement.observedModelSettings,
+    events: measurement.events,
   };
 }
 
-function ref(event) {
-  return { id: event.meta?.id, at: event.meta?.at, type: event.type };
+function indexSessionEvents(sessions) {
+  const result = new Map();
+  for (const session of sessions) {
+    if (typeof session.sessionId !== "string" || !Array.isArray(session.events)) continue;
+    const unique = new Map();
+    for (const event of session.events) {
+      const key =
+        typeof event?.meta?.id === "string" ? event.meta.id : `unidentified:${unique.size}`;
+      if (!unique.has(key)) unique.set(key, event);
+    }
+    result.set(session.sessionId, [...unique.values()]);
+  }
+  return result;
 }
+
 function incomplete(base, input, reason) {
   return {
     ...base,
@@ -172,16 +100,23 @@ export async function extractDirectory(root, identities = {}) {
     const artifact = JSON.parse(await readFile(path, "utf8"));
     if (!artifact?.result?.sessions) continue;
     const invocation = await findInvocation(dirname(dirname(path)));
-    samples.push(
-      extractSample({
-        identity: { ...identities, ...invocation, eval: artifact.id, artifact: path },
-        artifact,
-        verdict: artifact.verdict,
-      }),
-    );
+    const identity = { ...identities, ...invocation, eval: artifact.id, artifact: path };
+    if (!identity.metricProfile) throw new Error(`Invocation is missing a metric profile: ${path}`);
+    if (
+      identities.metricProfile &&
+      invocation.metricProfile &&
+      identities.metricProfile !== invocation.metricProfile
+    )
+      throw new Error(
+        `Invocation metric profile ${invocation.metricProfile} does not match requested profile ${identities.metricProfile}.`,
+      );
+    const profile = getProfile(identity.metricProfile);
+    samples.push(extractSample({ identity, artifact, verdict: artifact.verdict, profile }));
   }
   for (const path of await findInvocationFiles(resolve(root))) {
     const invocation = JSON.parse(await readFile(path, "utf8"));
+    if (!invocation.metricProfile)
+      throw new Error(`Invocation is missing a metric profile: ${path}`);
     for (const evalId of invocation.selectedEvals ?? []) {
       if (
         samples.some(
@@ -194,6 +129,7 @@ export async function extractDirectory(root, identities = {}) {
         )
       )
         continue;
+      const profile = getProfile(invocation.metricProfile);
       samples.push({
         ...identities,
         ...invocation,
@@ -206,7 +142,8 @@ export async function extractDirectory(root, identities = {}) {
               : "missing",
         infrastructureError: invocation.infrastructureError,
         artifact: invocation.artifact,
-        metricSchemaVersion: METRIC_SCHEMA_VERSION,
+        metricProfile: profile.id,
+        metricSchemaVersion: profile.metricSchemaVersion,
         measurement: {
           status: "incomplete",
           reason: invocation.infrastructureError
