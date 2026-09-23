@@ -107,6 +107,7 @@ function AgentMessageParts({
 
   return activity.length > 0
     ? [
+        ...text,
         <ActivityGroup
           canRespond={canRespond}
           isSettled={!showCaret}
@@ -114,7 +115,6 @@ function AgentMessageParts({
           onInputResponses={onInputResponses}
           parts={activity}
         />,
-        ...text,
       ]
     : text;
 }
@@ -351,14 +351,16 @@ function ActivityGroup({
     !isSettled || parts.some((part) => part.type === "reasoning" && part.state === "streaming");
   const [open, setOpen] = useState(false);
 
+  const label = summarizeActivity(parts, isWorking);
+
   return (
-    <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
-        {isWorking ? <Loader2Icon className="size-4 animate-spin" /> : null}
-        <span>{isWorking ? "Working..." : "Activity"}</span>
-        <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
+    <Collapsible className="mt-2 w-full" onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+        {isWorking ? <Loader2Icon className="size-3 animate-spin" /> : null}
+        <span>{label}</span>
+        <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
+      <CollapsibleContent className="mt-2 ml-1 border-l border-border/60 pl-3 text-muted-foreground">
         <ActivityContent
           canRespond={canRespond}
           isSettled={isSettled}
@@ -368,6 +370,13 @@ function ActivityGroup({
       </CollapsibleContent>
     </Collapsible>
   );
+}
+
+function summarizeActivity(parts: readonly ActivityPart[], isWorking: boolean) {
+  const tools = parts.filter((part): part is EveDynamicToolPart => part.type === "dynamic-tool");
+  if (isWorking) return "Working…";
+  if (tools.length === 0) return "Thought through response";
+  return summarizeToolGroup(tools, getToolGroupStatus(tools));
 }
 
 function ToolGroup({
