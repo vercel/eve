@@ -301,7 +301,40 @@ function nextStreamingText(current: string, target: string, catchUp = false) {
   return target.slice(0, current.length + Math.min(remaining, step));
 }
 
-type ActivityPart = Extract<EveMessagePart, { type: "dynamic-tool" | "reasoning" }>;
+export type ActivityPart = Extract<EveMessagePart, { type: "dynamic-tool" | "reasoning" }>;
+
+export function ActivityContent({
+  canRespond,
+  isSettled,
+  onInputResponses,
+  parts,
+}: {
+  readonly canRespond: boolean;
+  readonly isSettled: boolean;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly parts: readonly ActivityPart[];
+}) {
+  return (
+    <div className="space-y-2">
+      {parts.map((part, index) =>
+        part.type === "reasoning" ? (
+          <div className="text-sm leading-6" key={partKey(part, index)}>
+            <p className="mb-1 text-xs text-muted-foreground/70">Reasoning</p>
+            <Markdown>{part.text}</Markdown>
+          </div>
+        ) : (
+          <ToolGroup
+            canRespond={canRespond}
+            isSettled={isSettled}
+            key={part.toolCallId}
+            onInputResponses={onInputResponses}
+            parts={[part]}
+          />
+        ),
+      )}
+    </div>
+  );
+}
 
 function ActivityGroup({
   canRespond,
@@ -326,24 +359,12 @@ function ActivityGroup({
         <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
-        <div className="space-y-2">
-          {parts.map((part, index) =>
-            part.type === "reasoning" ? (
-              <div className="text-sm leading-6" key={partKey(part, index)}>
-                <p className="mb-1 text-xs text-muted-foreground/70">Reasoning</p>
-                <Markdown>{part.text}</Markdown>
-              </div>
-            ) : (
-              <ToolGroup
-                canRespond={canRespond}
-                isSettled={isSettled}
-                key={part.toolCallId}
-                onInputResponses={onInputResponses}
-                parts={[part]}
-              />
-            ),
-          )}
-        </div>
+        <ActivityContent
+          canRespond={canRespond}
+          isSettled={isSettled}
+          onInputResponses={onInputResponses}
+          parts={parts}
+        />
       </CollapsibleContent>
     </Collapsible>
   );

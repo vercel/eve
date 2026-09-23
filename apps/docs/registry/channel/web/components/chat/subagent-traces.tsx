@@ -1,8 +1,10 @@
 "use client";
 
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "eve/client";
-import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
+import type { EveDynamicToolPart } from "eve/react";
+import { ChevronDownIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ActivityContent, type ActivityPart } from "@/components/chat/message";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
@@ -110,107 +112,49 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
             {trace.status === "running" ? "Waiting for the subagent to begin…" : "No activity."}
           </p>
         ) : (
-          <TraceTimeline trace={trace} />
+          <ActivityContent
+            canRespond={false}
+            isSettled={trace.status !== "running"}
+            onInputResponses={() => undefined}
+            parts={traceActivityParts(trace)}
+          />
         )}
       </CollapsibleContent>
     </Collapsible>
   );
 }
 
-function TraceTimeline({ trace }: { readonly trace: SubagentTrace }) {
-  const entries = [...trace.steps.filter((step) => step.reasoning), ...trace.tools].sort(
-    (left, right) => left.order - right.order,
-  );
-
-  return (
-    <div className="space-y-2 pb-1">
-      {entries.map((entry) =>
-        "callId" in entry ? (
-          <SubagentToolRow key={entry.callId} tool={entry} />
-        ) : (
-          <div className="text-sm leading-6" key={entry.id}>
-            <p className="mb-1 text-xs text-muted-foreground/70">Reasoning</p>
-            <p className="whitespace-pre-wrap">{entry.reasoning}</p>
-          </div>
-        ),
-      )}
-    </div>
-  );
+function traceActivityParts(trace: SubagentTrace): readonly ActivityPart[] {
+  return [...trace.steps.filter((step) => step.reasoning), ...trace.tools]
+    .sort((left, right) => left.order - right.order)
+    .map((entry) => ("callId" in entry ? toolActivityPart(entry) : reasoningActivityPart(entry)));
 }
 
-function SubagentToolRow({ tool }: { readonly tool: SubagentTraceTool }) {
-  const [open, setOpen] = useState(false);
-  const hasDetails =
-    tool.input !== undefined || tool.output !== undefined || tool.errorText !== undefined;
-
-  return (
-    <div className="min-w-0">
-      <button
-        className={cn(
-          "flex max-w-full items-center gap-2 py-0.5 text-left text-sm leading-6 text-muted-foreground transition-colors",
-          hasDetails ? "group/tool cursor-pointer hover:text-foreground" : "cursor-default",
-        )}
-        disabled={!hasDetails}
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        <TraceStatus status={tool.status} />
-        <span className="truncate">{formatName(tool.name)}</span>
-        <span className="text-muted-foreground/70">· {toolStatusLabel(tool.status)}</span>
-        {hasDetails ? (
-          <ChevronRightIcon
-            className={cn(
-              "size-3 shrink-0 transition-all",
-              open ? "rotate-90 opacity-100" : "opacity-0 group-hover/tool:opacity-100",
-            )}
-          />
-        ) : null}
-      </button>
-      {open ? (
-        <div className="ml-2 border-l border-border/40 py-0.5 pl-3">
-          <div className="space-y-1.5">
-            <TracePayload label="input" value={tool.input} />
-            {tool.output !== undefined ? <TracePayload label="result" value={tool.output} /> : null}
-            {tool.errorText ? (
-              <TracePayload label="error" tone="error" value={tool.errorText} />
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
+function reasoningActivityPart(step: SubagentTraceStep): ActivityPart {
+  return {
+    state: step.finalized ? "done" : "streaming",
+    stepIndex: step.order,
+    text: step.reasoning,
+    type: "reasoning",
+  };
 }
 
-function TracePayload({
-  label,
-  tone = "default",
-  value,
-}: {
-  readonly label: string;
-  readonly tone?: "default" | "error";
-  readonly value: unknown;
-}) {
-  if (value === undefined) return null;
+function toolActivityPart(tool: SubagentTraceTool): EveDynamicToolPart {
+  const base = {
+    input: tool.input,
+    stepIndex: tool.order,
+    toolCallId: tool.callId,
+    toolName: tool.name,
+    type: "dynamic-tool" as const,
+  };
 
-  return (
-    <div>
-      <p className="text-muted-foreground/70">{label}</p>
-      <pre
-        className={cn(
-          "max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground",
-          tone === "error" && "text-destructive",
-        )}
-      >
-        {describeInput(value)}
-      </pre>
-    </div>
-  );
-}
-
-function toolStatusLabel(status: SubagentTraceTool["status"]) {
-  if (status === "running") return "Running";
-  if (status === "failed") return "Failed";
-  return "Complete";
+  if (tool.status === "running") {
+    return { ...base, inputText: "", state: "input-streaming" };
+  }
+  if (tool.status === "failed") {
+    return { ...base, errorText: tool.errorText ?? "Tool call failed", state: "output-error" };
+  }
+  return { ...base, output: tool.output, state: "output-available" };
 }
 
 function traceStatusLabel(status: SubagentTrace["status"]) {
@@ -364,13 +308,4 @@ function nextTraceOrder(trace: MutableTrace) {
 
 function blankStep(index: number, order = index - 1): SubagentTraceStep {
   return { finalized: false, id: `${index}`, order, reasoning: "", text: "" };
-}
-
-function describeInput(input: unknown): string {
-  if (typeof input === "string") return input;
-  try {
-    return JSON.stringify(input);
-  } catch {
-    return "Working…";
-  }
 }
