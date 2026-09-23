@@ -93,36 +93,35 @@ export function SubagentTraces({ traces }: { readonly traces: readonly SubagentT
 function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
   const [open, setOpen] = useState(trace.status === "running");
   useEffect(() => {
-    if (trace.status === "running") setOpen(true);
+    setOpen(trace.status === "running");
   }, [trace.status]);
 
   const detailCount = trace.steps.length + trace.tools.length;
-  const result = getLatestSubagentMessage(trace);
   return (
-    <Collapsible onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md py-1 text-left text-muted-foreground text-sm leading-6 transition-colors hover:text-foreground">
+    <Collapsible
+      className="my-4 border-border/70 border-l-2 pl-4"
+      onOpenChange={setOpen}
+      open={open}
+    >
+      <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-sm py-1 text-left text-[15px] leading-6 transition-colors hover:text-foreground">
         <TraceStatus status={trace.status} />
-        <span className="min-w-0 truncate">
-          {trace.status === "running" ? "Delegating to" : "Delegated to"} {formatName(trace.name)}
+        <span className="min-w-0 truncate text-foreground">
+          {trace.status === "running" ? "Delegating to" : "Delegated to"}{" "}
+          <span className="font-medium">{formatName(trace.name)}</span>
         </span>
-        {trace.status !== "running" && result ? (
-          <span className="min-w-0 truncate text-muted-foreground/70">
-            · {truncateInline(result, 72)}
-          </span>
-        ) : null}
-        <span className="sr-only">
-          {trace.status === "running" ? "Subagent is working" : "Subagent complete"}
-        </span>
+        <span className="text-muted-foreground">· {traceStatusLabel(trace.status)}</span>
         <ChevronRightIcon
           className={cn(
-            "ml-auto size-3.5 shrink-0 transition-transform",
+            "ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform",
             open ? "rotate-90" : "opacity-0 group-hover:opacity-100",
           )}
         />
       </CollapsibleTrigger>
-      <CollapsibleContent className="ml-2 border-border/40 border-l pl-3">
+      <CollapsibleContent className="mt-2 border-border/50 border-t pt-2">
         {detailCount === 0 ? (
-          <p className="py-1 text-muted-foreground text-sm">Waiting for the subagent to begin…</p>
+          <p className="text-[15px] leading-6 text-muted-foreground">
+            Waiting for the subagent to begin…
+          </p>
         ) : (
           <TraceTimeline trace={trace} />
         )}
@@ -138,21 +137,15 @@ function TraceTimeline({ trace }: { readonly trace: SubagentTrace }) {
   ].sort((left, right) => left.order - right.order);
 
   return (
-    <div className="space-y-2 py-1">
-      {entries.map((entry, index) => (
-        <div
-          className="relative flex gap-2 pb-2 last:pb-0"
-          key={"callId" in entry ? entry.callId : entry.id}
-        >
-          <div className="flex w-4 shrink-0 justify-center">
+    <div className="space-y-1.5 pb-1 pl-1">
+      {entries.map((entry) => (
+        <div className="flex gap-2" key={"callId" in entry ? entry.callId : entry.id}>
+          <div className="flex w-4 shrink-0 justify-center pt-1">
             {"callId" in entry ? (
               <TraceStatus status={entry.status} />
             ) : (
               <span className="mt-1.5 size-1.5 rounded-full bg-muted-foreground/60" />
             )}
-            {index < entries.length - 1 ? (
-              <span className="absolute top-5 bottom-0 w-px bg-border/50" />
-            ) : null}
           </div>
           {"callId" in entry ? <SubagentToolRow tool={entry} /> : <SubagentStepRow step={entry} />}
         </div>
@@ -163,17 +156,17 @@ function TraceTimeline({ trace }: { readonly trace: SubagentTrace }) {
 
 function SubagentStepRow({ step }: { readonly step: SubagentTraceStep }) {
   return (
-    <div className="min-w-0 flex-1 space-y-1 text-sm leading-6">
+    <div className="min-w-0 flex-1 space-y-1 text-[15px] leading-6">
+      {step.text ? <p className="whitespace-pre-wrap text-foreground">{step.text}</p> : null}
       {step.reasoning ? (
         <details className="group/reasoning">
           <summary className="cursor-pointer list-none text-muted-foreground hover:text-foreground">
-            <span className="group-open/reasoning:hidden">Thought</span>
-            <span className="hidden group-open/reasoning:inline">Reasoning</span>
+            <span className="group-open/reasoning:hidden">Show reasoning</span>
+            <span className="hidden group-open/reasoning:inline">Hide reasoning</span>
           </summary>
           <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{step.reasoning}</p>
         </details>
       ) : null}
-      {step.text ? <p className="whitespace-pre-wrap text-foreground">{step.text}</p> : null}
     </div>
   );
 }
@@ -187,7 +180,7 @@ function SubagentToolRow({ tool }: { readonly tool: SubagentTraceTool }) {
     <div className="min-w-0 flex-1">
       <button
         className={cn(
-          "flex w-full items-center gap-1.5 text-left text-sm leading-6 text-muted-foreground",
+          "flex w-full items-center gap-1.5 text-left text-[15px] leading-6 text-muted-foreground",
           hasDetails && "group/tool hover:text-foreground",
         )}
         disabled={!hasDetails}
@@ -251,11 +244,10 @@ function toolStatusLabel(status: SubagentTraceTool["status"]) {
   return "Complete";
 }
 
-function getLatestSubagentMessage(trace: SubagentTrace): string | undefined {
-  return [...trace.steps]
-    .sort((left, right) => right.order - left.order)
-    .find((step) => step.text.trim())
-    ?.text.trim();
+function traceStatusLabel(status: SubagentTrace["status"]) {
+  if (status === "running") return "Working";
+  if (status === "failed") return "Failed";
+  return "Complete";
 }
 
 function formatName(name: string) {
@@ -263,11 +255,6 @@ function formatName(name: string) {
     .replace(/^subagent:/, "")
     .replace(/__/g, " · ")
     .replace(/[_-]/g, " ");
-}
-
-function truncateInline(text: string, maxLength: number) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function TraceStatus({ status }: { readonly status: "complete" | "failed" | "running" }) {
