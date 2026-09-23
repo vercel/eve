@@ -141,6 +141,10 @@ Omitting `agent/instrumentation/agent-runs.ts` preserves that default. Export
 `agentRuns(...)` from that file to reconfigure it, or export
 `disableInstrumentation()` to disable it.
 
+Agent Runs is in beta and uses Vercel Native Tracing. Native Tracing usage is
+subject to [Vercel pricing](https://vercel.com/pricing). During the beta, Agent
+Runs data is retained for 30 days.
+
 ## Enable tracing on Vercel
 
 A deployed eve project needs at least one
