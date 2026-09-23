@@ -484,6 +484,7 @@ export function withEve<TConfig extends EveNextConfig>(
                 phase,
                 productionDestinationPrefix: agent.productionDestination.destinationPrefix,
                 productionServerOrigin: agent.productionDestination.localServerOrigin,
+                workspaceAgentName: agent.workspaceMember === true ? agent.name : undefined,
               });
 
               return createEveRewriteRule({

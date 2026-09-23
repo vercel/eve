@@ -436,9 +436,17 @@ function startEveDevServer(
   appRoot: string,
   timeoutMs: number,
   logLabel: string | undefined,
+  workspaceAgentName: string | undefined,
 ): Promise<EveProcessHandle> {
   return startServerProcess({
-    args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
+    args: [
+      createEveBinaryPath(),
+      "dev",
+      "--no-ui",
+      "--port",
+      "0",
+      ...(workspaceAgentName === undefined ? [] : ["--agent", workspaceAgentName]),
+    ],
     command: process.execPath,
     cwd: appRoot,
     logLabel,
@@ -479,6 +487,7 @@ async function resolveSharedEveDevServer(
   appRoot: string,
   timeoutMs: number,
   logLabel: string | undefined,
+  workspaceAgentName: string | undefined,
 ): Promise<EveProcessHandle> {
   const registeredOrigin = await readUsableEveDevServerRegistry(appRoot);
   if (registeredOrigin !== undefined) {
@@ -497,7 +506,7 @@ async function resolveSharedEveDevServer(
       };
     }
 
-    const handle = await startEveDevServer(appRoot, timeoutMs, logLabel);
+    const handle = await startEveDevServer(appRoot, timeoutMs, logLabel, workspaceAgentName);
     await writeEveDevServerRegistry(appRoot, handle);
     return handle;
   } finally {
@@ -512,6 +521,8 @@ export async function resolveEveDestinationPrefix(input: {
   readonly phase: string;
   readonly productionDestinationPrefix: string;
   readonly productionServerOrigin?: string;
+  /** Workspace member selected when spawning the local eve dev server. */
+  readonly workspaceAgentName?: string;
 }): Promise<string> {
   const state = getGlobalState();
 
@@ -563,6 +574,7 @@ export async function resolveEveDestinationPrefix(input: {
       input.appRoot,
       input.devServerTimeoutMs ?? DEV_SERVER_REGISTRY_TIMEOUT_MS,
       input.logLabel,
+      input.workspaceAgentName,
     ).catch((error) => {
       state.servers.delete(key);
       throw error;
