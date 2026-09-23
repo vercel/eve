@@ -76,13 +76,12 @@ export function vercelScheduleProvider(
     },
     async list(context, input): Promise<SchedulePage> {
       const cursor = input.cursor?.trim() || undefined;
-      const page = await (
-        await client()
-      ).list({
+      const params: { namespace: string; cursor?: string; limit?: number } = {
         namespace: context.namespace,
-        ...(cursor === undefined ? {} : { cursor }),
-        ...(input.limit === undefined ? {} : { limit: input.limit }),
-      });
+      };
+      if (cursor !== undefined) params.cursor = cursor;
+      if (input.limit !== undefined) params.limit = input.limit;
+      const page = await (await client()).list(params);
       return { cursor: page.cursor, data: page.data.map(fromVercelSchedule) };
     },
     async get(context, name) {
@@ -91,22 +90,17 @@ export function vercelScheduleProvider(
     },
     async update(context, name, patch) {
       const schedules = await client();
-      return fromVercelSchedule(
-        await schedules.update({
-          name,
-          namespace: context.namespace,
-          ...(patch.expression === undefined
-            ? {}
-            : {
-                expression: toVercelExpression(patch.expression),
-                timezone: patch.expression.timezone,
-                ...(patch.expression.type === "cron" ? { jitter: patch.expression.jitter } : {}),
-              }),
-          ...(patch.input === undefined
-            ? {}
-            : { payload: createDispatchPayload(context, patch.input) }),
-        }),
-      );
+      const params: Parameters<SchedulesClient["update"]>[0] = {
+        name,
+        namespace: context.namespace,
+      };
+      if (patch.expression !== undefined) {
+        params.expression = toVercelExpression(patch.expression);
+        params.timezone = patch.expression.timezone;
+        if (patch.expression.type === "cron") params.jitter = patch.expression.jitter;
+      }
+      if (patch.input !== undefined) params.payload = createDispatchPayload(context, patch.input);
+      return fromVercelSchedule(await schedules.update(params));
     },
     async enable(context, name) {
       return fromVercelSchedule(
@@ -142,11 +136,11 @@ async function createClient(input: {
     input.bearerToken === undefined
       ? input.fetch
       : withProjectId(input.fetch ?? fetch, input.projectId!);
-  return new SchedulesClient({
-    ...(input.baseUrl === undefined ? {} : { baseUrl: input.baseUrl }),
-    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
-    ...(input.bearerToken === undefined ? {} : { token: input.bearerToken }),
-  });
+  const options: ConstructorParameters<typeof SchedulesClient>[0] = {};
+  if (input.baseUrl !== undefined) options.baseUrl = input.baseUrl;
+  if (fetchImpl !== undefined) options.fetch = fetchImpl;
+  if (input.bearerToken !== undefined) options.token = input.bearerToken;
+  return new SchedulesClient(options);
 }
 
 function withProjectId(fetchImpl: typeof fetch, projectId: string): typeof fetch {
@@ -177,15 +171,18 @@ function toVercelExpression(expression: ScheduleExpression) {
 }
 
 function fromVercelSchedule(schedule: VercelSchedule): ScheduleRecord {
-  const expression: ScheduleExpression =
-    schedule.expression.type === "cron"
-      ? {
-          type: "cron",
-          cron: schedule.expression.cron,
-          timezone: schedule.timezone,
-          ...(schedule.jitter === undefined ? {} : { jitter: schedule.jitter }),
-        }
-      : { type: "single", at: schedule.expression.at, timezone: schedule.timezone };
+  let expression: ScheduleExpression;
+  if (schedule.expression.type === "cron") {
+    const cron: { type: "cron"; cron: string; timezone: string; jitter?: number } = {
+      type: "cron",
+      cron: schedule.expression.cron,
+      timezone: schedule.timezone,
+    };
+    if (schedule.jitter !== undefined) cron.jitter = schedule.jitter;
+    expression = cron;
+  } else {
+    expression = { type: "single", at: schedule.expression.at, timezone: schedule.timezone };
+  }
   return {
     createdAt: schedule.createdAt,
     expression,

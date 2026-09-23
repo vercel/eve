@@ -244,16 +244,15 @@ export default defineScheduleCollection({
   provider: vercelScheduleProvider(),
   scope: byPrincipal,
   inputSchema: z.object({
-    channelId: z.string(),
     query: z.string().min(1).max(20_000),
   }),
   tools: true,
-  async run({ appAuth, input, occurrence, to, waitUntil }) {
-    waitUntil(
-      to(slack, { channelId: input.channelId }).send(
-        `Run this saved query and report the result:\n\n${input.query}`,
-        { auth: appAuth },
-      ),
+  async run({ appAuth, input, to }) {
+    // Application policy, not model-supplied schedule input, selects the destination.
+    const channelId = await resolveAuthorizedDestination();
+    await to(slack, { channelId }).send(
+      `Run this saved query and report the result:\n\n${input.query}`,
+      { auth: appAuth },
     );
   },
 });

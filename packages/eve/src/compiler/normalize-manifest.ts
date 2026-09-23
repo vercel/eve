@@ -1,5 +1,4 @@
 import type { AgentSourceManifest } from "#discover/manifest.js";
-import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -49,11 +48,12 @@ import { resolveWorkspaceSubagentDefinition } from "#compiler/resolve-workspace-
 import { workspaceSubagentName } from "#public/definitions/workspace-agent.js";
 import { compileHookEntry } from "#compiler/normalize-hook.js";
 import { compileInstructionsEntry } from "#compiler/normalize-instructions.js";
-import { compileMemoryDefinition, deriveMemorySlot } from "#compiler/normalize-memory.js";
+import { compileMemoryDefinition } from "#compiler/normalize-memory.js";
+import { createMemoryWrapperCandidates } from "#compiler/memory-wrapper-candidates.js";
 import { compileSandboxDefinition } from "#compiler/normalize-sandbox.js";
 import { compileScheduleDefinition } from "#compiler/normalize-schedule.js";
-import { compileScheduleCollectionDefinition } from "#compiler/normalize-schedule-collection.js";
-import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
+import { compileScheduleCollectionCandidate } from "#compiler/normalize-schedule-collection.js";
+import { createScheduleCollectionWrapperCandidates } from "#compiler/schedule-collection-wrapper-candidates.js";
 import { compileSkillSource } from "#compiler/normalize-skill.js";
 import {
   assertRemoteAgentDefinitionHasNoLocalPackageEntries,
@@ -90,18 +90,12 @@ import {
   createProgrammaticModuleCandidates,
   describeAgentSourceCandidate,
   disableComposedCandidate,
-  instantiateProgrammaticTemplate,
   isAgentModuleCandidate,
   type AgentModuleCandidate,
   type AgentSourceCandidate,
   type AgentSourceRegistry,
-  canonicalSourceSlot,
 } from "#compiler/source-graph.js";
-import {
-  frameworkAgentSourceRegistry,
-  memoryWrapperTemplate,
-  scheduleCollectionWrapperTemplate,
-} from "#framework/sources/registry.js";
+import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import {
   noDevelopmentExtensions,
   prepareDevelopmentExtensions,
@@ -389,58 +383,15 @@ class AgentGraphCompiler {
         (framework ? frameworkCandidates : applicationCandidates).push(...candidates);
       }
     }
-    const memoryWrapperCandidates = [...projected.candidates, ...applicationCandidates]
-      .filter(
-        (candidate): candidate is AgentModuleCandidate =>
-          candidate.backing.kind !== "resource" &&
-          (canonicalSourceSlot(candidate.logicalPath) === "memory" ||
-            canonicalSourceSlot(candidate.logicalPath).startsWith("memory/")),
-      )
-      .map((candidate) => {
-        const slot = deriveMemorySlot(candidate.logicalPath);
-        return instantiateProgrammaticTemplate({
-          anchor: candidate,
-          dependencies: { memory: candidate },
-          logicalPath: `tools/${slot}.ts`,
-          owner: { feature: "memory", kind: "framework" },
-          parameters: {
-            memoryExportName: candidate.exportName ?? "default",
-            memoryLogicalPath: candidate.logicalPath,
-            slot,
-          },
-          template: memoryWrapperTemplate,
-        });
-      });
-    const scheduleCollectionWrapperCandidates = [...projected.candidates, ...applicationCandidates]
-      .filter(
-        (candidate): candidate is AgentModuleCandidate =>
-          candidate.backing.kind !== "resource" &&
-          canonicalSourceSlot(candidate.logicalPath).startsWith("schedules/"),
-      )
-      .map((candidate) => {
-        const collection = stripLogicalPathExtension(candidate.logicalPath).slice(
-          "schedules/".length,
-        );
-        return instantiateProgrammaticTemplate({
-          anchor: candidate,
-          dependencies: { collection: candidate },
-          logicalPath: `tools/schedule__${collection}.ts`,
-          owner: { feature: "schedule-collection", kind: "framework" },
-          parameters: {
-            application: input.manifest.agentId,
-            collection,
-            collectionExportName: candidate.exportName ?? "default",
-            collectionLogicalPath: candidate.logicalPath,
-          },
-          template: scheduleCollectionWrapperTemplate,
-        });
-      });
     const orderedCandidates: AgentSourceCandidate[] = [
       ...frameworkCandidates,
       ...(input.developmentExtensionCandidates ?? []),
       ...projected.candidates,
-      ...memoryWrapperCandidates,
-      ...scheduleCollectionWrapperCandidates,
+      ...createMemoryWrapperCandidates([...projected.candidates, ...applicationCandidates]),
+      ...createScheduleCollectionWrapperCandidates(
+        [...projected.candidates, ...applicationCandidates],
+        input.manifest.agentId,
+      ),
       ...applicationCandidates,
     ];
     const composed = composeAgentModuleCandidates(orderedCandidates);
@@ -606,20 +557,11 @@ class AgentGraphCompiler {
           }
           break;
         case "schedule": {
-          if (entry.source.sourceKind === "module") {
-            const exportValue = await loadModuleBackedDefinition({
-              binding: binding!,
-              loadNamespace,
-              kind: "schedule",
-              source: entry.source,
-            });
-            if (isScheduleCollectionDefinition(exportValue)) {
-              scheduleCollections.push(
-                await compileScheduleCollectionDefinition(entry.source, options),
-              );
-              state.evaluation.requireRuntimeEntry(candidate.sourceId);
-              break;
-            }
+          const collection = await compileScheduleCollectionCandidate(entry.source, options);
+          if (collection !== null) {
+            scheduleCollections.push(collection);
+            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+            break;
           }
           const schedule = await compileScheduleDefinition(
             input.manifest.agentRoot,

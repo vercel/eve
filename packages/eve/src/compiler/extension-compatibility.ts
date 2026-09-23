@@ -118,10 +118,9 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   schedule: {
     current: 17,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17],
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
-      15: "Schedule occurrence identity now follows the Vercel Schedules dogfood contract: executionId and scheduledAt replace id and firedAt.",
     },
   },
   subagent: {

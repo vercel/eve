@@ -7,21 +7,22 @@ import {
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ScheduleSourceRef } from "#discover/manifest.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
+import { isScheduleCollectionDefinition } from "#shared/schedule-collection-definition.js";
 import { serializeInputSchema } from "#tools/schema.js";
 
-export async function compileScheduleCollectionDefinition(
+export async function compileScheduleCollectionCandidate(
   source: ScheduleSourceRef,
   options: SourceDefinitionCompileOptions,
-): Promise<CompiledScheduleCollectionDefinition> {
-  if (source.sourceKind !== "module") {
-    throw new Error(`Schedule collections must be authored as modules: "${source.logicalPath}".`);
-  }
+): Promise<CompiledScheduleCollectionDefinition | null> {
+  if (source.sourceKind !== "module") return null;
+  const value = await loadModuleBackedDefinition({
+    ...requireModuleBackedDefinitionLoadOptions(options, source.logicalPath),
+    kind: "schedule collection",
+    source,
+  });
+  if (!isScheduleCollectionDefinition(value)) return null;
   const definition = normalizeScheduleCollectionDefinition(
-    await loadModuleBackedDefinition({
-      ...requireModuleBackedDefinitionLoadOptions(options, source.logicalPath),
-      kind: "schedule collection",
-      source,
-    }),
+    value,
     `Expected the schedule collection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 

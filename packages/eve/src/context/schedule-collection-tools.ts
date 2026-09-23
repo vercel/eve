@@ -122,13 +122,12 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
                 input: z.unknown().optional(),
                 name: scheduleNameSchema,
               }),
-              execute: async ({ name, ...patch }) =>
-                await client.update(name, {
-                  ...(patch.expression === undefined
-                    ? {}
-                    : { expression: patch.expression as ScheduleExpression }),
-                  ...(patch.input === undefined ? {} : { input: patch.input as TInput }),
-                }),
+              execute: async ({ name, ...patch }) => {
+                const update: { expression?: ScheduleExpression; input?: TInput } = {};
+                if (patch.expression !== undefined) update.expression = patch.expression;
+                if (patch.input !== undefined) update.input = patch.input as TInput;
+                return await client.update(name, update);
+              },
             });
             tools[toolName("enable")] = defineTool({
               approval: always(),
