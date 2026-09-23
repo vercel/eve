@@ -1841,6 +1841,7 @@ describe("workflowEntry integration", () => {
         });
         try {
           expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          await waitForParkedTurnStep(anchor.runId);
 
           await expect(
             workflowRuntime.dispatchContinuation({
