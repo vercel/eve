@@ -37,7 +37,7 @@ function follow(host: string, options?: { follow?: boolean }) {
     follow: options?.follow,
     host,
     resolveHeaders: () => Promise.resolve(new Headers()),
-    sessionId: "s",
+    path: "/eve/v1/session/s/stream",
     startIndex: 0,
   });
 }
@@ -120,7 +120,7 @@ describe("stream following over real sockets", () => {
     for await (const event of followStreamIterable({
       host,
       resolveHeaders: () => Promise.resolve(new Headers()),
-      sessionId: "s",
+      path: "/eve/v1/session/s/stream",
       startIndex: 0,
       streamReadIdleTimeoutMs: 50,
     })) {
