@@ -24,8 +24,6 @@ import { ensureChatGptAuth } from "./chatgpt-auth.js";
 import { loginVercelModel } from "./vercel-model-login.js";
 import { CONNECTION_OPTIONS } from "./model-login-options.js";
 
-export { CONNECTION_OPTIONS };
-
 type Team = { teamId: string; teamName: string };
 
 /** Evidence from this login attempt; credentials stay with their existing owner. */

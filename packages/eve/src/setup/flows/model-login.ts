@@ -26,9 +26,9 @@ import {
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { changeValidatedAgentModel, readAuthoredModelSelection } from "./model-source-change.js";
+import { CONNECTION_OPTIONS } from "./model-login-options.js";
 import {
   authenticateModelConnection,
-  CONNECTION_OPTIONS,
   reuseModelConnection,
   type ValidatedModelConnection,
 } from "./model-login-connection.js";
