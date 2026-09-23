@@ -216,9 +216,9 @@ const VENDORED_ZOD_IMPORTS = new Map(
 );
 
 /**
- * eve ships one Zod. Every Zod import that reaches the build, including ones
- * inside bundled dependencies such as `@vercel/sdk`, resolves to the vendored
- * copy instead of copying Zod's sources into `dist/src/node_modules`.
+ * eve ships one Zod. Every Zod import that reaches the build, from eve's
+ * sources or a bundled dependency, resolves to the vendored copy instead of
+ * copying Zod's sources into `dist/src/node_modules`.
  */
 function createVendoredZodPlugin() {
   return {

@@ -1,8 +1,8 @@
-import type { FlexibleSchema, ModelMessage, ToolSet } from "ai";
+import type { ModelMessage, ToolSet } from "ai";
 import type { HarnessSession } from "#harness/types.js";
 
+import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 import { estimateTokens } from "#harness/token-estimate.js";
-import { toModelSchema } from "#tools/schema.js";
 
 /** Count only request content outside the durable model-visible history. */
 export async function estimateRequestEnvelope(input: {
@@ -13,7 +13,13 @@ export async function estimateRequestEnvelope(input: {
 }): Promise<number> {
   const tools = await Promise.all(
     Object.entries(input.tools).map(async ([name, tool]) => {
-      const inputSchema = await toolInputJsonSchema(tool.inputSchema);
+      const schema = typeof tool.inputSchema === "function" ? tool.inputSchema() : tool.inputSchema;
+      const inputSchema =
+        schema === undefined
+          ? undefined
+          : "jsonSchema" in schema
+            ? await schema.jsonSchema
+            : serializeInputSchema(schema as ToolSchemaSource);
       return {
         name,
         description: tool.description,
@@ -28,13 +34,6 @@ export async function estimateRequestEnvelope(input: {
     estimateTokens({ instructions: input.instructions, messages: input.messages, tools }) -
       estimateTokens(input.history),
   );
-}
-
-async function toolInputJsonSchema(schema: FlexibleSchema | undefined): Promise<unknown> {
-  if (schema === undefined) return undefined;
-  const lowered = toModelSchema(schema, "input");
-  const resolved: object = typeof lowered === "function" ? lowered() : lowered;
-  return "jsonSchema" in resolved ? await resolved.jsonSchema : resolved;
 }
 
 const REQUEST_ENVELOPE_STATE_KEY = "eve.harness.requestEnvelopeTokens";

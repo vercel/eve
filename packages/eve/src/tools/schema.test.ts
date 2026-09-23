@@ -266,7 +266,7 @@ describe("defineJsonSchema", () => {
       properties: {
         filter: { properties: { depth: { $ref: "#/$defs/depth" } }, type: "object" },
         limit: { default: 10, type: "integer" },
-        // A default its own schema rejects is still used, as z.fromJSONSchema did.
+        // A default its own schema rejects is still used (Pydantic's `x: str = None`).
         query: { default: null, type: "string" },
         rows: {
           items: { properties: { n: { default: 1, type: "integer" } }, type: "object" },

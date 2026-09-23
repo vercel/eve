@@ -75,7 +75,6 @@ function registry(input: {
       connect: async () => {},
       executeTool: async () => {},
       getToolMetadata: input.loadTools[name]!,
-      getTools: async () => ({}),
     }),
     getConnectionApproval: () => undefined,
     getConnectionNames: () => input.connections.map((item) => item.connectionName),

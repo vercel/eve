@@ -348,10 +348,11 @@ function createJsonSchemaValidator(
 
 /**
  * Fills omitted object properties from their `default` values through
- * `properties`, array `items`, and local `$ref`s, as `z.fromJSONSchema` did.
- * It runs after validation, so a default is used as declared even when its own
- * schema rejects it. Branches of `allOf`, `anyOf`, and `oneOf` are skipped
- * because which branch governs a value is ambiguous. The input is not mutated.
+ * `properties`, array `items`, and local `$ref`s. It runs after validation, so
+ * a default is used as declared even when its own schema rejects it, as with
+ * Pydantic's `{ "type": "string", "default": null }` for `x: str = None`.
+ * Branches of `allOf`, `anyOf`, and `oneOf` are skipped because which branch
+ * governs a value is ambiguous. The input is not mutated.
  */
 function applyDefaults(root: JsonObject, schema: unknown, value: unknown): unknown {
   let result = value;
