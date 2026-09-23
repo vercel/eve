@@ -7,8 +7,6 @@ Extensions package eve tools, channels, connections, skills, schedules, subagent
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
-`eve dev` can also mount bundled development extensions without creating a project mount. The bundled self-modification extension is available this way during local development. Run `eve add eve/self-modification` when you need an explicit mount, or see [Self-Modification](./guides/self-modification) to use the bundled workflow.
-
 This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A self-improving extension could pair hooks with dynamic instructions.
 
 ## Author: create an extension
@@ -335,6 +333,10 @@ export default defineHook({
 ```
 
 `toolResultFrom` recognizes the mounted `crm__search` result from the original definition, not the namespaced string. Publishers should keep tool descriptions distinct so eve can assign each definition an unambiguous identity.
+
+### Bundled development extensions
+
+Local `eve dev` also mounts bundled development extensions without creating a project mount. The self-modification extension is included by default when `eve dev` starts a local server; production builds do not include it. If you want to use self-modification in production, run `eve add eve/self-modification` to create an authored mount. An authored mount ships with your production build and replaces the bundled version during local development. See [Self-Modification](./guides/self-modification) for setup and behavior.
 
 ### Compatibility
 

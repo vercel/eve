@@ -234,7 +234,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
 | `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
 
-Local development mounts bundled development extensions without adding files to your project. The default set includes the self-modification extension and its `self-modification__agent` subagent. Pass `--no-default-extensions` to disable the complete set for that server; explicitly mounted extensions remain available. See [Self-Modification](../guides/self-modification) for the local workflow.
+Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
 

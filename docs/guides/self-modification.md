@@ -3,7 +3,9 @@ title: "Self-Modification"
 description: "Ask your agent to update its own instructions, tools, skills, and other authored files during local development."
 ---
 
-`eve dev` includes self-modification by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to a bundled subagent.
+When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve dev <url>` does not add the bundled extension to that server.
+
+The bundled extension is for local development and is not included in production builds. To use self-modification in a production build, mount the `eve/self-modification` package in your agent. An authored mount named `self-modification` replaces the bundled extension during local development and is included in production builds.
 
 ```bash
 eve dev
@@ -25,7 +27,7 @@ Pass `--no-default-extensions` when you do not want `eve dev` to mount bundled d
 eve dev --no-default-extensions
 ```
 
-This disables the complete bundled default set for that server, including self-modification. It does not remove files from your project or disable extensions that you have explicitly mounted under `agent/extensions/`.
+This disables the complete bundled default set for that server, including self-modification. It does not remove files from your project or disable extensions that you have explicitly mounted under `agent/extensions/`. See [Extensions](../extensions#bundled-development-extensions) to learn how an authored mount differs from the bundled development extension.
 
 ## What to read next
 
