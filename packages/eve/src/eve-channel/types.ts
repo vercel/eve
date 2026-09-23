@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
+import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { AuthFn } from "#public/channels/auth.js";
 import type { UploadPolicyInput } from "#public/channels/upload-policy.js";
 import type {
@@ -113,7 +114,9 @@ export interface EveChannelInput {
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal, callback-marked public trace audience, or
-   * remote parent lineage. The predicate receives the *verified* route-auth
+   * remote parent lineage, and which may delegate work with a `callback` or
+   * `activityObserver` destination for this deployment's own credentials
+   * (see {@link callbackAuth}). The predicate receives the *verified* route-auth
    * principal of the forwarder — who is asserting, never what is asserted —
    * and must match it precisely (for example `(forwarder) =>
    * forwarder.subject === vercelSubject({ teamSlug, projectName })`). A
@@ -127,10 +130,18 @@ export interface EveChannelInput {
    * forwarder is recorded on accepted contexts as the `eve:forwarded-by`
    * attribute. An accepted public audience is evaluated by this deployment's
    * trace policies; the default records model and tool content. Omit the option
-   * to reject forwarded principals with 403 and ignore forwarded audience and
-   * remote lineage.
+   * to reject forwarded principals and callback-bearing requests with 403 and
+   * ignore forwarded audience and remote lineage.
    */
   readonly trustedForwarders?: TrustedForwarders;
+  /**
+   * Outbound auth for the completion, progress, and activity callbacks this
+   * deployment sends to remote parents. Defaults to the deployment's Vercel
+   * OIDC token on Vercel; supply `bearer()`, `basic()`, or a custom
+   * `OutboundAuthFn` from `eve/agents/auth` elsewhere. Callback credentials
+   * are only attached to `https:` callback URLs.
+   */
+  readonly callbackAuth?: OutboundAuthFn;
   /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).

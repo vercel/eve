@@ -41,6 +41,7 @@ export default eveChannel({
       principalType: "service",
     };
   },
+  trustedForwarders: (forwarder) => forwarder.principalId === "cancellation-parent",
 });
 `,
     "agent/instructions.md": "Call explicitly requested tools.\n",

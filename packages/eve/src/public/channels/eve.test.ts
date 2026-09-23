@@ -47,6 +47,15 @@ const OVERRIDE_AUTH: SessionAuthContext = {
   principalType: "user",
 };
 
+// Remote callback work is only accepted from service or runtime principals.
+const SERVICE_AUTH: SessionAuthContext = {
+  attributes: {},
+  authenticator: "test-service",
+  principalId: "parent-app",
+  principalType: "service",
+};
+const service: AuthFn<Request> = () => SERVICE_AUTH;
+
 type MockSendOptions = Pick<
   RunInput,
   | "auth"
@@ -852,7 +861,7 @@ describe("eveChannel — onMessage", () => {
   });
 
   it("passes validated continuation callback metadata through the public session API", async () => {
-    const handler = createEveContinueHandler({ auth: none() });
+    const handler = createEveContinueHandler({ auth: service, trustedForwarders: () => true });
 
     const response = await handler.fetch(
       createJsonMessageRequest({
@@ -1080,7 +1089,7 @@ describe("eveChannel — create session (text)", () => {
   });
 
   it("accepts remote-agent callback metadata for conversation sessions", async () => {
-    const handler = createEveCreateHandler({ auth: none() });
+    const handler = createEveCreateHandler({ auth: service, trustedForwarders: () => true });
 
     const response = await handler.fetch(
       createJsonMessageRequest({
@@ -1109,7 +1118,7 @@ describe("eveChannel — create session (text)", () => {
   });
 
   it("accepts callback metadata whose URL is mounted behind a public route prefix", async () => {
-    const handler = createEveCreateHandler({ auth: none() });
+    const handler = createEveCreateHandler({ auth: service, trustedForwarders: () => true });
 
     const response = await handler.fetch(
       createJsonMessageRequest({
