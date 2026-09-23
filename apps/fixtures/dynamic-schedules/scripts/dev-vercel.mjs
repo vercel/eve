@@ -1,7 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { parseEnv } from "node:util";
 
-const token = process.env.VERCEL_TOKEN?.trim();
+const fixtureRoot = new URL("../", import.meta.url);
+let fileEnvironment = {};
+try {
+  fileEnvironment = parseEnv(await readFile(new URL(".env.local", fixtureRoot), "utf8"));
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
+
+const token = (process.env.VERCEL_TOKEN ?? fileEnvironment.VERCEL_TOKEN)?.trim();
 if (!token) {
   throw new Error(
     'VERCEL_TOKEN is required. Create one with `vercel tokens add "dynamic schedules local test" --project <project-id> --scope <team>` or export an existing personal token.',
@@ -10,7 +19,7 @@ if (!token) {
 
 let link;
 try {
-  link = JSON.parse(await readFile(new URL("../.vercel/project.json", import.meta.url), "utf8"));
+  link = JSON.parse(await readFile(new URL(".vercel/project.json", fixtureRoot), "utf8"));
 } catch {
   throw new Error(
     "This fixture is not linked to a Vercel project. Run `vercel link --cwd apps/fixtures/dynamic-schedules` first.",

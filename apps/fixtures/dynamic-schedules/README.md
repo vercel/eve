@@ -29,15 +29,20 @@ vercel tokens add "dynamic schedules local test" \
   --scope <team-slug>
 ```
 
-Export it without placing the secret on the command line or in a committed file:
+Store it as `VERCEL_TOKEN` in the ignored `apps/fixtures/dynamic-schedules/.env.local`, or export it from the shell without placing the secret on the command line:
 
 ```sh
 read -s VERCEL_TOKEN
 export VERCEL_TOKEN
+```
+
+Then run:
+
+```sh
 pnpm --filter dynamic-schedules dev:vercel
 ```
 
-`dev:vercel` reads the project ID from `.vercel/project.json`, passes the bearer token and project ID to the fixture's test-only provider configuration, and starts `eve dev`. It does not print the token. This mutates schedules in the linked production Vercel project. Do not add the token or the fixture's `EVE_TEST_ONLY_*` variables to shared project environment configuration.
+`dev:vercel` prefers an exported `VERCEL_TOKEN`, otherwise loads it from the fixture's `.env.local`. It reads the project ID from `.vercel/project.json`, passes both values to the fixture's test-only provider configuration, and starts `eve dev`. It does not print the token. This mutates schedules in the linked production Vercel project. Do not add the token or the fixture's `EVE_TEST_ONLY_*` variables to shared project environment configuration.
 
 You can test create, list, read, update, enable, disable, invoke, and delete through the generated tools. Vercel accepts invoke asynchronously; occurrences target the project's production queue and do not execute `collection.run` locally. End-to-end execution requires the generated production queue consumer, which is not implemented yet.
 
