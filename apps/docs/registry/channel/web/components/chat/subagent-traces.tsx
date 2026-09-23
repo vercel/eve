@@ -103,7 +103,7 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
     setOpen(trace.status === "running");
   }, [trace.status]);
 
-  const detailCount = trace.steps.length + trace.tools.length;
+  const detailCount = trace.tools.length;
   return (
     <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
@@ -116,7 +116,11 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
         {detailCount === 0 ? (
-          <p className="text-sm">Waiting for the subagent to begin…</p>
+          <p className="text-sm">
+            {trace.status === "running"
+              ? "Waiting for the subagent to begin…"
+              : "No tool activity."}
+          </p>
         ) : (
           <TraceTimeline trace={trace} />
         )}
@@ -126,36 +130,16 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
 }
 
 function TraceTimeline({ trace }: { readonly trace: SubagentTrace }) {
-  const entries = [
-    ...trace.steps.filter((step) => step.reasoning || step.text),
-    ...trace.tools,
-  ].sort((left, right) => left.order - right.order);
-
   return (
     <div className="space-y-1.5 pb-1 pl-1">
-      {entries.map((entry) => (
-        <div className="flex gap-2" key={"callId" in entry ? entry.callId : entry.id}>
+      {trace.tools.map((tool) => (
+        <div className="flex gap-2" key={tool.callId}>
           <div className="flex w-4 shrink-0 justify-center pt-1">
-            {"callId" in entry ? (
-              <TraceStatus status={entry.status} />
-            ) : (
-              <span className="mt-1.5 size-1.5 rounded-full bg-muted-foreground/60" />
-            )}
+            <TraceStatus status={tool.status} />
           </div>
-          {"callId" in entry ? <SubagentToolRow tool={entry} /> : <SubagentStepRow step={entry} />}
+          <SubagentToolRow tool={tool} />
         </div>
       ))}
-    </div>
-  );
-}
-
-function SubagentStepRow({ step }: { readonly step: SubagentTraceStep }) {
-  return (
-    <div className="min-w-0 flex-1 space-y-1 text-sm leading-6">
-      {step.text ? <p className="whitespace-pre-wrap text-foreground">{step.text}</p> : null}
-      {step.reasoning ? (
-        <p className="whitespace-pre-wrap text-muted-foreground">{step.reasoning}</p>
-      ) : null}
     </div>
   );
 }
