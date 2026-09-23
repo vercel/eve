@@ -26,6 +26,7 @@ import {
   projectReceivedParts,
   removeStreamingToolPartsForTurn,
   upsertMessage,
+  upsertUserMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
 import type { InputResponse } from "#shared/input.js";
@@ -74,7 +75,7 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
   switch (event.type) {
     case "client.message.submitted":
-      return upsertMessage(data, {
+      return upsertUserMessage(data, {
         id: optimisticUserMessageId(event.data.submissionId),
         metadata: {
           optimistic: true,
@@ -85,7 +86,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       });
 
     case "client.message.failed":
-      return upsertMessage(data, {
+      return upsertUserMessage(data, {
         id: optimisticUserMessageId(event.data.submissionId),
         metadata: {
           optimistic: true,
@@ -113,15 +114,19 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.received":
       if (event.data.kind === "execution.background_task") return data;
-      return upsertMessage(data, {
-        id: `${receivedMessageEventId(event)}:user`,
-        metadata: {
-          status: "complete",
-          turnId: event.data.turnId,
+      return upsertUserMessage(
+        data,
+        {
+          id: `${receivedMessageEventId(event)}:user`,
+          metadata: {
+            status: "complete",
+            turnId: event.data.turnId,
+          },
+          parts: projectReceivedParts(event.data.parts, event.data.message),
+          role: "user",
         },
-        parts: projectReceivedParts(event.data.parts, event.data.message),
-        role: "user",
-      });
+        event.data.turnId,
+      );
 
     case "step.started":
       return updateAssistantMessage(data, event.data.turnId, (message) =>

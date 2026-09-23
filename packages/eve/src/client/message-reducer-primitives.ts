@@ -48,6 +48,39 @@ export function upsertMessage(data: EveMessageData, next: EveMessage): EveMessag
   };
 }
 
+/**
+ * Places a user message immediately before the assistant response for its
+ * turn. A steering delivery is accepted while that response is already
+ * streaming, so appending it would render the causal order backwards.
+ *
+ * Optimistic sends lack a durable turn id. In that case, use the currently
+ * streaming assistant as the local anchor; the authoritative delivery later
+ * replays with its exact turn id and keeps the same position.
+ */
+export function upsertUserMessage(
+  data: EveMessageData,
+  next: EveMessage & { readonly role: "user" },
+  turnId?: string,
+): EveMessageData {
+  const messages = data.messages.filter((message) => message.id !== next.id);
+  const assistantIndex =
+    turnId === undefined
+      ? messages.findLastIndex(
+          (message) => message.role === "assistant" && message.metadata?.status === "streaming",
+        )
+      : messages.findIndex(
+          (message) => message.role === "assistant" && message.metadata?.turnId === turnId,
+        );
+
+  if (assistantIndex === -1) {
+    return { messages: [...messages, next] };
+  }
+
+  return {
+    messages: [...messages.slice(0, assistantIndex), next, ...messages.slice(assistantIndex)],
+  };
+}
+
 export function removeStreamingToolPartsForTurn(
   data: EveMessageData,
   turnId: string,
