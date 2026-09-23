@@ -114,6 +114,10 @@ export async function dispatchDynamicSkillEvent(input: {
 }): Promise<void> {
   const { ctx, resolvers, event, messages } = input;
 
+  // Subagent event steps do not initialize sandbox access.
+  // Rebuild announcements only at boundaries that prepare model context.
+  if (!ALLOWED_DYNAMIC_SKILL_EVENTS.has(event.type) && event.type !== "step.started") return;
+
   // Build phase: rebuild announcement from durable manifest when the
   // virtual key is empty (step boundary crossed). Sandbox files persist;
   // only the announcement needs rebuilding.
