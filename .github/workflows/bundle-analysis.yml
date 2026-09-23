@@ -107,6 +107,12 @@ jobs:
           node-version-file: .nvmrc
           cache: "pnpm"
 
+      # --force replaces any vercel/vc bin links already on the runner; the allowed
+      # postinstall swaps the Node launcher for the native binary.
+      - name: Install Vercel CLI
+        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
+        run: npm install --global --force --allow-scripts=@vercel/vc-native @vercel/vc-native && vercel --version
+
       - name: Install dependencies
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
         run: pnpm install --frozen-lockfile
@@ -200,9 +206,9 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
           fi
 
-          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel link --yes \
+          pnpm --filter agent-tools-sandbox exec vercel link --yes \
             --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
-          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel env pull --yes --environment=preview \
+          pnpm --filter agent-tools-sandbox exec vercel env pull --yes --environment=preview \
             "${token_args[@]}"
 
           profile_args=()
@@ -249,9 +255,9 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
           fi
 
-          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel link --yes \
+          pnpm --filter agent-tools-sandbox exec vercel link --yes \
             --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
-          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel env pull --yes --environment=preview \
+          pnpm --filter agent-tools-sandbox exec vercel env pull --yes --environment=preview \
             "${token_args[@]}"
 
           # Sandbox templates key on VERCEL_PROJECT_ID at build and runtime.

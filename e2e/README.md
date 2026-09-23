@@ -93,15 +93,22 @@ One-time project setup:
   project's Preview environment.
 - Provide `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `VERCEL_PROJECT_ID` in CI.
 
+The repository does not install the Vercel CLI. Locally, any global `vercel`
+install works. CI installs the latest native binary:
+
+```sh
+npm install --global --force --allow-scripts=@vercel/vc-native @vercel/vc-native
+```
+
 Run a fixture against Vercel from its directory:
 
 ```sh
-pnpm dlx --allow-build=esbuild vercel link --yes --project "$VERCEL_PROJECT_ID"
-pnpm dlx --allow-build=esbuild vercel env pull --yes --environment=preview
+vercel link --yes --project "$VERCEL_PROJECT_ID"
+vercel env pull --yes --environment=preview
 VERCEL=1 VERCEL_ENV=preview VERCEL_TARGET_ENV=preview \
   VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
   pnpm exec eve build
-DEPLOYMENT_URL="$(pnpm dlx --allow-build=esbuild vercel deploy --prebuilt --yes --target=preview \
+DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
   --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" | tail -n 1)"
 npx eve eval --strict --url "$DEPLOYMENT_URL"
 ```
@@ -212,7 +219,7 @@ mock-compatible evals:
 
 ```sh
 pnpm exec eve build
-DEPLOYMENT_URL="$(pnpm dlx --allow-build=esbuild vercel deploy --prebuilt --yes --target=preview \
+DEPLOYMENT_URL="$(vercel deploy --prebuilt --yes --target=preview \
   --env "EVE_E2E_MODEL=mock" | tail -n 1)"
 npx eve eval --strict --exclude-tag real-model \
   --url "$DEPLOYMENT_URL" --junit "$JUNIT_PATH"

@@ -167,18 +167,8 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
   const scopeArgs =
     process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
-    "pnpm",
-    [
-      "dlx",
-      "--allow-build=esbuild",
-      "vercel",
-      "deploy",
-      "--prebuilt",
-      "--yes",
-      "--target=preview",
-      ...deploymentEnvArgs,
-      ...tokenArgs,
-    ],
+    "vercel",
+    ["deploy", "--prebuilt", "--yes", "--target=preview", ...deploymentEnvArgs, ...tokenArgs],
     EXEC_OPTIONS,
   );
   const deploymentUrl = deploy.stdout.trim().split("\n").at(-1)?.trim();
@@ -188,18 +178,8 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
   t.log(`deployed ${deploymentUrl} (${phase}); aliasing ${alias}`);
 
   await execFileAsync(
-    "pnpm",
-    [
-      "dlx",
-      "--allow-build=esbuild",
-      "vercel",
-      "alias",
-      "set",
-      deploymentUrl,
-      alias,
-      ...tokenArgs,
-      ...scopeArgs,
-    ],
+    "vercel",
+    ["alias", "set", deploymentUrl, alias, ...tokenArgs, ...scopeArgs],
     EXEC_OPTIONS,
   );
 }
