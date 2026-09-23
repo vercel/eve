@@ -121,7 +121,7 @@ test("computer-use accepts interactive actions without approval-only context", (
   const tool = computerUseTool;
   assert.ok(tool.inputSchema instanceof z.ZodType);
   for (const input of INTERACTIVE_ACTIONS) {
-    assert.equal(tool.inputSchema.safeParse(input).success, true, input.action);
+    assert.equal(tool.inputSchema.safeParse({ request: input }).success, true, input.action);
   }
 });
 
@@ -147,47 +147,57 @@ test("computer-use schema keeps browser, pacing, clipboard, and recording sequen
   const tool = computerUseTool;
   assert.ok(tool.inputSchema instanceof z.ZodType);
   assert.equal(
-    tool.inputSchema.safeParse({ action: "launch", app: "firefox", url: "https://eve.dev" })
-      .success,
-    true,
-  );
-  assert.equal(
-    tool.inputSchema.safeParse({ action: "launch", app: "firefox", url: "file:///etc/passwd" })
-      .success,
-    false,
-  );
-  assert.equal(
     tool.inputSchema.safeParse({
-      action: "type",
-      text: "eve dev",
-      typingStyle: "natural",
+      request: { action: "launch", app: "firefox", url: "https://eve.dev" },
     }).success,
     true,
   );
   assert.equal(
     tool.inputSchema.safeParse({
-      action: "type",
-      text: "eve dev",
-      typingStyle: "natural",
-      typingDelayMs: 10,
+      request: { action: "launch", app: "firefox", url: "file:///etc/passwd" },
     }).success,
     false,
   );
   assert.equal(
     tool.inputSchema.safeParse({
-      action: "clipboard_read",
-      selection: "primary",
+      request: {
+        action: "type",
+        text: "eve dev",
+        typingStyle: "natural",
+      },
     }).success,
     true,
   );
   assert.equal(
     tool.inputSchema.safeParse({
-      action: "sequence",
-      actions: [
-        { action: "record_start", path: "take.mp4" },
-        { action: "keypress", keys: ["ENTER"] },
-        { action: "record_stop" },
-      ],
+      request: {
+        action: "type",
+        text: "eve dev",
+        typingStyle: "natural",
+        typingDelayMs: 10,
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    tool.inputSchema.safeParse({
+      request: {
+        action: "clipboard_read",
+        selection: "primary",
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    tool.inputSchema.safeParse({
+      request: {
+        action: "sequence",
+        actions: [
+          { action: "record_start", path: "take.mp4" },
+          { action: "keypress", keys: ["ENTER"] },
+          { action: "record_stop" },
+        ],
+      },
     }).success,
     true,
   );
@@ -200,12 +210,14 @@ test("computer-use sends a recording sequence through one resolved driver reques
   };
   const output = await tool.execute(
     {
-      action: "sequence",
-      actions: [
-        { action: "record_start", path: "take.mp4" },
-        { action: "type", text: "echo hi", typingDelayMs: 50 },
-        { action: "record_stop" },
-      ],
+      request: {
+        action: "sequence",
+        actions: [
+          { action: "record_start", path: "take.mp4" },
+          { action: "type", text: "echo hi", typingDelayMs: 50 },
+          { action: "record_stop" },
+        ],
+      },
     },
     {
       abortSignal: undefined,
@@ -235,4 +247,14 @@ test("computer-use sends a recording sequence through one resolved driver reques
   assert.equal(request.action.actions[0].path, "/custom/workspace/computer-use/take.mp4");
   assert.equal(output.path, "/custom/workspace/computer-use/take.mp4");
   assert.deepEqual(output.timings, [{ action: "record_start", durationMs: 12, result: null }]);
+});
+
+test("computer-use advertises an object root while preserving action constraints", async () => {
+  const { z } = await import("zod");
+  const schema = z.toJSONSchema(computerUseTool.inputSchema as import("zod").z.ZodType, {
+    io: "input",
+  });
+  assert.equal(schema.type, "object");
+  for (const keyword of ["oneOf", "anyOf", "allOf"]) assert.equal(keyword in schema, false);
+  assert.ok(schema.properties?.request);
 });
