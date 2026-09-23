@@ -162,15 +162,16 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
       ? []
       : ["--env", `EVE_SANDBOX_IMAGE_TAG=${process.env.EVE_SANDBOX_IMAGE_TAG}`]),
   ];
-  // vc alias does not infer the team from the project link the way deploy
+  // vercel alias does not infer the team from the project link the way deploy
   // does, so pass the scope explicitly.
   const scopeArgs =
     process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
     "pnpm",
     [
-      "exec",
-      "vc",
+      "dlx",
+      "--allow-build=esbuild",
+      "vercel",
       "deploy",
       "--prebuilt",
       "--yes",
@@ -182,13 +183,23 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
   );
   const deploymentUrl = deploy.stdout.trim().split("\n").at(-1)?.trim();
   if (deploymentUrl === undefined || !deploymentUrl.startsWith("https://")) {
-    throw new Error(`vc deploy did not print a deployment URL; got: ${deploy.stdout}`);
+    throw new Error(`vercel deploy did not print a deployment URL; got: ${deploy.stdout}`);
   }
   t.log(`deployed ${deploymentUrl} (${phase}); aliasing ${alias}`);
 
   await execFileAsync(
     "pnpm",
-    ["exec", "vc", "alias", "set", deploymentUrl, alias, ...tokenArgs, ...scopeArgs],
+    [
+      "dlx",
+      "--allow-build=esbuild",
+      "vercel",
+      "alias",
+      "set",
+      deploymentUrl,
+      alias,
+      ...tokenArgs,
+      ...scopeArgs,
+    ],
     EXEC_OPTIONS,
   );
 }

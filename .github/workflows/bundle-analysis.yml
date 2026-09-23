@@ -200,9 +200,9 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
           fi
 
-          pnpm --filter agent-tools-sandbox exec vc link --yes \
+          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel link --yes \
             --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
-          pnpm --filter agent-tools-sandbox exec vc env pull --yes --environment=preview \
+          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel env pull --yes --environment=preview \
             "${token_args[@]}"
 
           profile_args=()
@@ -249,9 +249,9 @@ jobs:
             team_args=(--team "$VERCEL_ORG_ID")
           fi
 
-          pnpm --filter agent-tools-sandbox exec vc link --yes \
+          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel link --yes \
             --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
-          pnpm --filter agent-tools-sandbox exec vc env pull --yes --environment=preview \
+          pnpm --filter agent-tools-sandbox exec pnpm dlx --allow-build=esbuild vercel env pull --yes --environment=preview \
             "${token_args[@]}"
 
           # Sandbox templates key on VERCEL_PROJECT_ID at build and runtime.
