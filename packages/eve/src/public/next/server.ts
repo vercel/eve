@@ -18,7 +18,7 @@ const EVE_NEXT_DEV_SERVER_LOCK_FILE_NAME = "next-dev-server.lock";
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
 const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
-const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
+export const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
 
 interface EveProcessHandle {
   readonly origin: string;

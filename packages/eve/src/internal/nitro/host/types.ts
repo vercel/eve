@@ -6,7 +6,7 @@ import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import type { DevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
-import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
+import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
@@ -93,6 +93,6 @@ export interface PreparedApplicationHost {
 
 export interface PreparedDevelopmentApplicationHost extends PreparedApplicationHost {
   generation: DevelopmentGeneration;
-  workspaceExtensions: readonly DevelopmentWorkspaceExtension[];
+  workspaceExtensions: readonly WorkspaceExtension[];
   workspace: DevelopmentHostWorkspace;
 }

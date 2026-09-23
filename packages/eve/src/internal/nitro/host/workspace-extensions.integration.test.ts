@@ -1,12 +1,19 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  EXTENSION_COMPATIBILITY_MANIFEST_FILENAME,
+  EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+  EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+  writeExtensionCompatibilityManifest,
+} from "#compiler/extension-compatibility.js";
 import { discoverExtensionMountDeclarations } from "#discover/discover-agent.js";
 import { locateExtensionMountPackage } from "#discover/extensions.js";
 import { createDiskProjectSource } from "#discover/project-source.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   isAuthoredSourcePath,
   resolveDevelopmentSourceRoot,
@@ -22,7 +29,10 @@ vi.mock("#internal/nitro/host/build-extension.js", async (importOriginal) => ({
   buildExtensionPackage: mocks.buildExtensionPackage,
 }));
 
-import { prepareDevelopmentWorkspaceExtensions } from "#internal/nitro/host/dev-workspace-extensions.js";
+import {
+  buildWorkspaceExtensions,
+  prepareDevelopmentWorkspaceExtensions,
+} from "#internal/nitro/host/workspace-extensions.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -176,6 +186,79 @@ describe("prepareDevelopmentWorkspaceExtensions", () => {
     expect(mocks.buildExtensionPackage).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("buildWorkspaceExtensions", () => {
+  it("builds a mounted workspace extension whose distribution is missing", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledWith(
+      join(appRoot, "packages", "alpha"),
+      expect.objectContaining({ packageName: "@acme/alpha" }),
+    );
+  });
+
+  it("skips an extension whose distribution is newer than its build inputs", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    await writeDistributionManifest(join(appRoot, "packages", "alpha"), { builtAt: FUTURE });
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).not.toHaveBeenCalled();
+  });
+
+  it("rebuilds an extension edited after its distribution was built", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    const packageRoot = join(appRoot, "packages", "alpha");
+    await writeDistributionManifest(packageRoot, { builtAt: PAST });
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+  });
+
+  it("rebuilds an extension distribution built by another eve version", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    await writeDistributionManifest(join(appRoot, "packages", "alpha"), {
+      builtAt: FUTURE,
+      builtWithEve: "0.0.0-other",
+    });
+
+    await buildWorkspaceExtensions(appRoot);
+
+    expect(mocks.buildExtensionPackage).toHaveBeenCalledOnce();
+  });
+
+  it("names the workspace extension and the command to run when its build fails", async () => {
+    const appRoot = await createWorkspaceAgent(["alpha"]);
+    mocks.buildExtensionPackage.mockRejectedValueOnce(new Error("tools/search.ts is invalid"));
+
+    await expect(buildWorkspaceExtensions(appRoot)).rejects.toThrow(
+      `Failed to build workspace extension "@acme/alpha" at ${join(appRoot, "packages", "alpha")}. Fix the error below, then rebuild the agent, or run \`eve extension build\` in that package directory to build it on its own.\ntools/search.ts is invalid`,
+    );
+  });
+});
+
+const PAST = new Date("2000-01-01T00:00:00Z");
+const FUTURE = new Date(Date.now() + 60 * 60 * 1000);
+
+async function writeDistributionManifest(
+  packageRoot: string,
+  input: { readonly builtAt: Date; readonly builtWithEve?: string },
+): Promise<void> {
+  const distRoot = join(packageRoot, "dist", "extension");
+  await mkdir(distRoot, { recursive: true });
+  await writeExtensionCompatibilityManifest(distRoot, {
+    kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+    formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+    builtWithEve: input.builtWithEve ?? resolveInstalledPackageInfo().version,
+    requires: {},
+  });
+  const manifestPath = join(distRoot, EXTENSION_COMPATIBILITY_MANIFEST_FILENAME);
+  await utimes(manifestPath, input.builtAt, input.builtAt);
+}
 
 async function createWorkspaceAgent(extensionNames: readonly string[]): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-workspace-extension-dev-"));
