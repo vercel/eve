@@ -408,7 +408,7 @@ function registryResult(
 ): TuiSetupCommandResult {
   const { status, summary, message } = registryCommandOutcome(result, warnings);
   const outcome: TuiSetupCommandResult = { message, summary, preserveFlowDiagnostics: false };
-  if (status === "cancelled") outcome.cancelled = true;
+  if (status === "neutral") outcome.cancelled = true;
   else outcome.tone = status;
   return outcome;
 }

@@ -1837,7 +1837,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
     expect(snapshot).toContain("│ Text your agent: +15550000000");
     expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
-    expect(screen.rawOutput()).toContain("\u001b[32m✓\u001b[39m");
+    expect(screen.rawOutput()).toContain("\u001b[90m✓\u001b[39m");
     expect(screen.rawOutput()).not.toContain("\u001b[2mText your agent");
   });
 
@@ -1864,7 +1864,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.setupFlow.begin("");
 
     expect(screen.snapshot()).toMatch(/^▪ \/deploy$/m);
-    expect(screen.rawOutput()).toContain("\u001b[2m▪\u001b[22m \u001b[1m/deploy");
+    expect(screen.rawOutput()).toContain("\u001b[90m▪\u001b[39m /deploy");
     renderer.setupFlow.end();
     renderer.shutdown();
   });
@@ -1887,7 +1887,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderCommandInvocation("/add channel/slack");
     renderer.renderCommandResult(
       "Finish with `eve add channel/slack --skip-install`",
-      "cancelled",
+      "neutral",
       "Added channel/slack · setup not finished",
     );
     renderer.shutdown();
@@ -3173,13 +3173,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("paints a fully typed known command bold in the input line", async () => {
+  it("leaves a fully typed known command as plain text in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/add");
-    // Bold confirms command dispatch without competing with status color.
-    expect(screen.rawOutput()).toContain("[1m/add");
+    expect(screen.rawOutput()).not.toContain("[1m/add");
     expect(screen.rawOutput()).not.toContain("[34m/add");
     input.enter();
     await prompt;

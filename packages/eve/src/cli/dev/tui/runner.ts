@@ -407,14 +407,14 @@ export interface PromptCommandHandlerContext {
 }
 
 /** How a settled slash command marks its echoed invocation. */
-export type CommandResultStatus = "success" | "error" | "cancelled";
+export type CommandResultStatus = "success" | "error" | "neutral";
 
 /** What one handled slash command leaves behind for the runner to apply. */
 export interface PromptCommandOutcome {
   /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
-  /** Promotes an outcome to a top-level status. */
-  tone?: "success" | "error";
+  /** Marks the settled command; a cancelled outcome is neutral too. */
+  tone?: CommandResultStatus;
   /** Replaces the echoed invocation once the command settles. */
   summary?: string;
   /** Post-command work after setup settles. */
@@ -2814,6 +2814,6 @@ function commandResultStatus(
   outcome: PromptCommandOutcome | undefined,
 ): CommandResultStatus | undefined {
   if (outcome?.tone === "error") return "error";
-  if (outcome?.cancelled === true) return "cancelled";
+  if (outcome?.cancelled === true) return "neutral";
   return outcome?.tone;
 }

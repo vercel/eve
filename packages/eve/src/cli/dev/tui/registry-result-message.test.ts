@@ -34,7 +34,7 @@ describe("registryCommandOutcome", () => {
     });
   });
 
-  it("marks unfinished setup as cancelled with a resume command and flow warnings", () => {
+  it("marks unfinished setup as neutral with a resume command and flow warnings", () => {
     expect(
       registryCommandOutcome(
         {
@@ -49,7 +49,7 @@ describe("registryCommandOutcome", () => {
         ["Wait for the Slack request to expire before retrying."],
       ),
     ).toEqual({
-      status: "cancelled",
+      status: "neutral",
       summary: "Added channel/slack · setup not finished",
       message:
         "Finish with `eve add channel/slack --skip-install`\n" +
@@ -60,7 +60,7 @@ describe("registryCommandOutcome", () => {
   it("reports a cancellation before installation without detail", () => {
     expect(
       registryCommandOutcome({ outcomes: [{ kind: "cancelled", title: "connection/sentry" }] }),
-    ).toEqual({ status: "cancelled", summary: "connection/sentry not added", message: "" });
+    ).toEqual({ status: "neutral", summary: "connection/sentry not added", message: "" });
   });
 
   it("splits a failure's retry hint onto its own line", () => {

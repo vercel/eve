@@ -4469,9 +4469,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
-      // A fully typed known command paints blue, confirming it will dispatch
-      // as a command instead of being sent to the agent as a message.
-      const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
       this.#pushStatusLine(statusRows, width);
@@ -4494,7 +4491,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         width,
         theme: this.#theme,
         caretVisible: this.#caretVisible,
-        isCommand,
         ghost,
         maxRows: maxPromptRows,
       };
@@ -4623,7 +4619,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width,
       theme: this.#theme,
       caretVisible: true,
-      isCommand: false,
       ghost: "",
       maxRows: 4,
       inert: options.inert,
@@ -5078,8 +5073,6 @@ interface PromptInputRowsInput {
   readonly width: number;
   readonly theme: Theme;
   readonly caretVisible: boolean;
-  /** A fully typed known command is bold, confirming it will dispatch as a command. */
-  readonly isCommand: boolean;
   readonly ghost: string;
   readonly maxRows: number;
   /**
@@ -5104,7 +5097,6 @@ function promptInputRows({
   width,
   theme,
   caretVisible,
-  isCommand,
   ghost,
   maxRows,
   placeholder,
@@ -5128,10 +5120,7 @@ function promptInputRows({
     return [clip(`${theme.glyph.prompt} ${body}`, width), ""];
   }
 
-  const style = (segment: string): string => {
-    const rendered = renderInputText(segment);
-    return isCommand && rendered.length > 0 ? c.bold(rendered) : rendered;
-  };
+  const style = renderInputText;
 
   const layout = layoutPromptInput({ text, cursor });
   const visibleCount = Math.min(Math.max(1, maxRows), layout.rows.length);
@@ -5140,7 +5129,7 @@ function promptInputRows({
     Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
   );
   // An inert prompt's typed draft keeps the mark dim: the state is legible without claiming readiness.
-  const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : c.cyan(theme.glyph.prompt);
+  const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : theme.glyph.prompt;
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
   // The gutter sits at column 0, sharing a column with the conversation

@@ -95,6 +95,22 @@ describe("createPromptCommandHandler", () => {
     });
   });
 
+  it("marks an unchanged model as neutral", async () => {
+    const handler = createPromptCommandHandler({
+      target: LOCAL_TARGET,
+      applyModel: async ({ slug }) => ({ kind: "unchanged", model: slug }),
+      modelChangeRefusal: async () => null,
+    });
+
+    await expect(
+      handler.handle({ type: "extension", name: "model", argument: "openai/gpt-5.5" }, context()),
+    ).resolves.toEqual({
+      message: "",
+      summary: "Model already set to openai/gpt-5.5",
+      tone: "neutral",
+    });
+  });
+
   it("refuses an explicit model slug when the model is an external provider", async () => {
     const applyModel = vi.fn(
       async ({ slug }: { appRoot: string; slug: string }) =>

@@ -75,7 +75,7 @@ export function registryOutcomeSummary(outcome: RegistrySessionOutcome): string 
 function outcomeStatus(outcomes: readonly RegistrySessionOutcome[]): CommandResultStatus {
   if (outcomes.some((outcome) => outcome.kind === "failed")) return "error";
   if (outcomes.every((outcome) => outcome.kind === "installed")) return "success";
-  return "cancelled";
+  return "neutral";
 }
 
 /**

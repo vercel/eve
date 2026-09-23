@@ -24,7 +24,7 @@ import {
   wrapVisibleLine,
 } from "#cli/ui/terminal-text.js";
 
-export type ToolStatus = "running" | "done" | "error" | "denied" | "approval" | "cancelled";
+export type ToolStatus = "running" | "done" | "error" | "denied" | "approval" | "neutral";
 
 export type BlockKind =
   | "user"
@@ -265,9 +265,7 @@ function renderBody(
 
 function renderUser(block: Block, width: number, theme: Theme): string[] {
   const bar =
-    block.promptOrigin === "steer"
-      ? theme.colors.yellow(theme.glyph.user)
-      : theme.colors.cyan(theme.glyph.user);
+    block.promptOrigin === "steer" ? theme.colors.yellow(theme.glyph.user) : theme.glyph.user;
   const lines = wrap(block.body ?? "", width - 2);
   return lines.map((line) => `${bar} ${line}`);
 }
@@ -450,20 +448,21 @@ function renderCommand(block: Block, theme: Theme, context: RenderBlockContext):
     block.live !== true
       ? commandGutter(block, theme)
       : context.setupFlowOpen === true
-        ? c.dim(theme.glyph.square)
-        : c.yellow(context.activityPulse);
-  return [`${gutter} ${c.bold(block.body ?? "")}`];
+        ? c.gray(theme.glyph.square)
+        : c.gray(context.activityPulse);
+  return [`${gutter} ${block.body ?? ""}`];
 }
 
+/** Settled outcome marks stay gray: the glyph shape carries the outcome. */
 function commandGutter(block: Block, theme: Theme): string {
   const c = theme.colors;
   return block.status === "done"
-    ? c.green(theme.glyph.success)
+    ? c.gray(theme.glyph.success)
     : block.status === "error"
-      ? c.red(theme.glyph.error)
-      : block.status === "cancelled"
-        ? c.yellow(theme.glyph.dash)
-        : c.cyan(theme.glyph.user);
+      ? c.gray(theme.glyph.error)
+      : block.status === "neutral"
+        ? c.gray(theme.glyph.dash)
+        : theme.glyph.user;
 }
 
 /**
@@ -471,12 +470,19 @@ function commandGutter(block: Block, theme: Theme): string {
  * Connect URL, a written env file). The tone travels in `title`; info dims,
  * the other tones keep the body at full intensity behind their glyph.
  */
-function paintOutcomeMarker(line: string, theme: Theme, source = line): string {
+function paintOutcomeMarker(
+  line: string,
+  theme: Theme,
+  source = line,
+  colors: "tone" | "gray" = "tone",
+): string {
+  const c = theme.colors;
+  const paint = (tone: (text: string) => string) => (colors === "gray" ? c.gray : tone);
   const marker = source.trimStart().slice(0, 1);
-  if (marker === "✓") return line.replace(marker, theme.colors.green(theme.glyph.success));
-  if (marker === "⨯") return line.replace(marker, theme.colors.red(theme.glyph.error));
-  if (marker === "–") return line.replace(marker, theme.colors.yellow(theme.glyph.dash));
-  if (marker === "⚠") return line.replace(marker, theme.colors.yellow(theme.glyph.warning));
+  if (marker === "✓") return line.replace(marker, paint(c.green)(theme.glyph.success));
+  if (marker === "⨯") return line.replace(marker, paint(c.red)(theme.glyph.error));
+  if (marker === "–") return line.replace(marker, paint(c.yellow)(theme.glyph.dash));
+  if (marker === "⚠") return line.replace(marker, paint(c.yellow)(theme.glyph.warning));
   return line;
 }
 
@@ -506,7 +512,7 @@ function renderResult(block: Block, width: number, theme: Theme): string[] {
   const lines = wrap(block.body ?? "", width - 7);
   if (block.status === "done") {
     const elbow = theme.colors.dim(theme.glyph.elbow);
-    const success = theme.colors.green(theme.glyph.success);
+    const success = theme.colors.gray(theme.glyph.success);
     const rule = theme.colors.dim(theme.glyph.rule);
     const corner = theme.colors.dim(theme.glyph.corner);
     if (lines.length === 0) return [`   ${elbow}  ${success}`];
@@ -524,7 +530,7 @@ function renderResult(block: Block, width: number, theme: Theme): string[] {
   // re-open dim after each close so the whole line stays quiet.
   const dim = (line: string): string => {
     const body = theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
-    return paintOutcomeMarker(body, theme, line);
+    return paintOutcomeMarker(body, theme, line, "gray");
   };
   return lines.map((line, index) =>
     index === 0 ? `   ${marker}  ${dim(line)}` : `      ${dim(line)}`,

@@ -93,20 +93,15 @@ export function createPromptCommandHandler(
               },
             });
             if (outcome.kind === "rejected") return modelFailure(outcome.message);
-            return {
-              message: "",
-              summary:
-                outcome.kind === "unchanged"
-                  ? `Model already set to ${requested}`
-                  : `Model set to ${requested}`,
-              ...(outcome.kind === "changed" && { tone: "success" as const }),
-            };
+            return outcome.kind === "unchanged"
+              ? { message: "", summary: `Model already set to ${requested}`, tone: "neutral" }
+              : { message: "", summary: `Model set to ${requested}`, tone: "success" };
           }
           const applyModel = options.applyModel ?? changeAgentModel;
           const outcome = await applyModel({ appRoot, slug });
           if (outcome.kind === "rejected") return modelFailure(outcome.message);
           return outcome.kind === "unchanged"
-            ? { message: "", summary: `Model already set to ${outcome.model}` }
+            ? { message: "", summary: `Model already set to ${outcome.model}`, tone: "neutral" }
             : { message: "", summary: `Model set to ${outcome.to}`, tone: "success" };
         } catch (error) {
           return modelFailure(toErrorMessage(error));

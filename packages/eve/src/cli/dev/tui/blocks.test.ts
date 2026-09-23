@@ -59,7 +59,7 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["▲ **bold**", "  ", "  - item"]);
   });
 
-  it("colors per-item status markers in a mixed command result", () => {
+  it("keeps per-item status markers gray in a mixed command result", () => {
     const colored = createTheme({ color: true, unicode: true });
     const lines = renderBlockLines(
       {
@@ -71,9 +71,10 @@ describe("renderBlockLines", () => {
       ctx,
     );
 
-    expect(lines.join("\n")).toContain(colored.colors.green("✓"));
+    expect(lines.join("\n")).toContain(colored.colors.gray("✓"));
     expect(lines[0]).toContain("2 additions: 1 added, 1 failed");
-    expect(lines.join("\n")).toContain(colored.colors.red("⨯"));
+    expect(lines.join("\n")).toContain(colored.colors.gray("⨯"));
+    expect(lines.join("\n")).not.toContain(colored.colors.green("✓"));
   });
 
   it("uses ASCII status markers when Unicode is unavailable", () => {
