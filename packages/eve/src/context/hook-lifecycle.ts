@@ -1,4 +1,4 @@
-import { BoundaryHookError } from "#shared/boundary-hook-error.js";
+import { createLogger, logError } from "#internal/logging.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
@@ -8,11 +8,12 @@ import type { ContextContainer } from "./container.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ContinuationTokenKey } from "./keys.js";
 
+const log = createLogger("hooks");
+
 /**
  * Fans one runtime stream event out to every matching subscriber.
- * Errors propagate — harness error paths convert them into the
- * recoverable `turn.failed` cascade. Caller must hold an active ALS
- * scope so hooks see the same context as the rest of the step.
+ * Authored handler failures are logged independently. Caller must hold an
+ * active ALS scope so hooks see the same context as the rest of the step.
  */
 export async function dispatchStreamEventHooks(input: {
   readonly ctx: ContextContainer;
@@ -27,18 +28,18 @@ export async function dispatchStreamEventHooks(input: {
   }
 
   const hookCtx = buildHookContext(input.ctx);
-  try {
-    for (const entry of typed) {
+  for (const entry of [...typed, ...wildcard]) {
+    try {
       await entry.handler(input.event, hookCtx);
+    } catch (error) {
+      logError(log, "stream event hook failed", error, {
+        hook: entry.slug,
+        subscription: entry.eventType,
+        eventId: input.event.meta.id,
+        eventType: input.event.type,
+        sessionId: hookCtx.session.id,
+      });
     }
-    for (const entry of wildcard) {
-      await entry.handler(input.event, hookCtx);
-    }
-  } catch (error) {
-    if (input.event.type === "turn.started" || input.event.type === "step.started") {
-      throw new BoundaryHookError(error);
-    }
-    throw error;
   }
 }
 

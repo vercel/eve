@@ -43,4 +43,7 @@ export async function recordSubagentHook(
       output: event.type === "subagent.completed" ? event.data.output : undefined,
     },
   ]);
+  if (subscriber === "typed") {
+    throw new Error("Fixture subagent observer failed after recording its event.");
+  }
 }
