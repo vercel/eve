@@ -4,11 +4,11 @@ import { initialSelectState } from "#setup/cli/select-state.js";
 import { lineOf } from "./line-editor.js";
 import {
   renderAcknowledgeQuestion,
-  renderFlowDrawer,
   renderFlowPanel,
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
+import { renderFlowDrawer } from "./flow-drawer.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -263,6 +263,28 @@ describe("renderFlowDrawer", () => {
       rows: ["─".repeat(60), "", "   Vercel account", "", "─".repeat(60)],
       controls: [],
     });
+  });
+
+  it("keeps a live status inside the drawer after flow progress", () => {
+    const drawer = renderFlowDrawer(
+      {
+        title: "",
+        lines: [{ text: "Checked credentials", tone: "success" }],
+        content: {
+          kind: "status",
+          status: {
+            kind: "progress",
+            text: "Loading teams…",
+            indicator: { glyph: "⠼", color: "yellow" },
+          },
+        },
+      },
+      theme,
+      60,
+    );
+
+    expect(drawer.rows.join("\n")).toContain("Loading teams…");
+    expect(drawer.controls).toEqual([]);
   });
 });
 

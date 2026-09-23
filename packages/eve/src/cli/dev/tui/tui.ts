@@ -20,6 +20,7 @@ import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
+import { LOGIN_CONNECTION_COMMAND_OPTIONS } from "#setup/flows/model-login-options.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
@@ -56,13 +57,10 @@ function inlineArgumentSuggestions(appRoot: string) {
     command: "model" | "add" | "login",
   ): Promise<readonly PromptArgumentSuggestion[]> => {
     if (command === "login") {
-      return [
-        { value: "vercel", label: "Vercel account" },
-        { value: "chatgpt", label: "ChatGPT account" },
-        { value: "vercel-api-key", label: "API key (Vercel AI Gateway)" },
-        { value: "openai-api-key", label: "API key (OpenAI)" },
-        { value: "anthropic-api-key", label: "API key (Anthropic)" },
-      ];
+      return LOGIN_CONNECTION_COMMAND_OPTIONS.map((option) => ({
+        value: option.command,
+        label: option.label,
+      }));
     }
     if (command === "model") {
       const { gatewayModelCapabilities } = await import("#setup/boxes/model-capabilities.js");

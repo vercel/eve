@@ -22,14 +22,9 @@ import { withLoginProgress } from "./model-login-progress.js";
 import { validateGatewayApiKey } from "#setup/validate-gateway-key.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
 import { loginVercelModel } from "./vercel-model-login.js";
+import { CONNECTION_OPTIONS } from "./model-login-options.js";
 
-export const CONNECTION_OPTIONS = [
-  { value: "vercel", label: "Vercel Account" },
-  { value: "ai-gateway-key", label: "Vercel AI Gateway API Key" },
-  { value: "chatgpt", label: "ChatGPT Subscription" },
-  { value: "openai", label: "OpenAI API Key" },
-  { value: "anthropic", label: "Anthropic API Key" },
-] as const;
+export { CONNECTION_OPTIONS };
 
 type Team = { teamId: string; teamName: string };
 

@@ -329,43 +329,6 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   return rows.map((row) => (row.length === 0 ? clip(row, width) : clip(` ${row}`, width)));
 }
 
-/**
- * Frames an active setup flow as a drawer above the terminal footer. The
- * command echo remains in the transcript; this surface owns only temporary
- * setup state and disappears when the flow settles.
- */
-export interface FlowDrawer {
-  /** Temporary content enclosed by the drawer boundaries. */
-  rows: string[];
-  /** Interaction hints placed below the drawer so they do not compete with its content. */
-  controls: string[];
-}
-
-export function renderFlowDrawer(state: FlowPanelState, theme: Theme, width: number): FlowDrawer {
-  const divider = theme.colors.dim(theme.glyph.dash.repeat(Math.max(1, width)));
-  const drawerMark = theme.unicode ? "┃" : "|";
-  // The drawer owns the flow title. Keep it out of the panel body so a status
-  // or question never repeats its context immediately below the header.
-  const content =
-    state.content.kind === "question" && state.content.title === state.title
-      ? { ...state.content, title: undefined }
-      : state.content;
-  const body = renderFlowPanel({ ...state, title: "", content }, theme, width);
-  // Every interactive question ends with an empty row and one or more wrapped
-  // hints. Put that affordance under the drawer boundary instead of making it
-  // compete with the active selection inside.
-  const footerStart = body.lastIndexOf("");
-  const controls = footerStart === -1 ? [] : body.slice(footerStart + 1);
-  const drawerBody = footerStart === -1 ? body : body.slice(0, footerStart);
-  const header =
-    state.title.length === 0 ? [] : [` ${theme.colors.dim(`${drawerMark} ${state.title}`)}`, ""];
-  const leftAlignedControls = controls.map((row) => row.trimStart());
-  return {
-    rows: [divider, "", ...header, ...drawerBody, "", divider],
-    controls: leftAlignedControls,
-  };
-}
-
 function optionRow(input: {
   option: SetupPanelOption;
   isCursor: boolean;

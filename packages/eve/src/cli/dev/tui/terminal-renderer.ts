@@ -48,7 +48,6 @@ import {
 } from "./prompt-commands.js";
 import {
   enterBadge,
-  renderFlowDrawer,
   flowMessageRows,
   renderAcknowledgeQuestion,
   renderSelectQuestion,
@@ -60,6 +59,7 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
+import { renderFlowDrawer } from "./flow-drawer.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
