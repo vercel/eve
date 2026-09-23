@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { defineEval } from "eve/evals";
 import { z } from "zod";
-import { resetSessions, waitForVerification, waitForVerificationStop } from "./fixture.js";
+import {
+  cancellationRequest,
+  resetSessions,
+  signOffRequest,
+  waitForVerification,
+  waitForVerificationStop,
+} from "./fixture.js";
 
 export default defineEval({
   tags: ["real-model"],
@@ -15,15 +21,12 @@ export default defineEval({
       const caller = await t.session();
       sessions.push(caller.sessionId);
       const callerTurn = (
-        await caller.send(`Help Alice prepare her project status update.
-Use the remote-loopback tool to create a detector, passing the request below in its message.
-After delegation, acknowledge that it is underway and finish your turn.
-When the delegated task completes, share its receipt with Alice.
-
-Request to delegate:
-Ask verification-worker to fetch Alice's verification receipt by calling verification_gate with key ${key}.
-While the worker is busy, acknowledge that verification is running and finish your turn.
-When the worker completes, share the receipt it returned.`)
+        await caller.send(
+          signOffRequest(
+            "Hand this off with the remote-loopback tool, using the note below as its message.",
+            key,
+          ),
+        )
       ).expectOk();
       const delegation = callerTurn.requireToolCall("remote-loopback", {
         output: { status: "working" },
@@ -58,11 +61,7 @@ When the worker completes, share the receipt it returned.`)
 
       // Both delegation turns have ended, but the worker is still gated.
       await waitForVerification(t, workerCall.data.childSessionId, key);
-      const cancellation = (
-        await caller.send(
-          `Alice no longer needs this verification. Call task_cancel with taskIds ["${taskId}"] to cancel the detector, then acknowledge the cancellation.`,
-        )
-      ).expectOk();
+      const cancellation = (await caller.send(cancellationRequest(taskId))).expectOk();
       cancellation.requireToolCall("task_cancel", {
         input: { taskIds: [taskId] },
         output: { tasks: [{ taskId, status: "cancelled" }] },

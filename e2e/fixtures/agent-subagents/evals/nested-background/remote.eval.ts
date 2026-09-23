@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
-import { releaseVerification, resetSessions, waitForVerification } from "./fixture.js";
+import {
+  releaseVerification,
+  resetSessions,
+  signOffRequest,
+  waitForVerification,
+} from "./fixture.js";
 
 export default defineEval({
   tags: ["real-model"],
@@ -16,15 +21,12 @@ export default defineEval({
       const caller = await t.session();
       sessions.push(caller.sessionId);
       const callerTurn = (
-        await caller.send(`Help Alice prepare her project status update.
-Use the remote-loopback tool to create a detector, passing the request below in its message.
-After delegation, acknowledge that it is underway and finish your turn.
-When the delegated task completes, share its receipt with Alice.
-
-Request to delegate:
-Ask verification-worker to fetch Alice's verification receipt by calling verification_gate with key ${key}.
-While the worker is busy, acknowledge that verification is running and finish your turn.
-When the worker completes, share the receipt it returned.`)
+        await caller.send(
+          signOffRequest(
+            "Hand this off with the remote-loopback tool, using the note below as its message.",
+            key,
+          ),
+        )
       ).expectOk();
       callerTurn.requireToolCall("remote-loopback", { output: { status: "working" } });
       callerTurn.notEvent("subagent.completed");

@@ -27,7 +27,7 @@ async function execute({ key }: { key: string }, ctx: WorkflowToolContext) {
 }
 
 const tool: WorkflowToolDefinition<{ key: string }, string> = defineWorkflowTool({
-  description: "Wait for Alice to release the nested verification worker.",
+  description: "Wait for Alice's release checklist sign-off and return its sign-off code.",
   inputSchema: z.object({ key: z.string().uuid() }),
   execute,
 });
