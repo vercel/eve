@@ -100,14 +100,14 @@ export function inMemoryScheduleProvider(
     async invoke(context: ScheduleProviderContext, name: string) {
       if (operationResults.has(context.operationId)) return;
       const schedule = requireSchedule(schedules, scheduleKey(context, name), name);
-      const firedAt = now().toISOString();
+      const scheduledAt = now().toISOString();
       const delivery = {
         input: schedule.input,
         occurrence: {
-          firedAt,
-          id: `${schedule.scheduleId}:${firedAt}`,
+          executionId: `${schedule.scheduleId}:${scheduledAt}`,
           name: schedule.name,
           scheduleId: schedule.scheduleId,
+          scheduledAt,
         },
       };
       operationResults.set(context.operationId, delivery);

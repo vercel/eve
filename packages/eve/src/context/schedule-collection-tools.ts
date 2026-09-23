@@ -43,7 +43,7 @@ const expressionSchema = z.discriminatedUnion("type", [
     at: z
       .string()
       .describe(
-        "Local datetime in YYYY-MM-DDTHH:mm:ss format without an offset or fractional seconds.",
+        "Minute-precision local datetime in YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:00 format without an offset or fractional seconds.",
       ),
     timezone: timezoneSchema.optional(),
   }),

@@ -1,4 +1,4 @@
-import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import type { Schedule as VercelSchedule, SchedulesClient } from "@vercel/schedules";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type {
@@ -11,10 +11,10 @@ import type {
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
-const DEFAULT_BASE_URL = "https://vss-server.vercel.sh";
 const DEVELOPMENT_PROVIDER = inMemoryScheduleProvider();
 
 export interface VercelScheduleProviderOptions {
+  /** Overrides the public Vercel Schedules endpoint. */
   readonly baseUrl?: string;
   readonly fetch?: typeof fetch;
   /** Local-development workaround for production control-plane testing. Prefer ambient OIDC on Vercel. */
@@ -23,25 +23,10 @@ export interface VercelScheduleProviderOptions {
   readonly developmentProjectId?: string;
 }
 
-interface VercelSchedule {
-  readonly createdAt: number;
-  readonly expression:
-    | { readonly type: "cron"; readonly cron: string }
-    | {
-        readonly type: "single";
-        readonly at: string;
-      };
-  readonly jitter?: number;
-  readonly name: string;
-  readonly scheduleId: string;
-  readonly state: "active" | "inactive";
-  readonly timezone: string;
-  readonly updatedAt: number;
-}
-
 /**
- * Uses Vercel Schedules in deployed production and process-local storage under
- * `eve dev`. Preview and non-Vercel production environments fail closed.
+ * Uses the official Vercel Schedules SDK with ambient OIDC in deployed
+ * production and process-local storage under `eve dev`. A personal bearer token
+ * may opt `eve dev` into production control-plane testing.
  */
 export function vercelScheduleProvider(
   options: VercelScheduleProviderOptions = {},
@@ -62,102 +47,115 @@ export function vercelScheduleProvider(
   }
   if (isEveDevEnvironment() && !useDevelopmentBearer) return DEVELOPMENT_PROVIDER;
 
-  const baseUrl = new URL(
-    options.baseUrl ?? process.env.VERCEL_SCHEDULE_BASE_URL ?? DEFAULT_BASE_URL,
-  );
-  const fetchImpl = options.fetch ?? fetch;
-  const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-    assertSupportedVercelEnvironment(useDevelopmentBearer);
-    const token = developmentBearerToken || (await getVercelOidcToken());
-    const headers = new Headers({ Authorization: `Bearer ${token}` });
-    if (body !== undefined) headers.set("Content-Type", "application/json");
-    const url = new URL(path, baseUrl);
-    if (useDevelopmentBearer) {
-      url.searchParams.set("projectId", developmentProjectId!);
-    }
-    const response = await fetchImpl(url, {
-      body: body === undefined ? undefined : JSON.stringify(body),
-      headers,
-      method,
-    });
-    if (!response.ok) {
-      const detail = (await response.text()).trim();
-      throw new Error(
-        `Vercel Schedules request failed (${response.status})${detail ? `: ${detail}` : "."}`,
-      );
-    }
-    if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
-  };
+  let clientPromise: Promise<SchedulesClient> | undefined;
+  const client = () =>
+    (clientPromise ??= createClient({
+      baseUrl: options.baseUrl,
+      bearerToken: developmentBearerToken,
+      fetch: options.fetch,
+      projectId: developmentProjectId,
+    }));
 
   return {
     kind: "vercel",
     async create(context, input) {
-      const schedule = await request<VercelSchedule>("POST", "/v1/schedules", {
+      const schedules = await client();
+      let schedule = await schedules.create({
         expression: toVercelExpression(input.expression),
         jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
         name: input.name,
         namespace: context.namespace,
         payload: createDispatchPayload(context, input.input),
-        target: { type: "queue", topic: deriveEveScheduleQueueTopic(context.target.key) },
+        target: { topic: deriveEveScheduleQueueTopic(context.target.key) },
         timezone: input.expression.timezone,
       });
       if (input.state === "inactive") {
-        return fromVercelSchedule(
-          await request<VercelSchedule>(
-            "POST",
-            schedulePath(input.name, context.namespace, "/disable"),
-          ),
-        );
+        schedule = await schedules.disable({ name: input.name, namespace: context.namespace });
       }
       return fromVercelSchedule(schedule);
     },
     async list(context, input): Promise<SchedulePage> {
-      const search = new URLSearchParams({ namespace: context.namespace });
-      const cursor = input.cursor?.trim();
-      if (cursor) search.set("cursor", cursor);
-      if (input.limit !== undefined) search.set("limit", String(input.limit));
-      const page = await request<{ data: VercelSchedule[]; cursor: string | null }>(
-        "GET",
-        `/v1/schedules?${search.toString()}`,
-      );
+      const cursor = input.cursor?.trim() || undefined;
+      const page = await (
+        await client()
+      ).list({
+        namespace: context.namespace,
+        ...(cursor === undefined ? {} : { cursor }),
+        ...(input.limit === undefined ? {} : { limit: input.limit }),
+      });
       return { cursor: page.cursor, data: page.data.map(fromVercelSchedule) };
     },
     async get(context, name) {
-      const response = await fetchScheduleOrNull(request, name, context.namespace);
+      const response = await getScheduleOrNull(await client(), name, context.namespace);
       return response === null ? null : fromVercelSchedule(response);
     },
     async update(context, name, patch) {
-      const body: Record<string, unknown> = {};
-      if (patch.expression !== undefined) {
-        body.expression = toVercelExpression(patch.expression);
-        body.timezone = patch.expression.timezone;
-        if (patch.expression.type === "cron") body.jitter = patch.expression.jitter;
-      }
-      if (patch.input !== undefined) body.payload = createDispatchPayload(context, patch.input);
+      const schedules = await client();
       return fromVercelSchedule(
-        await request<VercelSchedule>("PATCH", schedulePath(name, context.namespace), body),
+        await schedules.update({
+          name,
+          namespace: context.namespace,
+          ...(patch.expression === undefined
+            ? {}
+            : {
+                expression: toVercelExpression(patch.expression),
+                timezone: patch.expression.timezone,
+                ...(patch.expression.type === "cron" ? { jitter: patch.expression.jitter } : {}),
+              }),
+          ...(patch.input === undefined
+            ? {}
+            : { payload: createDispatchPayload(context, patch.input) }),
+        }),
       );
     },
     async enable(context, name) {
       return fromVercelSchedule(
-        await request<VercelSchedule>("POST", schedulePath(name, context.namespace, "/enable")),
+        await (await client()).enable({ name, namespace: context.namespace }),
       );
     },
     async disable(context, name) {
       return fromVercelSchedule(
-        await request<VercelSchedule>("POST", schedulePath(name, context.namespace, "/disable")),
+        await (await client()).disable({ name, namespace: context.namespace }),
       );
     },
     async invoke(context, name) {
-      await request("POST", schedulePath(name, context.namespace, "/invoke"));
+      await (await client()).invoke({ name, namespace: context.namespace });
     },
     async delete(context, name) {
-      const existing = await fetchScheduleOrNull(request, name, context.namespace);
-      if (existing === null) return false;
-      await request("DELETE", schedulePath(name, context.namespace));
+      const schedules = await client();
+      if ((await getScheduleOrNull(schedules, name, context.namespace)) === null) return false;
+      await schedules.delete({ name, namespace: context.namespace });
       return true;
     },
+  };
+}
+
+async function createClient(input: {
+  readonly baseUrl?: string;
+  readonly bearerToken?: string;
+  readonly fetch?: typeof fetch;
+  readonly projectId?: string;
+}): Promise<SchedulesClient> {
+  assertSupportedVercelEnvironment(input.bearerToken !== undefined);
+  const { SchedulesClient } = await import("@vercel/schedules");
+  const fetchImpl =
+    input.bearerToken === undefined
+      ? input.fetch
+      : withProjectId(input.fetch ?? fetch, input.projectId!);
+  return new SchedulesClient({
+    ...(input.baseUrl === undefined ? {} : { baseUrl: input.baseUrl }),
+    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+    ...(input.bearerToken === undefined ? {} : { token: input.bearerToken }),
+  });
+}
+
+function withProjectId(fetchImpl: typeof fetch, projectId: string): typeof fetch {
+  return async (resource, init) => {
+    const url = new URL(
+      typeof resource === "string" || resource instanceof URL ? resource : resource.url,
+    );
+    url.searchParams.set("projectId", projectId);
+    return await fetchImpl(url, init);
   };
 }
 
@@ -198,22 +196,26 @@ function fromVercelSchedule(schedule: VercelSchedule): ScheduleRecord {
   };
 }
 
-async function fetchScheduleOrNull(
-  request: <T>(method: string, path: string, body?: unknown) => Promise<T>,
+async function getScheduleOrNull(
+  client: SchedulesClient,
   name: string,
   namespace: string,
 ): Promise<VercelSchedule | null> {
   try {
-    return await request("GET", schedulePath(name, namespace));
+    return await client.get({ name, namespace });
   } catch (error) {
-    if (error instanceof Error && error.message.includes("(404)")) return null;
+    if (isNotFoundError(error)) return null;
     throw error;
   }
 }
 
-function schedulePath(name: string, namespace: string, suffix = ""): string {
-  const search = new URLSearchParams({ namespace });
-  return `/v1/schedules/${encodeURIComponent(name)}${suffix}?${search.toString()}`;
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    Reflect.get(error, "name") === "SchedulesApiError" &&
+    Reflect.get(error, "status") === 404
+  );
 }
 
 function assertSupportedVercelEnvironment(useDevelopmentBearer: boolean): void {

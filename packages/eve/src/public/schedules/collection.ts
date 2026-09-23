@@ -111,10 +111,10 @@ export interface ScheduleProvider {
 }
 
 export interface ScheduleOccurrence {
-  readonly firedAt: string;
-  readonly id: string;
+  readonly executionId: string;
   readonly name: string;
   readonly scheduleId: string;
+  readonly scheduledAt: string;
 }
 
 export interface ScheduleCollectionRunArgs<TInput> extends ScheduleHandlerArgs {

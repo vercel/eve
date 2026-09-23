@@ -1,7 +1,7 @@
 import type { ScheduleExpression } from "#public/schedules/collection.js";
 
 const SCHEDULE_IDENTIFIER = /^[0-9A-Za-z][0-9A-Za-z._-]{0,255}$/u;
-const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/u;
+const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::00)?$/u;
 
 export function validateScheduleName(name: string): string {
   const normalized = name.trim();
@@ -43,7 +43,7 @@ export function validateScheduleExpression(expression: ScheduleExpression): Sche
 
   if (!LOCAL_DATE_TIME.test(expression.at)) {
     throw new Error(
-      'One-time schedules require a local datetime in "YYYY-MM-DDTHH:mm:ss" format without an offset or fractional seconds.',
+      'One-time schedules require a minute-precision local datetime in "YYYY-MM-DDTHH:mm" or "YYYY-MM-DDTHH:mm:00" format without an offset or fractional seconds.',
     );
   }
   const normalized: { type: "single"; at: string; timezone?: string } = {

@@ -102,8 +102,8 @@ describe("ScheduleDispatcher", () => {
         collectionId: "queries",
         input: { query: "open incidents" },
         occurrence: {
-          firedAt: "2026-09-20T12:00:00.000Z",
-          id: "occurrence_1",
+          scheduledAt: "2026-09-20T12:00:00.000Z",
+          executionId: "occurrence_1",
           name: "weekly-incidents",
           scheduleId: "schedule_1",
         },
@@ -116,7 +116,7 @@ describe("ScheduleDispatcher", () => {
 
       expect(observed).toEqual([
         { query: "open incidents" },
-        expect.objectContaining({ id: "occurrence_1", scheduleId: "schedule_1" }),
+        expect.objectContaining({ executionId: "occurrence_1", scheduleId: "schedule_1" }),
         SCHEDULE_APP_AUTH,
       ]);
       expect(result.waitUntilTasks).toHaveLength(1);

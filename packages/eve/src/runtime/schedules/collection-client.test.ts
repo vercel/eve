@@ -83,7 +83,7 @@ describe("bindScheduleCollection", () => {
       {
         input: { query: "open incidents" },
         occurrence: expect.objectContaining({
-          firedAt: "2026-09-20T12:00:00.000Z",
+          scheduledAt: "2026-09-20T12:00:00.000Z",
           name: "weekly-incidents",
         }),
       },

@@ -34,10 +34,14 @@ afterEach(() => {
 
 describe("vercelScheduleProvider", () => {
   it("creates a queue-target schedule with an eve dispatch envelope", async () => {
-    vi.stubEnv("VERCEL", "1");
-    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("EVE_DEV", "1");
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json(schedule()));
-    const provider = vercelScheduleProvider({ fetch: fetchImpl });
+    const provider = vercelScheduleProvider({
+      fetch: fetchImpl,
+      baseUrl: "https://vercel-schedules.com",
+      developmentBearerToken: "personal-token",
+      developmentProjectId: "prj_123",
+    });
 
     const record = await provider.create(context, {
       expression: {
@@ -53,7 +57,7 @@ describe("vercelScheduleProvider", () => {
     expect(provider.kind).toBe("vercel");
     expect(record).toMatchObject({ name: "review-prs-daily", scheduleId: "sch_1" });
     const [url, init] = fetchImpl.mock.calls[0]!;
-    expect(String(url)).toBe("https://vss-server.vercel.sh/v1/schedules");
+    expect(String(url)).toBe("https://vercel-schedules.com/v1/schedules?projectId=prj_123");
     expect(JSON.parse(String(init?.body))).toMatchObject({
       name: "review-prs-daily",
       namespace: "eve-namespace",
@@ -79,7 +83,7 @@ describe("vercelScheduleProvider", () => {
     await provider.list(context, { cursor: "", limit: 20 });
 
     expect(String(fetchImpl.mock.calls[0]![0])).toBe(
-      "https://vss-server.vercel.sh/v1/schedules?namespace=eve-namespace&limit=20&projectId=prj_123",
+      "https://vercel-schedules.com/v1/schedules?namespace=eve-namespace&limit=20&projectId=prj_123",
     );
   });
 
