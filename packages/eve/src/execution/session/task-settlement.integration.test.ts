@@ -1,7 +1,7 @@
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { handleSubagentEvent } from "#execution/tools/subagent/handle-event.js";
 
-vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({ emitSubagentEventStep: vi.fn() }));
+vi.mock("#execution/tools/subagent/handle-event.js", () => ({ handleSubagentEvent: vi.fn() }));
 
 import { expect, it, vi } from "vitest";
 
@@ -24,7 +24,12 @@ import type { TaskView } from "#tasks/types.js";
 it.each(["completed", "failed", "cancelled"] as const)(
   "records a parked parent's %s task and removes its question before reporting the cohort",
   async (status) => {
-    vi.mocked(emitSubagentEventStep).mockReset().mockResolvedValue({ serializedContext: {} });
+    vi.mocked(handleSubagentEvent)
+      .mockReset()
+      .mockImplementation(async (input) => ({
+        serializedContext: {},
+        sessionState: input.sessionState,
+      }));
     let state = createTestSessionState();
     let session = state.snapshot.session;
     for (const taskId of ["A", "B"]) {
@@ -104,7 +109,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
           expect(getProxyInputRequests(current.state).size).toBe(0);
           expect(cursor.sessionState.hasProxyInputRequests).toBe(false);
           expect(queue.pendingCount).toBe(1);
-          expect(emitSubagentEventStep).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
+          expect(handleSubagentEvent).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
           return notification({
             taskId: "B",
             metadata: { kind: "subagent", name: "worker" },
@@ -131,7 +136,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
 it.each(["completed", "failed", "cancelled"] as const)(
   "publishes a background subagent result only for a newly recorded success (%s)",
   async (status) => {
-    vi.mocked(emitSubagentEventStep).mockReset();
+    vi.mocked(handleSubagentEvent).mockReset();
     const initial = createTestSessionState();
     const metadata = { kind: "subagent", name: "researcher" };
     let sessionState = replaceDurableSessionSnapshot({
@@ -158,12 +163,12 @@ it.each(["completed", "failed", "cancelled"] as const)(
           ? { status, lastOutput: { type: "error", data: "failed" } }
           : { status }),
     };
-    vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => {
+    vi.mocked(handleSubagentEvent).mockImplementation(async (input) => {
       expect(
         findBackgroundWorkflowToolRun(input.sessionState.snapshot.session.state, "task")?.task
           .outcome,
       ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
-      return { serializedContext: input.serializedContext };
+      return { serializedContext: input.serializedContext, sessionState: input.sessionState };
     });
     const deliver = async (outcome: TaskView) => {
       const result = await routeDeliverToChildren({
@@ -183,9 +188,9 @@ it.each(["completed", "failed", "cancelled"] as const)(
       status: "completed",
       lastOutput: { type: "result", data: "late" },
     });
-    expect(emitSubagentEventStep).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
+    expect(handleSubagentEvent).toHaveBeenCalledTimes(status === "completed" ? 1 : 0);
     if (status === "completed") {
-      expect(emitSubagentEventStep).toHaveBeenCalledWith(
+      expect(handleSubagentEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           event: {
             type: "subagent.completed",

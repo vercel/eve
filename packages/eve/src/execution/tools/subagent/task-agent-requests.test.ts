@@ -6,15 +6,15 @@ import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { handleSubagentEvent } from "#execution/tools/subagent/handle-event.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
   dispatchTaskAgentInvocationStep: vi.fn(),
   settleTaskAgentInvocationStep: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
-  emitSubagentEventStep: vi.fn(),
+vi.mock("#execution/tools/subagent/handle-event.js", () => ({
+  handleSubagentEvent: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
@@ -76,15 +76,15 @@ describe("workflow-owned agent requests", () => {
       serializedContext: {},
       sessionState: updatedState,
     });
-    const publication = Promise.withResolvers<{ serializedContext: Record<string, unknown> }>();
-    vi.mocked(emitSubagentEventStep).mockReturnValue(publication.promise);
+    const publication = Promise.withResolvers<Awaited<ReturnType<typeof handleSubagentEvent>>>();
+    vi.mocked(handleSubagentEvent).mockReturnValue(publication.promise);
     const applying = applyTaskAgentRequest(
       { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
       { sessionWritable: {} as never, serializedContext: {}, sessionState },
     );
-    await vi.waitFor(() => expect(emitSubagentEventStep).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(handleSubagentEvent).toHaveBeenCalledOnce());
     expect(resumeHookStep).not.toHaveBeenCalled();
-    publication.resolve({ serializedContext: {} });
+    publication.resolve({ serializedContext: {}, sessionState: updatedState });
     expect((await applying).sessionState).toBe(updatedState);
     expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
       "reply",
@@ -123,7 +123,7 @@ describe("workflow-owned agent requests", () => {
       kind: "dispatched",
       sessionState,
     });
-    vi.mocked(emitSubagentEventStep).mockResolvedValue({ serializedContext });
+    vi.mocked(handleSubagentEvent).mockResolvedValue({ serializedContext, sessionState });
 
     const applied = await applyTaskAgentRequest(
       {
@@ -138,7 +138,7 @@ describe("workflow-owned agent requests", () => {
       { sessionWritable: {} as never, serializedContext, sessionState },
     );
 
-    expect(emitSubagentEventStep).toHaveBeenCalledWith({
+    expect(handleSubagentEvent).toHaveBeenCalledWith({
       event,
       sessionWritable: {},
       serializedContext,

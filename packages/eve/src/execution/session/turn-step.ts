@@ -53,6 +53,7 @@ import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { createSessionEventSink } from "#execution/session/event-sink.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
@@ -235,18 +236,22 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     await instrumentation?.flush();
   };
   const sink = createSessionEventSink({
-    abortSignal: input.abortSignal,
     adapter,
-    bundle,
     ctx,
-    effectiveAgent,
-    instrumentation,
     isFirstTurn: initialEmissionState.sequence === 0,
     sessionWritable: input.sessionWritable,
     sessionId: initialSession.sessionId,
   });
-  const { adapterCtx, dynamicConnections, effectiveNode, handleEvent } = sink;
+  const { adapterCtx } = sink;
   try {
+    const { dynamicConnections, effectiveNode, handleEvent } = createTurnEventHandler({
+      abortSignal: input.abortSignal,
+      bundle,
+      ctx,
+      effectiveAgent,
+      instrumentation,
+      sink,
+    });
     const previousAdapterState =
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
         ? structuredClone(adapterCtx.state)
