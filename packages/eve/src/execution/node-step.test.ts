@@ -145,10 +145,7 @@ function setupMockAgentForToolExecution(toolName: string, args: unknown): void {
 }
 
 function setupMockHarnessAgent(): void {
-  vi.mocked(HarnessAgent).mockImplementation(function (
-    this: Record<string, unknown>,
-    settings: Record<string, unknown>,
-  ) {
+  vi.mocked(HarnessAgent).mockImplementation(function (settings) {
     const harness = settings.harness as HarnessV1;
     const onStepEnd = settings.onStepEnd as ((step: unknown) => Promise<void>) | undefined;
     const result = {
@@ -159,23 +156,22 @@ function setupMockHarnessAgent(): void {
       toolResults: [],
       usage: undefined,
     };
-    this.createSession = vi.fn().mockResolvedValue({
-      detach: vi.fn().mockResolvedValue({
-        data: {},
-        harnessId: harness.harnessId,
-        specificationVersion: "harness-v1",
-        type: "resume-session",
+    return Object.assign(Object.create(HarnessAgent.prototype), {
+      createSession: vi.fn().mockResolvedValue({
+        detach: vi.fn().mockResolvedValue({
+          data: {},
+          harnessId: harness.harnessId,
+          specificationVersion: "harness-v1",
+          type: "resume-session",
+        }),
+        sessionId: "harness-session",
       }),
-      sessionId: "harness-session",
+      generate: vi.fn().mockImplementation(async () => {
+        await onStepEnd?.(result);
+        return { ...result, responseMessages: result.response.messages };
+      }),
     });
-    this.generate = vi.fn().mockImplementation(async () => {
-      await onStepEnd?.(result);
-      return { ...result, responseMessages: result.response.messages };
-    });
-    return this as unknown as HarnessAgent;
-  } as unknown as ConstructorParameters<typeof HarnessAgent> extends [infer S]
-    ? (settings: S) => HarnessAgent
-    : never);
+  });
 }
 
 function setupMockHarnessAgentForToolExecution(input: {
@@ -183,51 +179,42 @@ function setupMockHarnessAgentForToolExecution(input: {
   readonly onOutput: (output: unknown) => void;
   readonly toolName: string;
 }): void {
-  vi.mocked(HarnessAgent).mockImplementation(function (
-    this: Record<string, unknown>,
-    settings: Record<string, unknown>,
-  ) {
+  vi.mocked(HarnessAgent).mockImplementation(function (settings) {
     const onStepEnd = settings.onStepEnd as ((step: unknown) => Promise<void>) | undefined;
-    this.createSession = vi.fn().mockResolvedValue({
-      detach: vi.fn().mockResolvedValue({
-        data: {},
-        harnessId: "test-harness",
-        specificationVersion: "harness-v1",
-        type: "resume-session",
+    return Object.assign(Object.create(HarnessAgent.prototype), {
+      createSession: vi.fn().mockResolvedValue({
+        detach: vi.fn().mockResolvedValue({
+          data: {},
+          harnessId: "test-harness",
+          specificationVersion: "harness-v1",
+          type: "resume-session",
+        }),
+        sessionId: "harness-session",
       }),
-      sessionId: "harness-session",
-    });
-    this.generate = vi.fn().mockImplementation(async () => {
-      const tools = settings.tools as Record<
-        string,
-        {
-          execute: (
-            toolInput: unknown,
-            options: { readonly toolCallId: string },
-          ) => Promise<unknown>;
+      generate: vi.fn().mockImplementation(async () => {
+        const tool = settings.tools?.[input.toolName];
+        if (tool?.execute === undefined) {
+          throw new Error(`Missing HarnessAgent test tool "${input.toolName}".`);
         }
-      >;
-      const tool = tools[input.toolName];
-      if (tool === undefined) {
-        throw new Error(`Missing HarnessAgent test tool "${input.toolName}".`);
-      }
-      const output = await tool.execute(input.args, { toolCallId: `call-${input.toolName}` });
-      input.onOutput(output);
-      const result = {
-        finishReason: "stop",
-        response: { messages: [{ content: JSON.stringify(output), role: "assistant" }] },
-        text: JSON.stringify(output),
-        toolCalls: [],
-        toolResults: [],
-        usage: undefined,
-      };
-      await onStepEnd?.(result);
-      return { ...result, responseMessages: result.response.messages };
+        const output = await tool.execute(input.args, {
+          context: undefined,
+          messages: [],
+          toolCallId: `call-${input.toolName}`,
+        });
+        input.onOutput(output);
+        const result = {
+          finishReason: "stop",
+          response: { messages: [{ content: JSON.stringify(output), role: "assistant" }] },
+          text: JSON.stringify(output),
+          toolCalls: [],
+          toolResults: [],
+          usage: undefined,
+        };
+        await onStepEnd?.(result);
+        return { ...result, responseMessages: result.response.messages };
+      }),
     });
-    return this as unknown as HarnessAgent;
-  } as unknown as ConstructorParameters<typeof HarnessAgent> extends [infer S]
-    ? (settings: S) => HarnessAgent
-    : never);
+  });
 }
 
 function createEmptyToolRegistry(): RuntimeToolRegistry {
@@ -379,7 +366,6 @@ async function createHarnessNodeWithTools(input: {
     workspaceSpec: { rootEntries: [] },
   };
   return createTestNode(turnAgent, {
-    agent: { skills: [] } as unknown as ResolvedRuntimeAgentNode["agent"],
     toolRegistry,
   });
 }
@@ -623,16 +609,24 @@ describe("createExecutionNodeStep", () => {
       tools: [],
       workspaceSpec: { rootEntries: [] },
     };
+    const baseNode = createTestNode(turnAgent);
     const node = createTestNode(turnAgent, {
       agent: {
+        ...baseNode.agent,
         skills: [
           {
             description: "Get the weather for a location.",
+            logicalPath: "skills/get-weather/SKILL.md",
             markdown: "# Get weather\n\nUse the weather tool.",
             name: "get-weather",
+            rootPath: "/workspace/skills/get-weather",
+            skillFilePath: "/workspace/skills/get-weather/SKILL.md",
+            skillId: "get-weather",
+            sourceId: "skills/get-weather/SKILL.md",
+            sourceKind: "skill-package",
           },
         ],
-      } as ResolvedRuntimeAgentNode["agent"],
+      },
     });
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),

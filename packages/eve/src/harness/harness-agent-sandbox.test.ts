@@ -25,13 +25,13 @@ function createRegisteredSandbox() {
   const eveSandbox = mockSandbox({ id: "eve-session" });
   const routes = [{ port: 3000 }, { port: 4000 }];
   const update = vi.fn(async () => {});
-  const vercelSandbox = {
+  const vercelSandbox: VercelSandbox = Object.assign(Object.create(null), {
     currentSession: () => ({ networkPolicy: "allow-all" }),
     domain: vi.fn((port: number) => `https://${port}.example.test`),
     name: "vercel-session",
     routes,
     update,
-  } as unknown as VercelSandbox;
+  });
 
   registerVercelSandboxForSandboxSession({
     sandbox: vercelSandbox,
@@ -227,13 +227,13 @@ describe("loadHarnessAgentSandboxSession", () => {
     const stop = vi.fn();
     const destroy = vi.fn();
     const eveSandbox = mockSandbox({ stop });
-    const vercelSandbox = {
+    const vercelSandbox: VercelSandbox = Object.assign(Object.create(null), {
       delete: destroy,
       domain: vi.fn((port: number) => `https://${port}.example.test`),
       name: "vercel-session",
       routes: [{ port: 3000 }],
       stop,
-    } as unknown as VercelSandbox;
+    });
     registerVercelSandboxForSandboxSession({
       sandbox: vercelSandbox,
       session: eveSandbox.session,

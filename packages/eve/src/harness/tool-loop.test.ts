@@ -318,7 +318,7 @@ function createTestHarness(harnessId = "test-harness"): HarnessV1 {
     doStart: vi.fn(),
     harnessId,
     specificationVersion: "harness-v1",
-  } as unknown as HarnessV1;
+  };
 }
 
 const analysisTaskAnnouncement =
@@ -595,19 +595,27 @@ type MockAgentConstructor =
     : never;
 type MockAgentInstance = ToolLoopAgent & Record<string, unknown>;
 
+async function invokeMockCallback(callback: unknown, input: unknown): Promise<void> {
+  if (typeof callback === "function") {
+    await Reflect.apply(callback, undefined, [input]);
+  }
+}
+
 async function invokeMockStepStart(
-  settings: MockAgentSettings,
+  settings: { readonly onStepStart?: unknown; readonly prepareStep?: unknown },
   options: { readonly messages: unknown[] },
 ): Promise<void> {
   let preparedMessages = options.messages;
-  if (settings.prepareStep) {
-    const prepared = await settings.prepareStep({
-      messages: options.messages,
-      steps: [],
-      stepNumber: 0,
-      model: {},
-      context: undefined,
-    });
+  if (typeof settings.prepareStep === "function") {
+    const prepared: unknown = await Reflect.apply(settings.prepareStep, undefined, [
+      {
+        messages: options.messages,
+        steps: [],
+        stepNumber: 0,
+        model: {},
+        context: undefined,
+      },
+    ]);
     if (
       prepared !== null &&
       typeof prepared === "object" &&
@@ -617,10 +625,8 @@ async function invokeMockStepStart(
       preparedMessages = prepared.messages;
     }
   }
-  await settings.onStepStart?.({ messages: preparedMessages });
+  await invokeMockCallback(settings.onStepStart, { messages: preparedMessages });
 }
-
-type MockHarnessAgentSettings = Pick<MockAgentSettings, "onStepEnd" | "onStepStart">;
 
 function setupMockHarnessAgent(result: Record<string, unknown>) {
   const resumeFrom = {
@@ -635,27 +641,23 @@ function setupMockHarnessAgent(result: Record<string, unknown>) {
     sessionId: "harness-session",
   };
   const createSession = vi.fn().mockResolvedValue(harnessSession);
-  vi.mocked(HarnessAgent).mockImplementation(function (
-    this: Record<string, unknown>,
-    settings: MockHarnessAgentSettings,
-  ) {
+  vi.mocked(HarnessAgent).mockImplementation(function (settings) {
     const { onStepEnd } = settings;
-    this.createSession = createSession;
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      await invokeMockStepStart(settings, options);
-      if (onStepEnd) await onStepEnd(result);
-      return createMockGenerateResult(result);
+    return Object.assign(Object.create(HarnessAgent.prototype), {
+      createSession,
+      generate: vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+        await invokeMockStepStart(settings, options);
+        await invokeMockCallback(onStepEnd, result);
+        return createMockGenerateResult(result);
+      }),
+      stream: vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+        await invokeMockStepStart(settings, options);
+        const mockResult = createMockStreamResult(result);
+        if (onStepEnd) void Promise.resolve().then(() => invokeMockCallback(onStepEnd, result));
+        return mockResult;
+      }),
     });
-    this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-      await invokeMockStepStart(settings, options);
-      const mockResult = createMockStreamResult(result);
-      if (onStepEnd) void Promise.resolve().then(() => onStepEnd(result));
-      return mockResult;
-    });
-    return this as unknown as HarnessAgent;
-  } as unknown as ConstructorParameters<typeof HarnessAgent> extends [infer Settings]
-    ? (settings: Settings) => HarnessAgent
-    : never);
+  });
   return {
     createSession,
     detach,
@@ -9696,7 +9698,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", emit, {
         compactOnly: true,
-        harness,
+        harnessAgent: { harness, skills: [], tools: new Map() },
         resolveModel,
       }),
     );

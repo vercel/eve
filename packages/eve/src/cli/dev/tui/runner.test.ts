@@ -4442,7 +4442,7 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(renderCommandResult).not.toHaveBeenCalled();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect).not.toHaveBeenCalled();
-    expect(headers.at(-1)?.info?.agent.model.endpoint).toMatchObject({
+    expect(headers.at(-1)?.info?.agent.model?.endpoint).toMatchObject({
       kind: "gateway",
       connected: true,
     });

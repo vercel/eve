@@ -24,7 +24,11 @@ export function getPersistedHarnessAgentSession(input: {
   ) {
     throw new Error("Unsupported persisted HarnessAgent session state.");
   }
-  return value as unknown as PersistedHarnessAgentSession;
+  return {
+    resumeFrom: value.resumeFrom,
+    sessionId: value.sessionId,
+    version: 1,
+  };
 }
 
 export function setPersistedHarnessAgentSession(input: {

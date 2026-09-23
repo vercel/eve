@@ -251,11 +251,12 @@ function inspectCurrentPolicy(policy: NetworkPolicy): CurrentPolicyInspection {
           requestTransformationHosts.add(host.toLowerCase());
         }
         if (rule.forwardURL != null) {
-          forwardRules.push({
-            host,
-            ...(rule.match == null ? {} : { match: cloneMatch(rule.match) }),
-            forwardURL: rule.forwardURL,
-          });
+          forwardRules.push(
+            Object.assign(
+              { host, forwardURL: rule.forwardURL },
+              rule.match == null ? {} : { match: cloneMatch(rule.match) },
+            ),
+          );
         }
       }
     }
@@ -351,10 +352,10 @@ function composeNetworkPolicy({
       appendRule({
         rulesByHost,
         host,
-        rule: {
-          ...(forwardRule.match == null ? {} : { match: cloneMatch(forwardRule.match) }),
-          forwardURL: forwardRule.forwardURL,
-        },
+        rule: Object.assign(
+          { forwardURL: forwardRule.forwardURL },
+          forwardRule.match == null ? {} : { match: cloneMatch(forwardRule.match) },
+        ),
       });
     }
   }
@@ -364,10 +365,10 @@ function composeNetworkPolicy({
     return toVercelAccessPolicy(accessPolicy);
   }
 
-  return {
-    allow: Object.fromEntries(rulesByHost),
-    ...(accessPolicy.mode !== "custom" ? {} : toVercelSubnets(accessPolicy)),
-  };
+  return Object.assign(
+    { allow: Object.fromEntries(rulesByHost) },
+    accessPolicy.mode === "custom" ? toVercelSubnets(accessPolicy) : {},
+  );
 }
 
 function toVercelAccessPolicy(accessPolicy: NetworkAccessPolicy): NetworkPolicy {
@@ -375,10 +376,10 @@ function toVercelAccessPolicy(accessPolicy: NetworkAccessPolicy): NetworkPolicy 
     return accessPolicy.mode;
   }
 
-  return {
-    ...(accessPolicy.allowedHosts.length === 0 ? {} : { allow: [...accessPolicy.allowedHosts] }),
-    ...toVercelSubnets(accessPolicy),
-  };
+  return Object.assign(
+    toVercelSubnets(accessPolicy),
+    accessPolicy.allowedHosts.length === 0 ? {} : { allow: [...accessPolicy.allowedHosts] },
+  );
 }
 
 function toVercelSubnets(
@@ -388,10 +389,11 @@ function toVercelSubnets(
     return {};
   }
   return {
-    subnets: {
-      ...(accessPolicy.allowedCIDRs.length === 0 ? {} : { allow: [...accessPolicy.allowedCIDRs] }),
-      ...(accessPolicy.deniedCIDRs.length === 0 ? {} : { deny: [...accessPolicy.deniedCIDRs] }),
-    },
+    subnets: Object.assign(
+      {},
+      accessPolicy.allowedCIDRs.length === 0 ? {} : { allow: [...accessPolicy.allowedCIDRs] },
+      accessPolicy.deniedCIDRs.length === 0 ? {} : { deny: [...accessPolicy.deniedCIDRs] },
+    ),
   };
 }
 
@@ -480,17 +482,18 @@ function toVercelRequestTransformationRule(
   transformation: HarnessV1RequestTransformation,
 ): NetworkPolicyRule {
   const { host: _host, method, path, queryString, headers } = transformation.match;
-  const match = {
-    ...(path == null ? {} : { path: cloneMatcher(path) }),
-    ...(method == null ? {} : { method: [...method] }),
-    ...(queryString == null ? {} : { queryString: queryString.map(cloneKeyValueMatcher) }),
-    ...(headers == null ? {} : { headers: headers.map(cloneKeyValueMatcher) }),
-  };
+  const match = Object.assign(
+    {},
+    path == null ? {} : { path: cloneMatcher(path) },
+    method == null ? {} : { method: [...method] },
+    queryString == null ? {} : { queryString: queryString.map(cloneKeyValueMatcher) },
+    headers == null ? {} : { headers: headers.map(cloneKeyValueMatcher) },
+  );
 
-  return {
-    ...(Object.keys(match).length === 0 ? {} : { match }),
-    transform: [{ headers: { ...transformation.transform.headers } }],
-  };
+  return Object.assign(
+    { transform: [{ headers: { ...transformation.transform.headers } }] },
+    Object.keys(match).length === 0 ? {} : { match },
+  );
 }
 
 function hasRequestTransformation(rule: NetworkPolicyRule): boolean {
@@ -601,33 +604,28 @@ function cloneRequestTransformation(
   transformation: HarnessV1RequestTransformation,
 ): HarnessV1RequestTransformation {
   return {
-    match: {
-      host: transformation.match.host,
-      ...(transformation.match.path == null
+    match: Object.assign(
+      { host: transformation.match.host },
+      transformation.match.path == null
         ? {}
-        : { path: cloneHarnessMatcher(transformation.match.path) }),
-      ...(transformation.match.method == null ? {} : { method: [...transformation.match.method] }),
-      ...(transformation.match.queryString == null
+        : { path: cloneHarnessMatcher(transformation.match.path) },
+      transformation.match.method == null ? {} : { method: [...transformation.match.method] },
+      transformation.match.queryString == null
         ? {}
-        : {
-            queryString: transformation.match.queryString.map(cloneHarnessKeyValueMatcher),
-          }),
-      ...(transformation.match.headers == null
+        : { queryString: transformation.match.queryString.map(cloneHarnessKeyValueMatcher) },
+      transformation.match.headers == null
         ? {}
-        : {
-            headers: transformation.match.headers.map(cloneHarnessKeyValueMatcher),
-          }),
-    },
+        : { headers: transformation.match.headers.map(cloneHarnessKeyValueMatcher) },
+    ),
     transform: { headers: { ...transformation.transform.headers } },
   };
 }
 
 function cloneForwardRule(rule: ForwardRule): ForwardRule {
-  return {
-    host: rule.host,
-    ...(rule.match == null ? {} : { match: cloneMatch(rule.match) }),
-    forwardURL: rule.forwardURL,
-  };
+  return Object.assign(
+    { host: rule.host, forwardURL: rule.forwardURL },
+    rule.match == null ? {} : { match: cloneMatch(rule.match) },
+  );
 }
 
 function cloneNetworkAccessPolicy(policy: NetworkAccessPolicy): NetworkAccessPolicy {
@@ -649,21 +647,21 @@ function cloneNetworkPolicy(policy: NetworkPolicy): NetworkPolicy {
 function cloneMatch(
   match: NonNullable<NetworkPolicyRule["match"]>,
 ): NonNullable<NetworkPolicyRule["match"]> {
-  return {
-    ...(match.path == null ? {} : { path: cloneMatcher(match.path) }),
-    ...(match.method == null ? {} : { method: [...match.method] }),
-    ...(match.queryString == null
-      ? {}
-      : { queryString: match.queryString.map(cloneKeyValueMatcher) }),
-    ...(match.headers == null ? {} : { headers: match.headers.map(cloneKeyValueMatcher) }),
-  };
+  return Object.assign(
+    {},
+    match.path == null ? {} : { path: cloneMatcher(match.path) },
+    match.method == null ? {} : { method: [...match.method] },
+    match.queryString == null ? {} : { queryString: match.queryString.map(cloneKeyValueMatcher) },
+    match.headers == null ? {} : { headers: match.headers.map(cloneKeyValueMatcher) },
+  );
 }
 
 function cloneKeyValueMatcher(matcher: NetworkPolicyKeyValueMatcher): NetworkPolicyKeyValueMatcher {
-  return {
-    ...(matcher.key == null ? {} : { key: cloneMatcher(matcher.key) }),
-    ...(matcher.value == null ? {} : { value: cloneMatcher(matcher.value) }),
-  };
+  return Object.assign(
+    {},
+    matcher.key == null ? {} : { key: cloneMatcher(matcher.key) },
+    matcher.value == null ? {} : { value: cloneMatcher(matcher.value) },
+  );
 }
 
 function cloneMatcher(matcher: NetworkPolicyMatcher): NetworkPolicyMatcher {
@@ -673,10 +671,11 @@ function cloneMatcher(matcher: NetworkPolicyMatcher): NetworkPolicyMatcher {
 function cloneHarnessKeyValueMatcher(
   matcher: NonNullable<HarnessV1RequestTransformation["match"]["headers"]>[number],
 ): NonNullable<HarnessV1RequestTransformation["match"]["headers"]>[number] {
-  return {
-    ...(matcher.key == null ? {} : { key: cloneHarnessMatcher(matcher.key) }),
-    ...(matcher.value == null ? {} : { value: cloneHarnessMatcher(matcher.value) }),
-  };
+  return Object.assign(
+    {},
+    matcher.key == null ? {} : { key: cloneHarnessMatcher(matcher.key) },
+    matcher.value == null ? {} : { value: cloneHarnessMatcher(matcher.value) },
+  );
 }
 
 function cloneHarnessMatcher(
