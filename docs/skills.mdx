@@ -85,7 +85,7 @@ const research = ctx.getSkill("research");
 const checklist = await research.file("references/checklist.md").text();
 ```
 
-The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox, relative to that skill package directory.
+The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox, relative to that skill package directory. For a dynamic skill, `file("SKILL.md")` returns the resolved markdown from session state without starting a sandbox.
 
 ## Dynamic skills
 

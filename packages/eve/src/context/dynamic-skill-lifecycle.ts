@@ -7,7 +7,6 @@ import {
   normalizeSkillPackage,
   removeSkillPackageFromSandbox,
   skillPackageRevision,
-  stripSkillFrontmatter,
   writeSkillPackageToSandbox,
 } from "#shared/skill-package.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -89,7 +88,7 @@ function formatDynamicSkillAnnouncement(manifest: DynamicSkillManifest): string 
 function toDurableSkill(skill: MaterializableSkillPackage): DurableDynamicSkillMetadata {
   return {
     description: skill.description,
-    markdown: stripSkillFrontmatter(skill.markdown),
+    markdown: skill.markdown,
     name: skill.name,
     ...(skill.files.length > 1 ? { revision: skillPackageRevision(skill) } : {}),
   };

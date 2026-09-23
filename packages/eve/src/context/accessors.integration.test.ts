@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildCallbackContext } from "#context/build-callback-context.js";
+import { loadContext } from "#context/container.js";
+import { DynamicSkillManifestKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
@@ -158,6 +160,23 @@ describe("buildCallbackContext – getSandbox", () => {
 });
 
 describe("buildCallbackContext – getSkill", () => {
+  it("reads a dynamic skill's SKILL.md from session state without the sandbox", async () => {
+    const sandbox = mockSandbox();
+    const get = vi.spyOn(sandbox.access, "get");
+    const runtime = await createTestRuntime();
+    const markdown = "---\nname: policy\n---\n# Dynamic policy\n";
+
+    const text = await runtime.runAsSession({ sandbox }, async () => {
+      loadContext().set(DynamicSkillManifestKey, {
+        policy: [{ description: "Policy", markdown, name: "policy" }],
+      });
+      return await buildCallbackContext().getSkill("policy").file("SKILL.md").text();
+    });
+
+    expect(text).toBe(markdown);
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("throws when no authored runtime context is active", () => {
     expect(() => buildCallbackContext()).toThrow("No active eve context");
   });

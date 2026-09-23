@@ -331,7 +331,7 @@ export const DynamicSubagentAgentConfigKey = new ContextKey<DynamicSubagentAgent
 export interface DurableDynamicSkillMetadata {
   readonly name: string;
   readonly description: string;
-  /** Instruction body returned by `load_skill`, without frontmatter. */
+  /** `SKILL.md` content as authored; `load_skill` strips any frontmatter. */
   readonly markdown: string;
   /**
    * Content hash of the package files. Present only for packages with

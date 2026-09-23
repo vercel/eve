@@ -4,6 +4,7 @@ import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { stripSkillFrontmatter } from "#shared/skill-package.js";
 
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
@@ -20,14 +21,16 @@ type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
 async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   const ctx = loadContext();
   const { skill } = args;
-  const skills = [
-    ...Object.values(ctx.get(DynamicSkillManifestKey) ?? {}).flat(),
-    ...ctx.require(BundleKey).resolvedAgent.skills,
-  ];
-  const selected = skills.find((entry) => entry.name === skill);
-  if (selected !== undefined) return selected.markdown;
+  const dynamicSkills = Object.values(ctx.get(DynamicSkillManifestKey) ?? {}).flat();
+  const authoredSkills = ctx.require(BundleKey).resolvedAgent.skills;
+  const dynamicSkill = dynamicSkills.find((entry) => entry.name === skill);
+  if (dynamicSkill !== undefined) return stripSkillFrontmatter(dynamicSkill.markdown);
+  const authoredSkill = authoredSkills.find((entry) => entry.name === skill);
+  if (authoredSkill !== undefined) return authoredSkill.markdown;
 
-  const availableSkills = [...new Set(skills.map((entry) => entry.name))].sort();
+  const availableSkills = [
+    ...new Set([...dynamicSkills, ...authoredSkills].map((entry) => entry.name)),
+  ].sort();
   const message = formatSkillNotFoundError(skill, availableSkills);
   const connectionName = ctx
     .get(ConnectionRegistryKey)

@@ -25,18 +25,27 @@ export function assertSafeSkillId(id: string): asserts id is string {
 
 /**
  * Creates the public runtime skill handle. Existence is checked lazily by
- * each file read against the sandbox.
+ * each file read against the sandbox. `readInstructions` serves `SKILL.md`
+ * from memory when it returns content, so dynamic skills need no sandbox.
  */
-export function createSandboxSkillHandle(access: SandboxAccess, id: string): SkillHandle {
+export function createSandboxSkillHandle(
+  access: SandboxAccess,
+  id: string,
+  readInstructions?: () => string | undefined,
+): SkillHandle {
   assertSafeSkillId(id);
 
   return {
     name: id,
     file(relativePath: string) {
       assertSafeSkillRelativePath(relativePath);
+      const instructions = () => (relativePath === "SKILL.md" ? readInstructions?.() : undefined);
 
       return {
         async bytes(): Promise<Uint8Array> {
+          const markdown = instructions();
+          if (markdown !== undefined) return new TextEncoder().encode(markdown);
+
           const sandbox = await requireSandboxSession(access);
           const paths = await resolveSandboxSkillReadPaths({
             name: id,
@@ -54,6 +63,9 @@ export function createSandboxSkillHandle(access: SandboxAccess, id: string): Ski
           throw new Error(`Skill file not found: ${paths[0]}`);
         },
         async text(): Promise<string> {
+          const markdown = instructions();
+          if (markdown !== undefined) return markdown;
+
           const sandbox = await requireSandboxSession(access);
           const paths = await resolveSandboxSkillReadPaths({
             name: id,

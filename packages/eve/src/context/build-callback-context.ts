@@ -3,7 +3,12 @@ import type { SkillHandle } from "#shared/skill-types.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import { loadContext } from "#context/container.js";
-import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js";
+import {
+  DynamicSkillManifestKey,
+  DynamicSkillSandboxKey,
+  SandboxKey,
+  SessionKey,
+} from "#context/keys.js";
 
 /**
  * Builds a {@link SessionContext} from the active ALS scope.
@@ -58,7 +63,14 @@ export function buildCallbackContext(): SessionContext {
             "Call ctx.getSkill() only from authored runtime functions such as tools, hooks, and channel events.",
         );
       }
-      return createSandboxSkillHandle(access, identifier);
+      return createSandboxSkillHandle(
+        access,
+        identifier,
+        () =>
+          Object.values(ctx.get(DynamicSkillManifestKey) ?? {})
+            .flat()
+            .find((skill) => skill.name === identifier)?.markdown,
+      );
     },
   };
 }

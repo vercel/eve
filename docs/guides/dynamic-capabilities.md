@@ -422,7 +422,7 @@ The caller's team gets its own playbook advertised as a loadable skill; everyone
 
 Skills follow the same naming rule as tools: a single `defineSkill(...)` is named after the file slug, while a map names each entry by its bare key (namespace the key yourself if it might collide). A dynamic skill overrides a same-named authored one; two dynamic resolvers emitting the same name throws.
 
-A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and serves them from `load_skill`. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. A changed package replaces the previous directory, so files omitted from the new result are removed.
+A dynamic skill that returns only `markdown` never starts a sandbox: eve keeps its instructions in session state and serves them from `load_skill` and `ctx.getSkill(name).file("SKILL.md")`. When the skill also returns `files`, eve writes the package to the sandbox skill root when the resolver first returns it, and again only when its contents change or the session gets a new sandbox. A changed package replaces the previous directory, so files omitted from the new result are removed.
 
 ## Dynamic instructions
 

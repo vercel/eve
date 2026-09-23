@@ -162,14 +162,16 @@ describe("dispatchDynamicSkillEvent", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("stores instructions without frontmatter", async () => {
+  it("stores SKILL.md as authored, including frontmatter", async () => {
     const { ctx } = createCtx();
     await dispatch(
       ctx,
       createResolver("tenant", () => makeSkill("Tenant", "---\nname: tenant\n---\n# Body\n")),
     );
 
-    expect(ctx.get(DynamicSkillManifestKey)?.tenant?.[0]?.markdown).toBe("# Body\n");
+    expect(ctx.get(DynamicSkillManifestKey)?.tenant?.[0]?.markdown).toBe(
+      "---\nname: tenant\n---\n# Body\n",
+    );
   });
 
   it("keeps remaining dynamic skills in the announcement when one resolver removes its skill", async () => {

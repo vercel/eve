@@ -111,7 +111,7 @@ describe("load_skill executor", () => {
     expect(get).toHaveBeenCalledOnce();
   });
 
-  it("loads an active dynamic skill from durable context without opening the sandbox", async () => {
+  it("loads an active dynamic skill from durable context without frontmatter or the sandbox", async () => {
     const get = vi.fn(async () => null);
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, {
@@ -121,7 +121,11 @@ describe("load_skill executor", () => {
     });
     ctx.set(DynamicSkillManifestKey, {
       policy: [
-        { description: "Apply the dynamic policy", markdown: "# Dynamic policy\n", name: "policy" },
+        {
+          description: "Apply the dynamic policy",
+          markdown: "---\nname: policy\n---\n# Dynamic policy\n",
+          name: "policy",
+        },
       ],
     });
     const execute = skillToolExecutor(ctx, [
