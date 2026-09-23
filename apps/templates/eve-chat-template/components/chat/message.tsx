@@ -118,10 +118,8 @@ function AgentMessageParts({
 
     elements.push(
       <AgentMessagePart
-        canRespond={canRespond}
         isUser={isUser}
         key={key}
-        onInputResponses={onInputResponses}
         part={part}
         showCaret={showCaret && index === lastTextIndex}
         streamKey={`${messageId}:${key}`}
@@ -135,16 +133,12 @@ function AgentMessageParts({
 }
 
 function AgentMessagePart({
-  canRespond,
   isUser,
-  onInputResponses,
   part,
   showCaret,
   streamKey,
 }: {
-  readonly canRespond: boolean;
   readonly isUser: boolean;
-  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
   readonly streamKey: string;

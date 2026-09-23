@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { cpSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const canonical = resolve(root, "apps/docs/registry/channel/web/components/chat");
