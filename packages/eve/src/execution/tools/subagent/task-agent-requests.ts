@@ -1,8 +1,5 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import {
-  emitSubagentEventStep,
-  dispatchSessionEventHooksStep,
-} from "#execution/tools/subagent/emit-event-step.js";
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import {
   dispatchTaskAgentInvocationStep,
   settleTaskAgentInvocationStep,
@@ -56,9 +53,8 @@ export async function applyTaskAgentRequest(
           serializedContext,
           sessionState: settled.sessionState,
         });
-        const hooked = await dispatchSessionEventHooksStep({ ...emitted, sessionState });
-        serializedContext = hooked.serializedContext;
-        sessionState = hooked.sessionState;
+        serializedContext = emitted.serializedContext;
+        sessionState = emitted.sessionState;
       }
       await resumeHookStep(
         delivery.replyTo,
@@ -81,14 +77,10 @@ export async function applyTaskAgentRequest(
       });
       switch (dispatched.kind) {
         case "dispatched": {
-          const emitted = await emitSubagentEventStep({
+          return await emitSubagentEventStep({
             event: dispatched.event,
             sessionWritable: ctx.sessionWritable,
             serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
-            sessionState: dispatched.sessionState,
-          });
-          return await dispatchSessionEventHooksStep({
-            ...emitted,
             sessionState: dispatched.sessionState,
           });
         }

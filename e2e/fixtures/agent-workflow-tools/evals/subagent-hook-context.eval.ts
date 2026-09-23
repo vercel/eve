@@ -3,7 +3,7 @@ import type { SubagentHookObservation } from "../subagent-hook-audit";
 
 export default (["direct", "waiting", "background"] as const).map((mode) =>
   defineEval({
-    description: `${mode} subagent hooks retry without republishing and preserve parent context, skills, and sandbox writes.`,
+    description: `${mode} subagent hooks preserve parent context, skills, and sandbox writes.`,
     async test(t) {
       const initial = await t.send(
         `Alice asks Bob to review a short report and return his result. SUBAGENT-HOOKS:${mode}`,
@@ -84,17 +84,6 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
             (record: SubagentHookObservation & { sandboxCallId: string | null }) =>
               record.policy.includes("DELEGATION-POLICY:") &&
               record.sandboxCallId === record.callId,
-          ),
-      );
-      t.eventsSatisfy(
-        "retrying the completion hook retains the event ID from its failed attempt",
-        () =>
-          Array.isArray(observations) &&
-          observations.some(
-            (record: SubagentHookObservation) =>
-              record.subscriber === "wildcard" &&
-              record.type === "subagent.completed" &&
-              record.retryEventId === record.eventId,
           ),
       );
       t.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });

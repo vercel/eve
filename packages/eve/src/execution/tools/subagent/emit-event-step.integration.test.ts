@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { ContextContainer, loadContext } from "#context/container.js";
+import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import {
   AuthKey,
   DynamicSkillManifestKey,
@@ -11,11 +11,8 @@ import {
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
-import { stampTestEvent } from "#internal/testing/events.js";
-import {
-  emitSubagentEventStep,
-  dispatchSessionEventHooksStep,
-} from "#execution/tools/subagent/emit-event-step.js";
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { createSessionEventSink } from "#execution/session/event-sink.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -138,21 +135,19 @@ it.each(
     const chunks: Uint8Array[] = [];
     const stream = new WritableStream<Uint8Array>({
       write(chunk) {
+        expect(ctx.has(SessionKey)).toBe(false);
+        expect(ctx.has(SandboxKey)).toBe(false);
         calls.push("stream");
         chunks.push(chunk);
       },
     });
     const sessionState = createTestSessionState({ sessionId: "parent" });
-    const published = await emitSubagentEventStep({
+    const emitted = emitSubagentEventStep({
       event,
       sessionWritable: stream,
       serializedContext: {},
       sessionState,
     });
-    expect(calls).toEqual(["adapter", "stream"]);
-    expect(ctx.has(SessionKey)).toBe(false);
-    expect(ctx.has(SandboxKey)).toBe(false);
-    const emitted = dispatchSessionEventHooksStep({ ...published, sessionState });
     const firstHandler = subscription === "wildcard" ? "wildcard" : "typed";
     if (fails) {
       await expect(emitted).rejects.toThrow("subagent subscriber failed");
@@ -180,53 +175,63 @@ it.each(
   },
 );
 
-it.each(events)("publishes $type without preparing hook or model context", async (event) => {
+it.each(events)(
+  "the event sink publishes $type without preparing hook or model context",
+  async (event) => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "parent");
+    ctx.set(AuthKey, null);
+    ctx.set(ChannelKey, { kind: "test" });
+    const hook = vi.fn(() => {
+      throw new Error("publication invoked a hook");
+    });
+    const bundle: Partial<CompiledBundle> = {
+      get graph(): never {
+        throw new Error("publication read model configuration");
+      },
+      hookRegistry: createRuntimeHookRegistry([
+        {
+          slug: "audit",
+          logicalPath: "hooks/audit.ts",
+          sourceId: "hooks/audit.ts",
+          sourceKind: "module",
+          exportName: undefined,
+          events: { "*": hook },
+        },
+      ]),
+    };
+    ctx.set(BundleKey, bundle as CompiledBundle);
+    const chunks: Uint8Array[] = [];
+    const stream = new WritableStream<Uint8Array>({
+      write(chunk) {
+        chunks.push(chunk);
+      },
+    });
+    const sink = createSessionEventSink({
+      adapter: ctx.require(ChannelKey),
+      ctx,
+      isFirstTurn: false,
+      sessionWritable: stream,
+      sessionId: "parent",
+    });
+    try {
+      await contextStorage.run(ctx, () => sink.emit(event));
+    } finally {
+      sink.release();
+    }
+    expect(hook).not.toHaveBeenCalled();
+    expect(ctx.has(SessionKey)).toBe(false);
+    expect(ctx.has(SandboxKey)).toBe(false);
+    expect(chunks).toHaveLength(1);
+    expect(stream.locked).toBe(false);
+  },
+);
+
+it("does not prepare context when no hook subscribes to the published event", async () => {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, "parent");
   ctx.set(AuthKey, null);
   ctx.set(ChannelKey, { kind: "test" });
-  const hook = vi.fn(() => {
-    throw new Error("publication invoked a hook");
-  });
-  const bundle: Partial<CompiledBundle> = {
-    get graph(): never {
-      throw new Error("publication read model configuration");
-    },
-    hookRegistry: createRuntimeHookRegistry([
-      {
-        slug: "audit",
-        logicalPath: "hooks/audit.ts",
-        sourceId: "hooks/audit.ts",
-        sourceKind: "module",
-        exportName: undefined,
-        events: { "*": hook },
-      },
-    ]),
-  };
-  ctx.set(BundleKey, bundle as CompiledBundle);
-  vi.mocked(deserializeContext).mockResolvedValue(ctx);
-  vi.mocked(serializeContext).mockReturnValue({});
-  const chunks: Uint8Array[] = [];
-  const stream = new WritableStream<Uint8Array>({
-    write(chunk) {
-      chunks.push(chunk);
-    },
-  });
-  await emitSubagentEventStep({
-    event,
-    sessionWritable: stream,
-    serializedContext: {},
-    sessionState: createTestSessionState({ sessionId: "parent" }),
-  });
-  expect(hook).not.toHaveBeenCalled();
-  expect(ctx.has(SessionKey)).toBe(false);
-  expect(ctx.has(SandboxKey)).toBe(false);
-  expect(chunks).toHaveLength(1);
-  expect(stream.locked).toBe(false);
-});
-
-it("does not prepare context when no hook subscribes to the published event", async () => {
-  const ctx = new ContextContainer();
   const bundle: Partial<CompiledBundle> = {
     hookRegistry: createEmptyHookRegistry(),
     get turnAgent(): never {
@@ -235,30 +240,17 @@ it("does not prepare context when no hook subscribes to the published event", as
   };
   ctx.set(BundleKey, bundle as CompiledBundle);
   vi.mocked(deserializeContext).mockResolvedValue(ctx);
+  vi.mocked(serializeContext).mockReturnValue({ channel: true });
   const input = {
-    event: stampTestEvent(events[0]!),
-    suppressed: false,
+    event: events[0]!,
+    sessionWritable: new WritableStream<Uint8Array>(),
     serializedContext: { channel: true },
     sessionState: createTestSessionState({ sessionId: "parent" }),
   };
-  expect(await dispatchSessionEventHooksStep(input)).toEqual({
+  expect(await emitSubagentEventStep(input)).toEqual({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
   expect(ctx.has(SessionKey)).toBe(false);
   expect(ctx.has(SandboxKey)).toBe(false);
-});
-
-it("skips suppressed events without restoring hook context", async () => {
-  const input = {
-    event: stampTestEvent(events[0]!),
-    suppressed: true,
-    serializedContext: { channel: true },
-    sessionState: createTestSessionState(),
-  };
-  expect(await dispatchSessionEventHooksStep(input)).toEqual({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  });
-  expect(deserializeContext).not.toHaveBeenCalled();
 });

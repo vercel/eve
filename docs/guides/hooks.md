@@ -158,16 +158,14 @@ export default defineHook({
 });
 ```
 
-`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. For events emitted during a model turn, it is not a retry guard for the hook itself: if the turn step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one.
-
-`subagent.called` and `subagent.completed` publication completes in a separate durable step before hooks run. Retrying their hook step reuses the published event and its `meta.id`; it does not invoke the channel adapter or write another stream event. Hooks are still at-least-once: a retry runs both typed and wildcard subscribers again. Use `meta.id` to deduplicate side effects for that published event. If the publication step itself is interrupted before it completes, it can re-emit with a new ID.
+`meta.id` is stable for the life of the persisted event, so a consumer that re-reads the stream can ingest the same event twice safely. It is not a retry guard for the hook itself: if a step is interrupted and re-runs, the turn re-emits its events as _new_ events with new ids, and your hook runs again for each one.
 
 What to key on instead depends on what you are protecting:
 
 - **A side effect that must happen once per turn or step** — a charge, an email, a ticket — keys well on the coordinates in `event.data` (`turnId`, `stepIndex`, `sequence`). A retry restores those from the step's input, so the second attempt computes the same key and your gate holds.
 - **Stored content should not key on those coordinates.** The retry re-invokes the model, so one coordinate can carry different text on each attempt. `on conflict (turn_id, step_index, sequence) do nothing` would keep the abandoned attempt and drop the one that finished. Key on `meta.id`, and accept that an interrupted turn leaves both attempts in the table.
 
-Behind that split is an asymmetry worth knowing: durable history keeps only the attempt that completed, while the event stream keeps every attempt, and no field marks which is which. For events emitted during a model turn, no event key collapses a turn retry.
+Behind that split is an asymmetry worth knowing: durable history keeps only the attempt that completed, while the event stream keeps every attempt, and no field marks which is which. Hooks are at-least-once, and no key collapses a retry.
 
 See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envelope) for the full contract.
 
@@ -185,7 +183,7 @@ Hooks always run after the event is durably recorded, so if a hook throws, the s
 
 A thrown handler during a model turn propagates through turn execution and surfaces as `turn.failed`. In a conversation session, this includes handlers for `turn.started` and the first `step.started` of a model call: the failed turn ends with `session.waiting`, and the next message can start another turn. Task-mode boundary failures remain terminal. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
 
-For `subagent.called` and `subagent.completed`, a thrown handler fails the separate hook step and follows the workflow runtime's step retry policy. Publication remains completed. Parent execution waits for the hook step to finish or exhaust its retries.
+For `subagent.called` and `subagent.completed`, a thrown handler fails the notification step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the notification step to finish or exhaust its retries.
 
 ## Subagent isolation
 
