@@ -727,7 +727,8 @@ describe("compactMessages: tool-result cap heuristic", () => {
 describe("compactMessages: forced summary", () => {
   it("uses the model's default temperature when summarizing", async () => {
     const { generateText } = await import("ai");
-    vi.mocked(generateText).mockResolvedValue({
+    const summarizer = vi.mocked(generateText);
+    summarizer.mockResolvedValue({
       text: "forced checkpoint",
     } as Awaited<ReturnType<typeof generateText>>);
 
@@ -742,8 +743,8 @@ describe("compactMessages: forced summary", () => {
       true,
     );
 
-    expect(generateText).toHaveBeenCalledOnce();
-    expect(generateText.mock.calls[0]?.[0]).not.toHaveProperty("temperature");
+    expect(summarizer).toHaveBeenCalledOnce();
+    expect(summarizer.mock.calls[0]?.[0]).not.toHaveProperty("temperature");
   });
 
   it.each(["", " \n\t"])(
