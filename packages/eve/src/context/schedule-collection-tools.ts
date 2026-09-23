@@ -196,6 +196,7 @@ function bindingContext(application: string, context: DynamicResolveContext) {
     abortSignal: context.abortSignal ?? new AbortController().signal,
     application,
     channel: context.channel,
+    targetKey: application,
     session: context.session,
   };
 }

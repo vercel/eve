@@ -551,6 +551,7 @@
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
+    "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
     "@vercel/schedules": "0.0.0-alpha.10",
     "@vercel/sdk": "1.28.8",
