@@ -18,11 +18,18 @@ async function loadWithAccess(access?: SandboxAccess) {
   if (access !== undefined) {
     ctx.set(SandboxKey, access);
   }
-  return await contextStorage.run(ctx, loadHarnessAgentSandboxSession);
+  return await contextStorage.run(ctx, () =>
+    loadHarnessAgentSandboxSession({ sessionId: "test-session" }),
+  );
 }
 
-function createRegisteredSandbox() {
-  const eveSandbox = mockSandbox({ id: "eve-session" });
+function createRegisteredSandbox(
+  input: { readonly run?: NonNullable<Parameters<typeof mockSandbox>[0]>["run"] } = {},
+) {
+  const eveSandbox = mockSandbox({
+    id: "eve-session",
+    run: input.run ?? (() => ({ exitCode: 0, stderr: "", stdout: "3000" })),
+  });
   const routes = [{ port: 3000 }, { port: 4000 }];
   const update = vi.fn(async () => {});
   const vercelSandbox: VercelSandbox = Object.assign(Object.create(null), {
@@ -42,6 +49,29 @@ function createRegisteredSandbox() {
 }
 
 describe("loadHarnessAgentSandboxSession", () => {
+  it("keeps a session's reserved port first while preserving access to every exposed route", async () => {
+    const { eveSandbox, vercelSandbox } = createRegisteredSandbox({
+      run: () => ({ exitCode: 0, stderr: "", stdout: "4000" }),
+    });
+    const session = await loadWithAccess(eveSandbox.access);
+
+    expect(session.ports).toEqual([4000, 3000]);
+    await expect(session.getPortEndpoint({ port: 3000 })).resolves.toEqual({
+      url: "https://3000.example.test/",
+    });
+    expect(vercelSandbox.domain).toHaveBeenCalledWith(3000);
+    expect(eveSandbox.commandLog[0]).toContain('mkdir "$root/port-$port"');
+  });
+
+  it("reports exhaustion when all exposed ports have been reserved", async () => {
+    const { eveSandbox } = createRegisteredSandbox({
+      run: () => ({ exitCode: 3, stderr: "", stdout: "" }),
+    });
+
+    await expect(loadWithAccess(eveSandbox.access)).rejects.toThrow(
+      "No free exposed Vercel sandbox port is available for this HarnessAgent session.",
+    );
+  });
   it("rejects execution without an active sandbox", async () => {
     await expect(loadWithAccess()).rejects.toThrow(
       "Harness-backed agents require an active sandbox.",
@@ -226,7 +256,10 @@ describe("loadHarnessAgentSandboxSession", () => {
   it("does not take ownership of the eve sandbox lifecycle", async () => {
     const stop = vi.fn();
     const destroy = vi.fn();
-    const eveSandbox = mockSandbox({ stop });
+    const eveSandbox = mockSandbox({
+      run: () => ({ exitCode: 0, stderr: "", stdout: "3000" }),
+      stop,
+    });
     const vercelSandbox: VercelSandbox = Object.assign(Object.create(null), {
       delete: destroy,
       domain: vi.fn((port: number) => `https://${port}.example.test`),

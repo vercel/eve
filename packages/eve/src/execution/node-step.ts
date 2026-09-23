@@ -34,6 +34,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "#harness/provider-tool-schemas.js";
 import { isNeverApprovalPolicy } from "#tools/approval/policies.js";
+import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 
 const log = createLogger("execution.node-step");
 
@@ -234,16 +235,19 @@ export function createHarnessAgentTools(input: {
   const tools = new Map<string, HarnessToolDefinition>();
 
   for (const prepared of input.node.turnAgent.tools) {
+    const definition = input.tools.get(prepared.name);
+    if (definition?.execute === undefined) {
+      continue;
+    }
+    if (prepared.task?.workflowId === subagentToolExecuteWorkflowReference.workflowId) {
+      tools.set(prepared.name, definition);
+      continue;
+    }
     if (
       prepared.kind !== "authored-tool" ||
       prepared.owner.kind === "framework" ||
       prepared.task !== undefined
     ) {
-      continue;
-    }
-
-    const definition = input.tools.get(prepared.name);
-    if (definition?.execute === undefined) {
       continue;
     }
     if (definition.approval !== undefined && !isNeverApprovalPolicy(definition.approval)) {

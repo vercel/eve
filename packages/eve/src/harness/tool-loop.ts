@@ -85,6 +85,7 @@ import {
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
 import { loadHarnessAgentSandboxSession } from "#harness/harness-agent-sandbox.js";
+import { createHarnessAgentPrompt } from "#harness/harness-agent-prompt.js";
 import {
   compactMessages,
   getInputTokenCount,
@@ -1331,6 +1332,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const currentMessages = createCurrentMessages(messages, {
         historyState: ctx?.get(HistoryStateKey),
         currentTurnMessages: preparedTurnInput,
+        freshMessages: messages.slice(historyLength),
         projectedMessages,
       });
       if (ctx !== undefined) {
@@ -1457,7 +1459,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const prepareModelTools = async (opts: ModelCallOptions) => {
       const harnessTools =
         execution.kind === "harness"
-          ? execution.tools
+          ? buildHarnessToolsWithDynamicSubagents(execution.tools, ctx)
           : buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
@@ -1635,6 +1637,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // from the step's prompt messages, so the note exists only on this
       // call's wire request.
       const callMessages = withTrailingUserNote(modelMessages, opts.trailingUserNote);
+      const harnessPrompt =
+        execution.kind === "harness"
+          ? createHarnessAgentPrompt({
+              messages: validateHarnessModelMessages(
+                await hydrateSandboxAttachments([
+                  ...currentMessages.freshNonSystemMessages,
+                  ...(opts.trailingUserNote
+                    ? [createFrameworkUserMessage("execution.retry", opts.trailingUserNote)]
+                    : []),
+                ]),
+              ),
+            })
+          : undefined;
       const instrumentationTurnId = activeTurnId(emissionState);
       const attempt = stepInstrumentation?.prepareAttempt({
         attemptIndex: opts.attemptIndex,
@@ -1666,7 +1681,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       let agent: Agent;
       let harnessSession: HarnessAgentSession | undefined;
-      const turnInput:
+      let turnInput:
         | (AgentCallParameters<never> & HarnessAgentCallExtensions)
         | (AgentStreamParameters<never, any> & HarnessAgentCallExtensions) = {
         abortSignal: generation.signal,
@@ -1710,7 +1725,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const persistedHarnessSession = getPersistedHarnessAgentSession({ session });
         harnessSession = await harnessAgent.createSession({
           abortSignal: generation.signal,
-          sandboxSession: await loadHarnessAgentSandboxSession(),
+          sandboxSession: await loadHarnessAgentSandboxSession({ sessionId: session.sessionId }),
           ...(persistedHarnessSession === undefined
             ? {}
             : {
@@ -1718,7 +1733,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
                 sessionId: persistedHarnessSession.sessionId,
               }),
         });
-        turnInput.session = harnessSession;
+        turnInput = {
+          abortSignal: generation.signal,
+          messages: harnessPrompt === undefined ? [] : [harnessPrompt],
+          session: harnessSession,
+        };
       } else {
         const agentSettings = {
           headers: attributionHeaders,
@@ -1783,7 +1802,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             FINAL_OUTPUT_TOOL_NAME,
             ...hiddenRuntimeActionToolNames,
           ]);
-          const streamResult = await agent.stream(turnInput);
+          const streamResult =
+            execution.kind === "harness" && harnessSession?.hasUnfinishedTurn?.() === true
+              ? await (agent as HarnessAgent).continueStream({
+                  abortSignal: generation.signal,
+                  session: harnessSession,
+                })
+              : await agent.stream(turnInput);
           const {
             emittedActionCallIds,
             handledInlineToolResultCallIds,
@@ -1842,7 +1867,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             toolResults: [...toolResultsByCallId.values()],
           });
         }
-        const generateResult = await agent.generate(turnInput);
+        const generateResult =
+          execution.kind === "harness" && harnessSession?.hasUnfinishedTurn?.() === true
+            ? await (agent as HarnessAgent).continueGenerate({
+                abortSignal: generation.signal,
+                session: harnessSession,
+              })
+            : await agent.generate(turnInput);
         throwIfTurnAborted(config.abortSignal);
         generation.check();
         const stepResult = await hooks.stepResult;

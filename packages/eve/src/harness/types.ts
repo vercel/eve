@@ -290,8 +290,9 @@ export interface HarnessAgentExecutionConfig {
    */
   readonly skills: readonly HarnessV1Skill[];
   /**
-   * Static application and extension tools projected to HarnessAgent. Dynamic,
-   * workflow, framework, and approval-requiring tools remain unsupported.
+   * Static authored tools and subagent delegation tools projected to HarnessAgent.
+   * Dynamic tools, authored workflows, task cancellation, and approval-requiring
+   * authored tools remain unsupported.
    */
   readonly tools: HarnessToolMap;
 }

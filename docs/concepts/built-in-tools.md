@@ -237,6 +237,8 @@ export default disableTool();
 
 `task_cancel` lets the root session cancel background tasks.
 
+Harness-backed agents do not receive `task_cancel` yet. Their subagent tasks still report completion and failure, but cannot be cancelled through this tool.
+
 ```sh
 eve add tool/task_cancel
 ```

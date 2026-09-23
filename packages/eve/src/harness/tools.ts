@@ -73,7 +73,10 @@ export function buildToolSet(input: {
     const approval = buildApprovalFn(definition, input);
     const aiTool = tool({
       description: definition.description,
-      execute: wrapToolExecute(definition, backgroundBatch),
+      execute: wrapToolExecuteWithOptions({
+        backgroundBatch,
+        definition,
+      }),
       inputSchema: definition.inputSchema,
       ...(definition.execution === "background"
         ? {
@@ -198,10 +201,18 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-  backgroundBatch: BackgroundToolCallBatch = createBackgroundToolCallBatch(),
 ): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
+  return wrapToolExecuteWithOptions({ definition });
+}
+
+function wrapToolExecuteWithOptions(wrapOptions: {
+  readonly backgroundBatch?: BackgroundToolCallBatch;
+  readonly definition: HarnessToolDefinition;
+}): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
+  const { definition } = wrapOptions;
   const execute = definition.execute;
   if (execute === undefined) return undefined;
+  const backgroundBatch = wrapOptions.backgroundBatch ?? createBackgroundToolCallBatch();
 
   return (input, options) => {
     let output: unknown;

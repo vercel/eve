@@ -14,6 +14,7 @@ interface AddCurrentMessageOptions {
 interface CurrentMessagesOptions {
   readonly historyState?: HistoryState;
   readonly currentTurnMessages?: readonly HarnessModelMessage[];
+  readonly freshMessages?: readonly HarnessModelMessage[];
   readonly projectedMessages?: readonly HarnessModelMessage[];
 }
 
@@ -31,6 +32,7 @@ export function createCurrentMessages(
   readonly history: readonly HarnessModelMessage[];
   readonly historyState: HistoryState;
   readonly nonSystemMessages: readonly HarnessModelMessage[];
+  readonly freshNonSystemMessages: readonly HarnessModelMessage[];
   readonly systemMessages: readonly SystemModelMessage[];
   add(message: string, kind: FrameworkMessageKind, options?: AddCurrentMessageOptions): void;
   addAnnouncements(announcements: HistoryState): void;
@@ -41,6 +43,10 @@ export function createCurrentMessages(
   const systemMessages: SystemModelMessage[] = [];
   const nonSystemMessages: HarnessModelMessage[] = [];
   const currentTurnMessages = new Set(options.currentTurnMessages);
+  const freshMessages = new Set([
+    ...(options.freshMessages ?? []),
+    ...(options.currentTurnMessages ?? []),
+  ]);
   let currentTurnInsertionIndex: number | undefined;
 
   for (const message of options.projectedMessages ?? history) {
@@ -71,6 +77,7 @@ export function createCurrentMessages(
       const entry = createFrameworkUserMessage(kind, message);
       nonSystemMessages.splice(userInsertionIndex, 0, entry);
       durableMessages.splice(historyInsertionIndex, 0, entry);
+      freshMessages.add(entry);
       userInsertionIndex += 1;
       historyInsertionIndex += 1;
       return true;
@@ -94,6 +101,9 @@ export function createCurrentMessages(
     },
     get nonSystemMessages() {
       return [...nonSystemMessages];
+    },
+    get freshNonSystemMessages() {
+      return nonSystemMessages.filter((message) => freshMessages.has(message));
     },
     get history() {
       return [...durableMessages];

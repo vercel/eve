@@ -491,7 +491,7 @@ describe("createNodeHarnessTools", () => {
 });
 
 describe("createHarnessAgentTools", () => {
-  it("selects static application and extension tools only", async () => {
+  it("selects static application and extension tools and local and remote delegation", async () => {
     const delegation = createPreparedRuntimeSubagentTool({
       description: "Delegate research.",
       kind: "subagent",
@@ -530,14 +530,36 @@ describe("createHarnessAgentTools", () => {
           owner: { kind: "application" },
         },
       ],
-      turnTools: [delegation],
+      turnTools: [
+        delegation,
+        createPreparedRuntimeSubagentTool({
+          description: "Delegate remote review.",
+          kind: "remote",
+          logicalPath: "subagents/reviewer",
+          name: "reviewer",
+          nodeId: "subagents/reviewer",
+          path: "/eve/v1/session",
+          sourceId: "subagents/reviewer",
+          sourceKind: "module",
+          url: "https://review.example.com",
+        }),
+      ],
     });
     const tools = createNodeHarnessTools({ node });
 
     expect([...createHarnessAgentTools({ node, tools }).keys()]).toEqual([
       "application_tool",
       "extension_tool",
+      "research",
+      "reviewer",
     ]);
+  });
+
+  it("exposes only the framework root-copy delegation tool, not other framework tools", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["agent", "task_cancel"] });
+    const tools = createNodeHarnessTools({ node });
+
+    expect([...createHarnessAgentTools({ node, tools }).keys()]).toEqual(["agent"]);
   });
 
   it("rejects approval policies other than never", async () => {

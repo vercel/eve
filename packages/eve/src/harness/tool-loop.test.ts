@@ -628,7 +628,11 @@ async function invokeMockStepStart(
   await invokeMockCallback(settings.onStepStart, { messages: preparedMessages });
 }
 
-function setupMockHarnessAgent(result: Record<string, unknown>) {
+function setupMockHarnessAgent(input: {
+  readonly result: Record<string, unknown>;
+  readonly unfinished?: boolean;
+}) {
+  const { result } = input;
   const resumeFrom = {
     data: {},
     harnessId: "test-harness",
@@ -638,6 +642,7 @@ function setupMockHarnessAgent(result: Record<string, unknown>) {
   const detach = vi.fn().mockResolvedValue(resumeFrom);
   const harnessSession = {
     detach,
+    hasUnfinishedTurn: () => input.unfinished === true,
     sessionId: "harness-session",
   };
   const createSession = vi.fn().mockResolvedValue(harnessSession);
@@ -647,6 +652,10 @@ function setupMockHarnessAgent(result: Record<string, unknown>) {
       createSession,
       generate: vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
         await invokeMockStepStart(settings, options);
+        await invokeMockCallback(onStepEnd, result);
+        return createMockGenerateResult(result);
+      }),
+      continueGenerate: vi.fn().mockImplementation(async () => {
         await invokeMockCallback(onStepEnd, result);
         return createMockGenerateResult(result);
       }),
@@ -1724,11 +1733,13 @@ describe("createToolLoopHarness", () => {
 
   it("runs a harness-backed step without model resolution", async () => {
     const { createSession, detach, resumeFrom } = setupMockHarnessAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
+      result: {
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      },
     });
     const harnessSandbox = {} as HarnessV1NetworkSandboxSession;
     mockLoadHarnessAgentSandboxSession.mockResolvedValue(harnessSandbox);
@@ -1771,6 +1782,13 @@ describe("createToolLoopHarness", () => {
       abortSignal: expect.any(AbortSignal),
       sandboxSession: harnessSandbox,
     });
+    expect(mockLoadHarnessAgentSandboxSession).toHaveBeenCalledWith({
+      sessionId: session.sessionId,
+    });
+    const harnessInstance = vi.mocked(HarnessAgent).mock.results[0]?.value;
+    expect(vi.mocked(harnessInstance!.stream).mock.calls[0]?.[0]).toMatchObject({
+      messages: [{ role: "user", content: [{ type: "text", text: "Hi" }] }],
+    });
     expect(detach).toHaveBeenCalledOnce();
     expect(result.session.state).toMatchObject({
       "eve.harness.agentSession": {
@@ -1793,11 +1811,13 @@ describe("createToolLoopHarness", () => {
 
   it("resumes the persisted HarnessAgent session on a follow-up turn", async () => {
     const { createSession, detach, resumeFrom } = setupMockHarnessAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
+      result: {
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      },
     });
     const harnessSandbox = {} as HarnessV1NetworkSandboxSession;
     mockLoadHarnessAgentSandboxSession.mockResolvedValue(harnessSandbox);
@@ -1829,7 +1849,93 @@ describe("createToolLoopHarness", () => {
       sandboxSession: harnessSandbox,
       sessionId: "harness-session",
     });
+    const resumedInstance = vi.mocked(HarnessAgent).mock.results[1]?.value;
+    expect(vi.mocked(resumedInstance!.stream).mock.calls[0]?.[0]).toMatchObject({
+      messages: [{ role: "user", content: [{ type: "text", text: "Repeat that." }] }],
+    });
     expect(detach).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues an unfinished native harness turn without submitting a new prompt", async () => {
+    const { resumeFrom } = setupMockHarnessAgent({
+      result: {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done", role: "assistant" }] },
+        text: "Done",
+        toolCalls: [],
+        toolResults: [],
+      },
+      unfinished: true,
+    });
+    mockLoadHarnessAgentSandboxSession.mockResolvedValue({} as HarnessV1NetworkSandboxSession);
+    const harness = createTestHarness();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        harnessAgent: { harness, skills: [], tools: new Map() },
+      }),
+    );
+    const session = createTestSession({
+      agent: { harnessId: harness.harnessId, system: "Test", tools: [] },
+      state: {
+        "eve.harness.agentSession": { resumeFrom, sessionId: "harness-session", version: 1 },
+      },
+    });
+
+    await contextStorage.run(new ContextContainer(), () =>
+      runStep(session, { message: "Continue" }),
+    );
+
+    const harnessInstance = vi.mocked(HarnessAgent).mock.results[0]?.value;
+    expect(harnessInstance!.generate).not.toHaveBeenCalled();
+    expect(harnessInstance!.continueGenerate).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      session: expect.objectContaining({ sessionId: "harness-session" }),
+    });
+  });
+
+  it("exposes active dynamic subagents to HarnessAgent", async () => {
+    setupMockHarnessAgent({
+      result: {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done", role: "assistant" }] },
+        text: "Done",
+        toolCalls: [],
+        toolResults: [],
+      },
+    });
+    mockLoadHarnessAgentSandboxSession.mockResolvedValue({} as HarnessV1NetworkSandboxSession);
+    const harness = createTestHarness();
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicSubagentSelectionsKey, {
+      "subagents/researcher": {
+        agentConfig: { description: "Research the request.", model: { id: "openai/gpt-5.5" } },
+        kind: "subagent",
+        prepared: createPreparedRuntimeSubagentTool({
+          description: "Research the request.",
+          kind: "subagent",
+          logicalPath: "subagents/researcher",
+          name: "researcher",
+          nodeId: "subagents/researcher",
+          sourceId: "subagents/researcher",
+          sourceKind: "module",
+        }),
+      },
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        harnessAgent: { harness, skills: [], tools: new Map() },
+      }),
+    );
+    await contextStorage.run(ctx, () =>
+      runStep(
+        createTestSession({
+          agent: { harnessId: harness.harnessId, system: "Test", tools: [] },
+        }),
+        { message: "Research" },
+      ),
+    );
+
+    expect(vi.mocked(HarnessAgent).mock.calls[0]?.[0].tools).toHaveProperty("researcher");
   });
 
   it("rejects a harness that does not match the persisted harness identity", async () => {
