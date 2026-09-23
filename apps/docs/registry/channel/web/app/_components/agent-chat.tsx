@@ -152,6 +152,15 @@ export function AgentChat({
               message.id === lastMessage.id ? null : (
                 <Fragment key={message.id}>
                   <AgentMessage
+                    after={
+                      message.role === "assistant" ? (
+                        <SubagentTraces
+                          traces={subagentTraces.filter(
+                            (trace) => trace.parentTurnId === message.metadata?.turnId,
+                          )}
+                        />
+                      ) : undefined
+                    }
                     canRespond={!isBusy && !isResuming}
                     isStreaming={
                       agent.status === "streaming" && index === agent.data.messages.length - 1
@@ -162,13 +171,6 @@ export function AgentChat({
                       return agent.respond(inputResponses);
                     }}
                   />
-                  {message.role === "assistant" ? (
-                    <SubagentTraces
-                      traces={subagentTraces.filter(
-                        (trace) => trace.parentTurnId === message.metadata?.turnId,
-                      )}
-                    />
-                  ) : null}
                 </Fragment>
               ),
             )}

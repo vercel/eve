@@ -3,7 +3,14 @@
 "use client";
 
 import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
-import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
+import {
+  BrainIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CheckIcon,
+  Loader2Icon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
@@ -22,11 +29,13 @@ export type AgentInputResponse = {
 };
 
 export function AgentMessage({
+  after,
   canRespond,
   isStreaming,
   message,
   onInputResponses,
 }: {
+  readonly after?: ReactNode;
   readonly canRespond: boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
@@ -63,6 +72,7 @@ export function AgentMessage({
           parts={message.parts}
           showCaret={isStreaming && message.role === "assistant"}
         />
+        {after}
       </div>
     </article>
   );
@@ -86,36 +96,31 @@ function AgentMessageParts({
   readonly showCaret: boolean;
 }) {
   const elements: ReactNode[] = [];
-  let pendingTools: EveDynamicToolPart[] = [];
+  let pendingActivity: ActivityPart[] = [];
 
-  const flushTools = (isSettled: boolean) => {
-    if (pendingTools.length === 0) {
-      return;
-    }
-
-    const partsForGroup = pendingTools;
-
+  const flushActivity = (isSettled: boolean) => {
+    if (pendingActivity.length === 0) return;
+    const activity = pendingActivity;
     elements.push(
-      <ToolGroup
+      <ActivityGroup
         canRespond={canRespond}
         isSettled={isSettled}
-        key={`tools:${partsForGroup.map((part) => part.toolCallId).join(":")}`}
+        key={`activity:${activity.map(partKey).join(":")}`}
         onInputResponses={onInputResponses}
-        parts={partsForGroup}
+        parts={activity}
       />,
     );
-    pendingTools = [];
+    pendingActivity = [];
   };
 
   parts.forEach((part, index) => {
-    if (part.type === "dynamic-tool") {
-      pendingTools.push(part);
+    if (part.type === "dynamic-tool" || part.type === "reasoning") {
+      pendingActivity.push(part);
       return;
     }
 
-    flushTools(true);
+    flushActivity(true);
     const key = partKey(part, index);
-
     elements.push(
       <AgentMessagePart
         isUser={isUser}
@@ -127,8 +132,7 @@ function AgentMessageParts({
     );
   });
 
-  flushTools(!showCaret);
-
+  flushActivity(!showCaret);
   return elements;
 }
 
@@ -153,7 +157,7 @@ function AgentMessagePart({
         <AssistantTextPart showCaret={showCaret} streamKey={streamKey} text={part.text} />
       );
     case "reasoning":
-      return <ReasoningPart isStreaming={part.state === "streaming"} text={part.text} />;
+      return null;
     case "dynamic-tool":
       return null;
   }
@@ -314,31 +318,57 @@ function nextStreamingText(current: string, target: string, catchUp = false) {
   return target.slice(0, current.length + Math.min(remaining, step));
 }
 
-function ReasoningPart({
-  isStreaming,
-  text,
+type ActivityPart = Extract<EveMessagePart, { type: "dynamic-tool" | "reasoning" }>;
+
+function ActivityGroup({
+  canRespond,
+  isSettled,
+  onInputResponses,
+  parts,
 }: {
-  readonly isStreaming: boolean;
-  readonly text: string;
+  readonly canRespond: boolean;
+  readonly isSettled: boolean;
+  readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
+  readonly parts: readonly ActivityPart[];
 }) {
-  const [open, setOpen] = useState(isStreaming);
+  const isWorking =
+    !isSettled || parts.some((part) => part.type === "reasoning" && part.state === "streaming");
+  const [open, setOpen] = useState(isWorking);
 
   useEffect(() => {
-    if (isStreaming) {
-      setOpen(true);
-    }
-  }, [isStreaming]);
+    if (isWorking) setOpen(true);
+  }, [isWorking]);
 
   return (
     <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
-        <span className={isStreaming ? "shimmer-text" : undefined}>
-          {isStreaming ? "Thinking..." : "Reasoning"}
-        </span>
+        {isWorking ? (
+          <Loader2Icon className="size-4 animate-spin" />
+        ) : (
+          <BrainIcon className="size-4" />
+        )}
+        <span>{isWorking ? "Working..." : "Activity"}</span>
         <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
-        <Markdown>{text}</Markdown>
+        <div className="space-y-2">
+          {parts.map((part, index) =>
+            part.type === "reasoning" ? (
+              <div className="text-sm leading-6" key={partKey(part, index)}>
+                <p className="mb-1 text-xs text-muted-foreground/70">Reasoning</p>
+                <Markdown>{part.text}</Markdown>
+              </div>
+            ) : (
+              <ToolGroup
+                canRespond={canRespond}
+                isSettled={isSettled}
+                key={part.toolCallId}
+                onInputResponses={onInputResponses}
+                parts={[part]}
+              />
+            ),
+          )}
+        </div>
       </CollapsibleContent>
     </Collapsible>
   );

@@ -1,7 +1,14 @@
 "use client";
 
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "eve/client";
-import { ChevronRightIcon, CheckIcon, Loader2Icon, WrenchIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CheckIcon,
+  Loader2Icon,
+  WrenchIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -82,7 +89,7 @@ export function useSubagentTraces(events: readonly MessageStreamEvent[]): readon
 export function SubagentTraces({ traces }: { readonly traces: readonly SubagentTrace[] }) {
   if (traces.length === 0) return null;
   return (
-    <div className="my-3 space-y-2">
+    <div className="mt-3 space-y-2">
       {traces.map((trace) => (
         <SubagentTraceView key={trace.callId} trace={trace} />
       ))}
@@ -98,30 +105,18 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
 
   const detailCount = trace.steps.length + trace.tools.length;
   return (
-    <Collapsible
-      className="my-4 border-border/70 border-l-2 pl-4"
-      onOpenChange={setOpen}
-      open={open}
-    >
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-sm py-1 text-left text-[15px] leading-6 transition-colors hover:text-foreground">
+    <Collapsible className="my-3 w-full" onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className="flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground">
         <TraceStatus status={trace.status} />
-        <span className="min-w-0 truncate text-foreground">
-          {trace.status === "running" ? "Delegating to" : "Delegated to"}{" "}
-          <span className="font-medium">{formatName(trace.name)}</span>
+        <span className="min-w-0 truncate">
+          {trace.status === "running" ? "Delegating to" : "Delegated to"} {formatName(trace.name)}
         </span>
-        <span className="text-muted-foreground">· {traceStatusLabel(trace.status)}</span>
-        <ChevronRightIcon
-          className={cn(
-            "ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open ? "rotate-90" : "opacity-0 group-hover:opacity-100",
-          )}
-        />
+        <span className="text-muted-foreground/70">· {traceStatusLabel(trace.status)}</span>
+        <ChevronDownIcon className={cn("size-4 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-2 border-border/50 border-t pt-2">
+      <CollapsibleContent className="mt-3 border-l border-border pl-4 text-muted-foreground">
         {detailCount === 0 ? (
-          <p className="text-[15px] leading-6 text-muted-foreground">
-            Waiting for the subagent to begin…
-          </p>
+          <p className="text-sm">Waiting for the subagent to begin…</p>
         ) : (
           <TraceTimeline trace={trace} />
         )}
@@ -156,16 +151,10 @@ function TraceTimeline({ trace }: { readonly trace: SubagentTrace }) {
 
 function SubagentStepRow({ step }: { readonly step: SubagentTraceStep }) {
   return (
-    <div className="min-w-0 flex-1 space-y-1 text-[15px] leading-6">
+    <div className="min-w-0 flex-1 space-y-1 text-sm leading-6">
       {step.text ? <p className="whitespace-pre-wrap text-foreground">{step.text}</p> : null}
       {step.reasoning ? (
-        <details className="group/reasoning">
-          <summary className="cursor-pointer list-none text-muted-foreground hover:text-foreground">
-            <span className="group-open/reasoning:hidden">Show reasoning</span>
-            <span className="hidden group-open/reasoning:inline">Hide reasoning</span>
-          </summary>
-          <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{step.reasoning}</p>
-        </details>
+        <p className="whitespace-pre-wrap text-muted-foreground">{step.reasoning}</p>
       ) : null}
     </div>
   );
@@ -180,7 +169,7 @@ function SubagentToolRow({ tool }: { readonly tool: SubagentTraceTool }) {
     <div className="min-w-0 flex-1">
       <button
         className={cn(
-          "flex w-full items-center gap-1.5 text-left text-[15px] leading-6 text-muted-foreground",
+          "flex w-full items-center gap-1.5 text-left text-sm leading-6 text-muted-foreground",
           hasDetails && "group/tool hover:text-foreground",
         )}
         disabled={!hasDetails}
