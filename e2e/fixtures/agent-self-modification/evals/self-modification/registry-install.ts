@@ -55,14 +55,12 @@ export async function verifyRegistryInstall(input: {
 }
 
 function assertDiscovered(run: SelfModificationRun, address: string): void {
-  const search = run.child.requireToolCall("search_registry");
-  if (
-    search.status !== "completed" ||
-    !Array.isArray((search.output as { items?: unknown } | undefined)?.items) ||
-    !(search.output as { items: { address?: string }[] }).items.some(
-      (item) => item.address === address,
-    )
-  ) {
+  run.child.calledTool("search_registry");
+  const discovered = run.child.toolCalls.some((call) => {
+    if (call.name !== "search_registry" || call.status !== "completed") return false;
+    const items = (call.output as { items?: unknown } | undefined)?.items;
+    return Array.isArray(items) && items.some((item) => item.address === address);
+  });
+  if (!discovered)
     throw new Error(`Self-modification did not discover ${address} in the registry.`);
-  }
 }

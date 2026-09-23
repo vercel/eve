@@ -355,6 +355,25 @@ test("a failed eval restores source, releases its checkout lock, and preserves t
   await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
 });
 
+test("waitForRebuild polls until the authored runtime revision changes", async () => {
+  await withHarness(async ({ harness, target, close }) => {
+    let reads = 0;
+    const fetch = target.fetch;
+    target.fetch = async (path, options) => {
+      if (path === "/eve/v1/dev/runtime-artifacts") {
+        reads += 1;
+        return response({ revision: reads < 3 ? "before" : "after" });
+      }
+      return fetch(path, options);
+    };
+
+    const previous = await harness.runtimeRevision();
+    assert.equal(await harness.waitForRebuild(previous), "after");
+    assert.equal(reads, 3);
+    await close();
+  });
+});
+
 test("apply rejects a rebuild response without a runtime revision", async () => {
   await withHarness(async ({ harness, target, close }) => {
     let apply = true;

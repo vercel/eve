@@ -12,11 +12,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
 const SELF_MODIFICATION_AGENT = "self-modification__agent";
 const CLEANUP_TIMEOUT_MS = 30_000;
+const REBUILD_TIMEOUT_MS = 30_000;
+const REBUILD_POLL_INTERVAL_MS = 100;
 const LOCK_DIRECTORY = ".eve-self-modification-eval.lock";
 // Each eval entry bundles its relative imports separately. Share the lock across those copies.
 const shared = globalThis as typeof globalThis & {
@@ -251,6 +254,43 @@ export class SelfModificationHarness {
       throw new Error("Self-modification rebuild did not return a runtime revision.");
     }
     this.#t.log(`Self-modification runtime revision: ${body.revision}`);
+  }
+
+  async runtimeRevision(): Promise<string> {
+    const revision = await this.#readRuntimeRevision();
+    if (revision === undefined)
+      throw new Error("Could not read the current authored runtime revision.");
+    return revision;
+  }
+
+  async waitForRebuild(previousRevision: string): Promise<string> {
+    const deadline = Date.now() + REBUILD_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      this.#t.signal.throwIfAborted();
+      const revision = await this.#readRuntimeRevision();
+      if (revision !== undefined && revision !== previousRevision) {
+        this.#t.log(`Self-modification runtime revision: ${revision}`);
+        return revision;
+      }
+      await delay(REBUILD_POLL_INTERVAL_MS, undefined, { signal: this.#t.signal });
+    }
+    throw new Error(`Authored runtime did not rebuild within ${REBUILD_TIMEOUT_MS}ms.`);
+  }
+
+  async #readRuntimeRevision(): Promise<string | undefined> {
+    try {
+      const response = await this.#t.target.fetch("/eve/v1/dev/runtime-artifacts", {
+        signal: this.#t.signal,
+      });
+      if (!response.ok) return undefined;
+      const body = (await response.json()) as { revision?: unknown };
+      return typeof body.revision === "string" && body.revision.length > 0
+        ? body.revision
+        : undefined;
+    } catch {
+      this.#t.signal.throwIfAborted();
+      return undefined;
+    }
   }
 
   async assertOnlyChanged(sourcePaths: readonly string[]): Promise<void> {
