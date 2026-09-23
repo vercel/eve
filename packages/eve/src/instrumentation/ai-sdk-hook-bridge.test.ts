@@ -63,12 +63,15 @@ describe("createAiSdkHookBridge", () => {
 
   it("publishes normalized model lifecycle to every provider", async () => {
     const calls: string[] = [];
+    const startedEvents: InstrumentationModelCallStartedEvent[] = [];
+    const tools = [{ inputSchema: { type: "object" }, name: "get_weather" }];
     const provider = (name: string): InstrumentationProviderDefinition => {
       const states = new Map<string, string>();
       return {
         events: {
           "model.call.started"(event) {
             calls.push(`${name}:started:${event.idempotencyKey}`);
+            startedEvents.push(event);
             states.set(event.idempotencyKey, `${name}-state`);
           },
           "model.call.completed"(event) {
@@ -78,13 +81,14 @@ describe("createAiSdkHookBridge", () => {
           },
         },
         name,
+        tracePolicy: contentTracePolicy,
       };
     };
     const hooks = createInstrumentationHooks([provider("a"), provider("b")]);
     const bridge = createAiSdkHookBridge(scope, hooks);
 
     await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
-      { callId: "call-1", messages: [], modelId: "model", provider: "test", tools: undefined },
+      { callId: "call-1", messages: [], modelId: "model", provider: "test", tools },
     ]);
     await Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [
       {
@@ -104,6 +108,10 @@ describe("createAiSdkHookBridge", () => {
       `a:completed:${id}:a-state`,
       `b:completed:${id}:b-state`,
     ]);
+    expect(startedEvents).toHaveLength(2);
+    expect(startedEvents[0]?.input?.tools).toEqual(tools);
+    expect(startedEvents[0]?.input?.tools).not.toBe(tools);
+    expect(Object.isFrozen(startedEvents[0]?.input?.tools)).toBe(true);
   });
 
   it("publishes usage once when the SDK repeats a model terminal callback", async () => {

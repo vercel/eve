@@ -20,6 +20,7 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
+  genAiToolDefinitionsAttribute,
   systemPromptAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
@@ -399,6 +400,10 @@ export function createAgentOtelInstrumentation(
       const genAiSystem = genAiSystemInstructionsAttribute(event.input.instructions);
       if (genAiSystem !== undefined) {
         span.setAttribute("gen_ai.system_instructions", genAiSystem);
+      }
+      const toolDefinitions = genAiToolDefinitionsAttribute(event.input.tools);
+      if (toolDefinitions !== undefined) {
+        span.setAttribute("gen_ai.tool.definitions", toolDefinitions);
       }
     }
     const state = { context: trace.setSpan(attempt.context, span), span };
