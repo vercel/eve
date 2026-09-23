@@ -13,7 +13,7 @@ export default defineEval({
       data: { name: "deny-all" },
     });
     const child = t.target.watchTurn(called.data.childSessionId).result();
-    const turn = await parent.result();
+    const [turn, childTurn] = await Promise.all([parent.result(), child]);
     turn.expectOk();
     const sessionId = turn.sessionId;
     if (sessionId === undefined) throw new Error("Typed sandbox turn has no session id.");
@@ -24,7 +24,6 @@ export default defineEval({
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    const childTurn = await child;
     childTurn.expectOk();
     childTurn.calledTool("verify-typed-sandbox", { output: { blocked: true } });
   },
