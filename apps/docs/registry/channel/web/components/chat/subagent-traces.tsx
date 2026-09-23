@@ -2,8 +2,9 @@
 
 import type { MessageStreamEvent, SubagentCalledStreamEvent } from "eve/client";
 import type { EveDynamicToolPart } from "eve/react";
-import { ChevronDownIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
+import { ChevronDownIcon, CheckIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { ActivityContent, type ActivityPart } from "@/components/chat/message";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -101,7 +102,9 @@ function SubagentTraceView({ trace }: { readonly trace: SubagentTrace }) {
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
         <TraceStatus status={trace.status} />
         <code className="min-w-0 truncate font-mono text-[11px]">{trace.name}</code>
-        <span className="text-muted-foreground/70">· {traceStatusLabel(trace.status)}</span>
+        <span className="text-muted-foreground/70">
+          · <TraceStatusLabel status={trace.status} />
+        </span>
         <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2 border-l border-border/60 pl-3 text-muted-foreground">
@@ -161,8 +164,12 @@ function traceStatusLabel(status: SubagentTrace["status"]) {
   return "Complete";
 }
 
+function TraceStatusLabel({ status }: { readonly status: SubagentTrace["status"] }) {
+  return status === "running" ? <Shimmer duration={1}>Working</Shimmer> : traceStatusLabel(status);
+}
+
 function TraceStatus({ status }: { readonly status: "complete" | "failed" | "running" }) {
-  if (status === "running") return <Loader2Icon className="size-3.5 shrink-0 animate-spin" />;
+  if (status === "running") return null;
   if (status === "failed") return <XIcon className="size-3.5 shrink-0 text-destructive" />;
   return <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />;
 }

@@ -5,6 +5,7 @@
 import type { EveDynamicToolPart, EveMessage, EveMessagePart } from "eve/react";
 import { ChevronDownIcon, ChevronRightIcon, CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Markdown } from "@/components/chat/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -360,8 +361,7 @@ function ActivityGroup({
   return (
     <Collapsible className="mx-3 mt-2" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-        {isWorking ? <Loader2Icon className="size-3 animate-spin" /> : null}
-        <span>{isWorking ? "Working…" : "Show activity"}</span>
+        {isWorking ? <Shimmer duration={1}>Working…</Shimmer> : <span>Show activity</span>}
         <ChevronDownIcon className={cn("size-3 transition-transform", open ? "rotate-180" : "")} />
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2 ml-1 border-l border-border/60 pl-3 text-muted-foreground">
