@@ -1,4 +1,4 @@
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import type { NextConfig } from "next";
 
@@ -159,7 +159,7 @@ function resolveApplicationRoot(appPath: string | undefined): string {
     return process.cwd();
   }
 
-  return isAbsolute(appPath) ? appPath : resolve(process.cwd(), appPath);
+  return resolve(process.cwd(), appPath);
 }
 
 function resolveDevServerTimeout(timeoutMs: number | undefined): number | undefined {

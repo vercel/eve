@@ -405,6 +405,28 @@ describe("withEve Vercel config", () => {
     });
   });
 
+  it("discovers workspace members from an absolute eveRoot with a trailing slash", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    await mkdir(join(appRoot, "agents", "a", "agent"), { recursive: true });
+    await mkdir(join(appRoot, "agents", "b", "agent"), { recursive: true });
+    await writeFile(
+      join(appRoot, "package.json"),
+      `${JSON.stringify({ dependencies: { eve: "0.0.0" } })}\n`,
+    );
+    await writeFile(join(appRoot, "agents", "a", "agent", "agent.ts"), "export default {};\n");
+    await writeFile(join(appRoot, "agents", "b", "agent", "agent.ts"), "export default {};\n");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await resolveConfig(withEve<TestConfig>({}, { eveRoot: `${appRoot}/` }));
+    const outputConfig = (await readJsonFile(
+      join(appRoot, ".vercel", "output", "config.json"),
+    )) as { services?: Record<string, unknown> };
+
+    expect(Object.keys(outputConfig.services ?? {})).toEqual(["eve-a", "eve-b"]);
+  });
+
   it("writes one Build Output service and route for each named agent", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
