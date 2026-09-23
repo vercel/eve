@@ -1,3 +1,4 @@
+import { throwIfAborted } from "#client/abort-signal.js";
 import { EVE_STREAM_LEASE_ENDED_CONTROL, type MessageStreamEvent } from "#protocol/message.js";
 import {
   normalizeMessageStreamEvent,
@@ -59,9 +60,9 @@ export async function* readNdjsonStream(
 
   try {
     while (true) {
-      options.signal?.throwIfAborted();
+      throwIfAborted(options.signal);
       const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
-      options.signal?.throwIfAborted();
+      throwIfAborted(options.signal);
 
       if (result.done) {
         reachedEof = true;

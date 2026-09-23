@@ -6,6 +6,7 @@ import {
 } from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
+import { throwIfAborted } from "#client/abort-signal.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
@@ -286,7 +287,7 @@ export async function openStreamBody(
   }
 
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
-    input.signal?.throwIfAborted();
+    throwIfAborted(input.signal);
     const url = createClientUrl(
       input.host,
       createEveSessionStreamRoutePath(input.sessionId),
@@ -294,7 +295,7 @@ export async function openStreamBody(
     );
 
     const headers = await input.resolveHeaders();
-    input.signal?.throwIfAborted();
+    throwIfAborted(input.signal);
     const connectionController = new AbortController();
     const signal = input.signal
       ? AbortSignal.any([input.signal, connectionController.signal])

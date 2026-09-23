@@ -2,6 +2,7 @@ import { updatePendingAuthorizations } from "#client/session-utils.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
+import { throwIfAborted } from "#client/abort-signal.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
@@ -95,7 +96,7 @@ export class ClientSession {
 
   /** Reads a finite prefix through the durable tail without advancing this handle. */
   async snapshot(options?: { readonly signal?: AbortSignal }): Promise<SessionSnapshot> {
-    options?.signal?.throwIfAborted();
+    throwIfAborted(options?.signal);
     const events: MessageStreamEvent[] = [];
 
     for await (const event of this.#readStream({
@@ -106,7 +107,7 @@ export class ClientSession {
       events.push(event);
     }
 
-    options?.signal?.throwIfAborted();
+    throwIfAborted(options?.signal);
     return {
       events,
       session: { sessionId: this.#state.sessionId, streamIndex: events.length },
@@ -358,7 +359,7 @@ async function postSessionSend(
       await sleep(Math.min(retryDelayMs, remainingMs), input.signal);
     }
 
-    input.signal?.throwIfAborted();
+    throwIfAborted(input.signal);
     retryDelayMs = Math.min(retryDelayMs * 2, SESSION_SEND_RETRY_MAX_DELAY_MS);
   }
 }
