@@ -73,12 +73,18 @@ export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | u
 }
 
 function sanitizeSuggestion(suggestion: PromptArgumentSuggestion): PromptArgumentSuggestion {
-  return {
+  const sanitized: {
+    value: string;
+    label: string;
+    hint?: string;
+    next?: readonly PromptArgumentSuggestion[];
+  } = {
     value: sanitizeForTerminal(suggestion.value),
     label: sanitizeForTerminal(suggestion.label),
-    ...(suggestion.hint === undefined ? {} : { hint: sanitizeForTerminal(suggestion.hint) }),
-    ...(suggestion.next === undefined ? {} : { next: suggestion.next.map(sanitizeSuggestion) }),
   };
+  if (suggestion.hint !== undefined) sanitized.hint = sanitizeForTerminal(suggestion.hint);
+  if (suggestion.next !== undefined) sanitized.next = suggestion.next.map(sanitizeSuggestion);
+  return sanitized;
 }
 
 /** Filters catalog entries case-insensitively across their visible labels and ids. */
