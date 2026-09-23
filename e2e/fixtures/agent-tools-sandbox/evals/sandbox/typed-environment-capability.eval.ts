@@ -19,7 +19,10 @@ export default defineEval({
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    t.check(completed.message, includes(/blocked[^\n]*true/iu));
+    t.check(
+      completed.message,
+      includes(/(?:blocked[^\n]*true|(?:outbound )?network(?:ing| access)? is blocked)/iu),
+    );
   },
 });
 

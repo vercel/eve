@@ -111,8 +111,7 @@ export function resolvePendingInput(input: {
 
   const route = routePendingInput(batches);
   const deferTurnInput = hasTailApprovalResponse(baseHistory);
-  const textResolutionBatch =
-    route.kind === "session-limit" ? route.batch : batches.length === 1 ? batches[0] : undefined;
+  const textResolutionBatch = route.kind === "session-limit" ? route.batch : batches[0];
   const resolvedStepInput =
     textResolutionBatch === undefined
       ? input.stepInput
