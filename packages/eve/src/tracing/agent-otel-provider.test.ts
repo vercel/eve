@@ -145,6 +145,7 @@ async function emitAttempt(input: {
   readonly attemptError?: Error;
   readonly channelAudience?: ChannelAudience;
   readonly hooks: InstrumentationHooks;
+  readonly modelTools?: readonly Record<string, unknown>[];
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly runInContext: InstrumentationContextRunner;
@@ -199,6 +200,7 @@ async function emitAttempt(input: {
       ],
       modelId: "claude-test",
       provider: "anthropic",
+      tools: input.modelTools,
     },
   ]);
   await bridge.executeLanguageModelCall!({ callId: "call-1", execute: async () => undefined });
@@ -2818,6 +2820,17 @@ describe("createAgentOtelInstrumentation", () => {
     const runtime = createRuntime();
     await emitAttempt({
       hooks: runtime.hooks,
+      modelTools: [
+        {
+          description: "Get the current weather.",
+          inputSchema: {
+            properties: { city: { type: "string" } },
+            required: ["city"],
+            type: "object",
+          },
+          name: "get_weather",
+        },
+      ],
       runInContext: runtime.runInContext,
       sessionId: "session-1",
       turnId: "turn-1",
@@ -2843,6 +2856,8 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.response.finish_reasons": ["tool-calls"],
       "gen_ai.system_instructions":
         '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
+      "gen_ai.tool.definitions":
+        '[{"name":"get_weather","description":"Get the current weather.","parameters":{"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"}}]',
     });
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
     // Provider-executed tools never reach the tool loop; their calls and
