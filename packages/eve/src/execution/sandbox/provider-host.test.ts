@@ -1,33 +1,49 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
+import { importInstalledEnginePackage } from "#internal/application/optional-package-import.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 
-vi.mock("#internal/application/optional-package-install.js", () => ({
-  loadOptionalEnginePackage: vi.fn(async (input) => input),
+vi.mock("#internal/application/optional-package-import.js", () => ({
+  importInstalledEnginePackage: vi.fn(),
 }));
 
-const mockedLoadOptionalEnginePackage = vi.mocked(loadOptionalEnginePackage);
+const mockedImportInstalledEnginePackage = vi.mocked(importInstalledEnginePackage);
+
+const request = {
+  autoInstall: true,
+  importModule: vi.fn(async () => {
+    throw new Error("bundled dependency missing");
+  }),
+  missingMessage: "missing dependency",
+  packageName: "dependency",
+};
 
 describe("createSandboxProviderHost", () => {
-  it.each([
-    [true, true],
-    [false, false],
-  ])("applies its installation policy (allow: %s)", async (allowInstall, autoInstall) => {
-    const host = createSandboxProviderHost({ allowInstall, appRoot: "/repo/app" });
-    const request = {
-      autoInstall: true,
-      importModule: async () => ({ ok: true }),
-      missingMessage: "missing dependency",
+  it("loads application-installed packages without bundling the development installer", async () => {
+    const loadedModule = { ok: true };
+    mockedImportInstalledEnginePackage.mockResolvedValueOnce(loadedModule);
+    const host = createSandboxProviderHost({ appRoot: "/repo/app" });
+
+    await expect(host.loadOptionalPackage(request)).resolves.toBe(loadedModule);
+
+    expect(mockedImportInstalledEnginePackage).toHaveBeenCalledWith({
+      appRoot: "/repo/app",
       packageName: "dependency",
-    };
+    });
+  });
+
+  it("delegates package loading when development preparation allows installation", async () => {
+    const loadOptionalPackage = vi.fn(async (input) => input);
+    const host = createSandboxProviderHost({
+      appRoot: "/repo/app",
+      loadOptionalPackage,
+    });
 
     await host.loadOptionalPackage(request);
 
-    expect(mockedLoadOptionalEnginePackage).toHaveBeenCalledWith({
+    expect(loadOptionalPackage).toHaveBeenCalledWith({
       ...request,
       appRoot: "/repo/app",
-      autoInstall,
     });
   });
 });

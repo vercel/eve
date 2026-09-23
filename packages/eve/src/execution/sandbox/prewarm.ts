@@ -3,6 +3,7 @@ import { join, relative, resolve } from "node:path";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { createAuthoredSourceRuntimeCompiledArtifactsSource } from "#internal/application/runtime-compiled-artifacts-source.js";
+import { loadOptionalEnginePackage } from "#internal/application/optional-package-install.js";
 import {
   createSandboxProviderResources,
   type SandboxPreparedArtifact,
@@ -214,7 +215,10 @@ async function collectPrewarmTargets(input: {
       targets.push({
         context: {
           files: createSandboxProviderFiles(sandboxRoot),
-          host: createSandboxProviderHost({ allowInstall: true, appRoot: input.appRoot }),
+          host: createSandboxProviderHost({
+            appRoot: input.appRoot,
+            loadOptionalPackage: loadOptionalEnginePackage,
+          }),
           resources: createSandboxProviderResources({
             resourcesKey: workspaceResourceRoot.contentHash,
             resourcesPath:

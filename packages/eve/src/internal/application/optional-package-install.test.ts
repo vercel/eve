@@ -162,7 +162,7 @@ describe("loadOptionalEnginePackage", () => {
 
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
     expect(importModule).toHaveBeenCalledTimes(1);
-    expect(importInstalledModule).toHaveBeenCalledTimes(3);
+    expect(importInstalledModule).toHaveBeenCalledTimes(2);
   });
 
   it("loads an application dependency when automatic installation is disabled", async () => {
@@ -380,7 +380,7 @@ describe("loadOptionalEnginePackage", () => {
     );
 
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
-    expect(importInstalledModule).toHaveBeenCalledTimes(3);
+    expect(importInstalledModule).toHaveBeenCalledTimes(2);
   });
 
   it("wraps a missing package root after successful auto-install", async () => {

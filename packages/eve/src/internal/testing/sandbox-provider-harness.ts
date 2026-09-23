@@ -47,7 +47,7 @@ export function createSandboxProviderHarness<
     }) {
       const artifact = await implementation.prepare({
         files: createSandboxProviderFiles(`${input.appRoot}/sandbox`),
-        host: createSandboxProviderHost({ allowInstall: false, appRoot: input.appRoot }),
+        host: createSandboxProviderHost({ appRoot: input.appRoot }),
         log: input.log,
         resources: createSandboxProviderResources({
           ...input,
@@ -71,7 +71,7 @@ export function createSandboxProviderHarness<
     }): Promise<SandboxProviderHandle<Session>> {
       const artifact = await resolveArtifact(input);
       const context = {
-        host: createSandboxProviderHost({ allowInstall: false, appRoot: input.appRoot }),
+        host: createSandboxProviderHost({ appRoot: input.appRoot }),
         session: {
           auth: { current: null, initiator: null },
           id: input.sandboxName,
@@ -92,7 +92,7 @@ export function createSandboxProviderHarness<
       const artifact = await resolveArtifact(input);
       return await implementation.start(
         {
-          host: createSandboxProviderHost({ allowInstall: false, appRoot: input.appRoot }),
+          host: createSandboxProviderHost({ appRoot: input.appRoot }),
           session: {
             auth: { current: null, initiator: null },
             id: input.sandboxName,

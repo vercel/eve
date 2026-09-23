@@ -97,7 +97,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     }
 
     const context: SandboxProviderSessionContext = {
-      host: createSandboxProviderHost({ allowInstall: false, appRoot }),
+      host: createSandboxProviderHost({ appRoot }),
       session,
       storagePath: resolveSandboxCacheDirectory(appRoot),
     };
@@ -167,7 +167,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       });
     }
     const context: SandboxProviderSessionContext = {
-      host: createSandboxProviderHost({ allowInstall: false, appRoot }),
+      host: createSandboxProviderHost({ appRoot }),
       session,
       storagePath: resolveSandboxCacheDirectory(appRoot),
     };
