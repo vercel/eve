@@ -21,17 +21,15 @@ import {
   postSlackMessage,
   resolveSlackBotToken as resolveSlackBotTokenPrimitive,
   uploadSlackFiles,
+  type SlackApiOptions,
   type SlackApiResponse as SlackPrimitiveApiResponse,
+  type SlackFileUpload,
+  type SlackMessageOptions,
 } from "#compiled/@chat-adapter/slack/api.js";
-import type { CardElement, FileUpload } from "#compiled/chat/index.js";
+import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat/index.js";
 
 import { createLogger, logError } from "#internal/logging.js";
-import {
-  buildPostMessageOptions,
-  normalizePostInput,
-  normalizeSlackApiBody,
-  toSlackFileUpload,
-} from "#public/channels/slack/api-encoding.js";
+import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
@@ -597,6 +595,80 @@ export function buildSlackBinding(input: {
   };
 
   return { thread, slack };
+}
+
+/**
+ * Coerces the ergonomic bare forms of `SlackThread.post` / `postEphemeral`
+ * into the explicit {@link SlackPostInput} discriminated union the
+ * implementation works with.
+ *
+ * - `string` → `{ markdown }` so call sites like `ctx.thread.post(event.message)`
+ *   render through Slack's markdown converter.
+ * - {@link CardElement} → `{ card }` so call sites like
+ *   `ctx.thread.post(Card({...}))` go through the Block Kit converter.
+ * - Anything else is assumed to already be a {@link SlackPostInput}.
+ */
+function normalizePostInput(message: string | CardElement | SlackPostInput): SlackPostInput {
+  if (typeof message === "string") return { markdown: message };
+  if (isCardElement(message)) return { card: message };
+  return message;
+}
+
+function buildPostMessageOptions(
+  message: SlackPostInput,
+  channelId: string,
+  threadTs: string,
+  apiOptions: SlackApiOptions,
+): SlackMessageOptions {
+  const base: SlackMessageOptions = {
+    ...apiOptions,
+    channel: channelId,
+    threadTs: threadTs || undefined,
+    unfurlLinks: false,
+    unfurlMedia: false,
+  };
+
+  if ("card" in message) {
+    base.blocks = cardToBlocks(message.card);
+    base.text = message.fallbackText ?? cardToFallbackText(message.card);
+    return base;
+  }
+  if ("blocks" in message) {
+    base.blocks = [...message.blocks];
+    if (message.text !== undefined) base.text = message.text;
+    return base;
+  }
+  if ("markdown" in message) {
+    base.markdownText = message.markdown;
+    return base;
+  }
+  base.text = message.text;
+  return base;
+}
+
+function normalizeSlackApiBody(body: unknown): Record<string, unknown> {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    return body as Record<string, unknown>;
+  }
+  return {};
+}
+
+function toSlackFileUpload(file: FileUpload, snippetType?: string): SlackFileUpload {
+  return {
+    data: normalizeFileData(file.data),
+    filename: file.filename,
+    snippetType,
+  };
+}
+
+function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
+  if (data instanceof ArrayBuffer) return data;
+  if (typeof Blob !== "undefined" && data instanceof Blob) return data;
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  }
+  return data;
 }
 
 function parseThreadMessage(
