@@ -270,7 +270,7 @@ describe("ClientSession", () => {
     const session = createSession();
     const descriptor = Object.getOwnPropertyDescriptor(AbortSignal.prototype, "throwIfAborted");
     expect(descriptor).toBeDefined();
-    delete AbortSignal.prototype.throwIfAborted;
+    delete (AbortSignal.prototype as { throwIfAborted?: unknown }).throwIfAborted;
 
     try {
       await expect(session.snapshot({ signal: new AbortController().signal })).resolves.toEqual({
