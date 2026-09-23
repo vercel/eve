@@ -65,6 +65,8 @@ interface OptionRowInput {
   state: OptionRowState;
   /** Whether an un-hovered, selectable row draws the placeholder glyph. */
   placeholder: boolean;
+  /** TUI lists use type weight rather than a caret to show focus. */
+  presentation?: "cursor" | "minimal";
   /** Spaces inserted before the hint's dot so hints tab-align to a shared column. */
   hintPadding?: number;
   /**
@@ -213,6 +215,20 @@ export function renderOptionRow(input: OptionRowInput): string {
   if (hintText !== undefined) {
     const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1);
     hint = c.dim(`${" ".repeat(separatorWidth)}${glyphs.dot} ${hintText}`);
+  }
+  if (input.presentation === "minimal") {
+    const weight = selected ? (c.bold ?? ((text: string) => text)) : c.dim;
+    const styledLabel = input.state.kind === "available" ? weight(label) : label;
+    const semanticGlyph =
+      (input.state.kind === "available" && input.state.checked) ||
+      input.state.kind === "completed" ||
+      input.state.kind === "locked";
+    const marker =
+      input.state.kind === "completed" || input.state.kind === "locked"
+        ? c.green(glyphs.success)
+        : glyph;
+    const check = semanticGlyph ? `${marker} ` : "";
+    return ` ${check}${styledLabel}${hint}`;
   }
   const content = `${glyph} ${label}`;
   const row = renderCursorRow(content, selected, c, input.accent);

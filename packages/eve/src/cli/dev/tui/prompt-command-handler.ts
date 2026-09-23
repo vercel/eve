@@ -1,5 +1,6 @@
 import type { ApplyModelOutcome } from "#setup/flows/model-source-change.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
+import type { ModelConnectionSelection } from "#shared/model-connection.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -12,6 +13,14 @@ import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
 import type { DevelopmentTuiTarget } from "./target.js";
 
 type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
+
+const LOGIN_CONNECTIONS: Readonly<Record<string, ModelConnectionSelection>> = {
+  vercel: "vercel",
+  chatgpt: "chatgpt",
+  "vercel-api-key": "ai-gateway-key",
+  "openai-api-key": "openai",
+  "anthropic-api-key": "anthropic",
+};
 
 export interface PromptCommandHandlerOptions {
   readonly target: DevelopmentTuiTarget;
@@ -114,6 +123,20 @@ export function createPromptCommandHandler(
         return { message: "Choose an integration from the inline /add suggestions." };
       }
 
+      const loginConnection =
+        command.name === "login" && command.argument.length > 0
+          ? LOGIN_CONNECTIONS[command.argument]
+          : undefined;
+      if (
+        command.name === "login" &&
+        command.argument.length > 0 &&
+        loginConnection === undefined
+      ) {
+        return {
+          message: "Use `/login vercel|chatgpt|vercel-api-key|openai-api-key|anthropic-api-key`.",
+        };
+      }
+
       const flow = context.renderer.setupFlow;
       if (flow === undefined) {
         return { message: `/${command.name} is not supported by this renderer.` };
@@ -145,6 +168,7 @@ export function createPromptCommandHandler(
           commandInput.onOnboardingScreen = context.onOnboardingScreen;
         }
         if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
+        if (loginConnection !== undefined) commandInput.initialLoginConnection = loginConnection;
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;

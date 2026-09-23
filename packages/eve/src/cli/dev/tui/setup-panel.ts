@@ -1,7 +1,7 @@
 /** Pure borderless setup menus. Interaction and terminal lifecycle belong to the renderer. */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
-import { renderOptionRow, renderCursorRow, resolveOptionRowState } from "#setup/cli/option-row.js";
+import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
 import {
   filterOptions,
   submitRowIndex,
@@ -49,6 +49,8 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   loadingFrame?: string;
   /** A dim-inverse affordance appended to the cursor row, e.g. ` ↵ change `. */
   cursorBadge?: string;
+  /** Blink state for the active searchable field. */
+  caretVisible?: boolean;
   footerHints?: readonly string[];
 }
 
@@ -327,6 +329,43 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   return rows.map((row) => (row.length === 0 ? clip(row, width) : clip(` ${row}`, width)));
 }
 
+/**
+ * Frames an active setup flow as a drawer above the terminal footer. The
+ * command echo remains in the transcript; this surface owns only temporary
+ * setup state and disappears when the flow settles.
+ */
+export interface FlowDrawer {
+  /** Temporary content enclosed by the drawer boundaries. */
+  rows: string[];
+  /** Interaction hints placed below the drawer so they do not compete with its content. */
+  controls: string[];
+}
+
+export function renderFlowDrawer(state: FlowPanelState, theme: Theme, width: number): FlowDrawer {
+  const divider = theme.colors.dim(theme.glyph.dash.repeat(Math.max(1, width)));
+  const drawerMark = theme.unicode ? "┃" : "|";
+  // The drawer owns the flow title. Keep it out of the panel body so a status
+  // or question never repeats its context immediately below the header.
+  const content =
+    state.content.kind === "question" && state.content.title === state.title
+      ? { ...state.content, title: undefined }
+      : state.content;
+  const body = renderFlowPanel({ ...state, title: "", content }, theme, width);
+  // Every interactive question ends with an empty row and one or more wrapped
+  // hints. Put that affordance under the drawer boundary instead of making it
+  // compete with the active selection inside.
+  const footerStart = body.lastIndexOf("");
+  const controls = footerStart === -1 ? [] : body.slice(footerStart + 1);
+  const drawerBody = footerStart === -1 ? body : body.slice(0, footerStart);
+  const header =
+    state.title.length === 0 ? [] : [` ${theme.colors.dim(`${drawerMark} ${state.title}`)}`, ""];
+  const leftAlignedControls = controls.map((row) => row.trimStart());
+  return {
+    rows: [divider, "", ...header, ...drawerBody, "", divider],
+    controls: leftAlignedControls,
+  };
+}
+
 function optionRow(input: {
   option: SetupPanelOption;
   isCursor: boolean;
@@ -356,6 +395,7 @@ function optionRow(input: {
     isCursor: input.isCursor,
     state: resolveOptionRowState(option, input.isChecked),
     placeholder: input.placeholder,
+    presentation: "minimal",
     hintPadding: input.hintPadding,
   });
 }
@@ -460,15 +500,28 @@ function searchFilter(
   filter: string,
   placeholder: string | undefined,
   loadingFrame: string | undefined,
+  caretVisible: boolean,
   theme: Theme,
   railed: boolean,
 ): string {
-  const caret = theme.colors.dim(theme.glyph.caret);
+  const caret = caretVisible ? theme.colors.dim(theme.glyph.caret) : " ";
   let input = caret;
   if (railed) {
-    // The railed list's filter line: `▏ query▏`, or the dim placeholder.
-    input = filter.length > 0 ? filter + caret : theme.colors.dim(placeholder ?? "type to filter");
-  } else if (filter.length > 0) {
+    input =
+      filter.length === 0
+        ? renderInputWithBlockCursor({
+            before: "",
+            under: "s",
+            after: "earch…",
+            visible: caretVisible,
+            inverse: theme.colors.inverse,
+            render: theme.colors.dim,
+          })
+        : `${filter}${caret}`;
+    if (loadingFrame !== undefined) input += ` ${theme.colors.yellow(loadingFrame)}`;
+    return input;
+  }
+  if (filter.length > 0) {
     input = filter + caret;
   } else if (placeholder !== undefined) {
     input = theme.colors.dim(`> ${placeholder}`);
@@ -478,9 +531,9 @@ function searchFilter(
 }
 
 /**
- * Whether a select renders as the railed searchable list — the one component
- * behind the model catalog, team, and project pickers: `▏`-railed rows, an
- * inverse cursor row, and a rail-led filter line.
+ * Whether a select renders as the compact searchable list behind the model
+ * catalog, team, and project pickers. Its filter line leads the options and
+ * the focused row uses bold weight rather than a cursor marker.
  */
 function isRailedSearch(presentation: SelectPresentation): boolean {
   return (
@@ -666,8 +719,8 @@ function appendSelectOptionRows(input: {
     };
     if (editingKey) rowOption.hint = undefined;
     const railed = isRailedSearch(presentation);
-    // Railed lists already mark their cursor with `›`; only an explicit badge
-    // such as the provider picker's `↵ change` adds an extra affordance.
+    // Focused rows use bold weight; only an explicit badge such as the provider
+    // picker's `↵ change` adds another affordance.
     const rowBadge = state.cursorBadge;
     const badge = isCursor && rowBadge !== undefined ? ` ${rowBadge}` : "";
     rows.push(
@@ -693,10 +746,8 @@ function appendSelectOptionRows(input: {
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
   if (submitIndex < 0) return;
   const onSubmit = cursor === submitIndex;
-  const content = onSubmit
-    ? `${theme.glyph.selectedPointer} ${theme.colors.bold("Submit")}`
-    : "  Submit";
-  rows.push("", `  ${renderCursorRow(content, onSubmit, theme.colors)}`);
+  const content = onSubmit ? theme.colors.bold("Submit") : theme.colors.dim("Submit");
+  rows.push("", `  ${content}`);
 }
 
 function appendSelectNotices(
@@ -841,17 +892,15 @@ export function renderSelectQuestion(
   }
 
   if (presentation.filter !== undefined) {
-    // The railed filter line indents one extra cell so its rail sits in the
-    // option rows' glyph column.
-    rows.push(
-      `  ${railed ? " " : ""}${searchFilter(
-        state.select.filter,
-        presentation.filter.placeholder,
-        state.loadingFrame,
-        theme,
-        railed,
-      )}`,
+    const filter = searchFilter(
+      state.select.filter,
+      presentation.filter.placeholder,
+      state.loadingFrame,
+      state.caretVisible ?? true,
+      theme,
+      railed,
     );
+    rows.push(`  ${railed ? " " : ""}${filter}`);
   }
 
   const viewSize = selectViewSize({

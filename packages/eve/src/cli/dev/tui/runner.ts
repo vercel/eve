@@ -471,8 +471,10 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
-  /** Catalog entries available to inline `/model` and `/add` completion. */
-  argumentSuggestions?: (command: "model" | "add") => Promise<readonly PromptArgumentSuggestion[]>;
+  /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
+  argumentSuggestions?: (
+    command: "model" | "add" | "login",
+  ) => Promise<readonly PromptArgumentSuggestion[]>;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Remote target and mutable OIDC token source, when connected through `--url`. */

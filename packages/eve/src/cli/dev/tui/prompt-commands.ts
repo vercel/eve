@@ -89,8 +89,9 @@ const PROMPT_COMMAND_DEFINITIONS = [
     name: "login",
     aliases: [],
     description: "Connect a model provider",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "login", argument: "" }),
+    argumentHint: "[connection]",
+    takesArgument: true,
+    build: (argument) => ({ type: "extension", name: "login", argument }),
     targets: ["local"],
   },
   {

@@ -52,7 +52,18 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 }
 
 function inlineArgumentSuggestions(appRoot: string) {
-  return async (command: "model" | "add"): Promise<readonly PromptArgumentSuggestion[]> => {
+  return async (
+    command: "model" | "add" | "login",
+  ): Promise<readonly PromptArgumentSuggestion[]> => {
+    if (command === "login") {
+      return [
+        { value: "vercel", label: "Vercel account" },
+        { value: "chatgpt", label: "ChatGPT account" },
+        { value: "vercel-api-key", label: "API key (Vercel AI Gateway)" },
+        { value: "openai-api-key", label: "API key (OpenAI)" },
+        { value: "anthropic-api-key", label: "API key (Anthropic)" },
+      ];
+    }
     if (command === "model") {
       const { gatewayModelCapabilities } = await import("#setup/boxes/model-capabilities.js");
       const { fetchGatewayCatalog, modelOptionsFromCatalog } =

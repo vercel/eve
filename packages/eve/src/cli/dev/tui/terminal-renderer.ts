@@ -48,7 +48,7 @@ import {
 } from "./prompt-commands.js";
 import {
   enterBadge,
-  renderFlowPanel,
+  renderFlowDrawer,
   flowMessageRows,
   renderAcknowledgeQuestion,
   renderSelectQuestion,
@@ -292,8 +292,10 @@ export type TerminalRendererOptions = {
   diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
-  /** Catalog entries available to inline `/model` and `/add` completion. */
-  argumentSuggestions?: (command: "model" | "add") => Promise<readonly PromptArgumentSuggestion[]>;
+  /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
+  argumentSuggestions?: (
+    command: "model" | "add" | "login",
+  ) => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };
 
@@ -1006,7 +1008,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
               argumentOpen === undefined &&
               selected !== undefined &&
               this.#argumentSuggestions !== undefined &&
-              (selected.name === "add" || selected.name === "model")
+              (selected.name === "add" || selected.name === "login" || selected.name === "model")
             ) {
               apply(lineOf(typeaheadCompletion(selected)));
               break;
@@ -2076,6 +2078,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const flow = this.#beginSetupQuestion(opts.message);
     const multiple = isMultiSelectRequest(opts);
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
+    const searchableField = opts.kind === "search" && opts.layout === undefined;
     let selectOptions: readonly SetupPanelOption[] = opts.options;
 
     const plannerNavigation = opts.navigation?.kind === "planner";
@@ -2162,83 +2165,89 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (notices !== undefined && notices.length > 0) state.notices = notices;
       if (error !== undefined) state.error = error;
       if (loading) state.loadingFrame = this.#spinnerFrame();
+      if (searchableField) state.caretVisible = this.#caretVisible;
       return state;
     };
     flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
+    if (searchableField) this.#startCaretBlink();
     this.#paint();
 
-    const question = this.#captureSetupQuestion<SetupSelectResult>((key, settle) => {
-      const close = (value: SetupSelectResult): void => {
-        searchVersion += 1;
-        settle(value);
-      };
-      if (loading) {
-        if (key.type === "ctrl-c") close(undefined);
-        else if (key.type === "escape") clearSearch();
-        else if (key.type === "ctrl-r") this.#paint();
-        return;
-      }
-
-      const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
-      const plannerDirection =
-        key.type === "left" &&
-        (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
-          ? "back"
-          : key.type === "right" &&
-              plannerStep !== undefined &&
-              plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
-              plannerStep.activeStep < plannerStep.steps.length - 1
-            ? "forward"
-            : undefined;
-      if (plannerDirection !== undefined) {
-        close({
-          kind: "navigate",
-          direction: plannerDirection,
-          values: multiple ? orderedSelection(selectOptions, select.selected) : [],
-        });
-        return;
-      }
-
-      const base = { key, options: selectOptions, searchAction, select };
-      const result = multiple
-        ? reduceSetupSelectInput({
-            ...base,
-            kind: opts.kind,
-            required: opts.required,
-            plannerNavigation: plannerNavigation || undefined,
-          })
-        : reduceSetupSelectInput({ ...base, kind: opts.kind });
-      switch (result.kind) {
-        case "cancel":
-          close(undefined);
-          return;
-        case "repaint":
-          this.#paint();
-          return;
-        case "update":
-          select = result.select;
-          error = undefined;
-          this.#paint();
-          return;
-        case "submit": {
-          const query = searchActionQuery(result.values[0] ?? "");
-          const load = searchAction?.load;
-          if (query === undefined || load === undefined) {
-            close(result.values);
-            return;
-          }
-
-          void loadSearch(query, load);
+    const question = this.#captureSetupQuestion<SetupSelectResult>(
+      (key, settle) => {
+        const close = (value: SetupSelectResult): void => {
+          searchVersion += 1;
+          settle(value);
+        };
+        if (loading) {
+          if (key.type === "ctrl-c") close(undefined);
+          else if (key.type === "escape") clearSearch();
+          else if (key.type === "ctrl-r") this.#paint();
           return;
         }
-        case "error":
-          error = result.message;
-          this.#paint();
+
+        const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
+        const plannerDirection =
+          key.type === "left" &&
+          (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
+            ? "back"
+            : key.type === "right" &&
+                plannerStep !== undefined &&
+                plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
+                plannerStep.activeStep < plannerStep.steps.length - 1
+              ? "forward"
+              : undefined;
+        if (plannerDirection !== undefined) {
+          close({
+            kind: "navigate",
+            direction: plannerDirection,
+            values: multiple ? orderedSelection(selectOptions, select.selected) : [],
+          });
           return;
-        case "ignore":
-          return;
-      }
-    });
+        }
+
+        const base = { key, options: selectOptions, searchAction, select };
+        const result = multiple
+          ? reduceSetupSelectInput({
+              ...base,
+              kind: opts.kind,
+              required: opts.required,
+              plannerNavigation: plannerNavigation || undefined,
+            })
+          : reduceSetupSelectInput({ ...base, kind: opts.kind });
+        switch (result.kind) {
+          case "cancel":
+            close(undefined);
+            return;
+          case "repaint":
+            this.#paint();
+            return;
+          case "update":
+            select = result.select;
+            error = undefined;
+            if (searchableField) this.#showCaret();
+            this.#paint();
+            return;
+          case "submit": {
+            const query = searchActionQuery(result.values[0] ?? "");
+            const load = searchAction?.load;
+            if (query === undefined || load === undefined) {
+              close(result.values);
+              return;
+            }
+
+            void loadSearch(query, load);
+            return;
+          }
+          case "error":
+            error = result.message;
+            this.#paint();
+            return;
+          case "ignore":
+            return;
+        }
+      },
+      searchableField ? () => this.#stopCaretBlink() : undefined,
+    );
     return await question.promise;
   }
 
@@ -4351,7 +4360,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       } else {
         content = { kind: "idle", indicator };
       }
-      const state: Parameters<typeof renderFlowPanel>[0] = {
+      const state: Parameters<typeof renderFlowDrawer>[0] = {
         title: flow.title,
         navigation: flow.navigation,
         lines:
@@ -4368,7 +4377,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
               ],
         content,
       };
-      rows.push(...renderFlowPanel(state, this.#theme, width));
+      const drawer = renderFlowDrawer(state, this.#theme, width);
+      // Setup owns the footer while open. Do not lead it with the ordinary
+      // transcript spacer: the drawer begins directly below the command echo.
+      if (rows.length === 1 && rows[0] === "") rows.length = 0;
+      rows.push(...drawer.rows);
+      if (drawer.controls.length > 0) rows.push(...drawer.controls);
       this.#pushRemoteStatusLine(rows, width);
       return rows;
     }

@@ -4723,7 +4723,7 @@ describe("TerminalRenderer setup flow session", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).not.toContain("/deploy");
+    expect(snapshot).toContain("┃ /deploy");
     expect(snapshot).toContain("This directory is not linked yet.");
     expect(snapshot).toContain("Vercel project");
 
@@ -4792,9 +4792,8 @@ describe("TerminalRenderer setup flow session", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Slack channel was not added");
     expect(snapshot).not.toContain("Scaffolding Web Chat channel files");
-    // Focused completed row reads inert: a dim pointer, not a check.
-    expect(snapshot).toContain("› Terminal UI · Already installed");
-    expect(snapshot).not.toContain("✓ Terminal UI");
+    // Completed rows retain their semantic check without borrowing selection weight.
+    expect(snapshot).toContain("✓ Terminal UI · Already installed");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
     expect(snapshot).toContain("Dependency installation failed.");

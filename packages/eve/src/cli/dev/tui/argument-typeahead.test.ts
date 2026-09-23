@@ -44,7 +44,14 @@ describe("argumentTypeaheadQuery", () => {
       completed: [],
       argumentStart: 6,
     });
+    expect(argumentTypeaheadQuery("/login ver")).toEqual({
+      command: "login",
+      argument: "ver",
+      completed: [],
+      argumentStart: 7,
+    });
     expect(argumentTypeaheadQuery("/add channel/slack ")).toBeUndefined();
+    expect(argumentTypeaheadQuery("/login vercel ")).toBeUndefined();
     expect(argumentTypeaheadQuery("/model anthropic/claude-sonnet high ")).toBeUndefined();
     expect(argumentTypeaheadQuery("/add one two")).toBeUndefined();
     expect(argumentTypeaheadQuery("hello")).toBeUndefined();

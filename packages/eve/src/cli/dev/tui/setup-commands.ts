@@ -1,4 +1,4 @@
-import type { ModelAccessChange } from "#shared/model-connection.js";
+import type { ModelAccessChange, ModelConnectionSelection } from "#shared/model-connection.js";
 import { runModelLogin } from "#setup/flows/model-login.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
@@ -29,9 +29,9 @@ export type TuiSetupCommand = Exclude<PromptCommandExtensionName, "model">;
  * move past their opening question.
  */
 export const SETUP_FLOW_CONFIG = {
-  login: { title: "Connecting your model", indicator: "pulse" },
-  add: { title: "Add to your agent", indicator: "pulse" },
-  deploy: { title: "Deploy to Vercel", indicator: "spinner" },
+  login: { title: "", indicator: "pulse" },
+  add: { title: "", indicator: "pulse" },
+  deploy: { title: "", indicator: "spinner" },
 } satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
@@ -61,6 +61,8 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** Connection selected through `/login <connection>`. */
+  initialLoginConnection?: ModelConnectionSelection;
   /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
   /** Presentation and navigation supplied by an enclosing setup journey. */
@@ -250,6 +252,8 @@ async function executeSetupCommand(
           prompter,
           signal,
           automatic: input.initialModelStep === "provider",
+          selected: input.initialLoginConnection,
+          connectionMessage: "",
           withConnectionUpdate: input.withExclusiveTerminal,
         });
         return result.kind === "cancelled"

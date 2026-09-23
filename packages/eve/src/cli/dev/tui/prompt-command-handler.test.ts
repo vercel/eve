@@ -143,6 +143,44 @@ describe("createPromptCommandHandler", () => {
     });
   });
 
+  it("routes a /login argument to its connection", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Connected.",
+      preserveFlowDiagnostics: false,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { login: { title: "", indicator: "pulse" } },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+      await handler.handle(
+        { type: "extension", name: "login", argument: "openai-api-key" },
+        context({ setupFlow: setupFlowRenderer() }),
+      );
+      expect(runTuiSetupCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ command: "login", initialLoginConnection: "openai" }),
+      );
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
+  it("rejects an unknown /login connection", async () => {
+    const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+
+    await expect(
+      handler.handle(
+        { type: "extension", name: "login", argument: "other" },
+        context({ setupFlow: setupFlowRenderer() }),
+      ),
+    ).resolves.toEqual({
+      message: "Use `/login vercel|chatgpt|vercel-api-key|openai-api-key|anthropic-api-key`.",
+    });
+  });
+
   it("routes a /add argument to the registry flow's initial address", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
       message: "Added Slack",

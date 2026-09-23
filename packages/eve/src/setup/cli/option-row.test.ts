@@ -62,6 +62,24 @@ describe("renderOptionRow", () => {
     expect(row({ label: "No" })).toBe("   No");
   });
 
+  test("the minimal presentation uses weight instead of a cursor glyph", () => {
+    const minimalColors = { ...colors, bold: (text: string) => `<bold>${text}</bold>` };
+    expect(
+      row({ label: "Vercel", isCursor: true, presentation: "minimal", colors: minimalColors }),
+    ).toBe(" <bold>Vercel</bold>");
+    expect(row({ label: "Codex", presentation: "minimal" })).toBe(" <dim>Codex</dim>");
+  });
+
+  test("the minimal presentation retains semantic checks", () => {
+    expect(
+      row({
+        label: "Vercel",
+        presentation: "minimal",
+        state: { kind: "available", checked: true },
+      }),
+    ).toBe(" <green>✓</green> <dim>Vercel</dim>");
+  });
+
   test("a warning accent stays yellow under the cursor highlight", () => {
     expect(row({ label: "Configure provider", accent: "warning" })).toBe(
       "   <yellow>Configure provider</yellow>",
