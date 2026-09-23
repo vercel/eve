@@ -118,7 +118,18 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
   let durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
+  let adapter = ctx.require(ChannelKey);
+  const ownerSandboxState = rawDelivery?.caller?.parentSandboxState;
+  if (rawDelivery?.caller !== undefined && "parentSandboxState" in rawDelivery.caller) {
+    adapter = {
+      ...adapter,
+      state: {
+        ...adapter.state,
+        parentSandboxState: ownerSandboxState,
+      },
+    };
+    ctx.set(ChannelKey, adapter);
+  }
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const taskDeliveryPolicy =

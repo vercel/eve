@@ -1048,6 +1048,86 @@ describe("dispatchCoordinationStep", () => {
 });
 
 describe("turnStep", () => {
+  it("refreshes and persists the owner sandbox state on resumed child delivery", async () => {
+    const staleParentSandboxState = {
+      session: { providerName: "test", state: { name: "old" }, stateProtocolVersion: 1 },
+    };
+    const freshParentSandboxState = {
+      session: { providerName: "test", state: { name: "new" }, stateProtocolVersion: 1 },
+    };
+    const adapter: ChannelAdapter = {
+      ...threadContextAdapter,
+      state: { parentSandboxState: staleParentSandboxState },
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, createStubBundle());
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "child-continuation");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "child-session");
+    const session = createStubSession({ sessionId: "child-session" });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(
+      () =>
+        async (stepSession): Promise<StepResult> => ({ next: null, session: stepSession }),
+    );
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        caller: {
+          callId: "resume-call",
+          parentSandboxState: freshParentSandboxState,
+          replyTo: { kind: "hook", token: "parent-hook" },
+          subagentName: "worker",
+        },
+        payloads: [{ message: "resume parked child" }],
+      },
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+      sessionWritable: createTestWritable(),
+    });
+
+    expect(result.serializedContext[ChannelKey.name]).toMatchObject({
+      state: { parentSandboxState: freshParentSandboxState },
+    });
+  });
+
+  it("leaves the adapter owner state unchanged without a resumed caller state", async () => {
+    const staleParentSandboxState = {
+      session: { providerName: "test", state: { name: "old" }, stateProtocolVersion: 1 },
+    };
+    const adapter: ChannelAdapter = {
+      ...threadContextAdapter,
+      state: { parentSandboxState: staleParentSandboxState },
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, createStubBundle());
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "child-continuation");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "child-session");
+    const session = createStubSession({ sessionId: "child-session" });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(
+      () =>
+        async (stepSession): Promise<StepResult> => ({ next: null, session: stepSession }),
+    );
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "ordinary child delivery" }] },
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+      sessionWritable: createTestWritable(),
+    });
+
+    expect(result.serializedContext[ChannelKey.name]).toMatchObject({
+      state: { parentSandboxState: staleParentSandboxState },
+    });
+  });
+
   it("resumes an interrupted turn when the channel ignores the correction", async () => {
     const originalAuth: SessionAuthContext = {
       attributes: {},
