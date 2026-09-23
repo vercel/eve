@@ -42,11 +42,7 @@ import {
   AGENT_UNREACHABLE,
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
-import {
-  readWorkflowTaskView,
-  findBackgroundWorkflowToolRun,
-  type TaskAgentDispatchContext,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks, type TaskAgentDispatchContext } from "#harness/workflow-tool-runs.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   clearProxyInputRequestsForChild,
@@ -354,15 +350,13 @@ export async function dispatchTaskAgentInvocationStep(
   let taskDispatchContext: TaskAgentDispatchContext | undefined;
   if (input.taskId !== undefined) {
     const session = readDurableSession(input.sessionState);
-    const entry = findBackgroundWorkflowToolRun(session.state, input.taskId);
-    if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
-    const view = readWorkflowTaskView(entry.task);
-    if (view !== undefined) {
+    const task = getBackgroundTasks(session.state).get(input.taskId);
+    if (task?.status !== "working") {
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
-    taskDispatchContext = entry.task.dispatchContext;
-    if (entry.task.metadata.kind === "subagent") {
-      activityWorkIdentity = entry.task.activityWorkIdentity;
+    taskDispatchContext = task.run.task.dispatchContext;
+    if (task.metadata.kind === "subagent") {
+      activityWorkIdentity = task.run.task.activityWorkIdentity;
     }
   }
   const dispatched = await dispatchAgentInvocation({
@@ -474,13 +468,10 @@ export async function settleTaskAgentInvocationStep(input: {
     }),
   );
   const task =
-    input.taskId === undefined
-      ? undefined
-      : findBackgroundWorkflowToolRun(session.state, input.taskId);
+    input.taskId === undefined ? undefined : getBackgroundTasks(session.state).get(input.taskId);
   // A generated subagent task completes when the parent records its task outcome.
   // Nested agents inside authored background workflows settle independently of that task.
-  const isTaskAgent =
-    task?.task.metadata.kind === "subagent" && task.callId === input.result.callId;
+  const isTaskAgent = task?.metadata.kind === "subagent" && task.run.callId === input.result.callId;
   const completion: SubagentCompletedStreamEvent | undefined =
     input.result.outcome.result.kind !== "succeeded" || isTaskAgent
       ? undefined

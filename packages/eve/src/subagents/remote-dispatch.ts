@@ -360,14 +360,15 @@ export async function cancelRemoteAgentTurn(input: {
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
   readonly taskId?: string;
+  readonly tasks?: boolean;
   readonly turnId?: string;
 }): Promise<CancelTurnResult> {
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
   const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
     body:
-      input.turnId === undefined && input.taskId === undefined
+      input.turnId === undefined && input.taskId === undefined && input.tasks === undefined
         ? undefined
-        : JSON.stringify({ taskId: input.taskId, turnId: input.turnId }),
+        : JSON.stringify({ taskId: input.taskId, tasks: input.tasks, turnId: input.turnId }),
     headers,
     method: "POST",
   });

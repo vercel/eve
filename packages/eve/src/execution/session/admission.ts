@@ -74,7 +74,10 @@ export async function admitSessionInboxPayload(
 
   switch (command.kind) {
     case "deliver": {
-      const admission = input.queue.enqueueDelivery(command);
+      const admission = input.queue.enqueueDelivery(
+        command,
+        input.cursor.sessionState.snapshot.session.state,
+      );
       return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
     }
     case "clear":
@@ -109,6 +112,7 @@ export async function applySessionCancellation(
       sessionState: input.cursor.sessionState,
     });
     await input.cursor.apply(cancelled);
+    input.queue.discardStaleNotifications(input.cursor.sessionState.snapshot.session.state);
   }
   if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
 }

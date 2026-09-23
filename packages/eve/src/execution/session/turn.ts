@@ -91,7 +91,7 @@ export class SessionExecution {
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
-      const settled = result.action === "park" && result.settled !== undefined;
+      const turnCompleted = result.action === "park" && result.settled !== undefined;
 
       if (hasBackgroundTasks) {
         if (result.backgroundTaskState === undefined) {
@@ -107,7 +107,7 @@ export class SessionExecution {
       await cursor.apply({
         serializedContext: result.serializedContext,
         sessionState:
-          result.action === "cancelled" || (!settled && turn.signal.aborted)
+          result.action === "cancelled" || (!turnCompleted && turn.signal.aborted)
             ? (result.backgroundTaskState ?? result.sessionState)
             : result.sessionState,
       });
@@ -115,7 +115,11 @@ export class SessionExecution {
       turn.resetSteering();
 
       if (result.action === "cancelled") return await this.finishCancelledTurn();
-      if (!settled && turn.signal.aborted && (pendingCallIds === undefined || hasBackgroundTasks)) {
+      if (
+        !turnCompleted &&
+        turn.signal.aborted &&
+        (pendingCallIds === undefined || hasBackgroundTasks)
+      ) {
         return await this.finishCancelledTurn();
       }
 
@@ -160,6 +164,7 @@ export class SessionExecution {
         const canPark =
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
+          result.settled?.notifyCaller === false ||
           this.input.mode === "conversation";
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
         return {

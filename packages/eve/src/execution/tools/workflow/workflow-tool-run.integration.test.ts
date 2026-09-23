@@ -5,6 +5,8 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
+import { setAgentHandleStore } from "#subagents/handles/store.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
@@ -17,6 +19,7 @@ import {
   failingDeployWorkflow,
   holdUntilAbortedWorkflow,
   reportingDeployWorkflow,
+  receiveDelegatedResultWorkflow,
   stepThenRaceWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
@@ -691,6 +694,182 @@ describe("workflow tools", () => {
       } finally {
         stream.dispose();
         await run.cancel();
+      }
+    });
+  }, 30_000);
+
+  it.each(["session-timeout", "reset"] as const)(
+    "fails the retained caller when a yielded child receives %s",
+    async (kind) => {
+      const runtime = await createWorkflowToolRuntime({
+        agentName: `yielded-child-${kind}`,
+        background: true,
+        execute: holdUntilAbortedWorkflow,
+        toolName: "deploy_service",
+      });
+      await runtime.run(async () => {
+        const parentToken = `parent-result-${kind}`;
+        const parent = await start(receiveDelegatedResultWorkflow, [parentToken]);
+        let child: ReturnType<typeof getRun> | undefined;
+        let stream: ReturnType<typeof captureTurnEvents> | undefined;
+        let nestedRunId: string | undefined;
+        try {
+          await waitForHook(parent, { token: parentToken });
+          const before = await listWorkflowToolRunIds();
+          child = await start(workflowEntry, [
+            {
+              kind: "initial",
+              ownerDeploymentId: "dpl_inline",
+              input: { message: 'Run deploy_service with service "api"' },
+              serializedContext: {
+                ...buildSerializedContext({
+                  continuationToken: `child-${kind}`,
+                  mode: "conversation",
+                }),
+                "eve.channel": {
+                  kind: "subagent",
+                  state: {
+                    callId: "delegate",
+                    subagentName: "detector",
+                    parentContinuationToken: parentToken,
+                    parentSessionId: parent.runId,
+                  },
+                },
+              },
+            },
+          ]);
+          stream = captureTurnEvents(child);
+          const yielded = await stream.nextTurn();
+          expect(filterEventsByType(yielded, "turn.completed")).toHaveLength(1);
+          expect(yielded.at(-1)?.type).toBe("session.waiting");
+          nestedRunId = await waitForNewWorkflowToolRun(before);
+          await waitForHook({ runId: nestedRunId });
+          expect(await parent.status).toBe("running");
+          await resumeSessionInbox(
+            sessionCommandHookToken(child.runId),
+            kind === "session-timeout" ? { kind, ownerRunId: child.runId } : { kind },
+          );
+          await expect(parent.returnValue).resolves.toMatchObject({
+            kind: "runtime-action-result",
+            results: [
+              {
+                callId: "delegate",
+                isError: true,
+                outcome: {
+                  kind: "terminal",
+                  result: { kind: "failed" },
+                },
+              },
+            ],
+          });
+          await expect(child.returnValue).resolves.toEqual({
+            output: "The session ended before the delegated task completed.",
+          });
+          expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
+        } finally {
+          stream?.dispose();
+          if (nestedRunId !== undefined) {
+            const nested = getRun(nestedRunId);
+            const status = await nested.status;
+            if (status === "pending" || status === "running") await nested.cancel();
+          }
+          for (const run of [child, parent]) {
+            if (run === undefined) continue;
+            const status = await run.status;
+            if (status === "pending" || status === "running") await run.cancel();
+          }
+        }
+      });
+    },
+    30_000,
+  );
+
+  it("cancels nested work after its owning child has yielded", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "yielded-child-cancel",
+      background: true,
+      execute: holdUntilAbortedWorkflow,
+      toolName: "deploy_service",
+    });
+    await runtime.run(async () => {
+      const before = await listWorkflowToolRunIds();
+      const child = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:yielded-child-cancel",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+      let nestedRunId: string | undefined;
+      try {
+        const yielded = await stream.nextTurn();
+        expect(filterEventsByType(yielded, "turn.completed")).toHaveLength(1);
+        expect(yielded.at(-1)?.type).toBe("session.waiting");
+        nestedRunId = await waitForNewWorkflowToolRun(before);
+        await waitForHook({ runId: nestedRunId });
+        expect(await getRun(nestedRunId).status).toBe("running");
+
+        await cancelBackgroundAgentTask({
+          entry: {
+            callId: "delegate",
+            toolName: "child",
+            lifetime: "session",
+            origin: { turnId: "parent-turn", stepIndex: 0 },
+            address: { runId: child.runId, hookToken: "unused" },
+            task: {
+              taskId: "outer-task",
+              metadata: { kind: "subagent", name: "child" },
+              dispatchContext: { auth: { current: null, initiator: null } },
+            },
+          },
+          session: {
+            state: setAgentHandleStore(undefined, {
+              handles: [
+                {
+                  phase: "claimed",
+                  ownerId: "outer-task",
+                  operationId: "delegate",
+                  identity: { id: "child", name: "child", nodeId: "subagents/child" },
+                  address: {
+                    kind: "agent/local",
+                    sessionId: child.runId,
+                    continuationToken: "child",
+                  },
+                },
+              ],
+            }),
+          },
+          serializedContext: {},
+        });
+
+        // The held step can finish only after its abort signal fires or its 60s timer expires.
+        // Finishing within 15s proves cancellation reached the yielded child's work.
+        expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
+
+        // This input follows the cancellation notification in the child's inbox.
+        // It must be the next turn, without a task notification waking the child first.
+        await resumeSessionInbox(sessionCommandHookToken(child.runId), {
+          kind: "send",
+          payload: { message: "Hello again" },
+        });
+        const next = await stream.nextTurn();
+        expect(
+          filterEventsByType(next, "message.received").map((event) => event.data.message),
+        ).toEqual(["Hello again"]);
+        expect(filterEventsByType(next, "turn.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        if (nestedRunId !== undefined) {
+          const nested = getRun(nestedRunId);
+          const status = await nested.status;
+          if (status === "pending" || status === "running") await nested.cancel();
+        }
+        await child.cancel();
       }
     });
   }, 30_000);

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { defineEval } from "eve/evals";
 import { equals } from "eve/evals/expect";
-import { releaseVerification, resetSessions, waitForVerification } from "./fixture.js";
+import {
+  releaseVerification,
+  resetSessions,
+  signOffRequest,
+  waitForVerification,
+} from "./fixture.js";
 
 export default defineEval({
   tags: ["real-model"],
@@ -16,16 +21,13 @@ export default defineEval({
       const caller = await t.session();
       sessions.push(caller.sessionId);
       const callerTurn = (
-        await caller.send(`Help Alice prepare her project status update.
-Call the tool named "agent" exactly once, with the request below as its message argument.
-Your delegation tool for this request is "agent". Let that copy delegate the worker.
-After "agent" returns its working receipt, acknowledge that it is underway and finish your turn.
-When the delegated task completes, share its receipt with Alice.
-
-Request to delegate:
-Ask verification-worker to fetch Alice's verification receipt by calling verification_gate with key ${key}.
-While the worker is busy, acknowledge that verification is running and finish your turn.
-When the worker completes, share the receipt it returned.`)
+        await caller.send(
+          signOffRequest(
+            `Call the tool named "agent" exactly once, with the note below as its message argument.
+Your handoff tool for this request is "agent"; that copy of you will contact verification-worker.`,
+            key,
+          ),
+        )
       ).expectOk();
       callerTurn.requireToolCall("agent", { output: { status: "working" } });
       callerTurn.notEvent("subagent.completed");

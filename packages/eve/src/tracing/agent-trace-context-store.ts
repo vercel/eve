@@ -15,10 +15,7 @@ import type {
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 import type { SessionStateMap } from "#harness/types.js";
-import {
-  getBlockingWorkflowToolRuns,
-  getBackgroundWorkflowToolRuns,
-} from "#harness/workflow-tool-runs.js";
+import { getBlockingWorkflowToolRuns, getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -66,9 +63,9 @@ function pruneTraceOwnership(
   if (state === undefined) return;
   const calls = new Set(getBlockingWorkflowToolRuns(sessionState).map((run) => run.callId));
   const tasks = new Set(
-    getBackgroundWorkflowToolRuns(sessionState)
-      .filter((task) => task.task.outcome === undefined)
-      .map((task) => task.task.taskId),
+    getBackgroundTasks(sessionState)
+      .query({ state: "working" })
+      .map((task) => task.taskId),
   );
   const actionAnchors = Object.fromEntries(
     Object.entries(state.actionAnchors).filter(

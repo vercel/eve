@@ -3,6 +3,27 @@ import { setTimeout } from "node:timers/promises";
 import type { EveEvalContext } from "eve/evals";
 import { z } from "zod";
 
+/**
+ * Builds the caller prompt for a two-level delegation. `handoff` names the
+ * caller's delegation tool; the note is forwarded unchanged to the delegate,
+ * which hands it to verification-worker.
+ */
+export function signOffRequest(handoff: string, key: string) {
+  return `Alice is putting together her weekly project status update and needs the release checklist sign-off for it.
+${handoff}
+Once the handoff is accepted, let Alice know the sign-off is in progress and end your turn.
+When the handoff finishes, give Alice the sign-off code it returns.
+
+Note for the handoff:
+Please ask verification-worker to collect the release checklist sign-off by calling verification_gate with key ${key}.
+Once verification-worker has started, reply that the sign-off is in progress and end your turn.
+When verification-worker finishes, reply with the sign-off code it returned.`;
+}
+
+export function cancellationRequest(taskId: string) {
+  return `Alice collected the checklist sign-off herself, so the handoff is no longer needed. Call task_cancel with taskIds ["${taskId}"] to stop it, then let Alice know it was cancelled.`;
+}
+
 export async function waitForVerification(t: EveEvalContext, workerId: string, key: string) {
   const response = await t.target.fetch(`/test/verification/${workerId}/${key}/ready`, {
     method: "POST",

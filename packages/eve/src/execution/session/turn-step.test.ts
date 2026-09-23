@@ -1220,7 +1220,11 @@ describe("turnStep", () => {
           session.history,
         );
         return modelTurn === 1
-          ? { next: null, session, settledTurn: { output: { report: message } } }
+          ? {
+              next: null,
+              session,
+              settledTurn: { output: { report: message } },
+            }
           : { next: { done: true, output: { report: message } }, session };
       };
     });
@@ -2393,7 +2397,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "park",
-      settled: { output: "settled answer" },
+      settled: { notifyCaller: true, output: "settled answer" },
     });
   });
 
@@ -2425,7 +2429,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "park",
-      settled: { output: "settled answer" },
+      settled: { notifyCaller: true, output: "settled answer" },
     });
   });
 
@@ -2477,6 +2481,7 @@ describe("turnStep", () => {
     expect(first).toMatchObject({
       action: "park",
       settled: {
+        notifyCaller: true,
         output: "first answer",
         usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 40 },
       },
@@ -2510,6 +2515,7 @@ describe("turnStep", () => {
     expect(second).toMatchObject({
       action: "park",
       settled: {
+        notifyCaller: true,
         output: "second answer",
         usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 50, outputTokens: 20 },
       },
@@ -2556,7 +2562,7 @@ describe("turnStep", () => {
     expect(result).toMatchObject({
       action: "park",
       hasPendingInputBatch: true,
-      settled: { output: "settled while approval remains open" },
+      settled: { notifyCaller: true, output: "settled while approval remains open" },
     });
   });
 

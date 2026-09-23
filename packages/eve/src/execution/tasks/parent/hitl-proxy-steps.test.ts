@@ -1,7 +1,4 @@
-import {
-  recordWorkflowTaskView,
-  getBackgroundWorkflowToolRuns,
-} from "#harness/workflow-tool-runs.js";
+import { recordWorkflowTaskView, getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
@@ -125,7 +122,7 @@ describe("recordTaskInputRequestStep", () => {
         metadata: { kind: "tool", name: "export" },
         status: "completed",
         taskId: "task-1",
-      }),
+      }).state,
     });
 
     await expect(recordTaskInputRequestStep({ request, sessionState })).resolves.toEqual({
@@ -281,7 +278,7 @@ describe("recordTerminalTaskViewsStep", () => {
     });
     const state = result.sessionState.snapshot.session.state;
 
-    expect(getBackgroundWorkflowToolRuns(state)[0]?.task.outcome).toEqual({
+    expect(getBackgroundTasks(state).query()[0]?.run.task.outcome).toEqual({
       status: view.status,
       lastOutput: view.lastOutput,
     });
@@ -291,6 +288,16 @@ describe("recordTerminalTaskViewsStep", () => {
       expect.objectContaining({ phase: "available" }),
     ]);
     expect(result.serializedContext).toEqual({});
+    expect(result.subagentCompletions).toHaveLength(1);
+
+    vi.mocked(readDurableSession).mockReturnValue(result.sessionState.snapshot.session);
+    const repeated = await recordTerminalTaskViewsStep({
+      serializedContext: {},
+      sessionState: result.sessionState,
+      views: [view],
+    });
+    expect(repeated.subagentCompletions).toEqual([]);
+    expect(repeated.views).toEqual([]);
   });
 
   it("settles instrumentation from an accepted terminal task view", async () => {
