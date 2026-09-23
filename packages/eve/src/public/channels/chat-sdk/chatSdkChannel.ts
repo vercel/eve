@@ -538,21 +538,25 @@ function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
         ),
       ),
     );
+    if (request.allowFreeform === true) children.push(CardText("Or reply with your own answer."));
     return children;
   }
-  children.push(
-    CardText("This request needs a freeform answer. Continue from the eve session UI."),
-  );
+  children.push(CardText(FREEFORM_REPLY_HINT));
   return children;
 }
 
+/**
+ * Plain replies resolve through the harness text matcher (`resolveTextToResponse`):
+ * option ID or label, or freeform text when the request accepts it.
+ */
+const FREEFORM_REPLY_HINT = "Reply with your answer.";
+
 function renderInputRequestFallback(request: InputRequest): string {
   const options = request.options;
-  const answerHint =
-    options && options.length > 0
-      ? `Reply with ${options.map((option) => `"${option.id}" (${option.label})`).join(" or ")}.`
-      : "This request needs a freeform answer. Continue from the eve session UI.";
-  return `${request.prompt}\n\n${answerHint}`;
+  if (!options || options.length === 0) return `${request.prompt}\n\n${FREEFORM_REPLY_HINT}`;
+  const choices = options.map((option) => `"${option.id}" (${option.label})`).join(" or ");
+  const freeform = request.allowFreeform === true ? ", or reply with your own answer" : "";
+  return `${request.prompt}\n\nReply with ${choices}${freeform}.`;
 }
 
 async function postFailure(
