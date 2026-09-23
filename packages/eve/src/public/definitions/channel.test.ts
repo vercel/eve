@@ -480,7 +480,7 @@ describe("defineChannel", () => {
 
     expect(capturedCtx).toBeDefined();
     expect(typeof capturedCtx.getSandbox).toBe("function");
-    expect(typeof capturedCtx.getSkill).toBe("function");
+    expect(capturedCtx).not.toHaveProperty("getSkill");
     expect(capturedCtx.session.id).toBe("sess-channel-test");
     expect(capturedCtx.session.turn).toEqual({ id: "turn-1", sequence: 0 });
     expect(capturedChannel.session).toBeUndefined();

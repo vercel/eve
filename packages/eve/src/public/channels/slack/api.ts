@@ -16,7 +16,6 @@
  */
 
 import {
-  callSlackApi as callSlackApiPrimitive,
   fetchSlackThreadReplies,
   postSlackEphemeral,
   postSlackMessage,
@@ -30,6 +29,7 @@ import {
 import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat/index.js";
 
 import { createLogger, logError } from "#internal/logging.js";
+import { callSlackApiTrackingResponse } from "#public/channels/slack/api-errors.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
 import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
@@ -92,7 +92,7 @@ export async function callSlackApi(input: {
   readonly operation: string;
   readonly body: unknown;
 }): Promise<SlackApiResponse> {
-  return callSlackApiPrimitive(
+  return callSlackApiTrackingResponse(
     input.operation,
     normalizeSlackApiBody(input.body),
     createSlackApiOptions(input.botToken, input.context),

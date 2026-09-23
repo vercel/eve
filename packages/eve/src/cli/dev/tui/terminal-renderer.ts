@@ -19,6 +19,17 @@ import type {
 } from "./runner.js";
 import { interruptedError } from "./errors.js";
 import {
+  argumentTypeaheadCompletion,
+  argumentTypeaheadFor,
+  argumentTypeaheadLoadingLabel,
+  argumentTypeaheadQuery,
+  moveArgumentTypeaheadSelection,
+  renderArgumentSuggestions,
+  selectedArgumentSuggestion,
+  type ArgumentTypeaheadState,
+  type PromptArgumentSuggestion,
+} from "./argument-typeahead.js";
+import {
   dismissTypeahead,
   inlineCommandHint,
   isTypeaheadOpen,
@@ -49,13 +60,6 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
-import {
-  initialModelPickerState,
-  transitionModelPicker,
-  renderModelPicker,
-  modelPickerTitle,
-  type ModelPickerEvent,
-} from "./model-picker.js";
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
@@ -66,7 +70,6 @@ import type {
   SetupSelectResult,
 } from "./setup-flow.js";
 import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
-import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
@@ -290,6 +293,8 @@ export type TerminalRendererOptions = {
   diagnostics?: DevDiagnostics;
   /** Slash commands available in this local or remote session. */
   availablePromptCommands?: readonly PromptCommandSpec[];
+  /** Catalog entries available to inline `/model` and `/add` completion. */
+  argumentSuggestions?: (command: "model" | "add") => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };
 
@@ -473,6 +478,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * a `/`-prefixed freeform answer must never sprout suggestions.
    */
   #typeahead?: CommandTypeaheadState;
+  #argumentTypeahead?: ArgumentTypeaheadState;
+  readonly #argumentSuggestions?: TerminalRendererOptions["argumentSuggestions"];
+  readonly #argumentCatalogs = new Map<
+    ArgumentTypeaheadState["command"],
+    { kind: "loading" } | { kind: "ready"; suggestions: readonly PromptArgumentSuggestion[] }
+  >();
   /**
    * Whether the empty input row invites with a rotating placeholder. Only
    * the main chat prompt turns this on — a freeform question's empty input
@@ -622,7 +633,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
     readProviderPicker: (options) => this.#readProviderPicker(options),
-    readModelPicker: (options) => this.#readModelPicker(options),
     readText: (options) => this.#readSetupText(options),
     readAcknowledge: (options) => this.#readSetupAcknowledge(options),
     readChoice: (options) => this.#readSetupChoice(options),
@@ -663,8 +673,63 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#captureForeignOutput = options?.captureForeignOutput ?? this.#output === process.stdout;
     this.#diagnostics = options?.diagnostics;
     this.#onExitRequest = options?.onExitRequest;
+    this.#argumentSuggestions = options?.argumentSuggestions;
     this.#logs = options?.logs ?? "none";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
+  }
+
+  #syncTypeahead(text: string): void {
+    this.#typeahead = typeaheadFor(this.#availablePromptCommands, text, this.#typeahead);
+    const query = argumentTypeaheadQuery(text);
+    if (query === undefined || this.#argumentSuggestions === undefined) {
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    const catalog = this.#argumentCatalogs.get(query.command);
+    if (catalog === undefined) {
+      this.#argumentCatalogs.set(query.command, { kind: "loading" });
+      void this.#argumentSuggestions(query.command)
+        .catch(() => [])
+        .then((suggestions) => {
+          this.#argumentCatalogs.set(query.command, { kind: "ready", suggestions });
+          if (this.#inputActive) this.#syncTypeahead(this.#inputText);
+          this.#paint();
+        });
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    if (catalog.kind === "loading") {
+      this.#argumentTypeahead = undefined;
+      return;
+    }
+    this.#argumentTypeahead = argumentTypeaheadFor(
+      query,
+      catalog.suggestions,
+      this.#argumentTypeahead,
+    );
+  }
+
+  #typeaheadDrawerRows(width: number): string[] {
+    const query = argumentTypeaheadQuery(this.#inputText);
+    const catalog = query === undefined ? undefined : this.#argumentCatalogs.get(query.command);
+    if (catalog?.kind === "loading" && query !== undefined) {
+      return [
+        clip(
+          this.#theme.colors.dim(`Loading ${argumentTypeaheadLoadingLabel(query.command)}…`),
+          width,
+        ),
+      ];
+    }
+    if (this.#argumentTypeahead !== undefined) {
+      return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
+    }
+    const inlineHint =
+      this.#typeahead === undefined ? undefined : inlineCommandHint(this.#typeahead);
+    return inlineHint === undefined &&
+      this.#typeahead !== undefined &&
+      isTypeaheadOpen(this.#typeahead)
+      ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
+      : [];
   }
 
   setStartupPhase(phase: "starting" | "connecting" | "updating" | undefined): void {
@@ -810,7 +875,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#streamDraft = EMPTY_LINE;
     this.#promptHistory.begin(editor.text);
     this.#syncInput(editor);
-    this.#typeahead = typeaheadFor(this.#availablePromptCommands, editor.text);
+    this.#syncTypeahead(editor.text);
     this.#startCaretBlink();
     this.#paint();
 
@@ -820,7 +885,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         editor = next;
         this.#showCaret();
         this.#syncInput(editor);
-        this.#typeahead = typeaheadFor(this.#availablePromptCommands, next.text, this.#typeahead);
+        this.#syncTypeahead(next.text);
         this.#paint();
       };
       const recall = (entry: string | undefined) => {
@@ -836,6 +901,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
           ? this.#typeahead
           : undefined;
+      const argumentSuggestions = () =>
+        this.#argumentTypeahead?.suggestions.length ? this.#argumentTypeahead : undefined;
       const highlighted = () => {
         const open = suggestions();
         return open === undefined ? undefined : selectedTypeaheadCommand(open);
@@ -856,6 +923,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
         switch (key.type) {
           case "up":
           case "ctrl-p": {
+            const argumentOpen = argumentSuggestions();
+            if (argumentOpen !== undefined) {
+              this.#argumentTypeahead = moveArgumentTypeaheadSelection(argumentOpen, -1);
+              this.#paint();
+              break;
+            }
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, -1);
@@ -871,6 +944,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
           case "down":
           case "ctrl-n": {
+            const argumentOpen = argumentSuggestions();
+            if (argumentOpen !== undefined) {
+              this.#argumentTypeahead = moveArgumentTypeaheadSelection(argumentOpen, 1);
+              this.#paint();
+              break;
+            }
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = moveTypeaheadSelection(open, 1);
@@ -883,11 +962,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
           }
           case "tab": {
+            const argumentOpen = argumentSuggestions();
+            const argumentSelected =
+              argumentOpen === undefined ? undefined : selectedArgumentSuggestion(argumentOpen);
+            if (argumentOpen !== undefined && argumentSelected !== undefined) {
+              apply(lineOf(argumentTypeaheadCompletion(argumentOpen, argumentSelected)));
+              break;
+            }
             const selected = highlighted();
             if (selected !== undefined) apply(lineOf(typeaheadCompletion(selected)));
             break;
           }
           case "escape": {
+            if (this.#argumentTypeahead !== undefined) {
+              this.#argumentTypeahead = undefined;
+              this.#paint();
+              break;
+            }
             const open = suggestions();
             if (open !== undefined) {
               this.#typeahead = dismissTypeahead(open);
@@ -896,17 +987,42 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
           }
           case "enter": {
+            const argumentOpen = argumentSuggestions();
+            const argumentSelected =
+              argumentOpen === undefined ? undefined : selectedArgumentSuggestion(argumentOpen);
             const selected = highlighted();
             // Complete only genuine prefixes: a draft that already parses
             // (exact name, alias, or argument form) submits verbatim, so
             // /quit echoes as the user typed it.
+            if (
+              argumentOpen !== undefined &&
+              argumentSelected?.next !== undefined &&
+              argumentOpen.completed.length === 0
+            ) {
+              apply(lineOf(`${argumentTypeaheadCompletion(argumentOpen, argumentSelected)} `));
+              break;
+            }
+            // `/add` and `/model` share their inline drawer whether the
+            // command was typed exactly or reached through slash completion.
+            if (
+              argumentOpen === undefined &&
+              selected !== undefined &&
+              this.#argumentSuggestions !== undefined &&
+              (selected.name === "add" || selected.name === "model")
+            ) {
+              apply(lineOf(typeaheadCompletion(selected)));
+              break;
+            }
             const prompt =
-              selected !== undefined && parsePromptCommand(editor.text) === null
-                ? typeaheadCompletion(selected).trimEnd()
-                : editor.text;
+              argumentOpen !== undefined && argumentSelected !== undefined
+                ? argumentTypeaheadCompletion(argumentOpen, argumentSelected)
+                : selected !== undefined && parsePromptCommand(editor.text) === null
+                  ? typeaheadCompletion(selected).trimEnd()
+                  : editor.text;
             // An empty (or whitespace-only) buffer never submits.
             if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
+            this.#argumentTypeahead = undefined;
             this.#promptHistory.add(prompt);
             this.#inputActive = false;
             this.#stopCaretBlink();
@@ -2443,68 +2559,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#stopCaretBlink();
       },
     );
-    return await question.promise;
-  }
-
-  async #readModelPicker(opts: ModelSettingsRequest): Promise<ModelSettingsResult | undefined> {
-    let interaction = initialModelPickerState(opts);
-    const flow = this.#beginSetupQuestion(modelPickerTitle(interaction));
-    flow.question = (width) => renderModelPicker(opts, interaction, this.#theme, width);
-    this.#paint();
-
-    const question = this.#captureSetupQuestion<ModelSettingsResult | undefined>((key, settle) => {
-      const dispatch = (event: ModelPickerEvent): void => {
-        const transition = transitionModelPicker(interaction, event, opts);
-        switch (transition.kind) {
-          case "render":
-            if (interaction === transition.state) return;
-            interaction = transition.state;
-            flow.questionTitle = modelPickerTitle(interaction);
-            this.#paint();
-            return;
-          case "cancel":
-            settle(undefined);
-            return;
-          case "settle":
-            settle(transition.result);
-            return;
-        }
-      };
-
-      if (key.type === "ctrl-c") {
-        dispatch({ type: "cancel" });
-        return;
-      }
-      if (key.type === "escape" || key.type === "left") {
-        dispatch({ type: "back" });
-        return;
-      }
-      const intent = setupSelectionIntent(key);
-      switch (intent?.kind) {
-        case "move":
-          dispatch({ type: intent.direction });
-          return;
-        case "submit":
-          dispatch({ type: "submit" });
-          return;
-        case "repaint":
-          this.#paint();
-          return;
-      }
-      if (key.type === "backspace") {
-        dispatch({ type: "backspace" });
-        return;
-      }
-      if (key.type === "alt-backspace") {
-        dispatch({ type: "delete-word-backward" });
-        return;
-      }
-      if (key.type === "text") {
-        for (const char of key.value.replaceAll("\n", " ")) {
-          if (char >= " " && char !== "\u007f") dispatch({ type: "char", char });
-        }
-      }
-    });
     return await question.promise;
   }
 
@@ -4353,13 +4407,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // still open the list above the input.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
-      if (
-        inlineHint === undefined &&
-        this.#typeahead !== undefined &&
-        isTypeaheadOpen(this.#typeahead)
-      ) {
-        rows.push(...renderCommandSuggestions(this.#typeahead, this.#theme, width));
-      }
+      const typeaheadRows = this.#typeaheadDrawerRows(width);
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
@@ -4372,7 +4420,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
       // (attention or typeahead), so the prompt receives only what remains.
-      const maxPromptRows = Math.max(1, this.#height() - 1 - rows.length - 1 - statusRows.length);
+      const maxPromptRows = Math.max(
+        1,
+        this.#height() -
+          1 -
+          rows.length -
+          1 -
+          typeaheadRows.length -
+          statusRows.length -
+          (typeaheadRows.length > 0 ? 2 : 0),
+      );
       const promptRows: Parameters<typeof promptInputRows>[0] = {
         text: this.#inputText,
         cursor: this.#inputCursor,
@@ -4393,7 +4450,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
               ? ""
               : "Send a message…";
       }
-      rows.push(...promptInputRows(promptRows));
+      const renderedPromptRows = promptInputRows(promptRows);
+      // The prompt helper ends with a footer spacer; a drawer owns that gap.
+      if (typeaheadRows.length > 0 && renderedPromptRows.at(-1) === "") renderedPromptRows.pop();
+      rows.push(...renderedPromptRows);
+      // Keep menus beneath the composer so opening them never moves the caret.
+      if (typeaheadRows.length > 0) rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
+      rows.push(...typeaheadRows);
+      if (typeaheadRows.length > 0 && statusRows.length > 0) {
+        rows.push(c.dim(this.#theme.glyph.dash.repeat(width)));
+      }
       rows.push(...statusRows);
       return rows;
     }
@@ -4958,7 +5024,7 @@ interface PromptInputRowsInput {
   readonly width: number;
   readonly theme: Theme;
   readonly caretVisible: boolean;
-  /** A fully typed known command paints blue, confirming it will dispatch as a command. */
+  /** A fully typed known command is bold, confirming it will dispatch as a command. */
   readonly isCommand: boolean;
   readonly ghost: string;
   readonly maxRows: number;
@@ -5010,7 +5076,7 @@ function promptInputRows({
 
   const style = (segment: string): string => {
     const rendered = renderInputText(segment);
-    return isCommand && rendered.length > 0 ? c.blue(rendered) : rendered;
+    return isCommand && rendered.length > 0 ? c.bold(rendered) : rendered;
   };
 
   const layout = layoutPromptInput({ text, cursor });

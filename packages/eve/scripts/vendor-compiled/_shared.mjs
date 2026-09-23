@@ -892,7 +892,7 @@ function stampMatches(a, b) {
  * directory lets us recover from stale locks left behind by crashed
  * processes.
  */
-async function acquireLock(lockPath, timeoutMs = 120_000) {
+export async function acquireLock(lockPath, timeoutMs = 120_000) {
   const start = Date.now();
 
   while (true) {
@@ -920,6 +920,6 @@ async function acquireLock(lockPath, timeoutMs = 120_000) {
   }
 }
 
-async function releaseLock(lockPath) {
+export async function releaseLock(lockPath) {
   await rm(lockPath, { recursive: true, force: true });
 }

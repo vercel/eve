@@ -23,7 +23,7 @@
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
-    "test:integration": "turbo run test:integration",
+    "test:integration": "turbo run test:integration --filter=eve && turbo run test:integration --filter=\"!eve\"",
     "test:scenario": "turbo run test:scenario",
     "test:tui": "pnpm --filter eve run test:tui",
     "test:unit": "turbo run test:unit",
@@ -40,8 +40,7 @@
     "oxlint": "1.81.0",
     "syncpack": "15.3.3",
     "turbo": "2.10.12",
-    "typescript": "catalog:",
-    "vercel": "59.5.0"
+    "typescript": "catalog:"
   },
   "engines": {
     "node": ">=24"

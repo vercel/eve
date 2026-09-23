@@ -1,14 +1,24 @@
+import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
+import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
-import { contextStorage } from "#context/container.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
+  dispatchDynamicInstructionEvent,
   drainDynamicInstructionUserMessages,
   prepareDynamicInstructionPreamble,
 } from "#context/dynamic-instruction-lifecycle.js";
-import { refreshDynamicSessionSubagentsForRuntimeRevision } from "#context/dynamic-subagent-lifecycle.js";
+import {
+  dispatchDynamicSubagentEvent,
+  refreshDynamicSessionSubagentsForRuntimeRevision,
+} from "#context/dynamic-subagent-lifecycle.js";
 import { drainMemoryCommit, prepareMemoryPreamble } from "#context/memory-lifecycle.js";
 import {
+  dispatchDynamicToolEvent,
   rebindMissingCompiledDynamicToolCallbacks,
   refreshDynamicSessionToolsForRuntimeRevision,
 } from "#context/dynamic-tool-lifecycle.js";
@@ -28,7 +38,11 @@ import {
   TaskDeliveryPolicyKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  BundleKey,
+  ChannelKey,
+  type CompiledBundle,
+} from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   emitTurnPreamble,
@@ -36,7 +50,10 @@ import {
   isHarnessBetweenTurns,
   setHarnessEmissionState,
 } from "#harness/emission.js";
-import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
+import {
+  bindSessionInstrumentation,
+  type ExecutionInstrumentation,
+} from "#instrumentation/runtime.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
@@ -50,10 +67,10 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
-import { createSessionEventSink } from "#execution/session/event-sink.js";
+import { createSessionEventSink, type SessionEventSink } from "#execution/session/event-sink.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
@@ -235,18 +252,26 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     await instrumentation?.flush();
   };
   const sink = createSessionEventSink({
-    abortSignal: input.abortSignal,
     adapter,
-    bundle,
     ctx,
-    effectiveAgent,
-    instrumentation,
     isFirstTurn: initialEmissionState.sequence === 0,
     sessionWritable: input.sessionWritable,
     sessionId: initialSession.sessionId,
   });
-  const { adapterCtx, dynamicConnections, effectiveNode, handleEvent } = sink;
+  const { adapterCtx } = sink;
   try {
+    const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
+    const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
+    const handleEvent = createTurnEventHandler({
+      abortSignal: input.abortSignal,
+      bundle,
+      ctx,
+      dynamicConnections,
+      effectiveAgent,
+      effectiveNode,
+      instrumentation,
+      sink,
+    });
     const previousAdapterState =
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
         ? structuredClone(adapterCtx.state)
@@ -599,4 +624,69 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   } finally {
     sink.release();
   }
+}
+
+/** Publishes one turn event, then runs memory, hooks, and model preparation for it. */
+function createTurnEventHandler(input: {
+  readonly abortSignal: AbortSignal | undefined;
+  readonly bundle: CompiledBundle;
+  readonly ctx: ContextContainer;
+  readonly dynamicConnections: ReturnType<typeof bindDynamicConnections>;
+  readonly effectiveAgent: ReturnType<typeof resolveEffectiveAgentRuntime>;
+  readonly effectiveNode: CompiledBundle["graph"]["root"];
+  readonly instrumentation: ExecutionInstrumentation | undefined;
+  readonly sink: SessionEventSink;
+}): HandleEventFn {
+  const { abortSignal, bundle, ctx, effectiveAgent, effectiveNode } = input;
+  return async (event, messages) => {
+    const emitted = await input.sink.emit(event);
+    const lifecycleMessages = await dispatchMemoryLifecycleEvent({
+      abortSignal,
+      appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
+      ctx,
+      event,
+      instrumentation: input.instrumentation?.memory,
+      memories: effectiveNode.agent?.memories ?? [],
+      messages,
+      nodeId: bundle.nodeId ?? "__root__",
+    });
+    if (!emitted.suppressed) {
+      await dispatchStreamEventHooks({ ctx, registry: bundle.hookRegistry, event: emitted.event });
+    }
+    if (emitted.event.type !== "step.started") {
+      await dispatchDynamicModelEvent({
+        abortSignal,
+        ctx,
+        dynamicModel: effectiveAgent.turnAgent.dynamicModel,
+        event: emitted.event,
+        messages: lifecycleMessages,
+        scope: { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId },
+      });
+    }
+    await input.dynamicConnections.dispatch(emitted.event);
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      resolvers: bundle.subagentRegistry.dynamicResolvers ?? [],
+      event: emitted.event,
+      messages: lifecycleMessages,
+    });
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: bundle.resolvedAgent.dynamicToolResolvers ?? [],
+      event: emitted.event,
+      messages: lifecycleMessages,
+    });
+    await dispatchDynamicSkillEvent({
+      ctx,
+      resolvers: bundle.resolvedAgent.dynamicSkillResolvers ?? [],
+      event: emitted.event,
+      messages: lifecycleMessages,
+    });
+    await dispatchDynamicInstructionEvent({
+      ctx,
+      resolvers: bundle.resolvedAgent.dynamicInstructionsResolvers ?? [],
+      event: emitted.event,
+      messages: lifecycleMessages,
+    });
+  };
 }

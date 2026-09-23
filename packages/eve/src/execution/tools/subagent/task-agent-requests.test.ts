@@ -34,7 +34,7 @@ const result: RuntimeSubagentChildResult = {
   subagentName: "research",
 };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => vi.resetAllMocks());
 
 describe("workflow-owned agent requests", () => {
   it("reuses the settlement step's flushed trace context during workflow replay", async () => {
@@ -65,33 +65,50 @@ describe("workflow-owned agent requests", () => {
     expect(replay).toEqual(settled);
   });
 
-  it("emits completion and acknowledges only after settlement", async () => {
-    const updatedState = { sessionId: "updated" } as never;
-    vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
-      settled: true,
-      completion: {
-        type: "subagent.completed",
+  it.each([false, true])(
+    "waits for notification hooks before acknowledgement and retains their state (fails: %s)",
+    async (fails) => {
+      const updatedState = { sessionId: "updated" } as never;
+      const hookState = { sessionId: "hooked" } as never;
+      const completion = {
+        type: "subagent.completed" as const,
         data: { callId: "nested", subagentName: "research", output: "done" },
-      },
-      serializedContext: {},
-      sessionState: updatedState,
-    });
-    const publication = Promise.withResolvers<{ serializedContext: Record<string, unknown> }>();
-    vi.mocked(emitSubagentEventStep).mockReturnValue(publication.promise);
-    const applying = applyTaskAgentRequest(
-      { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
-      { sessionWritable: {} as never, serializedContext: {}, sessionState },
-    );
-    await vi.waitFor(() => expect(emitSubagentEventStep).toHaveBeenCalledOnce());
-    expect(resumeHookStep).not.toHaveBeenCalled();
-    publication.resolve({ serializedContext: {} });
-    expect((await applying).sessionState).toBe(updatedState);
-    expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
-      "reply",
-      { kind: "agent-settled", callId: "nested" },
-      { ifPresent: true },
-    );
-  });
+      };
+      vi.mocked(settleTaskAgentInvocationStep).mockResolvedValue({
+        settled: true,
+        completion,
+        serializedContext: {},
+        sessionState: updatedState,
+      });
+      const notification =
+        Promise.withResolvers<Awaited<ReturnType<typeof emitSubagentEventStep>>>();
+      vi.mocked(emitSubagentEventStep).mockReturnValue(notification.promise);
+      const applying = applyTaskAgentRequest(
+        { ownerId: "workflow-run", replyTo: "reply", request: { kind: "agent-settled", result } },
+        { sessionWritable: {} as never, serializedContext: {}, sessionState },
+      );
+      await vi.waitFor(() => expect(emitSubagentEventStep).toHaveBeenCalledOnce());
+      expect(resumeHookStep).not.toHaveBeenCalled();
+      if (fails) {
+        const rejected = expect(applying).rejects.toThrow("hook failed");
+        notification.reject(new Error("hook failed"));
+        await rejected;
+        expect(emitSubagentEventStep).toHaveBeenCalledOnce();
+        expect(resumeHookStep).not.toHaveBeenCalled();
+      } else {
+        notification.resolve({ serializedContext: { hook: true }, sessionState: hookState });
+        expect(await applying).toEqual({
+          serializedContext: { hook: true },
+          sessionState: hookState,
+        });
+        expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
+          "reply",
+          { kind: "agent-settled", callId: "nested" },
+          { ifPresent: true },
+        );
+      }
+    },
+  );
 
   it("does not acknowledge a failed settlement", async () => {
     vi.mocked(settleTaskAgentInvocationStep).mockRejectedValue(new Error("write failed"));
@@ -123,7 +140,10 @@ describe("workflow-owned agent requests", () => {
       kind: "dispatched",
       sessionState,
     });
-    vi.mocked(emitSubagentEventStep).mockResolvedValue({ serializedContext });
+    vi.mocked(emitSubagentEventStep).mockResolvedValue({
+      sessionState,
+      serializedContext,
+    });
 
     const applied = await applyTaskAgentRequest(
       {

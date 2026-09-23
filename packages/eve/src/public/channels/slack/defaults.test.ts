@@ -9,7 +9,6 @@ function sessionContext(
 ): SessionContext {
   return {
     getSandbox: vi.fn(),
-    getSkill: vi.fn(),
     session: {
       auth: { current, initiator: null },
       id: "test-session",

@@ -1,0 +1,111 @@
+name: eve-code
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/eve-code-benchmark.yml"
+      - ".github/scripts/resolve-benchmark-request*"
+      - "packages/eve-code/**"
+  # Every eve-code change on main publishes a fresh result per harness, so PRs
+  # compare their HEAD against the latest main as the baseline.
+  push:
+    branches: [main]
+    paths:
+      - "packages/eve-code/**"
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      harness:
+        description: Comma-separated harnesses to benchmark on SWE-lean
+        type: string
+        default: eve-code,opencode,pi
+
+# OIDC alternative: add `id-token: write` here and omit `vercel-token` below
+# after configuring a matching Vercel team OIDC policy.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+
+jobs:
+  request:
+    name: Resolve benchmark request
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'issue_comment' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/benchmark')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.request.outputs.run }}
+      harness: ${{ steps.request.outputs.harness }}
+      slug: ${{ steps.request.outputs.slug }}
+      sha: ${{ steps.request.outputs.sha }}
+      pr: ${{ steps.request.outputs.pr }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: request
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { pathToFileURL } = await import('node:url');
+            const { resolveBenchmarkRequest } = await import(pathToFileURL(
+              `${process.env.GITHUB_WORKSPACE}/.github/scripts/resolve-benchmark-request.mjs`).href);
+            const request = await resolveBenchmarkRequest({ github, context });
+            core.setOutput('run', Boolean(request));
+            if (request) for (const [key, value] of Object.entries(request)) core.setOutput(key, value);
+
+  benchmark:
+    name: Benchmark harness
+    needs: request
+    if: needs.request.outputs.run == 'true'
+    concurrency:
+      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.slug }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    # Every trial runs in parallel, so a run lasts about as long as its slowest
+    # trial (15-minute agent timeout plus preparation and verification).
+    timeout-minutes: 90
+    steps:
+      # vercel/eve is public and eve-bench is private; GitHub never lets a public
+      # repository `uses:` a private action, so fetch main with a read-only deploy
+      # key and run it locally. The action records the resolved runner SHA.
+      - name: Checkout eve-bench main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: vercel-labs/eve-bench
+          ref: main
+          ssh-key: ${{ secrets.EVE_BENCH_SSH_KEY }}
+          path: .eve-bench-action
+          persist-credentials: false
+      - name: Run selected harnesses
+        uses: ./.eve-bench-action
+        with:
+          harness: ${{ needs.request.outputs.harness }}
+          agent-repository: vercel/eve
+          agent-path: packages/eve-code
+          agent-ref: ${{ needs.request.outputs.sha }}
+          dataset: swe-lean
+          # The PR comment's ranking tables show these plus each dimension's winner.
+          contenders: eve-code@baseline,eve-code@head
+          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-6-luna' }}
+          # opencode drops Gemini's tool-call thought signatures, so Gemini stops reasoning
+          # after its first steps there; gpt-6-luna needs no signature to keep reasoning.
+          reasoning: low
+          attempts: "1"
+          # Per harness: one sandbox per task, so all trials start at once.
+          concurrency: "8"
+          native-build: "false"
+          # Baselines and cross-harness references resolve automatically from the
+          # durable result store; only dispatch/push/schedule runs publish to it.
+          blob-token: ${{ secrets.EVE_BENCH_BLOB_READ_WRITE_TOKEN }}
+          artifact-name: swe-lean-${{ needs.request.outputs.slug }}
+          gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
+          github-token: ${{ github.token }}
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-team-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}

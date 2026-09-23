@@ -5,12 +5,11 @@ description: "Use ctx.session and runtime accessors inside eve-managed execution
 
 eve passes a runtime `ctx` to tool executors, hook handlers, channel event handlers, and connection auth and header resolvers. Use it to inspect the active session and reach resources bound to that execution.
 
-| Accessor                     | Provides                                                  | Full guide                                      |
-| ---------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
-| `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                                       |
-| `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)                           |
-| `ctx.getSkill(identifier)`   | A handle for a skill visible to the current agent         | [Skills](../skills#read-skill-files-at-runtime) |
-| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state)                      |
+| Accessor                     | Provides                                                  | Full guide                 |
+| ---------------------------- | --------------------------------------------------------- | -------------------------- |
+| `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                  |
+| `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)      |
+| `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state) |
 
 These APIs work only during eve-managed runtime execution. Calling them during module evaluation, discovery, or a build throws.
 
@@ -60,17 +59,6 @@ const result = await sandbox.run({ command: "npm test" });
 ```
 
 The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
-
-## `ctx.getSkill(identifier)`
-
-Call `ctx.getSkill(identifier)` to read a packaged skill's supporting files:
-
-```ts
-const skill = ctx.getSkill("research");
-const notes = await skill.file("references/checklist.md").text();
-```
-
-The accessor is synchronous; file content is read lazily from the active sandbox. Visibility follows the current agent. See [Skills](../skills#read-skill-files-at-runtime) for the complete handle behavior.
 
 ## Custom state with `defineState`
 

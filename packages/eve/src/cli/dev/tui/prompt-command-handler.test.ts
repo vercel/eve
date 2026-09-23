@@ -54,7 +54,6 @@ function setupFlowRenderer() {
     readSelect: vi.fn(async () => undefined),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
-    readModelPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => undefined),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -114,7 +113,7 @@ describe("createPromptCommandHandler", () => {
     expect(applyModel).not.toHaveBeenCalled();
   });
 
-  it("sends a bare /model down the setup-flow path, not a bespoke picker", async () => {
+  it("requires the inline drawer to complete a bare /model", async () => {
     const applyModel = vi.fn(async () => ({ kind: "rejected", message: "unused" }) as const);
     const readInputQuestion = vi.fn(async () => ({ optionId: "openai/gpt-5" }));
     const handler = createPromptCommandHandler({
@@ -122,14 +121,12 @@ describe("createPromptCommandHandler", () => {
       applyModel,
     });
 
-    // No setupFlow on the renderer: the flow path reports itself instead of
-    // falling back to the old readInputQuestion picker.
     await expect(
       handler.handle(
         { type: "extension", name: "model", argument: "" },
         context({ readInputQuestion }),
       ),
-    ).resolves.toEqual({ message: "/model is not supported by this renderer." });
+    ).resolves.toEqual({ message: "Choose a model from the inline /model suggestions." });
     expect(readInputQuestion).not.toHaveBeenCalled();
     expect(applyModel).not.toHaveBeenCalled();
   });
@@ -144,43 +141,6 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "/model needs eve dev running the local server (it is not available with --url).",
     });
-  });
-
-  it("forwards automatic provider entry and model-access changes", async () => {
-    const runTuiSetupCommand = vi.fn(async () => ({
-      message: "AI Gateway via API key selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true } as const,
-    }));
-    vi.doMock("./setup-commands.js", () => ({
-      SETUP_FLOW_CONFIG: {
-        model: { title: "Configure the agent model", indicator: "pulse" },
-      },
-      runTuiSetupCommand,
-    }));
-
-    try {
-      const setupFlow = setupFlowRenderer();
-      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
-
-      await expect(
-        handler.handle(
-          { type: "extension", name: "model", argument: "" },
-          { ...context({ setupFlow }), initialModelStep: "provider" },
-        ),
-      ).resolves.toEqual({
-        message: "AI Gateway via API key selected.",
-        effect: { kind: "model-access-changed", reload: true },
-      });
-      expect(runTuiSetupCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ initialModelStep: "provider" }),
-      );
-      expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
-      expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
-    } finally {
-      vi.doUnmock("./setup-commands.js");
-      vi.resetModules();
-    }
   });
 
   it("routes a /add argument to the registry flow's initial address", async () => {
@@ -201,18 +161,9 @@ describe("createPromptCommandHandler", () => {
         { type: "extension", name: "add", argument: "channel/slack" },
         context({ setupFlow }),
       );
-      await handler.handle(
-        { type: "extension", name: "add", argument: "" },
-        context({ setupFlow }),
-      );
-
-      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
-        1,
+      expect(runTuiSetupCommand).toHaveBeenCalledOnce();
+      expect(runTuiSetupCommand).toHaveBeenCalledWith(
         expect.objectContaining({ command: "add", initialRegistryAddress: "channel/slack" }),
-      );
-      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
-        2,
-        expect.not.objectContaining({ initialRegistryAddress: expect.anything() }),
       );
     } finally {
       vi.doUnmock("./setup-commands.js");
@@ -308,9 +259,12 @@ describe("createPromptCommandHandler", () => {
       });
 
       await expect(
-        handler.handle({ type: "extension", name: "model", argument: "" }, context({ setupFlow })),
+        handler.handle(
+          { type: "extension", name: "add", argument: "channel/slack" },
+          context({ setupFlow }),
+        ),
       ).resolves.toEqual({
-        message: expect.stringMatching(/^\/model failed: /),
+        message: expect.stringMatching(/^\/add failed: /),
       });
       expect(setupFlow.begin).not.toHaveBeenCalled();
     } finally {

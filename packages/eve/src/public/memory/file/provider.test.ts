@@ -407,9 +407,6 @@ function operationContext() {
     getSandbox: async () => {
       throw new Error("not available");
     },
-    getSkill: () => {
-      throw new Error("not available");
-    },
     memory: {
       scope: { key: "mem_scope", namespace: "test", value: "scope-1" },
       slot: "facts",

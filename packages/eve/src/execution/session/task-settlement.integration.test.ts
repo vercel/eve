@@ -1,7 +1,9 @@
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 
-vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({ emitSubagentEventStep: vi.fn() }));
+vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
+  emitSubagentEventStep: vi.fn(),
+}));
 
 import { expect, it, vi } from "vitest";
 
@@ -24,7 +26,12 @@ import type { TaskView } from "#tasks/types.js";
 it.each(["completed", "failed", "cancelled"] as const)(
   "records a parked parent's %s task and removes its question before reporting the cohort",
   async (status) => {
-    vi.mocked(emitSubagentEventStep).mockReset().mockResolvedValue({ serializedContext: {} });
+    vi.mocked(emitSubagentEventStep)
+      .mockReset()
+      .mockImplementation(async (input) => ({
+        serializedContext: {},
+        sessionState: input.sessionState,
+      }));
     let state = createTestSessionState();
     let session = state.snapshot.session;
     for (const taskId of ["A", "B"]) {
@@ -163,7 +170,10 @@ it.each(["completed", "failed", "cancelled"] as const)(
         findBackgroundWorkflowToolRun(input.sessionState.snapshot.session.state, "task")?.task
           .outcome,
       ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
-      return { serializedContext: input.serializedContext };
+      return {
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      };
     });
     const deliver = async (outcome: TaskView) => {
       const result = await routeDeliverToChildren({
