@@ -143,24 +143,8 @@ for (const [index, item] of items.entries()) {
     }
     if (item.files?.some((file) => file.target === "tsconfig.json")) {
       throw new Error(
-        `Registry item "${item.name}" must not overwrite the agent's root tsconfig.json.`,
+        `Registry item "${item.name}" must let eve prepare tsconfig.json before shadcn installs files.`,
       );
-    }
-    const webProxy = item.files?.find((file) => file.target === "apps/web/proxy.ts");
-    if (webProxy?.path !== "registry/channel/web/proxy.ts") {
-      throw new Error(
-        `Registry item "${item.name}" must install the Web Chat proxy at apps/web/proxy.ts.`,
-      );
-    }
-    const webTsconfig = item.files?.find((file) => file.target === "apps/web/tsconfig.json");
-    if (webTsconfig?.path !== "registry/channel/web/tsconfig.json") {
-      throw new Error(
-        `Registry item "${item.name}" must install the Web Chat tsconfig at apps/web/tsconfig.json.`,
-      );
-    }
-    const config = JSON.parse(await readFile(join(docsRoot, webTsconfig.path), "utf8"));
-    if (!config.compilerOptions?.paths?.["@/*"]?.includes("./*")) {
-      throw new Error("Web Chat tsconfig must map @/* to ./*.");
     }
   }
 
