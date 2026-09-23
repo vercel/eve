@@ -24,35 +24,44 @@ interface HookContext extends SessionContext {
 }
 ```
 
-```ts title="agent/hooks/step-budget.ts"
+```ts title="agent/hooks/require-credentials.ts"
 import { defineHook } from "eve/hooks";
-
-const MAX_STEPS_PER_TURN = 20;
+import { loadWorkspaceCredentials } from "../lib/credentials";
 
 export default defineHook({
   events: {
-    "step.started"(event, ctx) {
-      if (event.data.stepIndex >= MAX_STEPS_PER_TURN) ctx.cancel();
+    async "turn.started"(_event, ctx) {
+      try {
+        await loadWorkspaceCredentials(ctx.session.auth.current);
+      } catch (error) {
+        console.warn("cancelling turn: workspace credentials unavailable", { error });
+        ctx.cancel();
+      }
     },
   },
 });
 ```
 
-`cancel()` returns `void` and does not throw, so it composes with the failure isolation contract: the handler keeps running, and the author returns when appropriate.
+### Why `void`, not `Promise<void>`
+
+`session.cancel()` returns a promise because it crosses a durable inbox and reports `accepted` or `no_active_turn`. `ctx.cancel()` runs inside the turn it stops, and that turn cannot settle while eve is still awaiting the hook. A promise would either resolve before the cancellation takes effect or never resolve. `void` states the real contract: the request is recorded now and applied when the event's hooks return. `await ctx.cancel()` still type-checks and behaves the same.
+
+`cancel()` also does not throw. Throwing would route through the failure isolation catch and hide the intent in an error log. The handler keeps running and returns when appropriate.
 
 ## Semantics
 
 ```mermaid
 flowchart LR
-  Hook["ctx.cancel() in a hook"] --> Rest["Remaining hooks and resolvers see the event"]
-  Rest --> Abort["Turn signal aborts"]
-  Abort --> Settle["turn.cancelled then session.waiting"]
+  Hook["ctx.cancel() in a hook"] --> Abort["Turn signal aborts"]
+  Abort --> Rest["Remaining hooks for the event run"]
+  Rest --> Settle["turn.cancelled then session.waiting"]
 ```
 
-- **Deferred to the end of the event.** Every consumer of the event still runs: memory lifecycle, the remaining hook subscribers (typed handlers first, then `*`), and the dynamic model, connection, subagent, tool, skill, and instruction resolvers. Only then does the turn stop. An audit hook never misses the event that caused the cancellation.
+- **Aborts at once, stops after the event's hooks.** The call aborts the turn signal immediately. The remaining hook subscribers for the event still run, so an audit hook sees the event that caused the cancellation. Turn-level consumers that honor the signal, such as dynamic model resolution, may stop early. If one of them throws, the turn still settles as cancelled because the signal was already aborted.
 - **Same outcome as `session.cancel()`.** In-flight model and tool work is aborted, delegated child turns are cancelled, and the turn settles as `turn.cancelled` followed by `session.waiting`. No failure event is emitted and no step is retried. A conversation accepts the next message as a new turn. A delegated task reports the cancellation to its caller.
-- **Deterministic before the model.** A cancel from `turn.started` or `step.started` stops the turn before that model call starts.
-- **Only a running turn can be cancelled.** The call is ignored with a warning log on events at or after settlement (`turn.completed`, `turn.failed`, `turn.cancelled`, `session.waiting`, `session.completed`, `session.failed`), on `subagent.called` and `subagent.completed`, and during clear or compact requests. Cancelling after a terminal event would create a second terminal for the same turn.
+- **Deterministic before the model.** A cancel from `turn.started` or `step.started` stops the turn before that model call is sent.
+- **Fails closed on events.** Eligibility is a total map over hook event types, so a new event does not compile until it is classified. `step.failed`, turn and session terminal events, `context.cleared`, and `subagent.*` are not cancellable, and neither are clear or compact requests. Cancelling after a terminal event would give the turn a second terminal. eve logs a warning and ignores these calls.
+- **Only during dispatch.** A call from work the handler did not await, made after the event's hooks returned, is ignored with a warning. Otherwise it could cancel at an arbitrary later point, or never.
 - **Hook exceptions stay isolated.** Throwing from a hook is logged with the hook slug, subscription, event type, event ID, and session ID, and execution continues. Only `ctx.cancel()` stops a turn.
 
 Internally, each turn step combines the workflow-owned turn signal with a step-local signal that `ctx.cancel()` aborts. The harness already checks that signal at every model, tool, and error-recovery boundary, so hook cancellation adds no new settlement path.
@@ -70,6 +79,6 @@ Internally, each turn step combines the workflow-owned turn signal with a step-l
 
 ## Validation
 
-- Unit: a `step.started` cancel returns a cancelled step result with the turn signal aborted after both typed and wildcard subscribers run. A `turn.completed` cancel keeps the settled turn and logs the warning.
-- Integration: the dispatcher forwards `cancel()` without skipping later subscribers and warns when no turn can be cancelled. A full workflow session cancelled from `turn.started` emits `turn.cancelled` then `session.waiting`, no `step.started`, no failure events, and no step retries, and the next message completes.
-- E2E: `agent-basic-runtime` `boundary-hook-cancel` cancels from `turn.started` and `step.started`, then requires the next turn in the same session to complete.
+- Unit: eligibility is table-tested across settlement, subagent, and unknown event types. A `step.started` cancel returns a cancelled step result with the turn signal aborted after both typed and wildcard subscribers run. A cancel followed by a throwing dynamic model resolver still returns a cancelled result. A `turn.completed` cancel keeps the settled turn and logs the warning.
+- Integration: the dispatcher forwards `cancel()` without skipping later subscribers, and warns on ineligible events and on calls after the hooks returned. Full workflow sessions cancelled from `turn.started` and from `step.started` emit `turn.cancelled` then `session.waiting`, no model output, no failure events, and no step retries, and the next message completes.
+- E2E: `agent-basic-runtime` `workspace-credentials-cancel` runs a `turn.started` hook that fails to load revoked workspace credentials and cancels. It requires no `step.started`, no failure events, and a completed next turn once the credentials load.

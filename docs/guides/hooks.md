@@ -188,25 +188,34 @@ A hook failure does not trigger a retry. State changes and external side effects
 
 ## Cancel the running turn from a hook
 
-Call `ctx.cancel()` to stop the turn that emitted the event, for example to enforce a per-turn step budget or to decline a request from `turn.started` before the model runs:
+Call `ctx.cancel()` when a hook finds that the turn cannot proceed. For example, a `turn.started` hook that cannot load the caller's credentials can stop the turn before the model runs, instead of letting every tool call fail:
 
-```ts title="agent/hooks/step-budget.ts"
+```ts title="agent/hooks/require-credentials.ts"
 import { defineHook } from "eve/hooks";
-
-const MAX_STEPS_PER_TURN = 20;
+import { loadWorkspaceCredentials } from "../lib/credentials";
 
 export default defineHook({
   events: {
-    "step.started"(event, ctx) {
-      if (event.data.stepIndex >= MAX_STEPS_PER_TURN) ctx.cancel();
+    async "turn.started"(_event, ctx) {
+      try {
+        await loadWorkspaceCredentials(ctx.session.auth.current);
+      } catch (error) {
+        console.warn("cancelling turn: workspace credentials unavailable", {
+          error,
+          sessionId: ctx.session.id,
+        });
+        ctx.cancel();
+      }
     },
   },
 });
 ```
 
-`ctx.cancel()` returns immediately. The remaining subscribers for the same event still run, then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
+The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
 
-`ctx.cancel()` only stops a turn that is still running. On `turn.completed`, `turn.failed`, `turn.cancelled`, `session.waiting`, `session.completed`, `session.failed`, `subagent.called`, and `subagent.completed`, and during clear or compact requests, eve logs a warning and ignores the call.
+`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
+
+`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, and `subagent.*` events, and during clear or compact requests.
 
 ## Subagent isolation
 

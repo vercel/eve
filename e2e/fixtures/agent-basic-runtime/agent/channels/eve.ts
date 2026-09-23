@@ -23,8 +23,8 @@ const authenticateB: AuthFn<Request> = (request) =>
 const authenticateEvalDriver: AuthFn<Request> = (request) => ({
   ...principal("eval-driver"),
   attributes: {
-    cancelHookEvent: request.headers.get("x-e2e-cancel-hook") ?? "",
     failHookEvent: request.headers.get("x-e2e-fail-hook") ?? "",
+    workspaceCredentials: request.headers.get("x-e2e-workspace-credentials") ?? "active",
   },
 });
 

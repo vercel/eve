@@ -97,6 +97,7 @@ describe("dispatchStreamEventHooks", () => {
 
     await contextStorage.run(ctx, () =>
       dispatchStreamEventHooks({
+        cancelTurn: undefined,
         ctx,
         registry,
         event: stampTestEvent({ type: "session.completed" }),
@@ -153,7 +154,7 @@ describe("dispatchStreamEventHooks", () => {
     const ctx = buildCtx();
     const stamped = stampTestEvent(event);
     await contextStorage.run(ctx, () =>
-      dispatchStreamEventHooks({ ctx, registry, event: stamped }),
+      dispatchStreamEventHooks({ cancelTurn: undefined, ctx, registry, event: stamped }),
     );
     expect(calls).toEqual(["broken-typed", "healthy-typed", "broken-wildcard", "healthy-wildcard"]);
     expect(records).toMatchObject([
@@ -208,6 +209,38 @@ describe("dispatchStreamEventHooks", () => {
     expect(records).toEqual([]);
   });
 
+  it("warns and ignores ctx.cancel() after the event's hooks return", async () => {
+    let lateCancel: (() => void) | undefined;
+    const cancelled: string[] = [];
+    const registry = createRuntimeHookRegistry([
+      hook("gate", {
+        events: {
+          "turn.started": (_event, hookContext) => {
+            lateCancel = () => hookContext.cancel();
+          },
+        },
+      }),
+    ]);
+    const ctx = buildCtx();
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({
+        cancelTurn: () => cancelled.push("cancelTurn"),
+        ctx,
+        registry,
+        event: stampTestEvent(createTurnStartedEvent({ sequence: 0, turnId: "turn_0" })),
+      }),
+    );
+    lateCancel?.();
+    expect(cancelled).toEqual([]);
+    expect(records).toMatchObject([
+      {
+        level: "warn",
+        message: "ctx.cancel() ignored: the event's hooks already returned",
+        fields: { hook: "gate", eventType: "turn.started" },
+      },
+    ]);
+  });
+
   it("warns and ignores ctx.cancel() when the event cannot cancel a turn", async () => {
     const registry = createRuntimeHookRegistry([
       hook("gate", {
@@ -217,7 +250,7 @@ describe("dispatchStreamEventHooks", () => {
     const ctx = buildCtx();
     const stamped = stampTestEvent({ type: "session.completed" });
     await contextStorage.run(ctx, () =>
-      dispatchStreamEventHooks({ ctx, registry, event: stamped }),
+      dispatchStreamEventHooks({ cancelTurn: undefined, ctx, registry, event: stamped }),
     );
     expect(records).toMatchObject([
       {
@@ -240,6 +273,7 @@ describe("dispatchStreamEventHooks", () => {
     await expect(
       contextStorage.run(ctx, () =>
         dispatchStreamEventHooks({
+          cancelTurn: undefined,
           ctx,
           registry,
           event: stampTestEvent({ type: "session.completed" }),
@@ -271,6 +305,7 @@ describe("dispatchStreamEventHooks", () => {
 
     await contextStorage.run(ctx, () =>
       dispatchStreamEventHooks({
+        cancelTurn: undefined,
         ctx,
         registry,
         event: stampTestEvent({ type: "session.completed" }),

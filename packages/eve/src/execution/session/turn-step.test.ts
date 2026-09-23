@@ -49,6 +49,7 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCompletedEvent,
+  createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
@@ -2445,8 +2446,12 @@ describe("turnStep", () => {
     });
     afterEach(() => setLogRecordSubscriber(undefined));
 
-    function installHooks(events: Record<string, (event: never, ctx: HookContext) => void>) {
+    function installHooks(
+      events: Record<string, (event: never, ctx: HookContext) => void>,
+      turnAgent: object = TestTurnAgent,
+    ) {
       const bundle = Object.assign({}, createTurnStepTestBundle() as object, {
+        turnAgent,
         hookRegistry: createRuntimeHookRegistry([
           {
             events,
@@ -2500,6 +2505,41 @@ describe("turnStep", () => {
       expect(stepSignal?.aborted).toBe(true);
       expect(seen).toEqual(["typed", "wildcard:step.started"]);
       expect(records.filter((record) => record.level !== "debug")).toEqual([]);
+    });
+
+    it("still cancels when a later consumer of the event throws", async () => {
+      installHooks(
+        { "turn.started": (_event, ctx) => ctx.cancel() },
+        {
+          ...TestTurnAgent,
+          // An unloadable resolver makes dynamic model dispatch throw after the hooks run.
+          dynamicModel: {
+            eventNames: ["turn.started"],
+            logicalPath: "agent.ts",
+            sourceId: "agent.ts",
+            sourceKind: "module",
+          },
+        },
+      );
+      installSessionStoreMocks([createStubSession()]);
+      vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+        return async (session): Promise<StepResult> => {
+          await input.handleEvent?.(
+            createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
+            session.history,
+          );
+          return { next: null, session, settledTurn: { output: "unreachable" } };
+        };
+      });
+
+      const result = await turnStep({
+        input: { kind: "deliver", payloads: [{ message: "hello" }] },
+        sessionWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState: createStubSessionState(),
+      });
+
+      expect(result.action).toBe("cancelled");
     });
 
     it("keeps a settled turn and warns when a terminal event hook cancels", async () => {

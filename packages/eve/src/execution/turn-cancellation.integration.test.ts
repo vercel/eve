@@ -402,77 +402,85 @@ describe("turn cancellation integration", () => {
     });
   }, 60_000);
 
-  it("cancels a turn from a hook's ctx.cancel() and accepts the next message", async () => {
-    const runtime = await createTestRuntime({
-      agent: { name: "turn-hook-cancel" },
-      modules: [
-        {
-          loadNamespace: async () => ({
-            default: defineHook({
-              events: {
-                "turn.started"(event, ctx) {
-                  if (event.data.sequence === 0) ctx.cancel();
+  it.each(["turn.started", "step.started"] as const)(
+    "cancels a turn from a %s hook's ctx.cancel() and accepts the next message",
+    async (boundary) => {
+      const runtime = await createTestRuntime({
+        agent: { name: `turn-hook-cancel-${boundary}` },
+        modules: [
+          {
+            loadNamespace: async () => ({
+              default: defineHook({
+                events: {
+                  "*"(event, ctx) {
+                    if (event.type === boundary && event.data.sequence === 0) ctx.cancel();
+                  },
                 },
-              },
+              }),
             }),
-          }),
-          logicalPath: "hooks/gate.ts",
-        },
-      ],
-    });
-    const rawToken = "turn-hook-cancel";
-    const continuationToken = `http:${rawToken}`;
-    const address = createChannelAddress({
-      adapter: { kind: "http" },
-      channelName: "http",
-      continuationToken: rawToken,
-      runtime: createWorkflowRuntime({
-        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      }),
-    });
+            logicalPath: "hooks/gate.ts",
+          },
+        ],
+      });
+      const rawToken = `turn-hook-cancel-${boundary}`;
+      const continuationToken = `http:${rawToken}`;
+      const address = createChannelAddress({
+        adapter: { kind: "http" },
+        channelName: "http",
+        continuationToken: rawToken,
+        runtime: createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        }),
+      });
 
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Alice asks for the weekly summary." },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken,
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        const cancelledTurn = await stream.nextTurn();
-        expect(
-          containsEventSequence(cancelledTurn, [
-            "turn.started",
-            "turn.cancelled",
-            "session.waiting",
-          ]),
-        ).toBe(true);
-        expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(0);
-        expectNoFailureEvents(cancelledTurn);
-        await expectNoStepRetries(run.runId);
-
-        await waitForHookByToken(sessionInboxHookToken(continuationToken));
-        await address.send("Bob asks for the summary again.", { auth: null });
-        const nextTurn = await stream.nextTurn();
-        expect(filterEventsByType(nextTurn, "turn.started")).toMatchObject([
-          { data: { sequence: 1 } },
+      await runtime.run(async () => {
+        const run = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
+            input: { message: "Alice asks for the weekly summary." },
+            serializedContext: buildSerializedContext({
+              channelKind: "http",
+              continuationToken,
+              mode: "conversation",
+            }),
+          },
         ]);
-        expect(filterEventsByType(nextTurn, "turn.completed")).toHaveLength(1);
-        expectNoFailureEvents(nextTurn);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 60_000);
+        const stream = captureTurnEvents(run);
+
+        try {
+          const cancelledTurn = await stream.nextTurn();
+          expect(
+            containsEventSequence(cancelledTurn, [
+              "turn.started",
+              "turn.cancelled",
+              "session.waiting",
+            ]),
+          ).toBe(true);
+          expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(
+            boundary === "step.started" ? 1 : 0,
+          );
+          expect(filterEventsByType(cancelledTurn, "message.completed")).toHaveLength(0);
+          expect(filterEventsByType(cancelledTurn, "step.completed")).toHaveLength(0);
+          expectNoFailureEvents(cancelledTurn);
+          await expectNoStepRetries(run.runId);
+
+          await waitForHookByToken(sessionInboxHookToken(continuationToken));
+          await address.send("Bob asks for the summary again.", { auth: null });
+          const nextTurn = await stream.nextTurn();
+          expect(filterEventsByType(nextTurn, "turn.started")).toMatchObject([
+            { data: { sequence: 1 } },
+          ]);
+          expect(filterEventsByType(nextTurn, "turn.completed")).toHaveLength(1);
+          expectNoFailureEvents(nextTurn);
+        } finally {
+          stream.dispose();
+          await run.cancel();
+        }
+      });
+    },
+    60_000,
+  );
 
   it("keeps an abort-shaped memory recall error terminal while the turn signal is active", async () => {
     const fixture = await createAbortRecallRuntime("turn-active-memory-abort", {

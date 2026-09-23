@@ -19,8 +19,8 @@ export async function dispatchStreamEventHooks(input: {
   readonly ctx: ContextContainer;
   readonly registry: RuntimeHookRegistry;
   readonly event: MessageStreamEvent;
-  /** Records a `ctx.cancel()` request; absent when the event cannot stop a running turn. */
-  readonly cancelTurn?: () => void;
+  /** Stops the running turn for `ctx.cancel()`; `undefined` when this event cannot stop one. */
+  readonly cancelTurn: (() => void) | undefined;
 }): Promise<void> {
   const typed = input.registry.streamEventsByType.get(input.event.type) ?? [];
   const wildcard = input.registry.streamEventsWildcard;
@@ -30,20 +30,26 @@ export async function dispatchStreamEventHooks(input: {
   }
 
   const baseCtx = buildHookContext(input.ctx);
+  let dispatching = true;
   for (const entry of [...typed, ...wildcard]) {
     const hookCtx: HookContext = {
       ...baseCtx,
       cancel: () => {
-        if (input.cancelTurn !== undefined) {
+        if (dispatching && input.cancelTurn !== undefined) {
           input.cancelTurn();
           return;
         }
-        log.warn("ctx.cancel() ignored: the event is not part of a running turn", {
-          hook: entry.slug,
-          eventId: input.event.meta.id,
-          eventType: input.event.type,
-          sessionId: baseCtx.session.id,
-        });
+        log.warn(
+          dispatching
+            ? "ctx.cancel() ignored: the event is not part of a running turn"
+            : "ctx.cancel() ignored: the event's hooks already returned",
+          {
+            hook: entry.slug,
+            eventId: input.event.meta.id,
+            eventType: input.event.type,
+            sessionId: baseCtx.session.id,
+          },
+        );
       },
     };
     try {
@@ -58,6 +64,8 @@ export async function dispatchStreamEventHooks(input: {
       });
     }
   }
+  // Work a hook did not await could otherwise cancel at an arbitrary later point, or never.
+  dispatching = false;
 }
 
 /** Builds the {@link HookContext} fields shared by every handler of one event. */

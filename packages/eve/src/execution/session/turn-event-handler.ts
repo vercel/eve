@@ -11,22 +11,61 @@ import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-co
 import type { SessionEventSink } from "#execution/session/event-sink.js";
 import { throwIfTurnAborted, TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HandleEventFn } from "#harness/types.js";
+import type { HookEventType } from "#public/definitions/hook.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
-/** Events at or after turn settlement; cancelling from them would add a second terminal. */
-const TURN_SETTLEMENT_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "session.completed",
-  "session.failed",
-  "session.waiting",
-  "turn.cancelled",
-  "turn.completed",
-  "turn.failed",
-]);
+/**
+ * Whether `ctx.cancel()` from a hook on each event may stop the running turn.
+ * Total over hook events, so a new event must be classified before it compiles.
+ * Settlement events stay false: cancelling there would give the turn a second terminal.
+ */
+const HOOK_CANCELLABLE_EVENTS = {
+  "action.input.appended": true,
+  "action.partial": true,
+  "action.result": true,
+  "actions.requested": true,
+  "approval.candidate": true,
+  "approval.settled": true,
+  "authorization.completed": true,
+  "authorization.required": true,
+  "compaction.completed": true,
+  "compaction.requested": true,
+  "context.cleared": false,
+  "input.requested": true,
+  "input.resolved": true,
+  "message.appended": true,
+  "message.completed": true,
+  "message.received": true,
+  "reasoning.appended": true,
+  "reasoning.completed": true,
+  "result.completed": true,
+  "session.completed": false,
+  "session.failed": false,
+  "session.started": true,
+  "session.waiting": false,
+  "step.completed": true,
+  "step.failed": false,
+  "step.started": true,
+  "subagent.called": false,
+  "subagent.completed": false,
+  "subagent.event": false,
+  "subagent.started": false,
+  "turn.cancelled": false,
+  "turn.completed": false,
+  "turn.failed": false,
+  "turn.started": true,
+} as const satisfies Record<HookEventType, boolean>;
+
+/** True when a hook on this event type may cancel the running turn. */
+export function isHookCancellableEvent(type: string): boolean {
+  return (HOOK_CANCELLABLE_EVENTS as Readonly<Record<string, boolean>>)[type] === true;
+}
 
 /**
  * Publishes one turn event, then runs memory, hooks, and model preparation for it.
- * A hook `ctx.cancel()` takes effect after every consumer has seen the event.
+ * A hook's `ctx.cancel()` aborts the turn signal at once; the event's remaining
+ * hooks still run, then the handler stops the turn before the next model call.
  */
 export function createTurnEventHandler(input: {
   readonly abortSignal: AbortSignal;
@@ -54,15 +93,13 @@ export function createTurnEventHandler(input: {
       messages,
       nodeId: bundle.nodeId ?? "__root__",
     });
-    let cancelRequested = false;
+    const cancelTurn =
+      input.canCancelTurn && isHookCancellableEvent(emitted.event.type)
+        ? () => input.hookCancellation.abort(new TurnCancelledError())
+        : undefined;
     if (!emitted.suppressed) {
       await dispatchStreamEventHooks({
-        cancelTurn:
-          input.canCancelTurn && !TURN_SETTLEMENT_EVENT_TYPES.has(emitted.event.type)
-            ? () => {
-                cancelRequested = true;
-              }
-            : undefined,
+        cancelTurn,
         ctx,
         registry: bundle.hookRegistry,
         event: emitted.event,
@@ -103,9 +140,6 @@ export function createTurnEventHandler(input: {
       event: emitted.event,
       messages: lifecycleMessages,
     });
-    if (cancelRequested) {
-      input.hookCancellation.abort(new TurnCancelledError());
-      throwIfTurnAborted(input.hookCancellation.signal);
-    }
+    if (cancelTurn !== undefined) throwIfTurnAborted(input.hookCancellation.signal);
   };
 }
