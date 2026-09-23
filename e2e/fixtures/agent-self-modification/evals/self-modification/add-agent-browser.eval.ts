@@ -17,7 +17,6 @@ export default defineEval({
         run,
         selfMod,
       });
-      t.succeeded();
     });
   },
 });

@@ -11,7 +11,6 @@ export default defineEval({
     await withSelfModification(t, async (selfMod) => {
       const run = await selfMod.request("Can you add the slack channel?");
       await verifyRegistryHandoff({ address: "channel/slack", run, selfMod });
-      t.succeeded();
     });
   },
 });
