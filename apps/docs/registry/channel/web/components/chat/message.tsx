@@ -358,7 +358,7 @@ function ActivityGroup({
   const [open, setOpen] = useState(false);
 
   return (
-    <Collapsible className="mt-2 w-full" onOpenChange={setOpen} open={open}>
+    <Collapsible className="mx-3 mt-2" onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
         {isWorking ? <Loader2Icon className="size-3 animate-spin" /> : null}
         <span>{isWorking ? "Working…" : "Show activity"}</span>
