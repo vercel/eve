@@ -12,7 +12,7 @@ import { shellQuote } from "./shell.ts";
 type ComputerUseSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 const DRIVER_VERSION = "0.12.5";
-const DESKTOP_INSTALL_VERSION = "2026-09-10.1";
+const DESKTOP_INSTALL_VERSION = "2026-09-17.1";
 
 /** Include this in the consumer sandbox revalidation key so cached templates rebuild when computer use changes. */
 export const COMPUTER_USE_REVALIDATION_KEY = `computer-use:${DRIVER_VERSION}:${DESKTOP_INSTALL_VERSION}`;

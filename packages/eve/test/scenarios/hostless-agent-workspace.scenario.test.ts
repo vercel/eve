@@ -41,12 +41,7 @@ describe("hostless agent workspace", () => {
       name: "hostless-agent-workspace",
     });
     await runPnpmCommand({
-      args: [
-        "exec",
-        "vercel",
-        "build",
-        "--yes",
-      ],
+      args: ["exec", "vercel", "build", "--yes"],
       cwd: app.appRoot,
     });
 

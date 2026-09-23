@@ -1,4 +1,4 @@
-export const GH_SIGNED_COMMIT_VERSION = "1";
+export const GH_SIGNED_COMMIT_VERSION = "2";
 
 export const GH_SIGNED_COMMIT_SOURCE = String.raw`#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
@@ -17,7 +17,7 @@ for (let i = 0; i < args.length; i += 1) {
 if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(options.repo || "")) fail("--repo owner/name is required");
 if (!options.branch) fail("--branch is required");
 if (!options.message) fail("-m headline is required");
-if (!process.env.GH_TOKEN) fail("GH_TOKEN is not set; run the GitHub login tool first");
+if (!process.env.GH_TOKEN) fail('GH_TOKEN is not set; invoke the configured authenticated gh tool with command "gh-signed-commit --repo owner/name --branch branch -m headline", permissions [{"provider":"github","repositories":["owner/name"],"access":"write"}], a description of the intended commit, and workingDirectory set to the repository. Use the same repository for --repo and permissions; the tool supplies the scoped credential lease.');
 
 const [owner, repo] = options.repo.split("/");
 const api = "https://api.github.com";
@@ -82,7 +82,7 @@ function ensureNoUnstagedTrackedChanges() {
     execFileSync("git", ["diff", "--quiet"], { stdio: "ignore" });
   } catch (error) {
     if (error && error.status === 1) {
-      throw new Error("unstaged tracked changes would be unsafe; stage them, stash or revert unrelated changes, or use a clean worktree");
+      throw new Error("unstaged tracked changes would be unsafe; preserve them and use a clean worktree, or stage only changes authorized for this commit. Do not stash, revert, or overwrite unrelated user changes without explicit authorization.");
     }
     throw error;
   }

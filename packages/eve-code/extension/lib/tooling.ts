@@ -1,14 +1,17 @@
 import type { SandboxSession } from "eve/sandbox";
 
 import { GH_SIGNED_COMMIT_SOURCE, GH_SIGNED_COMMIT_VERSION } from "./signed-commit.ts";
+import { shellQuote } from "./shell.ts";
 
 export { GH_SIGNED_COMMIT_SOURCE, GH_SIGNED_COMMIT_VERSION };
 export const TYPESCRIPT_VERSION = "6.0.3";
 const TOOLING_DIR = ".eve-code";
+const TRUSTED_TOOLING_ROOT = "/usr/local/lib/eve-code";
+const TYPESCRIPT_MODULE = `${TRUSTED_TOOLING_ROOT}/typescript/node_modules/typescript/lib/typescript.js`;
 
 export function toolingPaths(sandbox: Pick<SandboxSession, "resolvePath">) {
   const root = sandbox.resolvePath(TOOLING_DIR);
-  const trustedRoot = "/usr/local/lib/eve-code";
+  const trustedRoot = TRUSTED_TOOLING_ROOT;
   return {
     root,
     trustedRoot,
@@ -18,9 +21,10 @@ export function toolingPaths(sandbox: Pick<SandboxSession, "resolvePath">) {
     vercelWrapper: `${root}/vercel`,
     signedCommit: `${root}/gh-signed-commit`,
     trustedSignedCommit: `${trustedRoot}/gh-signed-commit`,
-    typescriptRoot: `${root}/typescript`,
-    typescriptModule: `${root}/typescript/node_modules/typescript`,
-    worker: `${root}/diagnostics.cjs`,
+    typescriptRoot: `${trustedRoot}/typescript`,
+    typescriptModule: TYPESCRIPT_MODULE,
+    workerSource: `${root}/diagnostics.cjs`,
+    worker: `${trustedRoot}/diagnostics.cjs`,
   };
 }
 
@@ -35,20 +39,32 @@ export function vercelWrapperSource(sandbox: Pick<SandboxSession, "resolvePath">
 }
 
 export function typescriptInstallCommand(sandbox: Pick<SandboxSession, "resolvePath">): string {
-  return (
-    `npm install --prefix ${toolingPaths(sandbox).typescriptRoot} --ignore-scripts --no-audit --no-fund ` +
-    `typescript@${TYPESCRIPT_VERSION}`
-  );
+  const { typescriptRoot } = toolingPaths(sandbox);
+  const globalConfig = `${typescriptRoot}/npmrc`;
+  // Neither npm configuration nor executables may come from the writable workspace or home.
+  const install = [
+    "set -e",
+    `cd ${shellQuote(typescriptRoot)}`,
+    "umask 022",
+    `: > ${shellQuote(globalConfig)}`,
+    `npm install --prefix ${shellQuote(typescriptRoot)} --ignore-scripts --no-audit --no-fund typescript@${TYPESCRIPT_VERSION}`,
+    `chmod -R go-w ${shellQuote(typescriptRoot)}`,
+  ].join("\n");
+  const command =
+    "/usr/bin/env -i HOME=/root PATH=/usr/local/bin:/usr/bin:/bin " +
+    `NPM_CONFIG_USERCONFIG=/dev/null NPM_CONFIG_GLOBALCONFIG=${shellQuote(globalConfig)} ` +
+    "NPM_CONFIG_REGISTRY=https://registry.npmjs.org " +
+    `/bin/sh -c ${shellQuote(install)}`;
+  return `if [ "$(id -u)" = 0 ]; then ${command}; else sudo -n ${command}; fi`;
 }
 
 /**
  * Runs inside the sandbox with `node`. Reads one base64 JSON request from
- * `EVE_CODE_DIAGNOSTICS_REQUEST` (`{ repoRoot, filePath, typescriptPath }`),
- * prefers the repository's own TypeScript, and prints `{ diagnostics }`.
+ * `EVE_CODE_DIAGNOSTICS_REQUEST` (`{ repoRoot, filePath }`), loads only the
+ * bootstrap-installed compiler, and prints `{ diagnostics }`.
  */
 export const DIAGNOSTICS_WORKER_SOURCE = String.raw`const fs = require("node:fs");
 const path = require("node:path");
-const { createRequire } = require("node:module");
 
 const { EVE_CODE_DIAGNOSTICS_REQUEST = "" } = require("node:process").env;
 const request = JSON.parse(Buffer.from(EVE_CODE_DIAGNOSTICS_REQUEST, "base64").toString());
@@ -58,7 +74,7 @@ if (fileName !== repoRoot && !fileName.startsWith(repoRoot + path.sep)) {
   throw new Error("file escapes repository: " + request.filePath);
 }
 
-const ts = loadTypeScript();
+const ts = require(${JSON.stringify(TYPESCRIPT_MODULE)});
 const projectPath = nearestConfig(path.dirname(fileName));
 let fileNames;
 let options;
@@ -116,14 +132,6 @@ const diagnostics = [
     };
   });
 process.stdout.write(JSON.stringify({ diagnostics }));
-
-function loadTypeScript() {
-  try {
-    return createRequire(path.join(repoRoot, "package.json"))("typescript");
-  } catch {
-    return require(request.typescriptPath);
-  }
-}
 
 function nearestConfig(start) {
   let current = start;

@@ -16,7 +16,7 @@ import {
 type ToolingSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
 /** Include in the consumer's sandbox `revalidationKey` so cached templates rebuild when the tooling changes. */
-export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:2:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
+export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
 
 /** Install CLI wrappers, signed commits, and TypeScript diagnostics. */
 export async function installCodeTooling(
@@ -27,7 +27,7 @@ export async function installCodeTooling(
   await Promise.all([
     sandbox.writeTextFile({ path: paths.ghWrapper, content: ghWrapperSource(sandbox) }),
     sandbox.writeTextFile({ path: paths.signedCommit, content: GH_SIGNED_COMMIT_SOURCE }),
-    sandbox.writeTextFile({ path: paths.worker, content: DIAGNOSTICS_WORKER_SOURCE }),
+    sandbox.writeTextFile({ path: paths.workerSource, content: DIAGNOSTICS_WORKER_SOURCE }),
     ...(options.vercel === true
       ? [
           sandbox.writeTextFile({
@@ -63,10 +63,11 @@ function toolingInstallCommand(
     "fi",
     `chmod 755 ${quote(paths.ghWrapper)} ${quote(paths.signedCommit)}`,
     "if [ \"$(id -u)\" = 0 ]; then INSTALL=install; else INSTALL='sudo -n install'; fi",
-    `$INSTALL -d -m 755 ${quote(paths.trustedRoot)}`,
+    `$INSTALL -d -o root -g root -m 755 ${quote(paths.trustedRoot)} ${quote(paths.typescriptRoot)}`,
     `[ -x /usr/bin/gh ] || { echo 'eve-code requires gh at /usr/bin/gh' >&2; exit 1; }`,
     `$INSTALL -m 755 /usr/bin/gh ${quote(paths.ghReal)}`,
     `$INSTALL -m 755 ${quote(paths.signedCommit)} ${quote(paths.trustedSignedCommit)}`,
+    `$INSTALL -m 644 ${quote(paths.workerSource)} ${quote(paths.worker)}`,
     `$INSTALL -m 755 ${quote(paths.ghWrapper)} /usr/local/bin/gh`,
     `$INSTALL -m 755 ${quote(paths.trustedSignedCommit)} /usr/local/bin/gh-signed-commit`,
     typescriptInstallCommand(sandbox),

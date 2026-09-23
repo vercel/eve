@@ -75,5 +75,7 @@ test("error message names each path and its remedy", () => {
   const message = generatedPatchTargetsError(matches);
   assert.match(message, /pnpm-lock\.yaml/u);
   assert.match(message, /pnpm install/u);
-  assert.match(message, /git checkout/u);
+  assert.match(message, /Preserve existing user changes/u);
+  assert.match(message, /stop and ask for explicit authorization/u);
+  assert.doesNotMatch(message, /git (?:checkout|restore|reset)|stash|revert/u);
 });

@@ -68,6 +68,6 @@ export function generatedPatchTargetsError(matches: readonly GeneratedPathMatch[
   return [
     "This patch targets generated files, which must not be edited through model-authored patches:",
     ...lines,
-    "Use the deterministic operation instead, or `git checkout <ref> -- <path>` to take an existing revision.",
+    "Use the deterministic operation instead. Preserve existing user changes; if regeneration would overwrite them, stop and ask for explicit authorization.",
   ].join("\n");
 }

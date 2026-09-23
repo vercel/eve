@@ -16,7 +16,7 @@
       "dependencyTypes": ["dev", "prod"]
     },
     {
-      "label": "Extension fixtures declare a broad eve peer range like published extensions",
+      "label": "Extensions declare a broad eve peer range",
       "dependencies": ["eve"],
       "packages": [
         "eve-code",
