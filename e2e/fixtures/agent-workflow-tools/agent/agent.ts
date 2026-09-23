@@ -9,6 +9,9 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
 function respond(request: MockModelRequest): MockModelResponse | string {
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
+    if (!request.toolResults.some((entry) => entry.name === "load_skill")) {
+      return { toolCalls: [{ name: "load_skill", input: { skill: "delegation-policy" } }] };
+    }
     const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];
     if (request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT")) {
       const audit = request.toolResults.find((entry) => entry.name === "read_subagent_hooks");
