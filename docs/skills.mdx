@@ -76,16 +76,9 @@ skills.sh skills are community-authored project files. Review their source and t
 
 Skills are scoped to the agent that declares them. A [subagent](./subagents)'s `skills/` are invisible to the root agent, and the reverse holds too. To share one skill definition across agents, package it in a [workspace extension](./extensions#use-an-extension-in-a-workspace) and mount that extension in each agent. Put shared executable helpers in `lib/`.
 
-## Read skill files at runtime
+## Supporting files
 
-Loading a skill adds its `SKILL.md` to context. To reach a packaged skill's sibling files (references, assets, scripts) from inside a tool or hook, use `ctx.getSkill(id)`:
-
-```ts
-const research = ctx.getSkill("research");
-const checklist = await research.file("references/checklist.md").text();
-```
-
-The handle exposes the skill's `name` and `file(relativePath)`; file content is read lazily from the active sandbox, relative to that skill package directory. For a dynamic skill, `file("SKILL.md")` returns the resolved markdown from session state without starting a sandbox.
+Supporting files are for the model. After loading a skill, the model reads its references, assets, and scripts with sandbox filesystem tools such as `read_file` and `bash`. Tools and hooks have no skill file API; when your code needs the same data, import it from a module in `lib/` so it ships with the agent.
 
 ## Dynamic skills
 

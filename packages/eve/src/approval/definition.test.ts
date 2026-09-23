@@ -36,6 +36,5 @@ describe("approval definitions", () => {
       session: { id: string; initiator: unknown; turn: unknown };
     }>();
     expectTypeOf<ApprovalResponseContext["auth"]>().not.toHaveProperty("getSandbox");
-    expectTypeOf<ApprovalResponseContext["auth"]>().not.toHaveProperty("getSkill");
   });
 });

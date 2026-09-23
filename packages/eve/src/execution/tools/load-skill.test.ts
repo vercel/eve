@@ -6,7 +6,6 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { createSandboxSkillHandle } from "#runtime/skills/sandbox-access.js";
 import type { ResolvedSkillDefinition } from "#runtime/types.js";
 import { readToolBehavior } from "#tools/behavior.js";
 import { loadSkill } from "#tools/provided/load-skill.js";
@@ -65,18 +64,9 @@ describe("load_skill executor", () => {
     ).resolves.toBe("# Research\n\nFollow the evidence.\n");
   });
 
-  it("opens the sandbox only when a loaded static skill's sibling file is read", async () => {
-    const sandbox = mockSandbox({
-      initialFiles: {
-        "/workspace/skills/incident-response/references/services/api/owners.md": "# API owners\n",
-      },
-    });
-    const get = vi.fn(async () => sandbox.session);
-    const access = {
-      captureState: vi.fn(async () => ({ initialized: false, session: null })),
-      get,
-      stop: vi.fn(async () => {}),
-    };
+  it("loads an authored package skill without opening the sandbox", async () => {
+    const get = vi.fn(async () => null);
+    const access = { captureState: async () => ({ session: null }), get, stop: async () => {} };
     const ctx = new ContextContainer();
     ctx.set(SandboxKey, access);
     const execute = skillToolExecutor(ctx, [
@@ -103,12 +93,6 @@ describe("load_skill executor", () => {
       "# Incident response\n\nConsult `references/services/api/owners.md` when needed.\n",
     );
     expect(get).not.toHaveBeenCalled();
-
-    const skill = createSandboxSkillHandle(access, "incident-response");
-    await expect(skill.file("references/services/api/owners.md").text()).resolves.toBe(
-      "# API owners\n",
-    );
-    expect(get).toHaveBeenCalledOnce();
   });
 
   it("loads an active dynamic skill from durable context without frontmatter or the sandbox", async () => {

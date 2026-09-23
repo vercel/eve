@@ -1,11 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { loadContext } from "#context/container.js";
-import { DynamicSkillManifestKey } from "#context/keys.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/sandbox.js";
 
 /**
@@ -14,8 +11,7 @@ import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/
  *
  * Each case runs in-memory through the AppHarness.
  * `runtime.runAsSession(init, fn)` binds the authored context and
- * invokes `fn`. `mockSkill()` owns its own tmpdir cleanup via an
- * internally-registered `afterEach`.
+ * invokes `fn`.
  */
 
 describe("buildCallbackContext – session", () => {
@@ -156,70 +152,5 @@ describe("buildCallbackContext – getSandbox", () => {
     });
 
     expect(deletions).toBe(1);
-  });
-});
-
-describe("buildCallbackContext – getSkill", () => {
-  it("reads a dynamic skill's SKILL.md from session state without the sandbox", async () => {
-    const sandbox = mockSandbox();
-    const get = vi.spyOn(sandbox.access, "get");
-    const runtime = await createTestRuntime();
-    const markdown = "---\nname: policy\n---\n# Dynamic policy\n";
-
-    const text = await runtime.runAsSession({ sandbox }, async () => {
-      loadContext().set(DynamicSkillManifestKey, {
-        policy: [{ description: "Policy", markdown, name: "policy" }],
-      });
-      return await buildCallbackContext().getSkill("policy").file("SKILL.md").text();
-    });
-
-    expect(text).toBe(markdown);
-    expect(get).not.toHaveBeenCalled();
-  });
-
-  it("throws when no authored runtime context is active", () => {
-    expect(() => buildCallbackContext()).toThrow("No active eve context");
-  });
-
-  it("throws when authored runtime execution does not include skill access", async () => {
-    const runtime = await createTestRuntime();
-
-    await expect(
-      runtime.runAsSession({}, () => buildCallbackContext().getSkill("semantic-model")),
-    ).rejects.toThrow("eve sandbox runtime access is unavailable in the current async context.");
-  });
-
-  it("resolves visible skill files across async boundaries", async () => {
-    const skill = await mockSkill({
-      name: "semantic-model",
-      description: "Inspect the semantic model.",
-      markdown: "Inspect the semantic model.",
-      references: { "catalog.yml": "entities: []\n" },
-    });
-
-    const sandbox = mockSandbox({
-      initialFiles: {
-        "/workspace/skills/semantic-model/SKILL.md": "Inspect the semantic model.",
-        "/workspace/skills/semantic-model/references/catalog.yml": "entities: []\n",
-      },
-    });
-    const runtime = await createTestRuntime({ skills: [skill.source] });
-
-    const result = await runtime.runAsSession({ sandbox }, async () => {
-      await Promise.resolve();
-      const ctx = buildCallbackContext();
-
-      return {
-        skill: ctx.getSkill("semantic-model"),
-        text: await ctx.getSkill("semantic-model").file("references/catalog.yml").text(),
-      };
-    });
-
-    expect(result.skill.name).toBe("semantic-model");
-    await expect(result.skill.file("SKILL.md").text()).resolves.toBe("Inspect the semantic model.");
-    await expect(result.skill.file("references/catalog.yml").text()).resolves.toBe(
-      "entities: []\n",
-    );
-    expect(result.text).toBe("entities: []\n");
   });
 });
