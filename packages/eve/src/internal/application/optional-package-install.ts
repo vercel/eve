@@ -141,6 +141,10 @@ export async function loadOptionalEnginePackage<T>(input: {
   try {
     return await input.importModule();
   } catch (importError) {
+    if (!input.autoInstall || !isEveDevEnvironment()) {
+      throw new Error(input.missingMessage, { cause: importError });
+    }
+
     const importInstalledModule =
       input.importInstalledModule ??
       (async () =>
@@ -148,16 +152,6 @@ export async function loadOptionalEnginePackage<T>(input: {
           appRoot: input.appRoot,
           packageName: input.packageName,
         }));
-    if (!input.autoInstall || !isEveDevEnvironment()) {
-      try {
-        return await importInstalledModule();
-      } catch (installedImportError) {
-        throw new Error(input.missingMessage, {
-          cause: new AggregateError([importError, installedImportError]),
-        });
-      }
-    }
-
     const isInstalledModuleLoadable =
       input.importInstalledModule === undefined
         ? async () => await isInstalledEnginePackageLoadable(input)

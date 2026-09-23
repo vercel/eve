@@ -165,27 +165,6 @@ describe("loadOptionalEnginePackage", () => {
     expect(importInstalledModule).toHaveBeenCalledTimes(2);
   });
 
-  it("loads an application dependency when automatic installation is disabled", async () => {
-    const loadedModule = { ok: true };
-    const importInstalledModule = vi.fn(async () => loadedModule);
-
-    await expect(
-      loadOptionalEnginePackage({
-        appRoot: "/repo/existing-app",
-        autoInstall: false,
-        importInstalledModule,
-        importModule: async () => {
-          throw new Error("bundled dependency missing");
-        },
-        missingMessage: "missing dependency",
-        packageName: "existing-dependency",
-      }),
-    ).resolves.toBe(loadedModule);
-
-    expect(importInstalledModule).toHaveBeenCalledOnce();
-    expect(mockedSpawn).not.toHaveBeenCalled();
-  });
-
   it("installs a versioned specifier while loading by package name", async () => {
     vi.stubEnv(EVE_DEV_ENV_FLAG, "1");
     const importModule = vi.fn(async () => {
