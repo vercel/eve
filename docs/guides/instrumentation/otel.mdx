@@ -1,13 +1,11 @@
 ---
 title: "OpenTelemetry"
-description: "Configure OpenTelemetry destinations, content capture, and managed exports."
+description: "Configure OpenTelemetry destinations, content capture, and third-party exports."
 url: "/observability/otel"
 ---
 
-eve configures its built-in OpenTelemetry destinations automatically.
-`eve dev` records local traces, and preview and production deployments export
-to Vercel Agent Runs by default. You do not need `otel()` or
-`otelIntegration()` to use these defaults.
+`eve dev` records local traces by default. Use `otel()` for process-wide
+settings and `otelIntegration()` for third-party destinations.
 
 ## Configure OpenTelemetry
 
@@ -118,11 +116,7 @@ lineage and trace-content policy. See [Remote agents](../guides/remote-agents#pr
 Use `gen_ai.conversation.id` to find the traces for one conversation in your
 destination's span-search surface.
 
-## Manage built-in destinations
-
-Instrumentation has two environment-specific defaults.
-
-### Local traces
+## Local traces
 
 `eve dev` records local traces by default. Omitting
 `agent/instrumentation/local.ts` preserves that default. Export
@@ -134,48 +128,21 @@ import { disableInstrumentation } from "eve/instrumentation";
 export default disableInstrumentation();
 ```
 
-### Vercel Agent Runs
-
-Preview and production deployments export to Vercel Agent Runs by default.
-Omitting `agent/instrumentation/agent-runs.ts` preserves that default. Export
-`agentRuns(...)` from that file to reconfigure it, or export
-`disableInstrumentation()` to disable it.
-
-Agent Runs is in beta and uses Vercel Native Tracing. Native Tracing usage is
-subject to [Vercel pricing](https://vercel.com/pricing). During the beta, Agent
-Runs data is retained for 30 days.
-
 ## Enable tracing on Vercel
 
-New eve deployments automatically sample 100% of requests. Existing
-eve deployments need a sampling rule configured for the Vercel project to
-collect traces. To enable tracing for an existing deployment, select your team
-and project, then open
-[**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):
-
-1. Select **Add Sampling Rule**.
-2. Choose **All Environments**, **Production**, or **Preview**.
-3. Set **Rate** to `100%`.
-4. Leave **Request Path Prefix** blank to sample requests on every path.
-5. Select **Save**.
-
-Vercel applies the first matching rule. If an existing rule matches these
-requests, update it to use a 100% rate; a later rule will not override it.
-
-Tracing starts as soon as you save the rule. You can also manage sampling
-rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
-The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
+For Agent Runs sampling defaults and existing-deployment setup, see
+[Enable tracing on Vercel](./agent-runs#enable-tracing-on-vercel).
 
 ## Filter a destination
 
-`otelIntegration()`, `localTraces()`, and `agentRuns()` accept one
+`otelIntegration()` and `localTraces()` accept one
 `exportPolicy` object or an array applied in order. Each policy filters spans
 and attributes before that destination's processors receive them:
 
-```ts title="agent/instrumentation/agent-runs.ts"
-import { agentRuns } from "eve/instrumentation/otel";
+```ts title="agent/instrumentation/local.ts"
+import { localTraces } from "eve/instrumentation/otel";
 
-export default agentRuns({
+export default localTraces({
   exportPolicy: {
     span: ({ name }) => ({ emit: name !== "internal.cache.refresh" }),
     attribute: ({ key }) => (key === "customer.id" ? { emit: false } : { emit: true }),
@@ -194,33 +161,9 @@ A throwing `span` callback drops the span from this destination. Return
 `{ replace: true, value }` from `attribute` to retain, remove, or change
 one attribute.
 
-### Further narrow a built-in destination
-
-Return a redaction decision to further narrow what a built-in destination
-receives after the process-wide `otel({ tracePolicy })` has admitted a trace.
-For example, keep the spans in Agent Runs while redacting their inputs and
-outputs unless the session is public:
-
-```ts title="agent/instrumentation/agent-runs.ts"
-import { agentRuns } from "eve/instrumentation/otel";
-
-export default agentRuns({
-  exportPolicy: {
-    span: ({ audience }) =>
-      audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
-  },
-});
-```
-
-Input redaction removes eve's known prompt, instruction, document, and
-tool-argument attributes. Output redaction removes response, reasoning,
-tool-result, exception, and status attributes. Redaction narrows only this
-destination; it does not mutate spans sent to another destination. Policies run
-in array order, and each policy receives the facade produced by the policies
-before it.
-
 ## What to read next
 
 - [Instrumentation](/docs/observability/instrumentation): handle eve lifecycle events.
+- [Agent Runs](./agent-runs): configure Vercel's built-in trace destination.
 - [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
 - [Local development](../guides/dev-tui): inspect local traces in the TUI.

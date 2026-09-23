@@ -91,6 +91,6 @@ message directing you to the instrumentation directory.
 
 New eve deployments automatically sample 100% of requests. Existing Vercel
 deployments need project sampling configured before you verify them. See
-[Enable tracing on Vercel](/docs/observability/otel#enable-tracing-on-vercel).
+[Enable tracing on Vercel](/docs/observability/agent-runs#enable-tracing-on-vercel).
 
 Then run the agent and verify each destination independently.
