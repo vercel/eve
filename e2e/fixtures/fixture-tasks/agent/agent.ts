@@ -138,13 +138,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return inspectTerminalTask(request, "task-cancel-inspect", "TASK-CANCEL-STATUS", message);
   }
   if (message.startsWith("TASK-CANCEL-VERIFY ")) {
-    return inspectTerminalTask(
-      request,
-      "task-cancel-verify",
-      "TASK-CANCEL-STATUS",
-      message,
-      "cancelled",
-    );
+    return inspectTerminalTask(request, "task-cancel-verify", "TASK-CANCEL-STATUS", message);
   }
 
   if (message.startsWith("TASK-HITL-VERIFY ")) {
