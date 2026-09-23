@@ -746,31 +746,34 @@ describe("chatSdkChannel", () => {
       ctx,
     );
 
-    const card = adapter.posted[0]?.message as AdapterPostableMessage;
-    expect(card).toMatchObject({
-      children: [
-        { content: "Deploy?", type: "text" },
-        {
-          children: [
-            {
-              id: "eve_input:request-1:approve",
-              label: "Approve",
-              style: "primary",
-              type: "button",
-              value: "approve",
-            },
-            {
-              id: "eve_input:request-1:cancel",
-              label: "Cancel",
-              style: "danger",
-              type: "button",
-              value: "cancel",
-            },
-          ],
-          type: "actions",
-        },
-      ],
-      type: "card",
+    const message = adapter.posted[0]?.message as AdapterPostableMessage;
+    expect(message).toMatchObject({
+      card: {
+        children: [
+          { content: "Deploy?", type: "text" },
+          {
+            children: [
+              {
+                id: "eve_input:request-1:approve",
+                label: "Approve",
+                style: "primary",
+                type: "button",
+                value: "approve",
+              },
+              {
+                id: "eve_input:request-1:cancel",
+                label: "Cancel",
+                style: "danger",
+                type: "button",
+                value: "cancel",
+              },
+            ],
+            type: "actions",
+          },
+        ],
+        type: "card",
+      },
+      fallbackText: 'Deploy?\n\nReply with "approve" (Approve) or "cancel" (Cancel).',
     });
 
     const { send } = await firePost(bridge.channel, "/eve/v1/test", {
