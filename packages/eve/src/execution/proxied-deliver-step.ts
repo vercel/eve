@@ -1,5 +1,7 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { AuthKey } from "#context/keys.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
@@ -64,6 +66,7 @@ export async function routeProxiedDeliverStep(input: {
   "use step";
   let durableSession = readDurableSession(input.sessionState);
   const sourceDelivery = input.delivery;
+  let serializedContext = input.serializedContext ?? {};
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
@@ -160,6 +163,11 @@ export async function routeProxiedDeliverStep(input: {
     }
 
     if (child.answerHook !== undefined) {
+      if (sourceDelivery.auth !== undefined) {
+        const context = await deserializeContext(serializedContext);
+        context.set(AuthKey, sourceDelivery.auth);
+        serializedContext = serializeContext(context);
+      }
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
       if (child.dismissedRequestIds.length > 0) {
@@ -194,7 +202,7 @@ export async function routeProxiedDeliverStep(input: {
   }
 
   const context = {
-    serializedContext: input.serializedContext ?? {},
+    serializedContext,
     sessionState: retired
       ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
       : input.sessionState,
