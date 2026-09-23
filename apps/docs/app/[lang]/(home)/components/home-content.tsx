@@ -38,7 +38,7 @@ export const HomeContent = () => (
     <FileTree />
     <NextjsInterop />
     <ArchitectureDiagram />
-    <FeatureGrid />
     <CTA />
+    <FeatureGrid />
   </div>
 );
