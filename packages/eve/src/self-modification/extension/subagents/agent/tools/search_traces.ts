@@ -19,46 +19,36 @@ import {
 
 const MAX_ANALYZED_TRACES = 200;
 const MAX_UNINDEXED_TRACES = 100;
-const DEFAULT_LIMIT = 20;
+const DEFAULT_SORT_BY = "latest";
 const MAX_RESULTS = 50;
 
 const inputSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    agentName: { type: "string", minLength: 1 },
-    failedOnly: {
-      type: "boolean",
-      description: "Only traces containing error spans; this does not imply the activation failed.",
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: MAX_RESULTS,
+      default: MAX_RESULTS,
     },
-    limit: { type: "integer", minimum: 1, maximum: MAX_RESULTS },
-    sessionId: { type: "string", minLength: 1 },
     sortBy: {
       enum: ["duration", "failures", "inputTokens", "latest"],
       type: "string",
+      default: DEFAULT_SORT_BY,
       description:
-        "Rank examined traces by elapsed time, error-span count, summed step input tokens, or start time.",
-    },
-    toolName: {
-      type: "string",
-      minLength: 1,
-      description: "Match tool operations, not other named actions such as subagent lifetimes.",
+        "Rank examined traces by elapsed time, error-span count, summed step input tokens, or start time. Defaults to latest.",
     },
   },
 } as const;
 
 interface SearchInput {
-  readonly agentName?: string;
-  readonly failedOnly?: boolean;
   readonly limit: number;
-  readonly sessionId?: string;
   readonly sortBy: LocalTraceSortBy;
-  readonly toolName?: string;
 }
 
 const searchTracesTool = defineTool({
-  description:
-    "Search structural summaries for traces in the invoking conversation. Filter by session, agent, tool, or failures; then inspect a returned trace with inspect_trace. Prompts and tool payloads are never searched.",
+  description: "Search summaries for traces in the invoking conversation.",
   inputSchema,
   outputSchema: { type: "object", additionalProperties: true },
   async execute(input, ctx) {
@@ -161,21 +151,8 @@ function parseInput(value: unknown): SearchInput {
     throw new Error("Trace search input must be an object.");
   }
   const input = value as Record<string, unknown>;
-  for (const key of ["agentName", "sessionId", "toolName"] as const) {
-    if (input[key] !== undefined && (typeof input[key] !== "string" || input[key].length === 0)) {
-      throw new Error(`${key} must be a non-empty string.`);
-    }
-  }
-  if (input.failedOnly !== undefined && typeof input.failedOnly !== "boolean") {
-    throw new Error("failedOnly must be a boolean.");
-  }
-  if (
-    input.limit !== undefined &&
-    (typeof input.limit !== "number" ||
-      !Number.isInteger(input.limit) ||
-      input.limit < 1 ||
-      input.limit > MAX_RESULTS)
-  ) {
+  const limit = input.limit === undefined ? MAX_RESULTS : input.limit;
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > MAX_RESULTS) {
     throw new Error(`limit must be an integer between 1 and ${MAX_RESULTS}.`);
   }
   if (
@@ -188,12 +165,8 @@ function parseInput(value: unknown): SearchInput {
     throw new Error("sortBy must be latest, duration, failures, or inputTokens.");
   }
   return {
-    agentName: input.agentName as string | undefined,
-    failedOnly: input.failedOnly as boolean | undefined,
-    limit: (input.limit as number | undefined) ?? DEFAULT_LIMIT,
-    sessionId: input.sessionId as string | undefined,
-    sortBy: (input.sortBy as LocalTraceSortBy | undefined) ?? "latest",
-    toolName: input.toolName as string | undefined,
+    limit,
+    sortBy: (input.sortBy as LocalTraceSortBy | undefined) ?? DEFAULT_SORT_BY,
   };
 }
 

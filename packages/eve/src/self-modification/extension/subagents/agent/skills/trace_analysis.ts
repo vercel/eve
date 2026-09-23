@@ -5,14 +5,14 @@ import { defineLocalOnlyDynamic, resolveLocalOnly } from "../../../local-only.js
 
 const traceAnalysisSkill = defineSkill({
   description:
-    "Analyze local eve traces for latency, token usage, failures, repeated tool calls, and discovery inefficiency with a bounded investigation.",
+    "Analyze local eve traces for latency, token usage, failures, repeated tool calls, and discovery inefficiency with a bounded, conversation-scoped investigation.",
   markdown: `# Trace analysis
 
 Use this workflow when the user asks to review, diagnose, or optimize behavior from local traces.
 
 ## Keep the investigation bounded
 
-1. Call \`search_traces\` once with \`sortBy\` set to the user's primary concern and \`limit\` no greater than 5. Use its \`sessionId\`, \`agentName\`, \`toolName\`, or \`failedOnly\` filters only when they directly narrow the question.
+1. Call \`search_traces\` once with \`limit\` no greater than 5. It is already scoped to the invoking conversation, including its child-agent traces, and excludes the current investigation by default.
 2. Rank findings across correctness, latency, token usage, and tool-call efficiency. Follow the user's stated priority; do not assume that "improve" means only fixing errors.
 3. Call \`inspect_trace\` only for the one or two traces needed to explain a high-impact signal. Set \`limit\` to the smallest useful bound, normally 20–40. Its timeline includes bounded argument previews and \`availableFields\` for each span.
 4. Use \`inspect_trace_spans\` only with span ids returned by a timeline. Include only the required payload fields and batch related spans in one call. An empty \`availableFields\` list means none are recorded, not that the call failed.

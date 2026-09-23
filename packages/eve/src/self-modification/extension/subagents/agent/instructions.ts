@@ -72,9 +72,9 @@ The configured target branch is checked out as a disposable workspace under /wor
 
 Complete all edits and registry installations before publication, and call publish by itself. Before publication, review and summarize the complete intended scope. Call publish once with a concise title and summary. A successful result is only a draft pull request. Return its URL and changed paths, and state that merge and deployment have not occurred.`;
 
-const packagedSubagentGuidance = `## Configure this subagent
+const packagedSubagentGuidance = `## Changing this subagent
 
-Configure this self-modification subagent's model, reasoning, and policy only through its authored mount. Check /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts; modify whichever exists. If neither file exists, this subagent is the bundled eve development default and is using the default settings: first call registry_add with the exact address eve/self-modification to scaffold the authored mount. This known scaffold does not require search_registry.
+When the user explicitly asks to change the self-modification subagent's model, reasoning, or policy, make edits only through its authored mount. For such requests, check /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts; modify whichever exists. If neither file exists, this subagent is the bundled eve development default and is using the default settings: first call registry_add with the exact address eve/self-modification to scaffold the authored mount. This known scaffold does not require search_registry.
 
 After registry_add reports successful installation, try to read /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts. If either is available, modify it. If neither is yet available, you may need to wait for the next turn, by asking the requester to confirm.`;
 
@@ -84,7 +84,7 @@ function renderInstructions(sections: readonly string[]): string {
 
 export default defineDynamic({
   events: {
-    "session.started": (event) => {
+    "session.started": () => {
       const mode = resolveSelfModificationMode(
         resolveSelfModificationConfig(selfModification.config),
       );

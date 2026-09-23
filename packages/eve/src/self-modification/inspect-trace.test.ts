@@ -22,7 +22,6 @@ afterEach(() => {
 
 function segment(
   input: {
-    agentName?: string;
     conversationId?: string;
     id?: string;
     runId?: string;
@@ -34,7 +33,6 @@ function segment(
 ): string {
   const id = input.id ?? traceId;
   const attributes = [
-    { key: "agent.name", value: { stringValue: input.agentName ?? "reviewer" } },
     input.runId === undefined
       ? { key: "agent.session.id", value: { stringValue: input.sessionId ?? "session-a" } }
       : { key: "agent.run.id", value: { stringValue: input.runId } },
@@ -110,6 +108,25 @@ function traceContext(contents: Record<string, string>) {
 }
 
 describe("self-modification trace inspection tools", () => {
+  it("defaults an omitted search limit", async () => {
+    const ctx = traceContext({
+      [traceId]: segment({ id: traceId, toolName: "read", status: { code: 2 } }),
+      [otherTraceId]: segment({ id: otherTraceId }),
+    });
+    const search = resolveSearchTracesTool({ localEnabled: true })!;
+
+    const defaultSearch = await search.execute({}, ctx);
+    const sortedSearch = await search.execute({ sortBy: "failures" }, ctx);
+
+    expect(defaultSearch).toMatchObject({ matches: [{ traceId }, { traceId: otherTraceId }] });
+    expect(sortedSearch).toMatchObject({
+      matches: [
+        { traceId, errorSpanCount: 1 },
+        { traceId: otherTraceId, errorSpanCount: 0 },
+      ],
+    });
+  });
+
   it("ranks summed step usage and returns the same summary from search and paged inspection", async () => {
     const ctx = traceContext({
       [traceId]: segment({ stepInputTokens: [100, 100], toolName: "read", status: { code: 2 } }),
@@ -136,7 +153,7 @@ describe("self-modification trace inspection tools", () => {
     expect(inspection.summary).not.toHaveProperty("failedOperations");
   });
 
-  it("searches structural trace metadata with session, agent, tool, and failure filters", async () => {
+  it("searches structural trace metadata within the invoking conversation", async () => {
     const ctx = {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
@@ -144,12 +161,11 @@ describe("self-modification trace inspection tools", () => {
           path.includes(traceId)
             ? segment({
                 id: traceId,
-                agentName: "worker",
                 runId: "target",
                 toolName: "deploy",
                 status: { code: 2, message: "failed" },
               })
-            : segment({ id: otherTraceId, agentName: "other", runId: "other" }),
+            : segment({ id: otherTraceId, runId: "other" }),
         run: async ({ command }: { command: string }) => {
           if (command === "ls -1dt /traces/*") {
             return {
@@ -167,19 +183,27 @@ describe("self-modification trace inspection tools", () => {
     } as never;
 
     const result = await resolveSearchTracesTool({ localEnabled: true })!.execute(
-      { agentName: "worker", failedOnly: true, sessionId: "target", toolName: "deploy" },
+      { limit: 10 },
       ctx,
     );
 
     expect(result).toMatchObject({
       coverage: { complete: true, considered: 2, matched: 2, stored: 2 },
-      matches: [{ agentNames: ["worker"], sessionIds: ["target"], toolNames: ["deploy"], traceId }],
+      matches: [
+        {
+          traceId,
+          errorSpanCount: 1,
+          sessionIds: ["target"],
+          toolNames: ["deploy"],
+        },
+        { traceId: otherTraceId, errorSpanCount: 0, sessionIds: ["other"], toolNames: [] },
+      ],
     });
   });
 
   it("reports incomplete coverage without exposing unindexed trace internals", async () => {
     const ids = Array.from({ length: 101 }, (_, index) => index.toString(16).padStart(32, "0"));
-    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({}, {
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({ limit: 10 }, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
         readTextFile: async () => segment({ conversationId: "other" }),
@@ -206,7 +230,7 @@ describe("self-modification trace inspection tools", () => {
   });
 
   it("treats an empty trace mount as an empty result", async () => {
-    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({}, {
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({ limit: 10 }, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
         run: async ({ command }: { command: string }) =>
@@ -226,7 +250,7 @@ describe("self-modification trace inspection tools", () => {
 
   it("keeps readable matches when one trace disappears during the scan", async () => {
     const missingTraceId = "3".repeat(32);
-    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({}, {
+    const result = await resolveSearchTracesTool({ localEnabled: true })!.execute({ limit: 10 }, {
       abortSignal: new AbortController().signal,
       getSandbox: async () => ({
         readTextFile: async () => segment({ id: traceId }),
