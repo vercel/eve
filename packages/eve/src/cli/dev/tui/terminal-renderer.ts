@@ -2067,7 +2067,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#inputActive = false;
     this.#questionPanel = (width) => {
       const rows: string[] = [];
-      for (const line of stripTerminalControls(text).split("\n"))
+      for (const line of stripAnsi(text).split("\n"))
         rows.push(...wrapVisibleLine(line, Math.max(8, width - 4)).map((part) => `  ${part}`));
       rows.push("", `  ${this.#theme.colors.dim("Esc to close")}`);
       return rows;
@@ -3474,7 +3474,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#messageQueue.requestCancellation();
           this.#cancelRequestedByUser = true;
           this.renderCommandInvocation(message.trim());
-          this.renderCommandResult("Turn cancellation requested.");
+          this.renderCommandResult("", "success", "Cancellation requested");
           this.#requestTurnCancel();
           this.#paint();
           break;

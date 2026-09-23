@@ -2227,8 +2227,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await vi.waitFor(() => {
       expect(cancel).toHaveBeenCalledOnce();
-      expect(screen.snapshot()).toContain("/cancel");
-      expect(screen.snapshot()).toContain("Turn cancellation requested.");
+      expect(screen.snapshot()).toContain("✓ Cancellation requested");
+      expect(screen.snapshot()).not.toContain("/cancel");
       expect(screen.snapshot()).toContain("Cancelling turn…");
     });
 
@@ -5506,9 +5506,13 @@ describe("TerminalRenderer command typeahead", () => {
 
   it("closes the transient info panel without retaining its contents", async () => {
     const { input, renderer, screen } = makeRenderer();
-    const panel = renderer.showInfoPanel("Agent: Weather");
+    const panel = renderer.showInfoPanel(
+      "\x1b[36mApplication\x1b[39m\n\x1b[1mAgent\x1b[22m: Weather",
+    );
 
+    expect(screen.snapshot()).toContain("Application");
     expect(screen.snapshot()).toContain("Agent: Weather");
+    expect(screen.snapshot()).not.toContain("[36m");
     input.send("\x1b");
     await panel;
     expect(screen.snapshot()).not.toContain("Agent: Weather");
