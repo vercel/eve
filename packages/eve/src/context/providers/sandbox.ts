@@ -18,11 +18,15 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     const sessionId = ctx.require(SessionIdKey);
     const channel = ctx.get(ChannelKey);
     const adapterState = channel?.state as Record<string, unknown> | undefined;
-    const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
+    const parentSandboxState = adapterState?.parentSandboxState as SandboxState | null | undefined;
     const inheritsParent = registry.sandbox?.definition.kind === "parent";
     const ownerSandboxSessionId = adapterState?.sandboxSessionId as string | undefined;
     const reusesOwnerSandbox = inheritsParent || ownerSandboxSessionId !== undefined;
     const sandboxSessionId = reusesOwnerSandbox ? (ownerSandboxSessionId ?? sessionId) : sessionId;
+    const sandboxState =
+      reusesOwnerSandbox && parentSandboxState !== undefined
+        ? parentSandboxState
+        : session.sandboxState;
 
     return {
       value: await ensureSandboxAccess({
@@ -31,8 +35,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
         ownsSandbox: !reusesOwnerSandbox,
         registry,
         sessionId: sandboxSessionId,
-        state:
-          session.sandboxState ?? (reusesOwnerSandbox ? parentSandboxState : undefined) ?? null,
+        state: sandboxState ?? null,
       }),
     };
   },
