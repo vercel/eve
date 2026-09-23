@@ -97,7 +97,7 @@ Comment `/benchmark` to re-run the default harnesses, or `/benchmark <harness>[,
 With [eve-bench](https://github.com/vercel-labs/eve-bench#readme) linked (`npm link` in its checkout), commit and push this checkout, then run:
 
 ```sh
-eve-bench -a eve-code --agent-dir packages/eve-code --model google/gemini-3.8-flash \
+eve-bench -a eve-code --agent-dir packages/eve-code --model openai/gpt-6-luna --reasoning low \
   --scope <vercel-team> --execution vercel-sandbox
 ```
 

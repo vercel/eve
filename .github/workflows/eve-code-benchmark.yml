@@ -92,7 +92,10 @@ jobs:
           dataset: swe-lean
           # The PR comment's ranking tables show these plus each dimension's winner.
           contenders: eve-code@baseline,eve-code@head
-          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'google/gemini-3.8-flash' }}
+          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-6-luna' }}
+          # opencode drops Gemini's tool-call thought signatures, so Gemini stops reasoning
+          # after its first steps there; gpt-6-luna needs no signature to keep reasoning.
+          reasoning: low
           attempts: "1"
           # Per harness: one sandbox per task, so all trials start at once.
           concurrency: "8"

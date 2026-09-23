@@ -246,8 +246,9 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /uses: \.\/\.eve-bench-action/u);
   assert.match(
     workflow,
-    /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'google\/gemini-3\.8-flash' \}\}/u,
+    /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'openai\/gpt-6-luna' \}\}/u,
   );
+  assert.match(workflow, /reasoning: low\n/u);
   assert.doesNotMatch(workflow, /runner-revision:/u);
   assert.match(workflow, /blob-token: \$\{\{ secrets\.EVE_BENCH_BLOB_READ_WRITE_TOKEN \}\}/u);
   assert.doesNotMatch(workflow, /artifact-id/u);
