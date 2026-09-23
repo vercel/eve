@@ -584,15 +584,6 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/eve
 
-  apps/fixtures/dynamic-schedules:
-    dependencies:
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
-      zod:
-        specifier: 'catalog:'
-        version: 4.5.4
-
   apps/fixtures/weather-agent:
     dependencies:
       eve:
