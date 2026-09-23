@@ -515,9 +515,12 @@ function truncate(text: string, max = MAX_TYPING_STATUS): string {
 }
 
 function renderInputRequests(requests: readonly InputRequest[], inputActionPrefix: string) {
-  return Card({
-    children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
-  });
+  return {
+    card: Card({
+      children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
+    }),
+    fallbackText: requests.map(renderInputRequestFallback).join("\n\n"),
+  };
 }
 
 function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
@@ -541,6 +544,15 @@ function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
     CardText("This request needs a freeform answer. Continue from the eve session UI."),
   );
   return children;
+}
+
+function renderInputRequestFallback(request: InputRequest): string {
+  const options = request.options;
+  const answerHint =
+    options && options.length > 0
+      ? `Reply with ${options.map((option) => `"${option.id}" (${option.label})`).join(" or ")}.`
+      : "This request needs a freeform answer. Continue from the eve session UI.";
+  return `${request.prompt}\n\n${answerHint}`;
 }
 
 async function postFailure(
