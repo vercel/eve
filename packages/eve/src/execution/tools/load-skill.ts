@@ -1,4 +1,4 @@
-import { z } from "#compiled/zod/index.js";
+import { defineJsonSchema } from "#tools/schema.js";
 
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey } from "#context/keys.js";
@@ -9,7 +9,9 @@ import { stripSkillFrontmatter } from "#shared/skill-package.js";
 /**
  * Typed input accepted by {@link executeLoadSkillTool}.
  */
-type LoadSkillInput = z.infer<typeof SKILL_INPUT_SCHEMA>;
+interface LoadSkillInput {
+  skill: string;
+}
 
 /**
  * Executes the `load_skill` tool.
@@ -54,10 +56,15 @@ function formatSkillNotFoundError(skill: string, availableSkills: readonly strin
 // Tool definition
 // ---------------------------------------------------------------------------
 
-export const SKILL_INPUT_SCHEMA = z.strictObject({
-  skill: z.string().describe("Available skill name or id."),
+export const SKILL_INPUT_SCHEMA = defineJsonSchema<LoadSkillInput>({
+  type: "object",
+  properties: {
+    skill: { type: "string", description: "Available skill name or id." },
+  },
+  required: ["skill"],
+  additionalProperties: false,
 });
-export const SKILL_OUTPUT_SCHEMA = z.string();
+export const SKILL_OUTPUT_SCHEMA = defineJsonSchema<string>({ type: "string" });
 
 export async function executeLoadSkill(input: unknown): Promise<unknown> {
   return await executeLoadSkillTool(input as LoadSkillInput);

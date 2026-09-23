@@ -224,6 +224,7 @@ import {
   buildToolSetWithProviderTools,
 } from "#harness/tools.js";
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { toModelSchema } from "#tools/schema.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { createHistoryViewPreparer, type HistoryViewProjector } from "#shared/history-view.js";
@@ -1429,6 +1430,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
       for (const tool of Object.values(effectiveTools)) {
+        // Whatever produced this tool, the AI SDK must only receive its own
+        // schema type; see toModelSchema.
+        tool.inputSchema = toModelSchema(tool.inputSchema, "input");
+        if (tool.outputSchema !== undefined) {
+          tool.outputSchema = toModelSchema(tool.outputSchema, "output");
+        }
         const execute = tool.execute;
         if (execute !== undefined)
           tool.execute = (...args) => {

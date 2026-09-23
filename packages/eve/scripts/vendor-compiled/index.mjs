@@ -12,6 +12,7 @@ import openai from "./@ai-sdk/openai.mjs";
 import otel from "./@ai-sdk/otel.mjs";
 import provider from "./@ai-sdk/provider.mjs";
 import providerUtils from "./@ai-sdk/provider-utils.mjs";
+import cfworkerJsonSchema from "./@cfworker/json-schema.mjs";
 
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
@@ -58,6 +59,7 @@ import zodValidationError from "./zod-validation-error.mjs";
 export const MODULES = [
   acpSdk,
   anthropic,
+  cfworkerJsonSchema,
   codeMode,
   chat,
   chatAdapterSlack,

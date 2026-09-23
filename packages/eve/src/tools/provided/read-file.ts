@@ -1,43 +1,62 @@
-import { z } from "#compiled/zod/index.js";
-
 import { type ReadFileInput, executeReadFileOnSandbox } from "#execution/sandbox/read-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
+
+export interface ReadFileToolInput {
+  filePath: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ReadFileToolOutput {
+  content: string;
+  nextOffset?: number;
+  path: string;
+  totalLines: number;
+  truncated: boolean;
+}
 
 /**
  * Input schema for the provided `read_file` tool.
  */
-export const READ_FILE_INPUT_SCHEMA = z.strictObject({
-  filePath: z
-    .string()
-    .describe("The absolute path to the file to read. A leading $HOME is supported."),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .describe("Maximum number of lines to return. Defaults to 2000.")
-    .optional(),
-  offset: z
-    .number()
-    .int()
-    .min(1)
-    .describe("1-based line number to start from. Defaults to 1.")
-    .optional(),
+export const READ_FILE_INPUT_SCHEMA = defineJsonSchema<ReadFileToolInput>({
+  type: "object",
+  properties: {
+    filePath: {
+      type: "string",
+      description: "The absolute path to the file to read. A leading $HOME is supported.",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      description: "Maximum number of lines to return. Defaults to 2000.",
+    },
+    offset: {
+      type: "integer",
+      minimum: 1,
+      description: "1-based line number to start from. Defaults to 1.",
+    },
+  },
+  required: ["filePath"],
+  additionalProperties: false,
 });
 
 /**
  * Output schema for the provided `read_file` tool.
  */
-export const READ_FILE_OUTPUT_SCHEMA = z.strictObject({
-  content: z.string(),
-  nextOffset: z.number().int().min(1).optional(),
-  path: z.string(),
-  totalLines: z.number().int().min(0),
-  truncated: z.boolean(),
+export const READ_FILE_OUTPUT_SCHEMA = defineJsonSchema<ReadFileToolOutput>({
+  type: "object",
+  properties: {
+    content: { type: "string" },
+    nextOffset: { type: "integer", minimum: 1 },
+    path: { type: "string" },
+    totalLines: { type: "integer", minimum: 0 },
+    truncated: { type: "boolean" },
+  },
+  required: ["content", "path", "totalLines", "truncated"],
+  additionalProperties: false,
 });
-
-export type ReadFileToolInput = z.infer<typeof READ_FILE_INPUT_SCHEMA>;
-export type ReadFileToolOutput = z.infer<typeof READ_FILE_OUTPUT_SCHEMA>;
 
 /**
  * Framework-owned executor that delegates to the default sandbox.

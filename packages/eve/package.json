@@ -491,6 +491,7 @@
     "@ai-sdk/otel": "catalog:",
     "@ai-sdk/provider": "catalog:",
     "@ai-sdk/provider-utils": "catalog:",
+    "@cfworker/json-schema": "4.1.1",
     "@chat-adapter/slack": "4.41.0",
     "@chat-adapter/state-memory": "4.41.0",
     "@chat-adapter/twilio": "4.41.0",

@@ -1,4 +1,4 @@
-import { z } from "#compiled/zod/index.js";
+import { defineJsonSchema } from "#tools/schema.js";
 
 export { executeAskQuestionTool } from "#execution/tools/ask-question-workflow.js";
 
@@ -14,42 +14,89 @@ export const ASK_QUESTION_TOOL_DESCRIPTION = [
   '- If the status is "unavailable", no one can answer in this session; continue with your best judgment and state the assumption you made.',
 ].join("\n");
 
-const ASK_QUESTION_OPTION_SCHEMA = z.strictObject({
-  description: z
-    .string()
-    .min(1)
-    .max(200)
-    .describe("One short sentence on the impact or tradeoff of choosing this option."),
-  label: z.string().min(1).max(80).describe("User-facing label, 1-5 words."),
+export interface AskQuestionInput {
+  options?: { description: string; label: string }[];
+  question: string;
+}
+
+export type AskQuestionOutput =
+  | { answer: string; status: "answered" }
+  | { status: "dismissed" }
+  | { status: "unavailable" };
+
+export const ASK_QUESTION_INPUT_SCHEMA = defineJsonSchema<AskQuestionInput>(
+  {
+    type: "object",
+    properties: {
+      options: {
+        type: "array",
+        minItems: 2,
+        maxItems: 3,
+        items: {
+          type: "object",
+          properties: {
+            description: {
+              type: "string",
+              minLength: 1,
+              maxLength: 200,
+              description: "One short sentence on the impact or tradeoff of choosing this option.",
+            },
+            label: {
+              type: "string",
+              minLength: 1,
+              maxLength: 80,
+              description: "User-facing label, 1-5 words.",
+            },
+          },
+          required: ["description", "label"],
+          additionalProperties: false,
+        },
+        description:
+          'Two or three mutually exclusive choices, recommended option first. Omit for an open-ended question. Never include an "Other" option.',
+      },
+      question: {
+        type: "string",
+        minLength: 1,
+        maxLength: 2000,
+        description: "The question to show the user, with the context needed to answer it.",
+      },
+    },
+    required: ["question"],
+    additionalProperties: false,
+  },
+  // Labels double as option ids, so duplicates would make answers ambiguous.
+  (input) =>
+    input.options !== undefined &&
+    new Set(input.options.map((option) => option.label)).size !== input.options.length
+      ? "Option labels must be unique."
+      : undefined,
+);
+
+export const ASK_QUESTION_OUTPUT_SCHEMA = defineJsonSchema<AskQuestionOutput>({
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        answer: {
+          type: "string",
+          description: "The chosen option's label, or the user's own words.",
+        },
+        status: { type: "string", const: "answered" },
+      },
+      required: ["answer", "status"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { status: { type: "string", const: "dismissed" } },
+      required: ["status"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { status: { type: "string", const: "unavailable" } },
+      required: ["status"],
+      additionalProperties: false,
+    },
+  ],
 });
-
-export const ASK_QUESTION_INPUT_SCHEMA = z.strictObject({
-  options: z
-    .array(ASK_QUESTION_OPTION_SCHEMA)
-    .min(2)
-    .max(3)
-    .refine((options) => new Set(options.map((option) => option.label)).size === options.length, {
-      message: "Option labels must be unique.",
-    })
-    .describe(
-      'Two or three mutually exclusive choices, recommended option first. Omit for an open-ended question. Never include an "Other" option.',
-    )
-    .optional(),
-  question: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe("The question to show the user, with the context needed to answer it."),
-});
-
-export const ASK_QUESTION_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
-  z.strictObject({
-    answer: z.string().describe("The chosen option's label, or the user's own words."),
-    status: z.literal("answered"),
-  }),
-  z.strictObject({ status: z.literal("dismissed") }),
-  z.strictObject({ status: z.literal("unavailable") }),
-]);
-
-export type AskQuestionInput = z.infer<typeof ASK_QUESTION_INPUT_SCHEMA>;
-export type AskQuestionOutput = z.infer<typeof ASK_QUESTION_OUTPUT_SCHEMA>;

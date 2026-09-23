@@ -1,65 +1,86 @@
-import { z } from "#compiled/zod/index.js";
-
 import { type GrepInput, executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
+
+export interface GrepToolInput {
+  context?: number;
+  glob?: string;
+  ignoreCase?: boolean;
+  limit?: number;
+  literal?: boolean;
+  path?: string;
+  pattern: string;
+}
+
+export interface GrepToolOutput {
+  content: string;
+  matchCount: number;
+  path: string;
+  truncated: boolean;
+}
 
 /**
  * Input schema for the provided `grep` tool.
  */
-export const GREP_INPUT_SCHEMA = z.strictObject({
-  context: z
-    .number()
-    .int()
-    .min(0)
-    .describe(
-      "Number of surrounding context lines to include before and after each match. Defaults to 0.",
-    )
-    .optional(),
-  glob: z.string().describe('Filter files by glob pattern (e.g. "*.ts", "*.{ts,tsx}").').optional(),
-  ignoreCase: z
-    .boolean()
-    .describe("Perform case-insensitive search. Defaults to false.")
-    .optional(),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(1000)
-    .describe("Maximum number of matches to return per file. Defaults to 100.")
-    .optional(),
-  literal: z
-    .boolean()
-    .describe(
-      "Treat the pattern as a literal string instead of a regular expression. Defaults to false.",
-    )
-    .optional(),
-  path: z
-    .string()
-    .describe(
-      "The directory or file to search in. Defaults to /workspace. " +
+export const GREP_INPUT_SCHEMA = defineJsonSchema<GrepToolInput>({
+  type: "object",
+  properties: {
+    context: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "Number of surrounding context lines to include before and after each match. Defaults to 0.",
+    },
+    glob: {
+      type: "string",
+      description: 'Filter files by glob pattern (e.g. "*.ts", "*.{ts,tsx}").',
+    },
+    ignoreCase: {
+      type: "boolean",
+      description: "Perform case-insensitive search. Defaults to false.",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 1000,
+      description: "Maximum number of matches to return per file. Defaults to 100.",
+    },
+    literal: {
+      type: "boolean",
+      description:
+        "Treat the pattern as a literal string instead of a regular expression. Defaults to false.",
+    },
+    path: {
+      type: "string",
+      description:
+        "The directory or file to search in. Defaults to /workspace. " +
         "Must be an absolute path or begin with $HOME/. Omit to use the default.",
-    )
-    .optional(),
-  pattern: z
-    .string()
-    .describe(
-      'The regex pattern to search for in file contents (e.g. "log.*Error", "function\\s+\\w+").',
-    ),
+    },
+    pattern: {
+      type: "string",
+      description:
+        'The regex pattern to search for in file contents (e.g. "log.*Error", "function\\s+\\w+").',
+    },
+  },
+  required: ["pattern"],
+  additionalProperties: false,
 });
 
 /**
  * Output schema for the provided `grep` tool.
  */
-export const GREP_OUTPUT_SCHEMA = z.strictObject({
-  content: z.string(),
-  matchCount: z.number().int(),
-  path: z.string(),
-  truncated: z.boolean(),
+export const GREP_OUTPUT_SCHEMA = defineJsonSchema<GrepToolOutput>({
+  type: "object",
+  properties: {
+    content: { type: "string" },
+    matchCount: { type: "integer" },
+    path: { type: "string" },
+    truncated: { type: "boolean" },
+  },
+  required: ["content", "matchCount", "path", "truncated"],
+  additionalProperties: false,
 });
-
-export type GrepToolInput = z.infer<typeof GREP_INPUT_SCHEMA>;
-export type GrepToolOutput = z.infer<typeof GREP_OUTPUT_SCHEMA>;
 
 /**
  * Framework-owned executor that delegates to the default sandbox.
