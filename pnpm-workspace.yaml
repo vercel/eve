@@ -65,6 +65,7 @@ minimumReleaseAgeExclude:
   - ai
   - eve
   - "@vercel/*"
+  - vercel
   - "@workflow/*"
   - workflow
   - "@chat-adapter/gchat@4.41.0"
