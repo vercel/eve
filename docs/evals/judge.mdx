@@ -3,7 +3,7 @@ title: "Judge"
 description: "Grade evals with evaluation models using criteria, typed questions, or batches, and set thresholds on each assertion."
 ---
 
-Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`evaluate` from `eve/ai`](../guides/evaluate#evaluate-inside-a-tool) and defaults to `typesafe-ai/jev`, Vercel's [Jev evaluation model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
+Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`evaluate` from `eve/ai`](../guides/evaluate#evaluate-inside-a-tool) and defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev evaluation model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
 
 ```ts
 import { defineEval } from "eve/evals";
