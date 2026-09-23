@@ -47,7 +47,9 @@ test("custom broker receives complete rules for each credential", async () => {
 });
 
 test("firewall delivery fails precisely without mutable network policy", async () => {
-  const sandbox = fakeSandbox({}) as SandboxSession;
+  const sandbox = fakeSandbox({});
+
+  assert.equal("setNetworkPolicy" in sandbox, false);
 
   for (const authenticate of [authenticateGitHub, authenticateVercel]) {
     await assert.rejects(
@@ -75,10 +77,10 @@ function fakeSandbox(input: {
   commands?: string[];
   writes?: Map<string, string>;
   setPolicy?: (policy: unknown) => void;
-}): NetworkPolicySandboxSession {
+}): SandboxSession {
   const writes = input.writes ?? new Map<string, string>();
   const sandbox: Pick<SandboxSession, "resolvePath" | "readTextFile" | "writeTextFile" | "run"> &
-    Pick<NetworkPolicySandboxSession, "setNetworkPolicy"> = {
+    Partial<Pick<NetworkPolicySandboxSession, "setNetworkPolicy">> = {
     resolvePath(path: string) {
       return `/workspace/${path}`.replace(/\/$/u, "");
     },
@@ -92,9 +94,9 @@ function fakeSandbox(input: {
       input.commands?.push(command);
       return { exitCode: 0, stdout: "", stderr: "" };
     },
-    async setNetworkPolicy(policy) {
-      input.setPolicy?.(policy);
-    },
   };
-  return sandbox as NetworkPolicySandboxSession;
+  if (input.setPolicy !== undefined) {
+    sandbox.setNetworkPolicy = async (policy) => input.setPolicy?.(policy);
+  }
+  return sandbox as SandboxSession;
 }
