@@ -98,6 +98,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "client.input.responded": {
       let next = data;
       for (const response of event.data.responses) {
+        const existing = findToolPartByApprovalId(next, response.requestId);
+        // A submitted approval may still be refused by the response policy.
+        if (existing?.toolMetadata?.eve?.inputRequest?.kind === "tool-approval") continue;
         next = respondToInputRequest(next, response);
       }
       return next;

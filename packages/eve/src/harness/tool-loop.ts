@@ -940,6 +940,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         return { next: null, session: parkedSession };
       }
 
+      if (config.mode === "conversation" && isHarnessBetweenTurns(pending.session)) {
+        // An approval response can finish without starting a turn or resolving the request.
+        await emit?.(createSessionWaitingEvent());
+      }
       return { next: null, session: pending.session };
     }
 

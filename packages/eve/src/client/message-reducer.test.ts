@@ -803,7 +803,7 @@ describe("defaultMessageReducer", () => {
       type: "client.input.responded",
     });
 
-    expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-responded" });
+    expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
   });
 
   it("projects authoritative input resolutions from replayed server events", () => {
@@ -916,85 +916,70 @@ describe("defaultMessageReducer", () => {
     });
   });
 
-  it("marks input requests as responded when the client submits a response", () => {
-    const reducer = defaultMessageReducer();
-    let data = reduceServerEvents(reducer, reducer.initial(), [
-      createInputRequestedEvent({
-        requests: [
-          {
-            action: {
-              callId: "call_1",
-              input: { command: "pwd" },
-              kind: "tool-call",
-              toolName: "bash",
+  it.each(["rejected", "failed", "timed-out", "stale"] as const)(
+    "keeps an approval answerable after a %s candidate",
+    (outcome) => {
+      const reducer = defaultMessageReducer();
+      let data = reduceServerEvents(reducer, reducer.initial(), [
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "save_note" },
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [
+                { id: "approve", label: "Approve" },
+                { id: "cancel", label: "Cancel" },
+              ],
+              prompt: "Save the note?",
+              requestId: "approval_1",
             },
-            display: "confirmation",
-            kind: "tool-approval",
-            options: [
-              { id: "approve", label: "Yes", style: "primary" },
-              { id: "deny", label: "No", style: "danger" },
-            ],
-            prompt: "Approve tool call: bash",
-            requestId: "approval_1",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-    ]);
-
-    data = reducer.reduce(data, {
-      data: {
-        createdAt: 1,
-        responses: [{ optionId: "deny", requestId: "approval_1" }],
-      },
-      type: "client.input.responded",
-    });
-
-    expect(data.messages).toEqual([
-      {
-        id: "turn_1:assistant",
-        metadata: {
-          status: "streaming",
+          ],
+          sequence: 0,
+          stepIndex: 0,
           turnId: "turn_1",
-        },
-        parts: [
-          { type: "step-start" },
-          {
-            approval: {
-              id: "approval_1",
-            },
-            input: { command: "pwd" },
-            state: "approval-responded",
+        }),
+      ]);
+      data = reducer.reduce(data, {
+        data: { createdAt: 1, responses: [{ optionId: "approve", requestId: "approval_1" }] },
+        type: "client.input.responded",
+      });
+      expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
+      data = reduceServerEvents(reducer, data, [
+        {
+          type: "approval.candidate",
+          data: {
+            candidateId: "candidate_1",
+            requestId: "approval_1",
+            responderPrincipalId: "alice",
+            outcome,
+            sequence: 0,
             stepIndex: 0,
-            toolCallId: "call_1",
-            toolMetadata: {
-              eve: {
-                inputRequest: {
-                  allowFreeform: undefined,
-                  display: "confirmation",
-                  kind: "tool-approval",
-                  options: [
-                    { id: "approve", label: "Yes", style: "primary" },
-                    { id: "deny", label: "No", style: "danger" },
-                  ],
-                  prompt: "Approve tool call: bash",
-                  requestId: "approval_1",
-                },
-                inputResponse: { optionId: "deny", requestId: "approval_1" },
-                kind: "tool-call",
-                name: "bash",
-              },
-            },
-            toolName: "bash",
-            type: "dynamic-tool",
+            turnId: "turn_1",
           },
-        ],
-        role: "assistant",
-      },
-    ]);
-  });
+        },
+      ]);
+      expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
+      expect(findToolPart(data, "call_1")?.toolMetadata?.eve?.inputResponse).toBeUndefined();
+      data = reduceServerEvents(reducer, data, [
+        {
+          type: "approval.settled",
+          data: {
+            requestId: "approval_1",
+            responderPrincipalId: "bob",
+            outcome: "approved",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+      ]);
+      expect(findToolPart(data, "call_1")).toMatchObject({
+        state: "approval-responded",
+        approval: { approved: true },
+      });
+    },
+  );
 
   it("merges resumed approval results back into the requested tool part", () => {
     const reducer = defaultMessageReducer();
@@ -1032,6 +1017,19 @@ describe("defaultMessageReducer", () => {
       type: "client.input.responded",
     });
     data = reduceServerEvents(reducer, data, [
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "tool-approval",
+            outcome: "approved",
+            requestId: "approval_1",
+            response: { optionId: "approve", requestId: "approval_1" },
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
       createStepStartedEvent({
         modelId: "openai/gpt-5.5",
         sequence: 1,
