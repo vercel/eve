@@ -60,11 +60,8 @@ async function handleWorkflowToolRunOutcome(
     message.from.callId,
     message.from.turnId,
   );
-  if (recorded?.address.runId !== message.from.runId) return undefined;
-
-  const result = workflowToolRunOutcomeToToolResult(message);
-
-  // A workflow run that ends cancels the agent tasks it still owns.
+  // A workflow run that ends cancels the agent tasks it still owns, even
+  // when the turn no longer records it.
   await cursor.apply(
     await cancelTasksStep({
       selector: { kind: "workflow-run", runId: message.from.runId },
@@ -72,6 +69,9 @@ async function handleWorkflowToolRunOutcome(
       sessionState: cursor.sessionState,
     }),
   );
+  if (recorded?.address.runId !== message.from.runId) return undefined;
+
+  const result = workflowToolRunOutcomeToToolResult(message);
 
   return isInboxToolResultFromRecordedWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,

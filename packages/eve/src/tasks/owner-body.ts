@@ -5,9 +5,11 @@ import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
+import { readTaskCallbackAlias } from "#tasks/state.js";
 import {
   applyTaskReportStep,
   cancelTasksStep,
+  ensureTaskCallbackAliasStep,
   startAgentTasksStep,
   type AgentTaskCall,
   type TaskOwnerUpdate,
@@ -47,6 +49,7 @@ export async function startPendingAgentTasks(
   cursor: SessionStateCursor,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
   if (!hasPendingAgentTaskCalls(cursor.sessionState.snapshot.session.state)) return [];
+  await ensureTaskCallbackAlias(cursor);
   return await applyTaskOwnerUpdate(
     cursor,
     await startAgentTasksStep({
@@ -60,6 +63,7 @@ export async function startAgentTasks(
   cursor: SessionStateCursor,
   calls: readonly AgentTaskCall[],
 ): Promise<readonly RuntimeToolResultActionResult[]> {
+  await ensureTaskCallbackAlias(cursor);
   return await applyTaskOwnerUpdate(
     cursor,
     await startAgentTasksStep({
@@ -95,4 +99,10 @@ export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise
     }),
   );
   await cancelDescendantTurnsStep({ sessionState: cursor.sessionState });
+}
+
+/** Records and claims the remote callback alias before any child can call back on it. */
+async function ensureTaskCallbackAlias(cursor: SessionStateCursor): Promise<void> {
+  if (readTaskCallbackAlias(cursor.sessionState.snapshot.session.state) !== undefined) return;
+  await cursor.apply(await ensureTaskCallbackAliasStep({ sessionState: cursor.sessionState }));
 }

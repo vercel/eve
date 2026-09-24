@@ -1,4 +1,4 @@
-import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { DispatchOutcome, RuntimeSession } from "#subagents/start-outcome.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
 import { deriveAgentOperationId } from "#subagents/operation-id.js";
@@ -38,7 +38,7 @@ export async function startRemoteSubagent(input: {
   });
 
   // Preflight resolution failures happen before ownership exists, so they
-  // reject without touching the handle store.
+  // reject before the child exists.
   let callbackBaseUrl: string;
   let resolvedRemote: ReturnType<typeof resolveRemoteAgentForAction>;
   try {

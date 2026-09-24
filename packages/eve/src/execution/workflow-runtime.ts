@@ -474,23 +474,6 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
-/**
- * Resolves hook ownership for replay-idempotent work already running inside a
- * durable step. Request handlers must return from start/resume acceptance and
- * leave ownership arbitration to the workflow.
- */
-export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
-  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
-  while (true) {
-    try {
-      return normalizeWorkflowHook(await getHookByToken(token));
-    } catch (error) {
-      if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
-    }
-  }
-}
-
 async function waitForHookRelease(token: string, ownerRunId: string): Promise<void> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {

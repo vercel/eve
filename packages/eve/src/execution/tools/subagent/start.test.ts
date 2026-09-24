@@ -34,6 +34,7 @@ describe("startSubagent", () => {
         initiatorAuth: null,
         parentContinuationToken: "parent-token",
         sandboxSessionId: "parent-session",
+        taskId: "researcher-aaaaaa",
         session: { rootSessionId: "root-session", sessionId: "parent-session" } as never,
         trace: { originAudience: "private", parentTraceContext: caller },
         target:
@@ -65,6 +66,11 @@ describe("startSubagent", () => {
         }),
       );
       expect(other).not.toHaveBeenCalled();
+      if (kind === "local") {
+        expect(start).toHaveBeenCalledWith(
+          expect.objectContaining({ taskId: "researcher-aaaaaa" }),
+        );
+      }
     },
   );
 });

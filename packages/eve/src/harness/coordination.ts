@@ -43,9 +43,9 @@ interface PendingCoordinationEventMetadata {
 /**
  * Serializable pending coordination batch stored on `session.state`.
  *
- * Child ownership does not live here: the agent handle store records every
- * dispatched child (from before its start side effect) and is the sole
- * authority for continuing, settling, and cancelling children.
+ * Child ownership does not live here: the owner's task table records every
+ * agent child before it starts and is the sole authority for continuing,
+ * settling, and cancelling it.
  */
 export interface PendingCoordinationBatch {
   /** Authored-tool and subagent workflow tasks pending coordination. */

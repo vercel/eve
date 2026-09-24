@@ -52,9 +52,13 @@ function makeParent(
 }
 
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
+  input: Omit<BuildSubagentRunInput, "selfAgent" | "source" | "taskId"> & {
+    readonly selfAgent?: boolean;
+    readonly taskId?: string;
+  },
 ): ReturnType<typeof buildSubagentRunInput> {
   return buildSubagentRunInput({
+    taskId: "researcher-aaaaaa",
     ...input,
     selfAgent: input.selfAgent ?? false,
     source: { type: "runtime" },
@@ -118,8 +122,23 @@ describe("buildSubagentRunInput", () => {
       turn: { id: "turn-17", sequence: 5 },
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
-    expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
+    expect(childContinuationToken).toBe("subagent:parent-session:researcher-aaaaaa");
     expect(runInput.mode).toBe("conversation");
+  });
+
+  it("derives the child's continuation address from its task ID, so a duplicate start collides", () => {
+    const start = (taskId: string, callId: string) =>
+      buildRuntimeSubagentRunInput({
+        action: { ...makeAction(), callId },
+        auth: null,
+        initiatorAuth: null,
+        parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
+        session: makeSession(),
+        taskId,
+      }).childContinuationToken;
+
+    expect(start("researcher-aaaaaa", "call-1")).toBe(start("researcher-aaaaaa", "call-1"));
+    expect(start("researcher-aaaaaa", "call-1")).not.toBe(start("researcher-bbbbbb", "call-1"));
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
@@ -266,6 +285,7 @@ describe("buildSubagentRunInput", () => {
       selfAgent: false,
       session: makeSession(),
       source: { description: "Research the request.", outputSchema: schema, type: "local" },
+      taskId: "researcher-aaaaaa",
       parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
@@ -283,6 +303,7 @@ describe("buildSubagentRunInput", () => {
       selfAgent: false,
       session: makeSession(),
       source: { description: "Research the request.", outputSchema: declared, type: "local" },
+      taskId: "researcher-aaaaaa",
       parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
@@ -325,6 +346,7 @@ describe("buildSubagentRunInput", () => {
       selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },
+      taskId: "researcher-aaaaaa",
       parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 
@@ -380,6 +402,7 @@ describe("buildSubagentRunInput", () => {
       selfAgent: true,
       session: makeSession(),
       source: { outputSchema: schema, type: "runtime" },
+      taskId: "researcher-aaaaaa",
       parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
 

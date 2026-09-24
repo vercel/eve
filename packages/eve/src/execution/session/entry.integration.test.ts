@@ -2,7 +2,7 @@ import type { HandoffWorkflowEntryInput } from "./entry-input.js";
 import type { RunCreatedEventRequest } from "@workflow/world";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { assert, afterEach, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import {
   dehydrateWorkflowArguments,
   hydrateWorkflowArguments,
@@ -23,7 +23,7 @@ import {
   buildSubagentRootAttributes,
 } from "#execution/eve-workflow-attributes.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
@@ -41,6 +41,14 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { SessionTitleKey } from "#context/keys.js";
+
+/** Resolves the run that currently owns a session command hook. */
+async function waitForCommandHookOwner(token: string): Promise<{ readonly runId: string }> {
+  return await vi.waitFor(async () => ({ runId: (await getHookByToken(token)).runId }), {
+    interval: 20,
+    timeout: 10_000,
+  });
+}
 
 function buildSerializedContext(overrides: {
   acceptedDeploymentId?: string;

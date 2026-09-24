@@ -55,6 +55,15 @@ export type TaskEffect =
       readonly record: TaskRecord;
       readonly requests: readonly InputRequest[];
     }
+  | {
+      /**
+       * A child the owner cancelled confirmed it stopped. Nothing reaches the
+       * model, but its usage still counts.
+       */
+      readonly kind: "confirmed";
+      readonly record: TaskRecord;
+      readonly usage?: TokenUsage;
+    }
   | { readonly kind: "reconcile"; readonly record: TaskRecord }
   | { readonly kind: "hard-stop"; readonly record: TaskRecord };
 
@@ -116,18 +125,10 @@ export function findTask(table: TaskTable, taskId: string): TaskRecord | undefin
   return table.records.find((record) => record.id === taskId);
 }
 
-export function findTaskByCall(
-  table: TaskTable,
-  callId: string,
-  turnId?: string,
-): TaskRecord | undefined {
-  return table.records.find(
-    (record) => record.callId === callId && (turnId === undefined || record.turnId === turnId),
-  );
-}
-
 export type StartTaskResult =
   | { readonly kind: "started"; readonly table: TaskTable; readonly record: TaskRecord }
+  /** A replayed call whose record already exists; its side effects already ran. */
+  | { readonly kind: "existing"; readonly record: TaskRecord }
   | {
       /** The call named a working agent; the message joins its current generation. */
       readonly kind: "steered";
@@ -163,7 +164,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
   const existing = table.records.find(
     (record) => record.callId === input.callId && record.turnId === input.turnId,
   );
-  if (existing !== undefined) return { kind: "started", record: existing, table };
+  if (existing !== undefined) return { kind: "existing", record: existing };
 
   const deadlineAt =
     input.timeoutMs === false || input.timeoutMs === undefined
@@ -199,6 +200,15 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
         error: {
           code: "AGENT_MISMATCH",
           message: `Agent "${agent.id}" is a ${agent.name} agent. Call the ${agent.name} tool to continue it.`,
+        },
+      };
+    }
+    if (isTerminalTaskStatus(agent.status) && agent.child === undefined) {
+      return {
+        kind: "rejected",
+        error: {
+          code: "AGENT_UNREACHABLE",
+          message: `Agent "${agent.id}" can no longer be given more work. Omit agentId to start a new agent.`,
         },
       };
     }
@@ -302,6 +312,24 @@ export function applyTaskMessage(
       };
     }
     case "task.settled": {
+      // A child the owner stopped (cancelled or timed out) confirms here.
+      if (isTerminalTaskStatus(record.status) && record.cancelConfirmBy !== undefined) {
+        const confirmed = withoutUndefined({
+          ...record,
+          cancelConfirmBy: undefined,
+          child: message.childEnded === true ? undefined : record.child,
+        });
+        return {
+          effects: [
+            withoutUndefined({
+              kind: "confirmed" as const,
+              record: confirmed,
+              usage: message.usage,
+            }),
+          ],
+          table: replace(table, confirmed),
+        };
+      }
       if (isTerminalTaskStatus(record.status)) return { effects: [], table };
       const settled = settleRecord(record, message.outcome);
       const next =

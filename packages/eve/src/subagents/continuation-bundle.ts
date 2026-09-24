@@ -1,4 +1,4 @@
-import type { RuntimeAgentHandleAction } from "#subagents/handle-dispatch.js";
+import type { RuntimeAgentHandleAction } from "#subagents/start-outcome.js";
 import { resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";

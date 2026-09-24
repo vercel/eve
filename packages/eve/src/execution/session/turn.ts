@@ -384,7 +384,11 @@ class ActiveTurn {
           results: admitted.payload.results.filter((result) => result.kind === "tool-result"),
         });
         if (childResults.length > 0) {
-          await this.applyTaskReport({ kind: "runtime-action-result", results: childResults });
+          await this.applyTaskReport({
+            kind: "runtime-action-result",
+            results: childResults,
+            source: admitted.payload.source,
+          });
         }
         return;
       }

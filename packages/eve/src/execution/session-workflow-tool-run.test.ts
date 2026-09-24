@@ -98,14 +98,21 @@ it("cancels the run's agent tasks and returns its outcome as an ordinary tool re
   });
 });
 
-it("ignores an outcome from a run the turn did not record", async () => {
+it("still cancels the tasks of a run the turn no longer records, but ignores its outcome", async () => {
+  const cursor = createCursor({ recorded: false });
+  vi.mocked(cancelTasksStep).mockResolvedValue({ sessionState: cursor.sessionState });
+
   const outcome = await handleWorkflowToolRunMessage({
-    cursor: createCursor({ recorded: false }),
+    cursor,
     message: { from, kind: "outcome", result: { output: "done", status: "completed" } },
   });
 
   expect(outcome).toBeUndefined();
-  expect(cancelTasksStep).not.toHaveBeenCalled();
+  expect(cancelTasksStep).toHaveBeenCalledWith({
+    selector: { kind: "workflow-run", runId: "run" },
+    serializedContext: {},
+    sessionState: cursor.sessionState,
+  });
 });
 
 function createCursor(input: { readonly recorded: boolean }): SessionStateCursor {

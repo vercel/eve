@@ -1,7 +1,7 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
-import { ContinuationHookTokensKey } from "#context/keys.js";
+import type { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
@@ -20,7 +20,6 @@ import {
   resolveAgentInvocationAction,
 } from "#execution/tools/subagent/invoke-preparation.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
@@ -31,10 +30,12 @@ import {
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
-import { createSubagentCalledEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createCalledEvent } from "#tasks/events.js";
+import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeAgentDispatchRequest,
+  RuntimeSubagentChildResult,
   RuntimeSubagentResult,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
@@ -56,13 +57,20 @@ import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.
 import type { ChildAddress } from "#tasks/protocol.js";
 import { createFailedResult, toTaskError, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
 import { deliverToChild, runCommands, type CommandEffect } from "#tasks/transport.js";
-import { ownerInboxHookToken, setTaskTable } from "#tasks/state.js";
+import {
+  ownerInboxHookToken,
+  readTaskCallbackAlias,
+  setTaskTable,
+  TASK_CALLBACK_ALIAS_PREFIX,
+  TASK_CALLBACK_ALIAS_STATE_KEY,
+} from "#tasks/state.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
   applyTaskMessage,
   cancelTask,
   DEFAULT_AGENT_TIMEOUT_MS,
   findTask,
+  markTaskDelivered,
   readTaskTable,
   startTask,
   type TaskEffect,
@@ -70,9 +78,6 @@ import {
 } from "#tasks/table.js";
 
 const log = createLogger("tasks.owner");
-
-/** Unguessable per-session alias that remote children call back on. */
-const TASK_CALLBACK_ALIAS_KEY = "eve.taskCallbackAlias";
 
 /** One agent call: from the model, or from `ctx.agent` inside a workflow tool body. */
 export interface AgentTaskCall {
@@ -96,6 +101,28 @@ export interface TaskOwnerUpdate {
   readonly replies: readonly WorkflowCallerReply[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+}
+
+/**
+ * Mints the owner's remote callback alias if it has none. It runs before any
+ * start step, so the alias is recorded and claimed before a remote child
+ * could call back, and a retried start step reuses it.
+ */
+export async function ensureTaskCallbackAliasStep(input: {
+  readonly sessionState: DurableSessionState;
+}): Promise<{ readonly sessionState: DurableSessionState }> {
+  "use step";
+
+  const session = readDurableSession(input.sessionState);
+  if (readTaskCallbackAlias(session.state) !== undefined) return input;
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const alias = `${TASK_CALLBACK_ALIAS_PREFIX}${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  return {
+    sessionState: replaceDurableSessionSnapshot({
+      session: { ...session, state: { ...session.state, [TASK_CALLBACK_ALIAS_STATE_KEY]: alias } },
+      state: input.sessionState,
+    }),
+  };
 }
 
 /**
@@ -134,7 +161,10 @@ export async function startAgentTasks(input: {
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const emission = getHarnessEmissionState(durableSession.state);
-  const turnId = activeTurnId(emission);
+  // The pending batch keeps the waiting turn's ID even after a child's
+  // question clears the live one, so a turn cancel still reaches these tasks.
+  const turnId =
+    getPendingCoordinationBatch(durableSession.state)?.event.turnId ?? activeTurnId(emission);
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -187,7 +217,7 @@ export async function startAgentTasks(input: {
   let session = prepared.session;
   let serializedContext = input.serializedContext;
   const ownerToken = ownerInboxHookToken(session.sessionId);
-  let callbackAlias = readCallbackAlias(session);
+  const callbackAlias = readTaskCallbackAlias(session.state);
 
   for (const [index, entry] of prepared.plan.entries()) {
     const { call } = actions[index]!;
@@ -198,7 +228,7 @@ export async function startAgentTasks(input: {
     const action = entry.kind === "start" ? entry.target.action : entry.action;
     const name = action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
     const agentId = readAgentId(action);
-    let table = getTaskTable(session);
+    let table = readTasks(session);
     const started = startTask(table, {
       agentId,
       callId: call.callId,
@@ -212,6 +242,8 @@ export async function startAgentTasks(input: {
       turnId,
       workflowCaller: call.workflowCaller,
     });
+    // A replayed call already started its child and resolved its caller.
+    if (started.kind === "existing") continue;
     if (started.kind === "rejected") {
       fail(call, action, { code: started.error.code, message: started.error.message });
       continue;
@@ -241,12 +273,7 @@ export async function startAgentTasks(input: {
 
     const isRemote = action.kind === "remote-agent-call";
     if (isRemote && callbackAlias === undefined) {
-      callbackAlias = mintCallbackAlias();
-      session = {
-        ...session,
-        state: { ...session.state, [TASK_CALLBACK_ALIAS_KEY]: callbackAlias },
-      };
-      serializedContext = recordContinuationHookToken(serializedContext, callbackAlias);
+      throw new Error("Remote agent tasks require the owner's callback alias.");
     }
     const replyToken = isRemote ? sessionInboxHookToken(callbackAlias!) : ownerToken;
 
@@ -292,6 +319,7 @@ export async function startAgentTasks(input: {
         sandboxSessionId: prepared.sandboxSessionId,
         session,
         target: entry.target,
+        taskId: record.id,
         trace: tracing.dispatch,
       });
       if (outcome.kind === "error") failure = outcome.result.output;
@@ -310,7 +338,10 @@ export async function startAgentTasks(input: {
         input.now,
       );
       // The failure is the call's result right now, so it is already delivered.
-      session = setTaskTable(session, markDelivered(settled.table, record.id));
+      session = setTaskTable(
+        session,
+        markTaskDelivered(settled.table, record.id, record.generation),
+      );
       serializedContext = await flushAgentInvocationTraces(
         tracing.fail(createFailedResult(action, call.callId, failure)),
       );
@@ -318,9 +349,9 @@ export async function startAgentTasks(input: {
       continue;
     }
     if (child !== undefined) {
-      const adopted = adoptChild(getTaskTable(session), record, child, input.now);
+      const adopted = adoptChild(readTasks(session), record, child, input.now);
       session = setTaskTable(session, adopted.table);
-      await runCommands(adopted.commands, prepared.bundle);
+      await runCommands(adopted.commands, ctx);
       events.push(
         createCalledEvent({
           child,
@@ -379,15 +410,15 @@ export async function applyTaskReport(input: {
   if (input.payload.kind === "task.started") {
     // A cancelled task still adopts its child, so the held cancel reaches it.
     const startedCallId = input.payload.callId;
-    const record = getTaskTable(session).records.find(
+    const record = readTasks(session).records.find(
       (candidate) => candidate.callId === startedCallId && candidate.child === undefined,
     );
     if (record !== undefined) {
       const child: ChildAddress = { kind: "local", ...input.payload.child };
-      const adopted = adoptChild(getTaskTable(session), record, child, input.now);
+      const adopted = adoptChild(readTasks(session), record, child, input.now);
       session = setTaskTable(session, adopted.table);
       if (adopted.commands.length > 0) {
-        await runCommands(adopted.commands, await readBundle(input.serializedContext));
+        await runCommands(adopted.commands, await readContext(input.serializedContext));
       }
       const current = findTask(adopted.table, record.id)!;
       if (current.status === "working" || current.status === "input_required") {
@@ -404,10 +435,11 @@ export async function applyTaskReport(input: {
       }
     }
   } else {
+    const source = input.payload.source;
     for (const result of input.payload.results) {
       if (result.kind !== "subagent-result" || result.origin !== "child") continue;
-      const table = getTaskTable(session);
-      const record = findWorkingTaskByCall(table, result.callId);
+      const table = readTasks(session);
+      const record = findReportedTask(table, result, source);
       if (record === undefined) continue;
       const outcome = toTaskOutcome(result);
       const childEnded = result.outcome.kind === "terminal";
@@ -423,8 +455,37 @@ export async function applyTaskReport(input: {
         },
         input.now,
       );
+      if (applied.effects.some((effect) => effect.kind === "confirmed")) {
+        // A cancelled child confirmed it stopped: count its spend, report nothing.
+        const confirmed =
+          childEnded && record.child?.kind === "local"
+            ? clearProxyInputRequestsForChild(
+                setTaskTable(session, applied.table),
+                record.child.continuationToken,
+              )
+            : setTaskTable(session, applied.table);
+        session = setTurnUsageState(
+          confirmed,
+          accumulateSessionUsage({
+            previous: getTurnUsageState(session.state),
+            usage: result.outcome.usageDelta,
+          }),
+        );
+        serializedContext = await flushAgentInvocationTraces(
+          settleAgentInvocationTrace({
+            acceptedAtMs: Date.parse(input.now),
+            result,
+            serializedContext,
+            sessionId: session.sessionId,
+          }),
+        );
+        continue;
+      }
       if (!applied.effects.some((effect) => effect.kind === "settled")) continue;
-      let next = setTaskTable(session, markDelivered(applied.table, record.id));
+      let next = setTaskTable(
+        session,
+        markTaskDelivered(applied.table, record.id, record.generation),
+      );
       if (childEnded && record.child?.kind === "local") {
         next = clearProxyInputRequestsForChild(next, record.child.continuationToken);
       }
@@ -491,7 +552,7 @@ export async function cancelTasksStep(input: {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
-  const initial = getTaskTable(durable);
+  const initial = readTasks(durable);
   let table = initial;
   const now = new Date().toISOString();
   const commands: CommandEffect[] = [];
@@ -509,7 +570,7 @@ export async function cancelTasksStep(input: {
     commands.push(...commandEffects(cancelled.effects));
   }
   if (table === initial) return { sessionState: input.sessionState };
-  await runCommands(commands, await readBundle(input.serializedContext));
+  await runCommands(commands, await readContext(input.serializedContext));
   return {
     sessionState: replaceDurableSessionSnapshot({
       session: setTaskTable(durable, table),
@@ -536,11 +597,11 @@ function commandEffects(effects: readonly TaskEffect[]): CommandEffect[] {
   return effects.filter((effect): effect is CommandEffect => effect.kind === "send");
 }
 
-async function readBundle(
+async function readContext(
   serializedContext: Record<string, unknown>,
-): Promise<CompiledBundle | undefined> {
+): Promise<ContextContainer | undefined> {
   try {
-    return (await deserializeContext(serializedContext)).get(BundleKey);
+    return await deserializeContext(serializedContext);
   } catch {
     return undefined;
   }
@@ -564,7 +625,7 @@ function readAgentId(action: RuntimeAgentDispatchRequest): string | undefined {
 }
 
 /** Reads the task table and logs records that could not be decoded. */
-function getTaskTable(session: Pick<HarnessSession, "state">): TaskTable {
+function readTasks(session: Pick<HarnessSession, "state">): TaskTable {
   const { lost, table } = readTaskTable(session.state);
   for (const task of lost) {
     log.warn("dropped an unreadable task record", {
@@ -576,46 +637,34 @@ function getTaskTable(session: Pick<HarnessSession, "state">): TaskTable {
   return table;
 }
 
-function mintCallbackAlias(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(24));
-  return `task-callback:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function readCallbackAlias(session: Pick<HarnessSession, "state">): string | undefined {
-  const value = session.state?.[TASK_CALLBACK_ALIAS_KEY];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function recordContinuationHookToken(
-  serializedContext: Record<string, unknown>,
-  token: string,
-): Record<string, unknown> {
-  const recorded = serializedContext[ContinuationHookTokensKey.name];
-  const tokens = Array.isArray(recorded)
-    ? recorded.filter((value) => typeof value === "string")
-    : [];
-  return tokens.includes(token)
-    ? serializedContext
-    : { ...serializedContext, [ContinuationHookTokensKey.name]: [...tokens, token] };
-}
-
-function findWorkingTaskByCall(table: TaskTable, callId: string): TaskRecord | undefined {
-  return table.records.find(
-    (record) =>
-      record.callId === callId &&
-      (record.status === "working" || record.status === "input_required"),
-  );
-}
-
-/** Foreground and `ctx.agent` results reach their caller in the same step they settle. */
-function markDelivered(table: TaskTable, taskId: string): TaskTable {
-  const record = findTask(table, taskId);
-  if (record === undefined || record.delivered) return table;
-  return {
-    records: table.records.map((candidate) =>
-      candidate === record ? { ...record, delivered: true } : candidate,
-    ),
-  };
+/**
+ * The task a child's result settles: the current generation's call, from a
+ * child of the matching kind. A cancelled task still accepts its child's
+ * confirmation. Remote results must come from the remote session the owner
+ * started, so one remote child cannot settle another task.
+ */
+function findReportedTask(
+  table: TaskTable,
+  result: RuntimeSubagentChildResult,
+  source: RuntimeActionResultHookPayload["source"],
+): TaskRecord | undefined {
+  return table.records.find((record) => {
+    if (record.callId !== result.callId || record.name !== result.subagentName) return false;
+    if (
+      record.status !== "working" &&
+      record.status !== "input_required" &&
+      record.cancelConfirmBy === undefined
+    ) {
+      return false;
+    }
+    if (source?.kind === "remote") {
+      return (
+        record.child?.kind === "remote" &&
+        (source.sessionId === undefined || source.sessionId === record.child.sessionId)
+      );
+    }
+    return record.child?.kind !== "remote";
+  });
 }
 
 function resolveFailedCall(input: {
@@ -646,31 +695,5 @@ function resolveFailedCall(input: {
     kind: "tool-result",
     output: input.output,
     toolName: call.toolName ?? call.input.target,
-  });
-}
-
-function createCalledEvent(input: {
-  readonly child: ChildAddress;
-  readonly record: TaskRecord;
-  readonly sequence: number;
-  readonly sessionId: string;
-  readonly toolName: string;
-  readonly turnId: string;
-}): UnstampedMessageStreamEvent {
-  const { child, record } = input;
-  return createSubagentCalledEvent({
-    agentId: record.id,
-    callId: record.callId,
-    childSessionId: child.kind === "workflow" ? child.runId : child.sessionId,
-    name: record.name,
-    remote:
-      child.kind === "remote"
-        ? { resolverId: child.credentialResolver ?? record.nodeId, url: child.url }
-        : undefined,
-    sequence: input.sequence,
-    sessionId: input.sessionId,
-    toolName: input.toolName,
-    turnId: input.turnId,
-    workflowId: workflowEntryReference.workflowId,
   });
 }

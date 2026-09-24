@@ -295,9 +295,8 @@ export class RemoteAgentContinueRequestError extends Error {
 /**
  * Returns true when a failed continue request may be retried. Only a
  * session that no longer exists (404 / SESSION_NOT_RESUMABLE) is permanent;
- * transient HTTP and network failures stay retryable so the dispatch step
- * keeps the agent handle and surfaces a retryable error instead of
- * discarding it — the model decides whether to try the same agentId again
+ * transient HTTP and network failures stay retryable so the owner keeps the
+ * agent and surfaces a retryable error instead of discarding it — the model decides whether to try the same agentId again
  * (the step itself never re-sends: the callee may have accepted a delivery
  * whose response was lost).
  */

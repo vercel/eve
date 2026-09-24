@@ -1,4 +1,4 @@
-import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { DispatchOutcome, RuntimeSession } from "#subagents/start-outcome.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
@@ -39,6 +39,7 @@ export async function startLocalSubagent(input: {
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
+  readonly taskId: string;
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
   const childRuntime = createWorkflowRuntime({
@@ -61,6 +62,7 @@ export async function startLocalSubagent(input: {
     session: input.session,
     selfAgent: source.type === "runtime",
     source,
+    taskId: input.taskId,
   });
 
   try {

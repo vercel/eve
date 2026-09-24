@@ -234,7 +234,7 @@ const runtimeToolResultActionResultSchema = z
  * trade-off, not an oversight.
  *
  * `outcome` is the child engine's explicit lifecycle verdict for the settled
- * turn. The parent settles the agent handle from `outcome.kind` and folds
+ * turn. The owner settles the task record from `outcome.kind` and folds
  * `outcome.usageDelta` into its session totals; `output`/`isError` remain
  * the tool-result projection shown to the model. Every producer states the
  * envelope explicitly — task-mode boundaries synthesize a terminal one —
@@ -310,7 +310,7 @@ const runtimeSubagentDispatchFailureSchema = z
 /**
  * Runtime-owned subagent result projected back into a harness resume call,
  * discriminated on `origin`: `child` results come from a dispatched child
- * session and must bind to a running agent handle; `dispatch` failures are
+ * session and must bind to a working task record; `dispatch` failures are
  * parent-synthesized and trusted by construction.
  */
 export type RuntimeSubagentResult = RuntimeSubagentChildResult | RuntimeSubagentDispatchFailure;

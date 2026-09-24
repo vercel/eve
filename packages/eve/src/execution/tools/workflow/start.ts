@@ -2,7 +2,7 @@ import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { RuntimeSession } from "#subagents/start-outcome.js";
 import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,

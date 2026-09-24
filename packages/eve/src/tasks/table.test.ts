@@ -44,9 +44,16 @@ describe("startTask", () => {
     expect(first.record.id).toMatch(/^deploy-[0-9a-hjkmnp-tv-z]{6}$/u);
     expect(first.record).toMatchObject({ generation: 1, status: "working", delivered: false });
     expect(first.record.child).toBeUndefined();
-    const replay = started(first.table);
-    expect(replay.record).toBe(first.record);
-    expect(replay.table.records).toHaveLength(1);
+    const replay = startTask(first.table, {
+      callId: "call_1",
+      kind: "workflow",
+      mode: "foreground",
+      name: "deploy",
+      now: NOW,
+      ownerId: "session_1",
+      turnId: "turn_0",
+    });
+    expect(replay).toEqual({ kind: "existing", record: first.record });
   });
 
   it("gives different calls different ids", () => {
@@ -254,12 +261,14 @@ describe("applyTaskMessage", () => {
 });
 
 describe("cancelTask", () => {
-  it("records cancellation at once, holds the command until start, and drops the child's report", () => {
+  it("records cancellation at once, holds the command until start, and confirms the child's report", () => {
     const task = started();
     const cancelled = cancelTask(task.table, task.record.id, NOW);
     expect(cancelled.effects).toEqual([]);
     expect(cancelled.table.records[0]).toMatchObject({
       cancelConfirmBy: "2026-09-24T14:02:30.000Z",
+      delivered: true,
+      lastStatus: "Cancelled.",
       pendingCommands: [{ kind: "cancel" }],
       status: "cancelled",
     });
@@ -271,18 +280,58 @@ describe("cancelTask", () => {
     expect(start.effects).toEqual([
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
     ]);
-    expect(
-      applyTaskMessage(
-        start.table,
-        {
-          generation: 1,
-          kind: "task.settled",
-          outcome: { status: "cancelled" },
-          taskId: task.record.id,
-        },
-        NOW,
-      ).effects,
-    ).toEqual([]);
+    const report = {
+      generation: 1,
+      kind: "task.settled" as const,
+      outcome: { status: "cancelled" as const },
+      taskId: task.record.id,
+      usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 5, outputTokens: 1 },
+    };
+    const confirmed = applyTaskMessage(start.table, report, NOW);
+    expect(confirmed.effects).toEqual([
+      expect.objectContaining({ kind: "confirmed", usage: report.usage }),
+    ]);
+    expect(confirmed.table.records[0]?.cancelConfirmBy).toBeUndefined();
+    expect(applyTaskMessage(confirmed.table, report, NOW).effects).toEqual([]);
+  });
+
+  it("drops the child when a cancelled agent's session ended with its confirmation", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    const withChild = applyTaskMessage(
+      agent.table,
+      { child, generation: 1, kind: "task.started", taskId: agent.record.id },
+      NOW,
+    ).table;
+    const cancelled = cancelTask(withChild, agent.record.id, NOW).table;
+    const confirmed = applyTaskMessage(
+      cancelled,
+      {
+        childEnded: true,
+        generation: 1,
+        kind: "task.settled",
+        outcome: { status: "cancelled" },
+        taskId: agent.record.id,
+      },
+      NOW,
+    );
+    expect(confirmed.effects).toEqual([expect.objectContaining({ kind: "confirmed" })]);
+    expect(confirmed.table.records[0]?.child).toBeUndefined();
+  });
+
+  it("refuses to continue an agent that never started", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    const cancelled = cancelTask(agent.table, agent.record.id, NOW).table;
+    const resumed = startTask(cancelled, {
+      agentId: agent.record.id,
+      callId: "call_2",
+      kind: "agent",
+      mode: "foreground",
+      name: "researcher",
+      now: NOW,
+      ownerId: "session_1",
+      turnId: "turn_1",
+    });
+    expect(resumed).toMatchObject({ error: { code: "AGENT_UNREACHABLE" }, kind: "rejected" });
   });
 
   it("hard-stops a local child that has not confirmed within the window", () => {

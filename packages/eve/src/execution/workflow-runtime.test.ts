@@ -15,7 +15,6 @@ import { ActivityObserverKey, ChannelRequestIdKey, SessionTitleKey } from "#cont
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
-  waitForCommandHookOwner,
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   startSessionOwnerStep,
@@ -476,28 +475,6 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
-  });
-});
-
-describe("waitForCommandHookOwner", () => {
-  it("resolves the winning run without hydrating hook metadata", async () => {
-    getHookByTokenMock.mockResolvedValue({
-      get metadata() {
-        throw new Error("Ownership must not read encrypted metadata.");
-      },
-      runId: "winning-run",
-    });
-
-    await expect(waitForCommandHookOwner("task:token")).resolves.toEqual({ runId: "winning-run" });
-    expect(getHookByTokenMock).toHaveBeenCalledExactlyOnceWith("task:token");
-  });
-
-  it("does not turn storage failures into missing ownership", async () => {
-    const failure = new Error("backing store unavailable");
-    getHookByTokenMock.mockRejectedValue(failure);
-
-    await expect(waitForCommandHookOwner("task:token")).rejects.toBe(failure);
-    expect(getHookByTokenMock).toHaveBeenCalledOnce();
   });
 });
 

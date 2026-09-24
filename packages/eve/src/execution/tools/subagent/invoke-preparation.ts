@@ -14,7 +14,7 @@ import {
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
 } from "#context/keys.js";
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { RuntimeSession } from "#subagents/start-outcome.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import {
   createRecursiveAgentRootOnlyResult,

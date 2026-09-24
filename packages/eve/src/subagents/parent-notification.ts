@@ -215,12 +215,16 @@ function createSettledTurnResult(input: {
   return input.settled.usage === undefined ? result : { ...result, usage: input.settled.usage };
 }
 
-/** Tells the owner that this child claimed its addresses and can be reached. */
+/**
+ * Tells the owner that this child claimed its addresses and can be reached.
+ * Returns `false` when the owner no longer exists, so the child exits instead
+ * of doing work nobody will receive.
+ */
 export async function reportTaskStartedStep(input: {
   readonly callId: string;
   readonly child: TaskStartedHookPayload["child"];
   readonly token: string;
-}): Promise<void> {
+}): Promise<boolean> {
   "use step";
 
   const payload: TaskStartedHookPayload = {
@@ -230,9 +234,11 @@ export async function reportTaskStartedStep(input: {
   };
   try {
     await resumeHook(input.token, payload);
+    return true;
   } catch (error) {
     if (!HookNotFoundError.is(error)) throw error;
-    log.warn("task owner no longer exists", { callId: input.callId });
+    log.warn("task owner no longer exists; the child exits", { callId: input.callId });
+    return false;
   }
 }
 

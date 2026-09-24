@@ -7,7 +7,9 @@ import {
 } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { ContextContainer } from "#context/container.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
@@ -30,11 +32,11 @@ export type CommandEffect = Extract<TaskEffect, { kind: "send" }>;
 /** Sends owner commands to started children. Only `cancel` is issued before P2. */
 export async function runCommands(
   effects: readonly CommandEffect[],
-  bundle: CompiledBundle | undefined,
+  ctx: ContextContainer | undefined,
 ): Promise<void> {
   await Promise.all(
     effects.flatMap((effect) =>
-      effect.commands.map((command) => runCommand(effect.record, command, bundle)),
+      effect.commands.map((command) => runCommand(effect.record, command, ctx)),
     ),
   );
 }
@@ -42,18 +44,22 @@ export async function runCommands(
 async function runCommand(
   record: TaskRecord,
   command: TaskCommand,
-  bundle: CompiledBundle | undefined,
+  ctx: ContextContainer | undefined,
 ): Promise<void> {
   const child = record.child;
   if (child === undefined || command.kind !== "cancel") return;
   try {
     if (child.kind === "remote") {
-      if (bundle === undefined || record.nodeId === undefined) return;
+      const bundle = ctx?.get(BundleKey);
+      if (ctx === undefined || bundle === undefined || record.nodeId === undefined) return;
+      const selection = getDynamicSubagentSelection(ctx, record.nodeId);
       const resolved = resolveRemoteAgentForAction({
+        dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
         nodeId: record.nodeId,
         remoteAgentName: record.name,
         registry: bundle.subagentRegistry.subagentsByNodeId,
       });
+      // Cancel where the child runs; the registry may point at a newer deployment.
       await cancelRemoteAgentTurn({
         remote: { ...resolved, url: child.url },
         sessionId: child.sessionId,
@@ -65,9 +71,9 @@ async function runCommand(
     }
   } catch (error) {
     // The owner already recorded the cancellation; a lost request leaves the
-    // child to finish on its own, and its report is dropped as a duplicate.
+    // child to finish on its own, and its report only confirms the stop.
     logError(log, "failed to send cancel to a task child", error, {
-      childSessionId: child.kind === "workflow" ? child.runId : child.sessionId,
+      childKind: child.kind,
       taskId: record.id,
     });
   }

@@ -134,12 +134,16 @@ async function bootInitialOwner(
       : undefined;
     // The owner assigned this child's identity; now that the claims above
     // made this run the only one, report the address it can be reached at.
-    if (caller?.replyTo.kind === "hook") {
-      await reportTaskStartedStep({
+    if (
+      caller?.replyTo.kind === "hook" &&
+      !(await reportTaskStartedStep({
         callId: caller.callId,
         child: { continuationToken, sessionId },
         token: caller.replyTo.token,
-      });
+      }))
+    ) {
+      await inbox.dispose();
+      return undefined;
     }
     return {
       inbox,

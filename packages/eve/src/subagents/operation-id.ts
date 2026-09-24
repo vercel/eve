@@ -5,10 +5,8 @@ import { createHash } from "node:crypto";
  * parent-controlled, so the id exists before any child does and replaying
  * the same call produces the same operation.
  *
- * Lives apart from the handle store because it needs `node:crypto`: the
- * store module is bundled into the session owner body (which rejects
- * Node.js builtins), while operation ids are only ever minted inside
- * dispatch steps.
+ * Lives in its own module because it needs `node:crypto`, which the session
+ * workflow body rejects; operation ids are only minted inside start steps.
  */
 export function deriveAgentOperationId(input: {
   readonly callId: string;

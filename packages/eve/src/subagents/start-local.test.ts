@@ -51,12 +51,17 @@ describe("startLocalSubagent", () => {
         },
       },
       sandboxSessionId: "parent-session",
+      taskId: "researcher-aaaaaa",
       session: {} as never,
       source: { description: "Research", type: "local" },
     });
 
     expect(createWorkflowRuntime).toHaveBeenCalledOnce();
     expect(createSessionMock).toHaveBeenCalledOnce();
+    // The owner-assigned task ID names the child's continuation address, its start lock.
+    expect(buildSubagentRunInput).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "researcher-aaaaaa" }),
+    );
     expect(outcome).toEqual({ kind: "started" });
   });
 
@@ -87,6 +92,7 @@ describe("startLocalSubagent", () => {
         },
       },
       sandboxSessionId: "parent-session",
+      taskId: "researcher-aaaaaa",
       session: {} as never,
       source: { description: "Research", type: "local" },
     });
@@ -134,6 +140,7 @@ describe("startLocalSubagent", () => {
         },
       },
       sandboxSessionId: "parent-session",
+      taskId: "researcher-aaaaaa",
       session: {} as never,
       source: { description: "Search Slack", type: "local" },
     });

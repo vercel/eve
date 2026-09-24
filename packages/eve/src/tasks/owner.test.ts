@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
-import { ContinuationHookTokensKey } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
 import {
@@ -16,19 +15,27 @@ import {
   createWorkflowRuntime,
   requestWorkflowTurnCancellation,
 } from "#execution/workflow-runtime.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import type { SessionStateMap } from "#harness/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   applyTaskReport,
   cancelTasksStep,
+  ensureTaskCallbackAliasStep,
   startAgentTasks,
   type AgentTaskCall,
 } from "#tasks/owner.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { getTaskTable, ownerInboxHookToken } from "#tasks/state.js";
+import {
+  getTaskTable,
+  ownerInboxHookToken,
+  readTaskCallbackAlias,
+  TASK_CALLBACK_ALIAS_STATE_KEY,
+} from "#tasks/state.js";
 import { cancelTask } from "#tasks/table.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
@@ -47,6 +54,13 @@ const LOCAL_CHILD = {
   kind: "local" as const,
   sessionId: "child-session",
 };
+const REMOTE_CHILD = {
+  callbackBaseUrl: "https://parent.example",
+  kind: "remote" as const,
+  sessionId: "remote-child",
+  url: "https://billing.example",
+};
+const CALLBACK_ALIAS = `eve:task-callback:${"ab".repeat(24)}`;
 const ZERO_USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
 
 const bundle = {
@@ -146,8 +160,49 @@ describe("startAgentTasks", () => {
         callbackBaseUrl: "https://parent.example",
         parentContinuationToken: OWNER_INBOX,
         target: expect.objectContaining({ kind: "local" }),
+        taskId: record?.id,
       }),
     );
+  });
+
+  it("records the waiting turn from the pending batch after the live turn cleared", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+    const cleared = setHarnessEmissionState(runtimeSession(readDurableSession(ownerState([]))), {
+      sequence: 4,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "",
+    });
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 3, stepIndex: 1, turnId: "turn-1" },
+      responseMessages: [],
+      session: cleared,
+      tasks: [],
+    });
+
+    const update = await startAgentTasks({
+      callbackBaseUrl: "https://parent.example",
+      calls: [modelCall()],
+      now: NOW,
+      serializedContext: {},
+      sessionState: createDurableSessionState({ session: parked }),
+    });
+
+    expect(records(update.sessionState)).toEqual([expect.objectContaining({ turnId: "turn-1" })]);
+  });
+
+  it.each([
+    ["fresh start", undefined],
+    ["continuation", "research-abc234"],
+  ])("repeats no side effects for a replayed %s", async (_name, agentId) => {
+    const existing = createTaskRecord();
+
+    const update = await start([modelCall({ agentId })], [existing]);
+
+    expect(update).toMatchObject({ events: [], replies: [], results: [] });
+    expect(startSubagent).not.toHaveBeenCalled();
+    expect(dispatchSession).not.toHaveBeenCalled();
+    expect(records(update.sessionState)).toEqual([existing]);
   });
 
   it("adopts a remote child at once and announces it", async () => {
@@ -161,7 +216,9 @@ describe("startAgentTasks", () => {
       },
     });
 
-    const update = await start([modelCall({ target: "billing" })]);
+    const update = await start([modelCall({ target: "billing" })], [], {
+      [TASK_CALLBACK_ALIAS_STATE_KEY]: CALLBACK_ALIAS,
+    });
 
     const [record] = records(update.sessionState);
     expect(record?.child).toEqual({
@@ -186,16 +243,24 @@ describe("startAgentTasks", () => {
       }),
     ]);
     expect(update.results).toEqual([]);
-    // Remote children call back on an unguessable alias, never the owner's stable inbox.
-    const alias = readDurableSession(update.sessionState).state?.["eve.taskCallbackAlias"];
-    expect(alias).toEqual(expect.stringMatching(/^task-callback:[0-9a-f]{48}$/u));
-    expect(update.serializedContext[ContinuationHookTokensKey.name]).toEqual([alias]);
+    // Remote children call back on the owner's unguessable alias, never its stable inbox.
     expect(startSubagent).toHaveBeenCalledWith(
-      expect.objectContaining({ parentContinuationToken: sessionInboxHookToken(alias as string) }),
+      expect.objectContaining({
+        parentContinuationToken: sessionInboxHookToken(CALLBACK_ALIAS),
+        taskId: record?.id,
+      }),
     );
+    expect(update.serializedContext).toEqual({});
   });
 
-  it("settles the record failed and returns the error when the child cannot start", async () => {
+  it("refuses to start a remote child before the owner has a callback alias", async () => {
+    await expect(start([modelCall({ target: "billing" })])).rejects.toThrow(
+      "Remote agent tasks require the owner's callback alias.",
+    );
+    expect(startSubagent).not.toHaveBeenCalled();
+  });
+
+  it("returns the start error and keeps no record of an agent that never started", async () => {
     const output = { code: "SUBAGENT_START_FAILED", message: "The queue is unavailable." };
     vi.mocked(startSubagent).mockResolvedValue({
       kind: "error",
@@ -214,9 +279,8 @@ describe("startAgentTasks", () => {
     expect(update.results).toEqual([
       { callId: "call-1", isError: true, kind: "tool-result", output, toolName: "research" },
     ]);
-    expect(records(update.sessionState)).toEqual([
-      expect.objectContaining({ callId: "call-1", status: "failed" }),
-    ]);
+    // The settled, delivered record has no child to continue, so the write prunes it.
+    expect(records(update.sessionState)).toEqual([]);
   });
 
   it("replies to a ctx.agent caller when its call fails", async () => {
@@ -256,6 +320,27 @@ describe("startAgentTasks", () => {
     ]);
     expect(startSubagent).not.toHaveBeenCalled();
     expect(records(update.sessionState)).toEqual([]);
+  });
+
+  it("refuses to continue an agent whose child never started", async () => {
+    const { table } = cancelTask(
+      { records: [createTaskRecord({ callId: "call-0" })] },
+      "research-abc234",
+      NOW,
+    );
+
+    const update = await start([modelCall({ agentId: "research-abc234" })], table.records);
+
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        callId: "call-1",
+        isError: true,
+        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+      }),
+    ]);
+    expect(startSubagent).not.toHaveBeenCalled();
+    expect(dispatchSession).not.toHaveBeenCalled();
+    expect(records(update.sessionState)).toEqual(table.records);
   });
 
   it("rejects more work for an agent that is still working", async () => {
@@ -410,14 +495,19 @@ describe("applyTaskReport", () => {
         },
       ]);
       expect(update.replies).toEqual([]);
-      const [settled] = records(update.sessionState);
-      expect(settled).toMatchObject({
-        delivered: true,
-        lastStatus: "Found three sources.",
-        status: "completed",
-      });
-      // A child whose session ended cannot be given more work.
-      expect(settled?.child).toEqual(kind === "parked" ? LOCAL_CHILD : undefined);
+      // A parked child stays listed as an idle agent; one whose session ended is dropped.
+      expect(records(update.sessionState)).toEqual(
+        kind === "parked"
+          ? [
+              expect.objectContaining({
+                child: LOCAL_CHILD,
+                delivered: true,
+                lastStatus: "Found three sources.",
+                status: "completed",
+              }),
+            ]
+          : [],
+      );
       expect(getSessionTokenUsage(readDurableSession(update.sessionState))).toMatchObject({
         inputTokens: 2,
         outputTokens: 3,
@@ -502,6 +592,130 @@ describe("applyTaskReport", () => {
       expect(dropped.sessionState).toBe(restored);
     }
     expect(getSessionTokenUsage(readDurableSession(restored))).toMatchObject({ inputTokens: 2 });
+  });
+  describe("source binding", () => {
+    const remoteRecord = createTaskRecord({
+      child: REMOTE_CHILD,
+      id: "billing-abc234",
+      name: "billing",
+      nodeId: "subagents/billing.ts",
+    });
+    const done = {
+      kind: "parked" as const,
+      result: { kind: "succeeded" as const, output: "done" },
+      usageDelta: ZERO_USAGE,
+    };
+    const localResult = childResult(done);
+    const remoteResult = { ...childResult(done), subagentName: "billing" };
+
+    it.each([
+      [
+        "a remote-stamped result for a local task",
+        createTaskRecord({ child: LOCAL_CHILD }),
+        resultPayload(localResult, { kind: "remote", sessionId: "child-session" }),
+      ],
+      ["an unstamped result for a remote task", remoteRecord, resultPayload(remoteResult)],
+      [
+        "a result from another remote session",
+        remoteRecord,
+        resultPayload(remoteResult, { kind: "remote", sessionId: "other-remote" }),
+      ],
+      [
+        "a result naming another agent",
+        createTaskRecord({ child: LOCAL_CHILD }),
+        resultPayload({ ...localResult, subagentName: "billing" }),
+      ],
+    ])("drops %s", async (_name, record, payload) => {
+      const state = ownerState([record]);
+
+      const update = await applyTaskReport({
+        now: NOW,
+        payload,
+        serializedContext: {},
+        sessionState: state,
+      });
+
+      expect(update).toMatchObject({ events: [], replies: [], results: [] });
+      expect(update.sessionState).toBe(state);
+      expect(records(update.sessionState)).toEqual([record]);
+    });
+
+    it.each([
+      ["with the session it reported", { kind: "remote" as const, sessionId: "remote-child" }],
+      ["from an older deployment that omits its session", { kind: "remote" as const }],
+    ])("settles a remote task from a remote-stamped result %s", async (_name, source) => {
+      const update = await applyTaskReport({
+        now: NOW,
+        payload: resultPayload(remoteResult, source),
+        serializedContext: {},
+        sessionState: ownerState([remoteRecord]),
+      });
+
+      expect(update.results).toEqual([
+        { callId: "call-1", kind: "tool-result", output: "done", toolName: "billing" },
+      ]);
+    });
+  });
+
+  it("counts a cancelled child's confirmation without reporting it", async () => {
+    const { table } = cancelTask(
+      {
+        records: [
+          createTaskRecord({
+            child: LOCAL_CHILD,
+            workflowCaller: { replyTo: "reply", runId: "run-1" },
+          }),
+        ],
+      },
+      "research-abc234",
+      NOW,
+    );
+    const payload = resultPayload(
+      childResult({
+        kind: "parked",
+        result: { kind: "cancelled" },
+        usageDelta: { ...ZERO_USAGE, inputTokens: 5, outputTokens: 1 },
+      }),
+    );
+
+    const update = await applyTaskReport({
+      now: NOW,
+      payload,
+      serializedContext: {},
+      sessionState: ownerState(table.records),
+    });
+
+    expect(update).toMatchObject({ events: [], replies: [], results: [] });
+    expect(getSessionTokenUsage(readDurableSession(update.sessionState))).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 1,
+    });
+    const [record] = records(update.sessionState);
+    expect(record).toMatchObject({
+      child: LOCAL_CHILD,
+      lastStatus: "Cancelled.",
+      status: "cancelled",
+    });
+    expect(record?.cancelConfirmBy).toBeUndefined();
+
+    const repeated = await applyTaskReport({
+      now: NOW,
+      payload,
+      serializedContext: {},
+      sessionState: update.sessionState,
+    });
+    expect(repeated.sessionState).toBe(update.sessionState);
+  });
+});
+
+describe("ensureTaskCallbackAliasStep", () => {
+  it("mints the callback alias once and keeps it on every later call", async () => {
+    const minted = await ensureTaskCallbackAliasStep({ sessionState: ownerState([]) });
+
+    expect(readTaskCallbackAlias(readDurableSession(minted.sessionState).state)).toMatch(
+      /^eve:task-callback:[0-9a-f]{48}$/u,
+    );
+    await expect(ensureTaskCallbackAliasStep(minted)).resolves.toBe(minted);
   });
 });
 
@@ -595,17 +809,25 @@ function modelCall(
   return { callId: "call-1", input: callInput, toolName: target };
 }
 
-async function start(calls: readonly AgentTaskCall[], existing: readonly TaskRecord[] = []) {
+async function start(
+  calls: readonly AgentTaskCall[],
+  existing: readonly TaskRecord[] = [],
+  state: SessionStateMap = {},
+) {
   return await startAgentTasks({
     callbackBaseUrl: "https://parent.example",
     calls,
     now: NOW,
     serializedContext: {},
-    sessionState: ownerState(existing),
+    sessionState: ownerState(existing, state),
   });
 }
 
-function ownerState(existing: readonly TaskRecord[]): DurableSessionState {
+function ownerState(
+  existing: readonly TaskRecord[],
+  state: SessionStateMap = {},
+): DurableSessionState {
+  const merged = { ...taskTableState(existing), ...state };
   return createDurableSessionState({
     session: setHarnessEmissionState(
       {
@@ -614,7 +836,7 @@ function ownerState(existing: readonly TaskRecord[]): DurableSessionState {
         continuationToken: "parent-token",
         history: [],
         sessionId: "parent",
-        state: existing.length === 0 ? undefined : taskTableState(existing),
+        state: existing.length === 0 && Object.keys(state).length === 0 ? undefined : merged,
       },
       { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn-1" },
     ),
@@ -645,9 +867,15 @@ function childResult(outcome: RuntimeSubagentChildResult["outcome"]): RuntimeSub
   };
 }
 
-function resultPayload(result: RuntimeSubagentChildResult) {
-  return {
-    kind: "runtime-action-result",
-    results: [result],
-  } satisfies RuntimeActionResultHookPayload;
+function resultPayload(
+  result: RuntimeSubagentChildResult,
+  source?: RuntimeActionResultHookPayload["source"],
+) {
+  const payload: {
+    kind: "runtime-action-result";
+    results: RuntimeSubagentChildResult[];
+    source?: RuntimeActionResultHookPayload["source"];
+  } = { kind: "runtime-action-result", results: [result] };
+  if (source !== undefined) payload.source = source;
+  return payload;
 }

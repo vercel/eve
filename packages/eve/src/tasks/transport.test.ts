@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ContextContainer } from "#context/container.js";
+import { SessionDynamicSubagentSelectionsKey } from "#context/keys.js";
 import {
   createWorkflowRuntime,
   requestWorkflowTurnCancellation,
 } from "#execution/workflow-runtime.js";
 import { createTaskRecord } from "#internal/testing/task-records.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
@@ -47,6 +50,12 @@ const bundle = {
   subagentRegistry: { subagentsByNodeId: new Map() },
 } as never;
 const dispatchSession = vi.fn();
+
+function contextWithBundle(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(BundleKey, bundle);
+  return ctx;
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -152,16 +161,68 @@ describe("runCommands", () => {
         },
         { commands: [{ kind: "cancel" }], kind: "send", record: createTaskRecord() },
       ],
-      bundle,
+      contextWithBundle(),
     );
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
       sessionId: "child-session",
     });
+    expect(resolveRemoteAgentForAction).toHaveBeenCalledWith({
+      dynamicRemoteAgent: undefined,
+      nodeId: "subagents/research",
+      registry: expect.any(Map),
+      remoteAgentName: "research",
+    });
     expect(cancelRemoteAgentTurn).toHaveBeenCalledExactlyOnceWith({
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
     });
+  });
+
+  it("cancels a dynamic remote agent with its selected configuration, where it runs", async () => {
+    const remoteAgent = {
+      description: "Billing.",
+      path: "/eve/v1/session",
+      url: "https://selected.example",
+    };
+    const ctx = contextWithBundle();
+    ctx.set(SessionDynamicSubagentSelectionsKey, {
+      "subagents/research": { kind: "remote", prepared: {} as never, remoteAgent },
+    });
+
+    await runCommands(
+      [
+        {
+          commands: [{ kind: "cancel" }],
+          kind: "send",
+          record: createTaskRecord({ child: remoteChild }),
+        },
+      ],
+      ctx,
+    );
+
+    expect(resolveRemoteAgentForAction).toHaveBeenCalledWith(
+      expect.objectContaining({ dynamicRemoteAgent: remoteAgent }),
+    );
+    expect(cancelRemoteAgentTurn).toHaveBeenCalledWith({
+      remote: { name: "research", url: "https://child.example" },
+      sessionId: "remote-child",
+    });
+  });
+
+  it("skips a remote cancel when the owner context cannot be read", async () => {
+    await runCommands(
+      [
+        {
+          commands: [{ kind: "cancel" }],
+          kind: "send",
+          record: createTaskRecord({ child: remoteChild }),
+        },
+      ],
+      undefined,
+    );
+
+    expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
   });
 
   it("logs a lost cancel instead of failing the owner step", async () => {
@@ -177,13 +238,13 @@ describe("runCommands", () => {
             record: createTaskRecord({ child: localChild }),
           },
         ],
-        bundle,
+        contextWithBundle(),
       ),
     ).resolves.toBeUndefined();
 
     expect(error).toHaveBeenCalledWith(
       "[eve:tasks.transport] failed to send cancel to a task child",
-      expect.objectContaining({ childSessionId: "child-session", taskId: "research-abc234" }),
+      expect.objectContaining({ childKind: "local", taskId: "research-abc234" }),
     );
     error.mockRestore();
   });

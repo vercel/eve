@@ -9,6 +9,7 @@ import {
   bindTurnCallerContextStep,
   notifyDelegatedParentStep,
   notifyTurnCallerStep,
+  reportTaskStartedStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -550,5 +551,51 @@ describe("turn caller binding", () => {
         url: "https://parent.example/eve/v1/callback/reply-new",
       },
     });
+  });
+});
+
+describe("reportTaskStartedStep", () => {
+  beforeEach(() => {
+    resumeHookMock.mockReset();
+  });
+
+  const input = {
+    callId: "call-1",
+    child: { continuationToken: "subagent:parent:research-abc234", sessionId: "child-session" },
+    token: "eve:inbox:v1:eve:session:parent:inbox",
+  };
+
+  it("reports the child's address to the owner inbox", async () => {
+    resumeHookMock.mockResolvedValue(undefined as never);
+
+    await expect(reportTaskStartedStep(input)).resolves.toBe(true);
+
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(input.token, {
+      callId: "call-1",
+      child: input.child,
+      kind: "task.started",
+    });
+  });
+
+  it("tells the child to exit when its owner no longer exists", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    resumeHookMock.mockRejectedValue(new HookNotFoundError(input.token));
+
+    try {
+      await expect(reportTaskStartedStep(input)).resolves.toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[eve:execution.delegated-parent-notification] task owner no longer exists; the child exits",
+        expect.objectContaining({ callId: "call-1" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("lets any other failure retry the step", async () => {
+    const failure = new Error("queue unavailable");
+    resumeHookMock.mockRejectedValue(failure);
+
+    await expect(reportTaskStartedStep(input)).rejects.toBe(failure);
   });
 });

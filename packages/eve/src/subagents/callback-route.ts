@@ -1,7 +1,10 @@
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#subagents/agent-handle-errors.js";
+import type { RuntimeActionResultHookPayload } from "#channel/types.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { RouteContext } from "#public/definitions/channel.js";
+import { TASK_CALLBACK_ALIAS_PREFIX } from "#tasks/state.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
@@ -15,15 +18,14 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
   outputTokens: 0,
 };
 
-// Wire schemas of the child→parent callback route. Possession of the
-// callback token is the authorization to settle; results bind to the
-// pending call by callId. `sessionId` is informational (tracing and
-// diagnostics) and never verified — new senders emit it, older eve
-// deployments may omit it.
+// Wire schemas of the child→parent callback route. Possession of the owner's
+// callback alias is the authorization to report; results bind to a remote
+// task by callId and agent name. The self-reported `sessionId` narrows which
+// remote task a result may settle; older eve deployments may omit it.
 
 /**
  * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
- * the receiving parent settles the child's handle from `outcome.kind`, so
+ * the receiving owner settles the task record from `outcome.kind`, so
  * a turn callback that cannot state its lifecycle is rejected rather than
  * guessed at (pre-1.0: no wire compatibility shims). `usage` stays
  * unvalidated here — {@link parseCallbackUsage} drops it, never rejects
@@ -69,6 +71,11 @@ export async function handleSessionCallbackRequest(
   if (typeof token !== "string" || token.length === 0) {
     return Response.json({ error: "Missing callback token.", ok: false }, { status: 400 });
   }
+  // Only an owner's unguessable callback alias is reachable here; every
+  // other session address is derivable from a session ID.
+  if (!token.startsWith(sessionInboxHookToken(TASK_CALLBACK_ALIAS_PREFIX))) {
+    return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+  }
 
   let body: unknown;
   try {
@@ -81,12 +88,17 @@ export async function handleSessionCallbackRequest(
   if (result instanceof Response) {
     return result;
   }
+  const sessionId = Reflect.get(body as object, "sessionId");
+  const source: { kind: "remote"; sessionId?: string } = { kind: "remote" };
+  if (typeof sessionId === "string" && sessionId.length > 0) source.sessionId = sessionId;
+  const payload: RuntimeActionResultHookPayload = {
+    kind: "runtime-action-result",
+    results: [result],
+    source,
+  };
 
   try {
-    await resumeHook(token, {
-      kind: "runtime-action-result",
-      results: [result],
-    });
+    await resumeHook(token, payload);
   } catch {
     return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
   }

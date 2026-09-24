@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
+import { ownerInboxHookToken, TASK_CALLBACK_ALIAS_PREFIX } from "#tasks/state.js";
 
 const resumeHookMock = vi.fn();
+const CALLBACK_TOKEN = sessionInboxHookToken(`${TASK_CALLBACK_ALIAS_PREFIX}${"ab".repeat(24)}`);
+const CALLBACK_URL = `https://app.example.com/eve/v1/callback/${encodeURIComponent(CALLBACK_TOKEN)}`;
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
@@ -14,11 +18,58 @@ describe("session callback route", () => {
     resumeHookMock.mockReset();
   });
 
+  it.each([
+    ["the owner's stable inbox", ownerInboxHookToken("parent-session")],
+    ["an unwrapped callback alias", `${TASK_CALLBACK_ALIAS_PREFIX}${"ab".repeat(24)}`],
+    ["an arbitrary hook token", "tok123"],
+  ])("refuses %s without reading the body or resuming a hook", async (_name, token) => {
+    const request = new Request("https://app.example.com/eve/v1/callback/x", {
+      body: JSON.stringify({
+        callId: "call-1",
+        kind: "session.completed",
+        output: "done",
+        subagentName: "research",
+      }),
+      method: "POST",
+    });
+
+    const response = await handleSessionCallbackRequest(request, createRouteContext({ token }));
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Session callback not pending.",
+      ok: false,
+    });
+    expect(request.bodyUsed).toBe(false);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a callback whose alias no longer has an owner as not pending", async () => {
+    resumeHookMock.mockRejectedValue(new Error("hook not found"));
+
+    const response = await handleSessionCallbackRequest(
+      new Request(CALLBACK_URL, {
+        body: JSON.stringify({
+          callId: "call-1",
+          kind: "session.completed",
+          output: "done",
+          sessionId: "remote-session",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(resumeHookMock).toHaveBeenCalledOnce();
+  });
+
   it.each(["task.update", "task.input-requested", "task.authorization", "turn.started"])(
     "rejects removed %s callbacks without resuming the caller",
     async (kind) => {
       const response = await handleSessionCallbackRequest(
-        new Request("https://app.example.com/eve/v1/callback/invocation-reply", {
+        new Request(CALLBACK_URL, {
           body: JSON.stringify({
             callId: "update-call",
             kind,
@@ -29,7 +80,7 @@ describe("session callback route", () => {
           }),
           method: "POST",
         }),
-        createRouteContext({ token: "invocation-reply" }),
+        createRouteContext({ token: CALLBACK_TOKEN }),
       );
 
       expect(response.status).toBe(400);
@@ -45,7 +96,7 @@ describe("session callback route", () => {
     resumeHookMock.mockResolvedValue(undefined);
 
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
           kind: "session.completed",
@@ -55,12 +106,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
           callId: "call-1",
@@ -87,7 +139,7 @@ describe("session callback route", () => {
     resumeHookMock.mockResolvedValue(undefined);
 
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
           kind: "session.completed",
@@ -96,12 +148,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote" },
       results: [
         {
           callId: "call-1",
@@ -129,7 +182,7 @@ describe("session callback route", () => {
 
     const error = { code: "REMOTE_AGENT_FAILED", message: "remote crashed" };
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
           error,
@@ -139,12 +192,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
           callId: "call-1",
@@ -173,7 +227,7 @@ describe("session callback route", () => {
 
     const usage = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
           kind: "session.completed",
@@ -184,12 +238,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
           callId: "call-1",
@@ -212,7 +267,7 @@ describe("session callback route", () => {
     resumeHookMock.mockResolvedValue(undefined);
 
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
           kind: "session.completed",
@@ -229,7 +284,7 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
@@ -248,7 +303,7 @@ describe("session callback route", () => {
     resumeHookMock.mockResolvedValue(undefined);
 
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
           kind: "session.completed",
@@ -264,12 +319,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
           callId: "call-1",
@@ -301,7 +357,7 @@ describe("session callback route", () => {
       usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 25, outputTokens: 10 },
     };
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-2",
           kind: "turn.completed",
@@ -312,12 +368,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
           callId: "call-2",
@@ -334,7 +391,7 @@ describe("session callback route", () => {
 
   it("rejects a turn callback without an outcome envelope", async () => {
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-2",
           kind: "turn.completed",
@@ -344,7 +401,7 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(400);
@@ -364,7 +421,7 @@ describe("session callback route", () => {
       usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
     };
     const response = await handleSessionCallbackRequest(
-      new Request("https://app.example.com/eve/v1/callback/tok123", {
+      new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-2",
           error,
@@ -375,12 +432,13 @@ describe("session callback route", () => {
         }),
         method: "POST",
       }),
-      createRouteContext({ token: "tok123" }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith("tok123", {
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
+      source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
           callId: "call-2",

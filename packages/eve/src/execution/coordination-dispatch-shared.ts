@@ -23,7 +23,7 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { RuntimeSession } from "#subagents/start-outcome.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueCoordinationCallIds,

@@ -79,7 +79,11 @@ export async function nextTurnDelivery(input: {
             result.kind === "subagent-result" && result.origin === "child",
         );
         if (results.length > 0) {
-          await applyTaskReport(cursor, { kind: "runtime-action-result", results });
+          await applyTaskReport(cursor, {
+            kind: "runtime-action-result",
+            results,
+            source: admitted.payload.source,
+          });
         }
         break;
       }

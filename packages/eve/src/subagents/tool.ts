@@ -94,6 +94,8 @@ export function buildSubagentRunInput(input: {
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
+  /** The owner-assigned task ID; the child's continuation address, and so its start lock, derives from it. */
+  readonly taskId: string;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -107,7 +109,7 @@ export function buildSubagentRunInput(input: {
   } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(
-    `${session.sessionId}:${action.callId}`,
+    `${session.sessionId}:${input.taskId}`,
   );
 
   const inheritedLimits: {

@@ -283,6 +283,11 @@ export interface ClearSessionHookPayload {
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
+  /**
+   * Set by the remote callback route. The owner applies these results only to
+   * remote tasks, and only for the remote session that reported them.
+   */
+  readonly source?: { readonly kind: "remote"; readonly sessionId?: string };
   readonly results: readonly (
     | RuntimeSubagentChildResult
     | RuntimeSubagentDispatchFailure

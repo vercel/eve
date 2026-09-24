@@ -8,7 +8,7 @@ import type {
   RuntimeRemoteAgentDispatchRequest,
   RuntimeSubagentDispatchRequest,
 } from "#shared/action-types.js";
-import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { DispatchOutcome, RuntimeSession } from "#subagents/start-outcome.js";
 import { startLocalSubagent } from "#subagents/start-local.js";
 import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
@@ -51,6 +51,7 @@ export async function startSubagent(input: {
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
   readonly target: SubagentStartTarget;
+  readonly taskId: string;
   readonly trace: AgentChildTraceDispatch;
 }): Promise<DispatchOutcome> {
   const { trace } = input;
@@ -87,6 +88,7 @@ export async function startSubagent(input: {
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
+        taskId: input.taskId,
       });
     case "remote":
       return startRemoteSubagent({
