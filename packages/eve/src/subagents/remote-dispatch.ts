@@ -33,7 +33,6 @@ import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agen
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   writeForwardedAudienceBaggage,
   writeForwardedParentSessionBaggage,
@@ -81,7 +80,6 @@ export async function startRemoteAgentSession(input: {
   };
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
-  readonly taskId?: string;
 }): Promise<RemoteAgentSessionCoordinates> {
   const callbackToken = input.parent?.continuationToken ?? input.session.continuationToken;
   if (!callbackToken) {
@@ -97,7 +95,6 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: string;
       subagentName: string;
-      taskId?: string;
       token: string;
       url: string;
     };
@@ -112,7 +109,6 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
-      taskId: input.taskId ?? readTaskIdFromInboxToken(callbackToken),
       token: callbackToken,
       url: createWorkflowCallbackUrl(
         input.callbackBaseUrl,
@@ -222,7 +218,6 @@ export async function continueRemoteAgentSession(input: {
   readonly callback?: {
     readonly callId: string;
     readonly subagentName: string;
-    readonly taskId?: string;
     readonly token: string;
     readonly url: string;
   };
@@ -359,16 +354,11 @@ export async function cancelRemoteAgentTurn(input: {
   readonly headers?: Record<string, string>;
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
-  readonly taskId?: string;
-  readonly tasks?: boolean;
   readonly turnId?: string;
 }): Promise<CancelTurnResult> {
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
   const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
-    body:
-      input.turnId === undefined && input.taskId === undefined && input.tasks === undefined
-        ? undefined
-        : JSON.stringify({ taskId: input.taskId, tasks: input.tasks, turnId: input.turnId }),
+    body: input.turnId === undefined ? undefined : JSON.stringify({ turnId: input.turnId }),
     headers,
     method: "POST",
   });

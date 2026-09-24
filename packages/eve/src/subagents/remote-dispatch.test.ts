@@ -359,7 +359,7 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
-  it("binds a task id to an opaque invocation callback token", async () => {
+  it("binds an opaque invocation callback token", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
@@ -382,13 +382,11 @@ describe("startRemoteAgentSession", () => {
         sessionId: "parent-session",
         state: {},
       },
-      taskId: "task-1",
       parent: { continuationToken: "invocation-reply" },
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
       callback: {
-        taskId: "task-1",
         token: "invocation-reply",
         url: "https://caller.example.com/eve/v1/callback/invocation-reply",
       },
@@ -1171,22 +1169,6 @@ describe("cancelRemoteAgentTurn", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://remote.example.com/eve/v1/session/child-1/cancel",
       expect.objectContaining({ body: JSON.stringify({ turnId: "turn_child_7" }), method: "POST" }),
-    );
-  });
-
-  it("forwards cancellation of a yielded child's background tasks", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json({ ok: true, sessionId: "child-1", status: "accepted" }, { status: 202 }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await cancelRemoteAgentTurn({ remote: createRemoteAgent(), sessionId: "child-1", tasks: true });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/v1/session/child-1/cancel",
-      expect.objectContaining({ body: JSON.stringify({ tasks: true }), method: "POST" }),
     );
   });
 

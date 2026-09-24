@@ -1559,23 +1559,21 @@ describe("workflowEntry integration", () => {
                   Object.assign(session, {
                     state: {
                       ...session.state,
-                      "eve.workflowTool": {
-                        version: 3,
-                        runs: [
+                      "eve.agent.handles": {
+                        handles: [
                           {
-                            callId: "task",
-                            toolName: "research",
-                            lifetime: "session" as const,
-                            origin: { turnId: "turn", stepIndex: 0 },
-                            address: { runId: "run", hookToken: 42 },
-                            task: {
-                              taskId: "task",
-                              metadata: { kind: "tool", name: "research" },
-                              outcome: {
-                                status: "cancelled",
-                              },
-                              dispatchContext: { auth: { current: null, initiator: null } },
+                            address: {
+                              continuationToken: "child-token",
+                              kind: "agent/local",
+                              sessionId: "",
                             },
+                            identity: {
+                              id: "ag_research:operation",
+                              name: "research",
+                              nodeId: "subagents/research",
+                            },
+                            lastStatus: "Research complete",
+                            phase: "parked",
                           },
                         ],
                       },

@@ -30,7 +30,6 @@ it("defaults agent metadata to an empty registry for older workflow payloads", a
       toolName: "legacy",
       workflowId: "workflow//test//legacy",
       owner: { inbox: "inbox" },
-      execution: "blocking",
       runId: "run",
     },
     new AbortController().signal,
@@ -52,9 +51,8 @@ it("binds workflow-only methods to the run context", async () => {
     toolName: "deploy",
     workflowId: "workflow//test//execute",
     owner: { inbox: "inbox" },
-    execution: "blocking",
     runId: "run",
-  } as WorkflowBodyInput & { execution: "blocking"; runId: string };
+  } as WorkflowBodyInput & { runId: string };
   const question = { prompt: "Continue?" };
   const target = "reviewer";
   const invocation = { message: "Review" };

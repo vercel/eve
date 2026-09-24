@@ -202,8 +202,6 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
-    /** Present when eve, rather than a channel participant, authored the input. */
-    kind?: "execution.background_task";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -416,15 +414,6 @@ export interface SubagentChildEventStreamEvent {
  */
 export interface SubagentCompletedStreamEvent {
   data: {
-    /**
-     * Historical admission marker retained for reading existing streams.
-     * A marked event is a working receipt, not a completed invocation.
-     * New receipts are published only as action.result tool outputs.
-     */
-    backgroundTask?: {
-      taskId: string;
-      status: "working";
-    };
     callId: string;
     output: string;
     subagentName: string;
@@ -899,15 +888,12 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
-  /** Present when eve, rather than a channel participant, authored the input. */
-  readonly kind?: "execution.background_task";
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
   return {
     data: {
-      kind: input.kind,
       message: summarizeUserContent(input.message),
       parts: projectUserContentParts(input.message),
       sequence: input.sequence,

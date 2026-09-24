@@ -4,7 +4,6 @@ import { afterAll, expect, it } from "vitest";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
@@ -125,22 +124,6 @@ function fixture(
     inputSchema: jsonSchema({ type: "object" }),
     workflowId: "diagnostic-workflow",
   });
-  tools.set("control", {
-    name: "control",
-    description: "Deferred runtime control",
-    inputSchema: jsonSchema({ type: "object" }),
-    runtimeAction: { kind: "task-control" },
-  });
-  tools.set("background", {
-    name: "background",
-    description: "Background workflow",
-    inputSchema: jsonSchema({ type: "object" }),
-    workflowId: "diagnostic-background",
-    execution: "background",
-    execute: async () => {
-      throw new Error("Must dispatch through executor");
-    },
-  });
   const harness = createToolLoopHarness({
     mode: "conversation",
     capabilities: { requestInput: true },
@@ -159,13 +142,6 @@ function fixture(
       sessionId: session.sessionId,
       auth: { current: null, initiator: null },
       turn: { id: emission.turnId || `turn_${emission.sequence}`, sequence: emission.sequence },
-    });
-    ctx.set(BackgroundToolExecutorKey, {
-      async execute({ batch, options }) {
-        expect(batch.calls.some((call) => call.callId === options.toolCallId)).toBe(true);
-        executions.push("background-admitted");
-        return { status: "working", taskId: "diagnostic-background-task" };
-      },
     });
     const result = await contextStorage.run(ctx, () => harness(session, input));
     session = result.session;
@@ -224,7 +200,7 @@ function fixture(
       const batch = getPendingCoordinationBatch(session.state);
       if (!batch) throw new Error("Expected actual pending coordination batch");
       return drive({
-        runtimeActionResults: [...batch.tasks, ...batch.runtimeActions].map((r) => ({
+        runtimeActionResults: batch.tasks.map((r) => ({
           kind: "tool-result" as const,
           callId: r.callId,
           toolName: r.toolName,
@@ -285,18 +261,16 @@ for (const variant of ["approve", "cancel"] as const) {
   });
 }
 
-for (const tool of ["workflow", "control"]) {
-  it(`interprets a completed ${tool} result while an earlier approval remains`, async () => {
-    const f = fixture(tool);
-    await f.gate("gateA");
-    f.script.push(calls(tool), "FINAL");
-    await f.drive({ message: `Run unrelated ${tool}.` });
-    const result = await f.finishRuntime();
-    expect(JSON.stringify(result.session.history)).toContain("runtime-RESULT");
-    expect(f.pending()).toHaveLength(1);
-    expect(result.settledTurn?.output).toBe("FINAL");
-  });
-}
+it("interprets a completed workflow result while an earlier approval remains", async () => {
+  const f = fixture("workflow");
+  await f.gate("gateA");
+  f.script.push(calls("workflow"), "FINAL");
+  await f.drive({ message: "Run unrelated workflow." });
+  const result = await f.finishRuntime();
+  expect(JSON.stringify(result.session.history)).toContain("runtime-RESULT");
+  expect(f.pending()).toHaveLength(1);
+  expect(result.settledTurn?.output).toBe("FINAL");
+});
 
 it("completes a plain tool turn without any pending input [control]", async () => {
   const f = fixture("control-no-pending");
@@ -445,14 +419,6 @@ it("reaches the next budget prompt after a grant without an older approval [cont
 });
 
 for (const pending of [true, false]) {
-  it(`continues after a background admission receipt ${pending ? "with pending approval" : "[control]"}`, async () => {
-    const f = fixture(`background-${pending}`);
-    if (pending) await f.gate("gateA");
-    f.script.push(calls("background"), "FINAL");
-    const result = await f.drive({ message: "Start background work and acknowledge admission." });
-    expect(f.executions).toEqual(["background-admitted"]);
-    expect(result.settledTurn?.output).toBe("FINAL");
-  });
   it(`continues after a provider-executed result ${pending ? "with pending approval" : "[control]"}`, async () => {
     const f = fixture(`provider-${pending}`);
     if (pending) await f.gate("gateA");

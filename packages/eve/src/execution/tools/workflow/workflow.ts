@@ -16,30 +16,16 @@ import {
   openWorkflowToolRunOwnerInbox,
   type WorkflowToolRunOwnerInbox,
 } from "#execution/tools/workflow/owner.js";
-import { createBackgroundWorkflowOwner } from "#execution/tools/workflow/workflow-owner-background.js";
 import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner-blocking.js";
-import type {
-  BackgroundWorkflowToolRunInput,
-  WorkflowToolRunInput,
-} from "#execution/tools/workflow/types.js";
+import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 
-/** Owns admission, command intake, body execution, and settlement for either lifetime. */
-export async function workflowToolRunWorkflow(
-  input: WorkflowToolRunInput | BackgroundWorkflowToolRunInput,
-): Promise<void> {
+/** Owns command intake, body execution, and settlement for one turn-owned tool call. */
+export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Promise<void> {
   "use workflow";
 
-  const owner =
-    "workflow" in input
-      ? await createBackgroundWorkflowOwner(input)
-      : createBlockingWorkflow(input);
-  if (owner === undefined) return;
-  const definition =
-    "workflow" in input
-      ? { ...input.workflow, execution: "background" as const }
-      : { ...input, execution: input.execution ?? "blocking" };
+  const owner = createBlockingWorkflow(input);
+  const definition = input;
   const { signal } = owner;
-  let admitted = owner.kind === "turn";
   let commandsOpen = true;
   let body:
     | {
@@ -53,7 +39,7 @@ export async function workflowToolRunWorkflow(
   let outcome: WorkflowToolRunOutcome | undefined;
 
   while (true) {
-    if (admitted && signal.aborted) {
+    if (signal.aborted) {
       if (body === undefined) break;
       cleanupDeadline ??= sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
     }
@@ -72,7 +58,7 @@ export async function workflowToolRunWorkflow(
     }
     let read;
     try {
-      if (admitted && body === undefined) {
+      if (body === undefined) {
         const inbox = openWorkflowToolRunOwnerInbox();
         body = {
           inbox,
@@ -108,28 +94,11 @@ export async function workflowToolRunWorkflow(
         outcome = { status: "failed", error: "Workflow body ended without an outcome." };
         break;
       }
-      if (admitted && signal.aborted) break;
+      if (signal.aborted) break;
       return;
     }
     if (read.channel === "control") {
-      if (owner.kind !== "turn")
-        throw new Error("Session-owned workflow run received a turn command.");
       owner.handleCommand(read.next.value);
-      continue;
-    }
-    if (read.channel === "commands") {
-      if (owner.kind !== "session")
-        throw new Error("Turn-owned workflow run received a task command.");
-      const payload = read.next.value;
-      if (
-        admitted &&
-        payload.kind === "task-command" &&
-        (payload.command.kind === "ready" || payload.command.kind === "reject-dispatch")
-      )
-        continue;
-      const action = await owner.handleCommand(payload);
-      if (action === "stop") return;
-      if (action === "start") admitted = true;
       continue;
     }
     if (read.channel === "body") {

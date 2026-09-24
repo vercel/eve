@@ -16,7 +16,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
       };
     }
-    const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];
+    const mode = /SUBAGENT-HOOKS:(direct|waiting)/u.exec(hookScenario)?.[1];
     if (auditing) {
       const auditTool = request.lastUserMessage?.includes("DYNAMIC-SKILL-CONTEXT")
         ? "read_dynamic_skill_context"
@@ -26,12 +26,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ? { toolCalls: [{ name: auditTool, input: {} }] }
         : JSON.stringify(audit.output);
     }
-    const tool =
-      mode === "direct"
-        ? "workflow-marker"
-        : mode === "waiting"
-          ? "blocking_agent"
-          : "background_agent";
+    const tool = mode === "direct" ? "workflow-marker" : "blocking_agent";
     if (!request.toolResults.some((entry) => entry.name === tool)) {
       return {
         toolCalls: [
@@ -43,24 +38,14 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ],
       };
     }
-    const delivery = [...request.userMessages]
-      .reverse()
-      .find((entry) => entry.startsWith("[Task state]\n") || entry.startsWith("Background task "));
     const result = request.toolResults.find((entry) => entry.name === tool);
-    return (
-      delivery ??
-      (typeof result?.output === "string" ? result.output : JSON.stringify(result?.output))
-    );
+    return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);
   }
 
   const message =
     [...request.userMessages]
       .reverse()
-      .find(
-        (entry) =>
-          /^(WORKFLOW-|(?:Background task|Deploy) task_)/u.test(entry) ||
-          entry.includes("private-catalog"),
-      ) ?? "";
+      .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
   if (message.includes("private-catalog")) {
     const result = request.toolResults.find((entry) => entry.name === "connection_search");
     if (result === undefined) {
@@ -95,23 +80,26 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
   if (message.includes("WORKFLOW-MIXED-AGENTS-START")) {
     const mixedResults = request.toolResults.filter(
-      (result) => result.id === "blocking-agent-call" || result.id === "background-agent-call",
+      (result) => result.name === "blocking_agent" || result.name === "workflow-marker",
     );
     if (mixedResults.length < 2) {
       return {
         toolCalls: [
           { id: "blocking-agent-call", input: { service: "api" }, name: "blocking_agent" },
-          { id: "background-agent-call", input: { service: "api" }, name: "background_agent" },
+          { id: "direct-agent-call", input: { message: "api:direct" }, name: "workflow-marker" },
         ],
       };
     }
-    return "WORKFLOW-MIXED-AGENTS-INITIAL-RESULT";
+    return `WORKFLOW-MIXED-AGENTS-RESULT ${mixedResults
+      .map((result) =>
+        typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+      )
+      .join(" ")}`;
   }
 
   for (const [directive, tool] of [
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
-    ["WORKFLOW-REPORT-START", "report_deploy"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
@@ -127,16 +115,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     return `${directive.replace("-START", "-RESULT")} ${
       typeof output === "string" ? output : JSON.stringify(output ?? null)
     }`;
-  }
-
-  if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {
-    return "WORKFLOW-REPORT-DONE";
-  }
-  if (message.includes("is completed") && message.includes("WORKFLOW-CHILD:api:background")) {
-    return "WORKFLOW-MIXED-AGENTS-BACKGROUND-DONE";
-  }
-  if (message.startsWith("Background task ")) {
-    return "WORKFLOW-REPORT-ACK";
   }
 
   return "WORKFLOW-IDLE";

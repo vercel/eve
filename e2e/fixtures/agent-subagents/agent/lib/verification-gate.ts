@@ -4,7 +4,6 @@ export const verificationNamespace = (key: string) => `nested-verification.${key
 
 export interface VerificationGate {
   readonly token: string;
-  readonly runId: string;
 }
 
 export async function publishVerificationGate(

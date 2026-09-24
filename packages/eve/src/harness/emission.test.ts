@@ -14,7 +14,6 @@ import {
   getTurnClientContextState,
   setTurnClientContextState,
 } from "#harness/turn-client-context.js";
-import { markFrameworkStepInput } from "#harness/messages.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
@@ -152,30 +151,6 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitTurnPreamble", () => {
-  it("marks framework-authored task input as non-participant stream activity", async () => {
-    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
-
-    await emitTurnPreamble(
-      async (event) => {
-        events.push(event);
-      },
-      markFrameworkStepInput(
-        { message: "Framework-authored task state" },
-        "execution.background_task",
-      ),
-      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
-      [],
-    );
-
-    expect(events).toEqual([
-      expect.objectContaining({ type: "turn.started" }),
-      expect.objectContaining({
-        data: expect.objectContaining({ kind: "execution.background_task" }),
-        type: "message.received",
-      }),
-    ]);
-  });
-
   it("keeps participant messages visible", async () => {
     const events: Array<Parameters<HarnessEmitFn>[0]> = [];
 
@@ -716,53 +691,6 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
-  });
-
-  it("returns a background receipt without announcing subagent completion", async () => {
-    const emit = createEmitStub();
-    const tools = new Map<string, HarnessToolDefinition>([
-      [
-        "delegate",
-        {
-          description: "Delegate work to a subagent.",
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "delegate",
-          nodeId: "subagents/researcher",
-          workflowId: "workflow//./agent/subagents/researcher//execute",
-        },
-      ],
-    ]);
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          input: { message: "research the release" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-call",
-        },
-        {
-          output: { status: "working", taskId: "task-1" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-result",
-        },
-        { finishReason: "tool-calls", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-      { excludedActionToolNames: new Set(), tools },
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual(["actions.requested", "action.result"]);
-    expect(events[1]).toMatchObject({
-      data: {
-        result: { callId: "call-delegate", output: { status: "working", taskId: "task-1" } },
-      },
-      type: "action.result",
-    });
   });
 
   it("does not fail tool streaming when label projections throw", async () => {

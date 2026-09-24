@@ -3,7 +3,6 @@ import { finalizeSession } from "#execution/session/finalization.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
@@ -33,6 +32,7 @@ function withUsage(session: HarnessSession, inputTokens: number): HarnessSession
   return setTurnUsageState(session, { ...totals, session: totals, turnId: "current" });
 }
 
+/** A session whose running turn has accumulated usage it has not yet reported. */
 function sessionAwaitingCallerNotification() {
   const session: HarnessSession = {
     agent: { modelReference: { id: "unused" }, system: "", tools: [] },
@@ -42,30 +42,13 @@ function sessionAwaitingCallerNotification() {
     sessionId: "detector",
   };
   const previouslySettled = takeSessionUsageDelta(withUsage(session, 100)).session;
-  const pending = registerWorkflowToolRun(withUsage(previouslySettled, 250), {
-    callId: "worker",
-    toolName: "worker",
-    lifetime: "session",
-    origin: { turnId: "current", stepIndex: 0 },
-    address: { runId: "worker", hookToken: "worker" },
-    task: {
-      taskId: "worker",
-      metadata: { kind: "subagent", name: "worker" },
-      dispatchContext: { auth: { current: null, initiator: null } },
-    },
-  });
   const parked = resolveSessionStepResult(
-    {
-      next: null,
-      session: pending,
-      settledTurn: { output: "Verification is running." },
-    },
+    { next: null, session: withUsage(previouslySettled, 250) },
     {},
     "conversation",
-    {},
-    "current",
   );
-  expect(parked).toMatchObject({ action: "park", settled: { notifyCaller: false } });
+  expect(parked).toMatchObject({ action: "park" });
+  expect(parked).not.toHaveProperty("settled");
   return parked.sessionState;
 }
 

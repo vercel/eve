@@ -5,13 +5,12 @@ import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.j
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { prepareOwnerAgentInvocation } from "./invoke-preparation.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
 
-describe("background invocation origin", () => {
+describe("agent invocation origin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     const ctx = new ContextContainer();
@@ -35,50 +34,29 @@ describe("background invocation origin", () => {
     vi.mocked(deserializeContext).mockResolvedValue(ctx);
   });
 
-  it.each([true, false])(
-    "uses the task's creating turn after the parent advances: task=%s",
-    async (background) => {
-      const session = registerWorkflowToolRun(
-        setHarnessEmissionState(
-          {
-            agent: { dynamicModel: true, system: "", tools: [] },
-            compaction: { recentWindowSize: 5, threshold: 10_000 },
-            continuationToken: "parent-token",
-            history: [],
-            sessionId: "parent",
-          },
-          { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn-3" },
-        ),
-        {
-          callId: "task",
-          toolName: { kind: "subagent", name: "research", agentId: "agent" }.name,
-          lifetime: "session" as const,
-          origin: { turnId: "turn-1", stepIndex: 0 },
-          address: { runId: "task-run", hookToken: "task-inbox" },
-          task: {
-            taskId: "task",
-            dispatchContext: { auth: { current: null, initiator: null } },
-            metadata: { kind: "subagent", name: "research", agentId: "agent" },
-          },
-        },
-      );
-      await prepareOwnerAgentInvocation({
-        invocation: { target: "research", message: "Review Alice's plan" },
-        invocationId: "original-call",
-        serializedContext: {},
-        sessionState: createDurableSessionState({ session }),
-        taskId: background ? "task" : undefined,
-      });
-      expect(prepareActionDispatch).toHaveBeenCalledWith(
-        expect.objectContaining({
-          batch: expect.objectContaining({
-            event: expect.objectContaining({
-              turnId: background ? "turn-1" : "turn-3",
-              stepIndex: background ? 0 : 2,
-            }),
-          }),
+  it("uses the active parent turn as the invocation origin", async () => {
+    const session = setHarnessEmissionState(
+      {
+        agent: { dynamicModel: true, system: "", tools: [] },
+        compaction: { recentWindowSize: 5, threshold: 10_000 },
+        continuationToken: "parent-token",
+        history: [],
+        sessionId: "parent",
+      },
+      { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn-3" },
+    );
+    await prepareOwnerAgentInvocation({
+      invocation: { target: "research", message: "Review Alice's plan" },
+      invocationId: "original-call",
+      serializedContext: {},
+      sessionState: createDurableSessionState({ session }),
+    });
+    expect(prepareActionDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batch: expect.objectContaining({
+          event: expect.objectContaining({ turnId: "turn-3", stepIndex: 2 }),
         }),
-      );
-    },
-  );
+      }),
+    );
+  });
 });

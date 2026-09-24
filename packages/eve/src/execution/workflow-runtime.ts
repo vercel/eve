@@ -210,9 +210,7 @@ export function createWorkflowRuntime(config: {
         ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
         serializedContext,
       };
-      const taskId = input.taskId ?? input.callback?.taskId;
       if (input.limits !== undefined) workflowInput.limits = input.limits;
-      if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }
@@ -456,11 +454,7 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
-  const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
-    kind: "cancel",
-  };
-  if (input.taskId !== undefined) command.taskId = input.taskId;
-  if (input.tasks !== undefined) command.tasks = input.tasks;
+  const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
   if (input.turnId !== undefined) command.turnId = input.turnId;
   return await dispatchWorkflowCommand({ sessionId: input.sessionId }, command);
 }

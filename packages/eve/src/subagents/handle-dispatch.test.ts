@@ -36,10 +36,10 @@ describe("claimed child delivery", () => {
       identity: { id: "agent", name: "research", nodeId: "subagents/research" },
       operationId: "original-operation",
       callId: "original-call",
-      ownerId: "original-task",
+      ownerId: "original-owner",
       phase: "claimed",
     },
-    reply: { kind: "steer" },
+    reply: { kind: "reply", parentToken: "reply-token" },
   } satisfies Parameters<typeof dispatchToClaimedAgentAddress>[0];
 
   beforeEach(() => {
@@ -48,24 +48,8 @@ describe("claimed child delivery", () => {
     vi.mocked(createWorkflowRuntime).mockReturnValue({ dispatchSession } as never);
   });
 
-  it("steers without replacing the active turn's caller", async () => {
-    await expect(dispatchToClaimedAgentAddress(input)).resolves.toMatchObject({ kind: "called" });
-    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
-      sessionId: "child",
-      command: {
-        auth: null,
-        caller: undefined,
-        kind: "send",
-        payload: { message: "Use Alice's updated requirements", outputSchema: undefined },
-      },
-    });
-  });
-
   it("supplies a new caller when continuing an idle child", async () => {
-    await dispatchToClaimedAgentAddress({
-      ...input,
-      reply: { kind: "reply", parentToken: "reply-token", taskId: "new-task" },
-    });
+    await dispatchToClaimedAgentAddress(input);
     expect(dispatchSession).toHaveBeenCalledWith(
       expect.objectContaining({
         command: expect.objectContaining({
@@ -73,7 +57,6 @@ describe("claimed child delivery", () => {
             callId: "update-call",
             replyTo: { kind: "hook", token: "reply-token" },
             subagentName: "research",
-            taskId: "new-task",
           },
         }),
       }),
@@ -89,7 +72,7 @@ describe("claimed child delivery", () => {
     expect(dispatchSession).toHaveBeenCalledTimes(1);
   });
 
-  it("steers a remote child without replacing its callback", async () => {
+  it("continues a remote child with a callback to the reply hook", async () => {
     vi.mocked(resolveRemoteAgentForAction).mockReturnValue({ name: "research" } as never);
     const remoteInput = {
       ...input,
@@ -110,7 +93,12 @@ describe("claimed child delivery", () => {
     });
     expect(continueRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
       auth: null,
-      callback: undefined,
+      callback: {
+        callId: "update-call",
+        subagentName: "research",
+        token: "reply-token",
+        url: expect.stringContaining("https://parent.example"),
+      },
       message: "Use Alice's updated requirements",
       outputSchema: undefined,
       remote: { name: "research", url: "https://child.example" },

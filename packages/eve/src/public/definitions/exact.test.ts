@@ -26,7 +26,7 @@ import { defineSandbox } from "#public/definitions/sandbox.js";
 import { DockerSandbox, VercelSandbox } from "#sandbox/providers.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, type TaskReceipt, type ToolDefinition } from "#public/tools/index.js";
+import { defineTool, type ToolDefinition } from "#public/tools/index.js";
 import { defineWorkflowTool } from "#public/tools/index.js";
 
 describe("definition helper exact inputs", () => {
@@ -108,32 +108,17 @@ describe("definition helper exact inputs", () => {
     >();
   });
 
-  it("types background workflow tools in terms of their receipt", () => {
-    const backgroundTool = defineWorkflowTool({
-      description: "Start a durable export.",
-      execution: "background",
-      inputSchema: z.object({ jobId: z.string() }),
-      async *execute(input) {
-        yield { jobId: input.jobId };
-        return { jobId: input.jobId };
-      },
-    });
-
-    expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
-    expectTypeOf<
-      Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
-    >().toEqualTypeOf<TaskReceipt>();
-    expect(backgroundTool.execution).toBe("background");
-  });
-
-  it("rejects background execution on ordinary tools", () => {
+  it("rejects the removed execution option on ordinary and workflow tools", () => {
     const definition = {
       description: "Start a durable export.",
-      execution: "background",
+      execution: "blocking",
       inputSchema: z.object({ jobId: z.string() }),
       execute: async () => null,
     };
-    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
+    expect(() => defineTool(definition)).toThrow('defineTool: "execution" is no longer supported.');
+    expect(() => defineWorkflowTool(definition as never)).toThrow(
+      'defineWorkflowTool: "execution" is no longer supported.',
+    );
   });
 
   it("infers tool input from Zod 3 schemas", () => {

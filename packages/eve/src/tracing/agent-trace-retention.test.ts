@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -6,7 +6,6 @@ import {
   pruneAgentTraceState,
 } from "#tracing/agent-trace-context-store.js";
 import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
-import { deriveTaskId } from "#tasks/task-id.js";
 import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
 
 const anchor = {
@@ -24,26 +23,6 @@ const anchor = {
 };
 
 describe("trace retention by live work", () => {
-  it("does not turn a task-index compatibility problem into an execution failure", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const context = new ContextContainer();
-    contextStorage.run(context, () =>
-      new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
-    );
-    const before = serializeContext(context);
-    expect(() =>
-      pruneAgentTraceState(context, "session", {
-        "eve.workflowTool": { version: 99, runs: [] },
-      }),
-    ).not.toThrow();
-    expect(serializeContext(context)).toEqual(before);
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining("could not reconcile trace ownership"),
-      { error: expect.objectContaining({ message: expect.any(String) }) },
-    );
-    warn.mockRestore();
-  });
-
   it("does not accumulate anchors across 1000 completed turns", () => {
     const context = new ContextContainer();
     contextStorage.run(context, () => {
@@ -60,46 +39,25 @@ describe("trace retention by live work", () => {
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
   });
 
-  it("keeps background anchors until their recorded task finishes", () => {
+  it("keeps an anchor while its workflow tool run is waiting", () => {
     const context = new ContextContainer();
     contextStorage.run(context, () =>
       new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
     );
-    const task = {
-      callId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
+    const run = {
+      callId: "call",
       toolName: "workflow",
-      lifetime: "session" as const,
+      lifetime: "turn" as const,
       origin: { turnId: "turn", stepIndex: 0 },
-      address: { runId: "task-run", hookToken: "task-token" },
-      task: {
-        dispatchContext: { auth: { current: null, initiator: null } },
-        taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
-        metadata: { kind: "tool", name: "workflow" },
-      },
+      address: { runId: "workflow-run", hookToken: "workflow-token" },
     };
     pruneAgentTraceState(context, "session", {
-      "eve.workflowTool": { version: 3, runs: [task] },
+      "eve.workflowTool": { version: 3, runs: [run] },
     });
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
       actionAnchors: { key: anchor },
     });
-    pruneAgentTraceState(context, "session", {
-      "eve.workflowTool": {
-        version: 3,
-        runs: [
-          {
-            ...task,
-            task: {
-              ...task.task,
-              outcome: {
-                status: "completed",
-                lastOutput: { type: "result", data: "done" },
-              },
-            },
-          },
-        ],
-      },
-    });
+    pruneAgentTraceState(context, "session", undefined);
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
   });
 

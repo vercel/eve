@@ -183,7 +183,7 @@ describe("dynamic subagent lifecycle", () => {
       messages: [],
       resolvers: [resolver],
     });
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toEqual(expect.any(String));
     expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
 
     await dispatchDynamicSubagentEvent({
@@ -192,7 +192,7 @@ describe("dynamic subagent lifecycle", () => {
       messages: [],
       resolvers: [resolver],
     });
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toEqual(expect.any(String));
     expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
   });
 
@@ -218,7 +218,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
 
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toEqual(expect.any(String));
   });
 
   it("lets a turn-scoped agent config switch the subagent model", async () => {
@@ -286,7 +286,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [created.resolver],
     });
 
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toEqual(expect.any(String));
   });
 
   it("exposes a remote subagent with the returned remote config", async () => {
@@ -388,7 +388,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [created.resolver],
     });
 
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toEqual(expect.any(String));
   });
 
   it("omits an invalid non-null result", async () => {

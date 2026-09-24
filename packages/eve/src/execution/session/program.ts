@@ -232,7 +232,6 @@ async function runSessionLoop(
   let turnIndex = 0;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
-    if (caller?.taskId !== undefined) queue.rememberTask(caller.taskId);
     if (caller !== undefined) {
       await cursor.apply({
         serializedContext: await bindTurnCallerContextStep({
@@ -316,7 +315,7 @@ async function runSessionLoop(
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-      } else if (action.settled?.notifyCaller === true) {
+      } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,

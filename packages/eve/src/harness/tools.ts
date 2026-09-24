@@ -19,12 +19,6 @@ import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
-import {
-  createBackgroundToolCallBatch,
-  executeBackgroundToolCall,
-  type BackgroundExecutableTool,
-  type BackgroundToolCallBatch,
-} from "#harness/background-tools.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
@@ -46,12 +40,10 @@ const toolApprovals = new WeakMap<
  */
 export function buildToolSet(input: {
   readonly approvedTools?: ReadonlySet<string>;
-  readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
 }): ToolSet {
   const tools: Record<string, ToolSet[string]> = {};
-  const backgroundBatch = input.backgroundBatch ?? createBackgroundToolCallBatch();
   const disabled = input.disabledProviderTools;
 
   for (const definition of input.tools.values()) {
@@ -59,43 +51,12 @@ export function buildToolSet(input: {
       continue;
     }
 
-    backgroundBatch.setTool(
-      definition.name,
-      definition.execution === "background" && definition.execute !== undefined
-        ? {
-            executeInput: definition.executeInput,
-            name: definition.name,
-            nodeId: definition.nodeId,
-            workflowId: requireBackgroundWorkflowId(definition),
-          }
-        : undefined,
-    );
     const authorToModelOutput = definition.toModelOutput;
     const approval = buildApprovalFn(definition, input);
     const aiTool = tool({
       description: definition.description,
-      execute: wrapToolExecute(definition, backgroundBatch),
+      execute: wrapToolExecute(definition),
       inputSchema: toModelSchema(definition.inputSchema, "input"),
-      ...(definition.execution === "background"
-        ? {
-            onInputAvailable: ({
-              input: toolInput,
-              toolCallId,
-            }: {
-              readonly input: unknown;
-              readonly toolCallId: string;
-            }) => {
-              if (definition.execute === undefined) {
-                throw new Error(`Background tool "${definition.name}" has no execute function.`);
-              }
-              backgroundBatch.register({
-                callId: toolCallId,
-                input: toolInput,
-                toolName: definition.name,
-              });
-            },
-          }
-        : {}),
       outputSchema: toModelSchema(definition.outputSchema, "output"),
       ...(definition.execute !== undefined
         ? {
@@ -155,15 +116,6 @@ export function buildToolSet(input: {
   return tools as ToolSet;
 }
 
-function requireBackgroundWorkflowId(definition: HarnessToolDefinition): string {
-  if (definition.workflowId === undefined) {
-    throw new Error(
-      `Background tool "${definition.name}" must be defined with defineWorkflowTool().`,
-    );
-  }
-  return definition.workflowId;
-}
-
 /**
  * Builds a ToolSet from an ordered list of harness definitions.
  *
@@ -172,7 +124,6 @@ function requireBackgroundWorkflowId(definition: HarnessToolDefinition): string 
  */
 export function buildToolSetFromDefinitions(input: {
   readonly approvedTools?: ReadonlySet<string>;
-  readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: readonly HarnessToolDefinition[];
 }): ToolSet {
@@ -184,7 +135,6 @@ export function buildToolSetFromDefinitions(input: {
   }
   return buildToolSet({
     approvedTools: input.approvedTools,
-    backgroundBatch: input.backgroundBatch,
     disabledProviderTools: input.disabledProviderTools,
     tools,
   });
@@ -199,7 +149,6 @@ export function buildToolSetFromDefinitions(input: {
  */
 export function wrapToolExecute(
   definition: HarnessToolDefinition,
-  backgroundBatch: BackgroundToolCallBatch = createBackgroundToolCallBatch(),
 ): ((input: any, options: ToolExecuteOptions) => Promise<any> | AsyncIterable<any>) | undefined {
   const execute = definition.execute;
   if (execute === undefined) return undefined;
@@ -207,21 +156,7 @@ export function wrapToolExecute(
   return (input, options) => {
     let output: unknown;
     try {
-      if (definition.execution === "background") {
-        backgroundBatch.register({
-          callId: options.toolCallId,
-          input,
-          toolName: definition.name,
-        });
-        output = executeBackgroundToolCall({
-          batch: backgroundBatch,
-          definition: definition as BackgroundExecutableTool,
-          options,
-          toolInput: input,
-        });
-      } else {
-        output = execute(input, options);
-      }
+      output = execute(input, options);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -284,7 +219,6 @@ function normalizeToolExecuteOutput(
  */
 export async function buildToolSetWithProviderTools(input: {
   readonly approvedTools?: ReadonlySet<string>;
-  readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
   readonly tools: HarnessToolMap;
@@ -293,7 +227,6 @@ export async function buildToolSetWithProviderTools(input: {
   const tools: ToolSet = {
     ...buildToolSet({
       approvedTools: input.approvedTools,
-      backgroundBatch: input.backgroundBatch,
       disabledProviderTools: disabled,
       tools: input.tools,
     }),

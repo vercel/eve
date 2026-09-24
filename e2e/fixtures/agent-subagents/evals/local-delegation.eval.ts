@@ -11,25 +11,17 @@ export default defineEval({
   tags: ["real-model"],
   description: "Local subagent delegation smoke: child output reaches the parent reply verbatim.",
   async test(t) {
-    const started = await t.send(
+    const turn = await t.send(
       "Use the echo-marker subagent with message 'ping'. Once it returns, reply with the subagent's exact output included verbatim.",
     );
-    started.expectOk();
-    const completed = await t.target
-      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(started.session) })
-      .result();
-    completed.expectOk();
-    completed.messageIncludes(SUBAGENT_TOKEN);
+    turn.expectOk();
+    turn.calledSubagent("echo-marker", {
+      output: new RegExp(SUBAGENT_TOKEN),
+      status: "completed",
+      count: 1,
+    });
+    turn.messageIncludes(SUBAGENT_TOKEN);
 
     t.succeeded();
-    t.calledSubagent("echo-marker", { status: "completed" });
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Parent session has no stream index.");
-  return streamIndex;
-}

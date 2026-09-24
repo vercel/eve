@@ -1319,20 +1319,6 @@ describe("defaultMessageReducer", () => {
     expect(data.messages[0]?.id).toBe("turn_1:2:user");
   });
 
-  it("does not project framework-authored task input", () => {
-    const reducer = defaultMessageReducer();
-    const [event] = stampTestEvents([
-      createMessageReceivedEvent({
-        kind: "execution.background_task",
-        message: "Task completed",
-        sequence: 1,
-        turnId: "turn_1",
-      }),
-    ]);
-
-    expect(reducer.reduce(reducer.initial(), event!).messages).toEqual([]);
-  });
-
   it("projects structured file parts from message.received onto the user message", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [

@@ -115,7 +115,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "auth",
       "description",
       "execute",
-      "execution",
       "inputSchema",
       "approval",
       "approvalKey",
@@ -154,16 +153,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (hasExecute) {
     definition.execute = expectFunction(record.execute, message) as ToolExecuteFn;
-  }
-  if (record.execution !== undefined) {
-    if (!hasExecute) {
-      throw new Error(`${message} Execute-less native tools cannot use background execution.`);
-    }
-    const execution = expectString(record.execution, message);
-    if (execution !== "background") {
-      throw new Error(`${message} Expected "execution" to be "background".`);
-    }
-    definition.execution = execution;
   }
   if (outputSchema !== undefined) {
     definition.outputSchema = outputSchema;

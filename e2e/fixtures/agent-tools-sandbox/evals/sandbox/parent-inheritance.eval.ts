@@ -22,16 +22,9 @@ export default defineEval({
         "and reply with the command output verbatim.",
     );
     childTurn.expectOk();
-    const sessionId = childTurn.sessionId;
-    if (sessionId === undefined) throw new Error("Shared sandbox turn has no session id.");
-    const completed = t.target.watchTurn(sessionId, {
-      startIndex: requireStreamIndex(childTurn.session),
-    });
-    const childCompletion = await completed.result();
-    childCompletion.expectOk();
-    await t.require(childCompletion.message, includes(PARENT_TOKEN));
+    await t.require(childTurn.message, includes(PARENT_TOKEN));
 
-    const parentRead = await completed.session.send(
+    const parentRead = await childTurn.session.send(
       `Run the bash command \`cat ${CHILD_PATH}\` and reply with the file contents verbatim.`,
     );
 
@@ -40,11 +33,3 @@ export default defineEval({
     t.check(parentRead.message, includes(CHILD_TOKEN));
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Shared sandbox turn has no stream index.");
-  return streamIndex;
-}

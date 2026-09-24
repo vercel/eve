@@ -1,7 +1,7 @@
 import { WORKFLOW_CANCELLATION_SETTLE_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
-import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
+import { isWorkflowTargetGone } from "#execution/tools/workflow/target-gone.js";
 import { cancelRun, getRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 
@@ -22,7 +22,7 @@ export async function cancelWorkflowToolRun(
     signalled = true;
   } catch (error) {
     // A fresh run may not have registered its control hook yet.
-    if (!isTaskWorkflowTargetGone(error)) {
+    if (!isWorkflowTargetGone(error)) {
       logError(
         log,
         "failed to signal a workflow tool run to cancel; cancelling it outright",
@@ -37,7 +37,7 @@ export async function cancelWorkflowToolRun(
   try {
     await settleWorkflowToolRunCancellation(run.runId, reason, signalled);
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
+    if (isWorkflowTargetGone(error)) return;
     logError(log, "failed to cancel workflow tool run; it may run to completion", error, {
       runId: run.runId,
     });
@@ -57,7 +57,7 @@ export async function settleWorkflowToolRunCancellation(
         const status = await getRun(runId).status;
         if (status !== "pending" && status !== "running") return;
       } catch (error) {
-        if (isTaskWorkflowTargetGone(error)) return;
+        if (isWorkflowTargetGone(error)) return;
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -66,7 +66,7 @@ export async function settleWorkflowToolRunCancellation(
   try {
     await cancelRun(await getWorld(), runId, { cancelReason: reason });
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
+    if (isWorkflowTargetGone(error)) return;
     throw error;
   }
 }

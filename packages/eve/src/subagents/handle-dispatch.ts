@@ -24,7 +24,6 @@ import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import type { TaskOwnedAgentHandle } from "#subagents/handles/store.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
@@ -71,13 +70,11 @@ export type DispatchOutcome =
       readonly session: RuntimeSession;
     };
 
-/**
- * Where the callee reports its result. A new turn replies to the caller's
- * hook; steering an active turn keeps that turn's original reply target.
- */
-export type AgentReplyTarget =
-  | { readonly kind: "reply"; readonly parentToken: string; readonly taskId?: string }
-  | { readonly kind: "steer" };
+/** Where the callee reports its result: the caller's reply hook. */
+export interface AgentReplyTarget {
+  readonly kind: "reply";
+  readonly parentToken: string;
+}
 
 /** Delivers a continuation after the session handle store atomically claimed it for one owner. */
 export async function dispatchToClaimedAgentAddress(input: {
@@ -160,10 +157,6 @@ async function deliverToAgentAddress(input: {
   >
 > {
   const { action, address, bundle, identity, reply } = input;
-  const taskId =
-    reply.kind === "reply"
-      ? (reply.taskId ?? readTaskIdFromInboxToken(reply.parentToken))
-      : undefined;
 
   if (address.kind === "agent/remote") {
     let resolvedRemote;
@@ -182,19 +175,15 @@ async function deliverToAgentAddress(input: {
       await continueRemoteAgentSession({
         activityObserver: input.activityObserver,
         auth: input.auth,
-        callback:
-          reply.kind === "steer"
-            ? undefined
-            : {
-                callId: action.callId,
-                subagentName: identity.name,
-                taskId,
-                token: reply.parentToken,
-                url: createWorkflowCallbackUrl(
-                  address.callbackBaseUrl,
-                  createEveCallbackRoutePath(reply.parentToken),
-                ),
-              },
+        callback: {
+          callId: action.callId,
+          subagentName: identity.name,
+          token: reply.parentToken,
+          url: createWorkflowCallbackUrl(
+            address.callbackBaseUrl,
+            createEveCallbackRoutePath(reply.parentToken),
+          ),
+        },
         message: readSubagentMessage(action),
         outputSchema: normalizeRequestedOutputSchema(action.input.outputSchema),
         remote: { ...resolvedRemote, url: address.url },
@@ -218,16 +207,12 @@ async function deliverToAgentAddress(input: {
     const result = await childRuntime.dispatchSession({
       command: {
         auth: input.auth,
-        caller:
-          reply.kind === "steer"
-            ? undefined
-            : {
-                activityObserver: input.activityObserver,
-                callId: action.callId,
-                replyTo: { kind: "hook", token: reply.parentToken },
-                subagentName: identity.name,
-                taskId,
-              },
+        caller: {
+          activityObserver: input.activityObserver,
+          callId: action.callId,
+          replyTo: { kind: "hook", token: reply.parentToken },
+          subagentName: identity.name,
+        },
         kind: "send",
         payload: {
           message: readSubagentMessage(action),

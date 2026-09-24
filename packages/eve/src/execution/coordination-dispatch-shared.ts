@@ -33,11 +33,7 @@ import {
 } from "#harness/coordination.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
-import type {
-  RuntimeActionResult,
-  RuntimeToolCallActionRequest,
-  RuntimeWorkflowTaskRequest,
-} from "#shared/action-types.js";
+import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent } from "#channel/types.js";
 import {
   createDurableSessionState,
@@ -47,14 +43,11 @@ import {
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
-export type DispatchPlanEntry =
-  | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest }
-  | { readonly kind: "workflow-task"; readonly task: RuntimeWorkflowTaskRequest };
+export type DispatchPlanEntry = RuntimeWorkflowTaskRequest;
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
@@ -116,7 +109,7 @@ export async function prepareCoordinationDispatch(input: {
   const pending = getPendingCoordinationBatch(durableSession.state);
 
   if (pending === undefined) return undefined;
-  const requests = [...pending.runtimeActions, ...pending.tasks];
+  const requests = pending.tasks;
   if (requests.length === 0) return undefined;
   const turnId = pending.event.turnId || activeTurnId(input.sessionState.emissionState);
   const event = pending.event.turnId === turnId ? pending.event : { ...pending.event, turnId };
@@ -147,8 +140,6 @@ export async function prepareCoordinationDispatch(input: {
     sessionState: createDurableSessionState({ session }),
   };
 }
-
-type DispatchRequest = RuntimeToolCallActionRequest | RuntimeWorkflowTaskRequest;
 
 interface DispatchBatch {
   readonly event: {
@@ -267,18 +258,10 @@ function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string)
 }
 
 function planDispatch(input: {
-  readonly requests: readonly DispatchRequest[];
+  readonly requests: readonly RuntimeWorkflowTaskRequest[];
 }): DispatchPlanEntry[] {
   return input.requests.map((request): DispatchPlanEntry => {
-    if (request.kind === "tool-call") {
-      if (!isTaskControlAction(request)) {
-        throw new Error(`Unsupported task control "${request.toolName}".`);
-      }
-      return { action: request, kind: "task-control" };
-    }
-    if (request.kind === "workflow-task") {
-      return { kind: "workflow-task", task: request };
-    }
+    if (request.kind === "workflow-task") return request;
     const unsupported = request as { readonly kind?: unknown };
     throw new Error(`Unsupported coordination request "${String(unsupported.kind)}".`);
   });

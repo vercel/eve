@@ -20,7 +20,6 @@ interface CurrentMessagesOptions {
 const ANNOUNCEMENT_KINDS = {
   availableSkills: "context.state",
   deliveryInstruction: "context.instruction",
-  taskState: "context.state",
 } as const satisfies Record<keyof HistoryState, FrameworkMessageKind>;
 
 /** Builds the model view and durable history for one step. */
@@ -82,7 +81,7 @@ export function createCurrentMessages(
   return {
     add,
     addAnnouncements(announcements) {
-      for (const key of ["availableSkills", "taskState", "deliveryInstruction"] as const) {
+      for (const key of ["availableSkills", "deliveryInstruction"] as const) {
         const message = announcements[key];
         if (message === undefined || message.length === 0 || historyState[key] === message)
           continue;

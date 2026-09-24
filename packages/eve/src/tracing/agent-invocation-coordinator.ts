@@ -13,7 +13,6 @@ import {
 import { deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 import {
   readActionTraceContext,
-  readTaskActionTrace,
   readTurnTraceContext,
   recordActionInvocationKind,
   recordNestedAgentInvocation,
@@ -41,7 +40,6 @@ export function prepareAgentInvocationTrace(input: {
   readonly sessionId: string;
   readonly sessionState?: SessionStateMap;
   readonly startTimeMs: number;
-  readonly taskId?: string;
   readonly turnId: string;
 }): {
   readonly dispatch: AgentChildTraceDispatch;
@@ -49,17 +47,10 @@ export function prepareAgentInvocationTrace(input: {
   readonly serializedContext: Record<string, unknown>;
 } {
   const conversationId = readConversationId(input.serializedContext[ConversationIdKey.name]);
-  const taskAction =
-    input.taskId === undefined
-      ? undefined
-      : readTaskActionTrace(input.serializedContext, input.sessionId, input.taskId);
-  const parentActionCallId =
-    input.taskId === undefined
-      ? getBlockingWorkflowToolRuns(input.sessionState).find(
-          (run) => run.address.runId === input.ownerId,
-        )?.callId
-      : taskAction?.callId;
-  const turnId = taskAction?.turnId ?? input.turnId;
+  const parentActionCallId = getBlockingWorkflowToolRuns(input.sessionState).find(
+    (run) => run.address.runId === input.ownerId,
+  )?.callId;
+  const turnId = input.turnId;
   const parentTurnContext = readTurnTraceContext(input.serializedContext, input.sessionId, turnId);
   const conversation = input.conversation;
   const liveAudience = conversation?.audience ?? "unknown";

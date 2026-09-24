@@ -2,8 +2,6 @@ import { defineEval } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
 const FINAL = "SCHEDULED-REMOTE-FINAL SCHEDULED-REMOTE-CHILD-RESULT";
-const PREMATURE =
-  "Weekly report could not be completed before delivery because the analytics query did not return a result.";
 
 /**
  * The schedule creates a root session, so no TurnCaller exists. This E2E observes
@@ -11,7 +9,7 @@ const PREMATURE =
  */
 export default defineEval({
   description:
-    "A scheduled root suppresses its nonempty remote-agent launch fallback and delivers the late result exactly once.",
+    "A scheduled root waits for its remote-agent call and delivers the result once, in the same turn.",
   async test(t) {
     if (!t.target.capabilities.devRoutes) {
       t.skip("Target has no dev routes; schedule dispatch is dev-only.");
@@ -26,89 +24,25 @@ export default defineEval({
     );
     const sessionId = dispatch.sessionIds[0]!;
 
-    // Initiating turn: withhold the deliberate nonempty premature fallback from
-    // both the event stream and the channel.
+    // The remote-agent call resolves inside the scheduled turn, and the reply uses its result.
     const launch = await t.target.attachSession(sessionId);
     launch.succeeded();
-    launch.calledTool("remote-loopback", { output: { status: "working" }, count: 1 });
-    launch.notEvent("subagent.completed");
-    launch.event("message.completed", {
-      data: (data) => data.finishReason !== "tool-calls" && data.message === null,
+    launch.calledSubagent("remote-loopback", {
+      output: /SCHEDULED-REMOTE-CHILD-RESULT/,
+      status: "completed",
       count: 1,
     });
-    launch.notEvent("message.completed", {
-      data: (data) => data.finishReason !== "tool-calls" && data.message !== null,
-    });
-    await t.require(
-      launch.events,
-      satisfies(
-        (events: typeof launch.events) => !JSON.stringify(events).includes(PREMATURE),
-        "the adapter and channel suppress the premature fallback",
-      ),
-    );
-
-    // Agent receives background task result after turn ended.
-    if (launch.state === undefined) throw new Error("scheduled launch has no stream cursor");
-    const completedLive = t.target.watchTurn(sessionId, {
-      startIndex: launch.state.streamIndex,
-    });
-    const completed = await completedLive.result();
-    completed.expectOk();
-    completed.messageIncludes(FINAL);
-    completed.event("subagent.completed", {
+    launch.event("subagent.completed", {
       data: { subagentName: "remote-loopback" },
       count: 1,
     });
-    await t.require(
-      completed.events,
-      satisfies(
-        (events: typeof completed.events) =>
-          events.some(
-            (event) =>
-              event.type === "message.received" &&
-              messageText(event.data.message).includes("is completed") &&
-              messageText(event.data.message).includes("SCHEDULED-REMOTE-CHILD-RESULT"),
-          ),
-        "the final reply follows the late remote-agent result",
-      ),
-    );
-    completed.event("message.completed", {
-      data: (data) =>
-        data.finishReason !== "tool-calls" &&
-        data.message !== null &&
-        JSON.stringify(data.message).includes(FINAL),
-      count: 1,
-    });
+    launch.messageIncludes(FINAL);
 
-    // Replay both durable turns. The fallback never becomes assistant output,
-    // while the late remote result does exactly once.
-    const replayedLaunch = await t.target.attachSession(sessionId);
-    if (replayedLaunch.state === undefined) throw new Error("replayed launch has no stream cursor");
-    const replayedCompletion = await t.target
-      .watchTurn(sessionId, { startIndex: replayedLaunch.state.streamIndex })
-      .result();
-    const replayedEvents = [...replayedLaunch.events, ...replayedCompletion.events];
+    // Exactly one final non-null delivery crosses the channel boundary.
     await t.require(
-      replayedEvents,
+      launch.events,
       satisfies(
-        (events: typeof replayedEvents) =>
-          !JSON.stringify(events).includes(PREMATURE) &&
-          events.filter(
-            (event) =>
-              event.type === "message.completed" &&
-              event.data.message !== null &&
-              JSON.stringify(event.data.message).includes(FINAL),
-          ).length === 1,
-        "replay retains one final remote result and no premature fallback",
-      ),
-    );
-
-    // Across both turns, assert exactly one final non-null delivery crosses the channel boundary.
-    const allEvents = [...launch.events, ...completed.events];
-    await t.require(
-      allEvents,
-      satisfies(
-        (events: typeof allEvents) =>
+        (events: typeof launch.events) =>
           events.filter(
             (event) =>
               event.type === "message.completed" &&
@@ -122,18 +56,3 @@ export default defineEval({
     t.succeeded();
   },
 });
-
-function messageText(message: unknown): string {
-  if (typeof message === "string") return message;
-  if (!Array.isArray(message)) return "";
-  return message
-    .flatMap((part) =>
-      part !== null &&
-      typeof part === "object" &&
-      Reflect.get(part, "type") === "text" &&
-      typeof Reflect.get(part, "text") === "string"
-        ? [Reflect.get(part, "text") as string]
-        : [],
-    )
-    .join("\n");
-}

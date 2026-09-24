@@ -209,7 +209,6 @@ it.each(events)(
     const sink = createSessionEventSink({
       adapter: ctx.require(ChannelKey),
       ctx,
-      isFirstTurn: false,
       sessionWritable: stream,
       sessionId: "parent",
     });

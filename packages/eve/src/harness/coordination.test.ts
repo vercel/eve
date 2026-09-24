@@ -248,43 +248,19 @@ describe("createCoordinationRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      kind: "task",
-      request: {
-        callId: "call-1",
-        executeInput: undefined,
-        input: { message: "research this" },
-        kind: "workflow-task",
-        toolName: "researcher",
-        workflowId: "workflow://subagent-tool",
-      },
+      callId: "call-1",
+      executeInput: undefined,
+      input: { message: "research this" },
+      kind: "workflow-task",
+      toolName: "researcher",
+      workflowId: "workflow://subagent-tool",
     });
   });
 
-  it("reserves runtime actions for task controls", () => {
-    expect(
-      createCoordinationRequestFromToolCall({
-        toolCall: { ...toolCall, input: { taskIds: ["task-1"] }, toolName: "task_cancel" },
-        tools: new Map([
-          [
-            "task_cancel",
-            {
-              description: "Cancel tasks.",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "task_cancel",
-              runtimeAction: { kind: "task-control" as const },
-            },
-          ],
-        ]),
-      }),
-    ).toEqual({
-      kind: "runtime-action",
-      request: {
-        callId: "call-1",
-        input: { taskIds: ["task-1"] },
-        kind: "tool-call",
-        toolName: "task_cancel",
-      },
-    });
+  it("rejects a deferred tool without a workflow", () => {
+    expect(() => createCoordinationRequestFromToolCall({ toolCall, tools: new Map() })).toThrow(
+      'Deferred tool "researcher" has no workflow task.',
+    );
   });
 });
 
@@ -312,7 +288,6 @@ function createParkedSession(): HarnessSession {
   });
 
   return setPendingCoordinationBatch({
-    runtimeActions: [],
     tasks: [
       {
         callId: "call-1",
@@ -342,7 +317,6 @@ describe("coordination batch identity", () => {
 
     expect(() =>
       setPendingCoordinationBatch({
-        runtimeActions: [],
         tasks: [task, { ...task, toolName: "other" }],
         event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
         responseMessages: [],
@@ -379,43 +353,6 @@ function createSessionWithRunningChild(): HarnessSession {
 }
 
 describe("resolvePendingCoordination", () => {
-  it("does not emit subagent completion for a working task receipt", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
-    const taskId = "task_0123456789abcdef";
-
-    const resolved = await resolvePendingCoordination({
-      emit: async (event) => {
-        events.push(event);
-      },
-      session: createParkedSession(),
-      stepInput: {
-        runtimeActionResults: [
-          {
-            backgroundTask: { status: "working", taskId },
-            callId: "call-1",
-            kind: "subagent-result",
-            origin: "child",
-            outcome: {
-              kind: "parked",
-              result: { kind: "succeeded", output: "delegated" },
-              usageDelta: ZERO_USAGE,
-            },
-            output: {
-              agentId: deriveAgentId("researcher", OPERATION_ID),
-              status: "working",
-              taskId,
-            },
-            subagentName: "researcher",
-          },
-        ],
-      },
-    });
-
-    expect(events.some((event) => event.type === "subagent.completed")).toBe(false);
-    expect(events).toContainEqual(expect.objectContaining({ type: "action.result" }));
-    expect(getAgentHandleStore(resolved.session.state)).toBeUndefined();
-  });
-
   it("settles the running handle terminally and deletes it with the batch", async () => {
     const session = createSessionWithRunningChild();
 
@@ -535,7 +472,6 @@ describe("resolvePendingCoordination", () => {
     const parked = setPendingCoordinationBatch({
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
-      runtimeActions: [],
       session: createParkedSession(),
       tasks: [
         {
@@ -594,7 +530,6 @@ describe("resolvePendingCoordination", () => {
     const parked = setPendingCoordinationBatch({
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
-      runtimeActions: [],
       session: createParkedSession(),
       tasks: [
         {
@@ -773,7 +708,6 @@ describe("resolvePendingCoordination", () => {
 
     // A terminal failure on the follow-up turn deletes the handle.
     const secondBatch = setPendingCoordinationBatch({
-      runtimeActions: [],
       tasks: [
         {
           callId: "call-2",
@@ -892,7 +826,6 @@ describe("resolvePendingCoordination", () => {
       },
     } as HarnessSession;
     const secondBatch = setPendingCoordinationBatch({
-      runtimeActions: [],
       tasks: [
         {
           callId: "call-2",

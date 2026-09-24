@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent, defineDynamic } from "eve";
-import { mockModel } from "eve/evals";
+import { mockModel, type MockModelMessage } from "eve/evals";
 
 import {
   SCHEDULED_REMOTE_CHILD_SCENARIO,
@@ -65,21 +65,12 @@ const workspaceDispatcher = mockModel({
     ) {
       return "The workspace lookup was submitted.";
     }
-    const previous = [...request.toolResults]
-      .reverse()
-      .find((result) => result.name === "remote-loopback")?.output;
-    const agentId =
-      previous !== null &&
-      typeof previous === "object" &&
-      "agentId" in previous &&
-      typeof previous.agentId === "string"
-        ? previous.agentId
-        : undefined;
+    const agentId = listedAgentId(request.messages, "remote-loopback");
     const requestCount = request.messages.filter(
       (message) => message.role === "user" && message.text.includes(WORKSPACE_FORWARDING_MARKER),
     ).length;
     if (requestCount > 1 && agentId === undefined) {
-      throw new Error("Workspace continuation has no existing remote agent receipt.");
+      throw new Error("Workspace continuation has no listed remote-loopback agent.");
     }
     return {
       toolCalls: [
@@ -99,9 +90,8 @@ const scheduledRemoteModel = mockModel({
       return "SCHEDULED-REMOTE-CHILD-RESULT";
     }
 
-    const remote = completedTaskOutput(request.userMessages, "remote-loopback");
-    if (remote !== undefined) return `SCHEDULED-REMOTE-FINAL ${remote}`;
-    if (!request.toolResults.some((result) => result.id === "scheduled-remote")) {
+    const remote = request.toolResults.find((result) => result.id === "scheduled-remote");
+    if (remote === undefined) {
       return {
         toolCalls: [
           {
@@ -112,33 +102,20 @@ const scheduledRemoteModel = mockModel({
         ],
       };
     }
-    return "Weekly report could not be completed before delivery because the analytics query did not return a result.";
+    return JSON.stringify(remote.output).includes("SCHEDULED-REMOTE-CHILD-RESULT")
+      ? "SCHEDULED-REMOTE-FINAL SCHEDULED-REMOTE-CHILD-RESULT"
+      : `Scheduled remote agent returned an unexpected result: ${JSON.stringify(remote.output)}`;
   },
 });
 
-function completedTaskOutput(messages: readonly string[], name: string): string | undefined {
-  const prefix = "[Task state]\n";
-  const state = [...messages].reverse().find((message) => message.startsWith(prefix));
-  if (state === undefined) return undefined;
-  const parsed: unknown = JSON.parse(state.slice(prefix.length));
-  if (parsed === null || typeof parsed !== "object") return undefined;
-  const tasks = Reflect.get(parsed, "tasks");
-  if (!Array.isArray(tasks)) return undefined;
-  const task = tasks.find(
-    (candidate) =>
-      candidate !== null &&
-      typeof candidate === "object" &&
-      Reflect.get(candidate, "name") === name &&
-      Reflect.get(candidate, "status") === "completed",
-  );
-  if (task === undefined) return undefined;
-  const output = Reflect.get(task, "output");
-  return output !== null &&
-    typeof output === "object" &&
-    Reflect.get(output, "type") === "result" &&
-    typeof Reflect.get(output, "data") === "string"
-    ? (Reflect.get(output, "data") as string)
-    : undefined;
+/** Reads a continuable child's id from the framework-injected `[Agents]` note. */
+function listedAgentId(messages: readonly MockModelMessage[], name: string): string | undefined {
+  const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`, "u");
+  for (const message of [...messages].reverse()) {
+    if (message.role !== "user" || !message.text.startsWith("[Agents]")) continue;
+    return pattern.exec(message.text)?.[1];
+  }
+  return undefined;
 }
 
 export default defineAgent({

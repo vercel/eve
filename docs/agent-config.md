@@ -281,7 +281,7 @@ calls and inline tool executions can run again. That can repeat provider costs,
 events, and side effects. Use stable idempotency keys for non-idempotent tools.
 
 eve ends a batch before it waits for input, authorization, or blocking
-coordination, and before it acknowledges a background task. A batch can also
+coordination. A batch can also
 end below the configured ceiling when the turn completes or steering arrives.
 Before assistant output begins, steering can interrupt pending model generation.
 Executing tools finish safely before the batch yields and applies the correction.
@@ -314,7 +314,7 @@ export default defineAgent({
 This applies to every run that owns the session, including successor owners
 started after a deployment handoff, and to the run that collects session
 activity. Runs eve starts for other purposes keep the world's default: session
-timeouts, background tasks, and [workflow tools](./tools/workflows).
+timeouts and [workflow tools](./tools/workflows).
 
 The value applies per agent. A [subagent](./subagents) that runs its own session
 uses its own value, unlike `experimental.workflow.world`, which is root-only.

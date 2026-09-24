@@ -3,21 +3,21 @@ import { describe, expect, it } from "vitest";
 import { parseCancelTurnBody } from "#eve-channel/request.js";
 
 describe("parseCancelTurnBody", () => {
-  it("parses session-owned task cancellation", async () => {
+  it("parses a turn cancellation", async () => {
     const result = await parseCancelTurnBody(
       new Request("https://eve.test/eve/v1/session/session_1/cancel", {
-        body: JSON.stringify({ tasks: true, turnId: "turn_1" }),
+        body: JSON.stringify({ turnId: "turn_1" }),
         method: "POST",
       }),
     );
 
-    expect(result).toEqual({ tasks: true, turnId: "turn_1" });
+    expect(result).toEqual({ turnId: "turn_1" });
   });
 
-  it.each([null, 1, "true", []])("rejects a non-boolean tasks value %o", async (tasks) => {
+  it.each([null, 1, ""])("rejects an invalid turnId %o", async (turnId) => {
     const result = await parseCancelTurnBody(
       new Request("https://eve.test/eve/v1/session/session_1/cancel", {
-        body: JSON.stringify({ tasks }),
+        body: JSON.stringify({ turnId }),
         method: "POST",
       }),
     );
@@ -26,7 +26,7 @@ describe("parseCancelTurnBody", () => {
     if (!(result instanceof Response)) return;
     expect(result.status).toBe(400);
     await expect(result.json()).resolves.toEqual({
-      error: "Expected 'tasks' to be a boolean.",
+      error: "Expected 'turnId' to be a non-empty string.",
       ok: false,
     });
   });

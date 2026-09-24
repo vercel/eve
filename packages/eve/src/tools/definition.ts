@@ -30,13 +30,10 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   options: ToolExecuteOptions,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
-export type ToolExecution = "background";
-
 interface ToolDefinitionBase {
   /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
   readonly availableInSubagents?: boolean;
   readonly description: string;
-  readonly execution?: ToolExecution;
 }
 
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
@@ -208,7 +205,6 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   TInput,
   TOutput
 > {
-  readonly execution?: never;
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -344,12 +340,17 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
+  rejectRemovedExecutionOption(definition, "defineTool");
+  return stampToolDefinition(definition, "defineTool");
+}
+
+/** Rejects the removed `execution` option so stale definitions fail loudly instead of blocking silently. */
+export function rejectRemovedExecutionOption(definition: object, factory: string): void {
   if ("execution" in definition && definition.execution !== undefined) {
     throw new Error(
-      'defineTool: "execution" is not supported. Use defineWorkflowTool for background work.',
+      `${factory}: "execution" is no longer supported. Tool calls run inside the turn that makes them.`,
     );
   }
-  return stampToolDefinition(definition, "defineTool");
 }
 
 export function stampToolDefinition<

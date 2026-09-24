@@ -1,7 +1,5 @@
-import { applySessionCancellation } from "#execution/session/admission.js";
-import { recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { assert, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
@@ -9,7 +7,6 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import type { TaskView } from "#tasks/types.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
@@ -17,18 +14,8 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
-vi.mock("../cancel-indexed-session-tasks-step.js", () => ({
-  cancelAllIndexedSessionTasksStep: vi.fn(),
-}));
-
-import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
-
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
-  vi.mocked(cancelAllIndexedSessionTasksStep).mockReset();
-  vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
-    sessionState,
-  }));
 });
 
 interface ScriptedRead {
@@ -153,7 +140,7 @@ describe("nextTurnDelivery", () => {
       kind: "turn",
       delivery: {
         auth,
-        payloads: [...report(first).payloads, ...report(second).payloads],
+        payloads: [...first.payloads, ...second.payloads],
         deliveryMetadata: [
           first.deliveryMetadata![0],
           { ...second.deliveryMetadata![0], payloadIndex: 1 },
@@ -260,63 +247,6 @@ describe("nextTurnDelivery", () => {
     expect(next.payloads).toEqual(authorizationCallbackPayload.payloads);
   });
 
-  it("cancels indexed tasks and keeps waiting for ordinary parked activity", async () => {
-    const inbox = createMockInbox([cancelRead({ tasks: true }), authorizationRead()]);
-    const input = waitInput(inbox);
-
-    const next = await nextTurnDelivery(input);
-
-    expect(next.kind).toBe("authorization-resume");
-    expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
-      serializedContext: input.cursor.serializedContext,
-      sessionState: input.cursor.sessionState,
-    });
-  });
-
-  it("discards a held completion when session cancellation records the remaining task", async () => {
-    const input = batchingInput(2);
-    const session = input.cursor.sessionState.snapshot.session;
-    const completed = recordWorkflowTaskView(session.state, {
-      taskId: "task_0",
-      metadata: { kind: "subagent", name: "worker" },
-      status: "completed",
-      lastOutput: { type: "result", data: "done" },
-    }).state;
-    await input.cursor.apply({
-      sessionState: {
-        ...input.cursor.sessionState,
-        snapshot: { session: { ...session, state: completed } },
-      },
-    });
-    input.queue.enqueueDelivery(report(completion("task_0")));
-    vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
-      sessionState: {
-        ...sessionState,
-        snapshot: {
-          session: {
-            ...sessionState.snapshot.session,
-            state: recordWorkflowTaskView(sessionState.snapshot.session.state, {
-              taskId: "task_1",
-              metadata: { kind: "subagent", name: "worker" },
-              status: "cancelled",
-            }).state,
-          },
-        },
-      },
-    }));
-
-    await applySessionCancellation({ kind: "cancel", tasks: true }, input);
-
-    expect(input.queue.pendingCount).toBe(0);
-    expect(input.queue.isTaskCancelled("task_0")).toBe(false);
-    expect(input.queue.isTaskCancelled("task_1")).toBe(false);
-    input.inbox = createMockInbox([messageRead("New request")]);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [{ message: "New request" }] },
-    });
-  });
-
   it("resumes authorization after a consumed no-op cancel", async () => {
     // A cancel with no active turn is consumed without producing a parent
     // turn; the wait continues and the callback must still resume the challenge.
@@ -338,7 +268,7 @@ describe("nextTurnDelivery", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
-  it("buffers task deliveries until the authorization callback arrives", async () => {
+  it("buffers deliveries until the authorization callback arrives", async () => {
     const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
     const queue = new SessionInputQueue();
 
@@ -428,7 +358,7 @@ function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
 }
 
 describe("nextTurnDelivery routing", () => {
-  it("keeps waiting instead of starting a parent turn for a fully routed task response", async () => {
+  it("keeps waiting instead of starting a parent turn for a fully routed child response", async () => {
     const sessionState = createTestSessionState({
       continuationToken: "token",
       emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "turn" },
@@ -451,7 +381,7 @@ describe("nextTurnDelivery routing", () => {
         sessionState: routedSessionState,
       });
     const commands = [
-      { kind: "send" as const, payload: { inputResponses: [{ requestId: "task-request" }] } },
+      { kind: "send" as const, payload: { inputResponses: [{ requestId: "child-request" }] } },
       { kind: "send" as const, payload: { message: "ordinary" } },
     ];
     const inbox: SessionInbox = {
@@ -479,510 +409,5 @@ describe("nextTurnDelivery routing", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
     expect(cursor.sessionState).toBe(routedSessionState);
-  });
-});
-
-function completion(taskId: string): DeliverHookPayload {
-  return {
-    kind: "deliver",
-    taskDeliveryId: `${taskId}:ready:completed`,
-    payloads: [
-      {
-        message: taskId,
-        task: {
-          views: [
-            {
-              taskId,
-              status: "completed",
-              metadata: { kind: "subagent", name: "worker" },
-              lastOutput: { type: "result", data: taskId },
-            },
-          ],
-        },
-      },
-    ],
-    deliveryMetadata: [
-      {
-        payloadIndex: 0,
-        deliveryId: taskId,
-        channelKind: "eve",
-        channelName: "eve",
-        acceptedDeploymentId: "deployment",
-      },
-    ],
-  };
-}
-
-function terminalDelivery(taskId: string, status: "failed" | "cancelled"): DeliverHookPayload {
-  const view: TaskView = {
-    taskId,
-    metadata: { kind: "subagent", name: "worker" },
-    ...(status === "failed"
-      ? { status, lastOutput: { type: "error", data: "failed" } }
-      : { status }),
-  };
-  return {
-    kind: "deliver",
-    taskDeliveryId: `${taskId}:ready:${status}`,
-    payloads: [{ message: status, task: { views: [view] } }],
-  };
-}
-
-function report(delivery: DeliverHookPayload): DeliverHookPayload {
-  return {
-    ...delivery,
-    payloads: delivery.payloads.map(({ task: _task, ...payload }) => payload),
-  };
-}
-
-function batchingInput(count = 100, crossTurn = false) {
-  const input = waitInput(createMockInbox([]));
-  const taskSessionState = {
-    ...sessionState,
-    snapshot: {
-      session: {
-        sessionId: "session",
-        continuationToken: "token",
-        history: [],
-        agent: { system: "" },
-        state: {
-          "eve.workflowTool": {
-            version: 3,
-            runs: Array.from({ length: count }, (_, index) => ({
-              callId: `task_${index}`,
-              toolName: "worker",
-              lifetime: "session" as const,
-              origin: { turnId: crossTurn ? `turn-${index + 1}` : "turn-1", stepIndex: 0 },
-              address: { runId: `run-${index}`, hookToken: `inbox-${index}` },
-              task: {
-                taskId: `task_${index}`,
-                cohortId: "task_0",
-                dispatchContext: { auth: { current: null, initiator: null } },
-                metadata: { kind: "subagent", name: "worker" },
-              },
-            })).concat([
-              {
-                callId: "other-cohort",
-                toolName: "worker",
-                lifetime: "session" as const,
-                origin: { turnId: "turn-2", stepIndex: 0 },
-                address: { runId: "other-run", hookToken: "other-inbox" },
-                task: {
-                  taskId: "other-cohort",
-                  cohortId: "other-cohort",
-                  dispatchContext: { auth: { current: null, initiator: null } },
-                  metadata: { kind: "subagent", name: "worker" },
-                },
-              },
-            ]),
-          },
-        },
-      },
-    },
-  };
-  input.cursor = createCursor({ claimSessionHooks: async () => {} }, taskSessionState);
-  vi.mocked(routeDeliverToChildren).mockImplementation(
-    async ({ delivery, sessionState, serializedContext }) => ({
-      kind: "continue",
-      remainder: report(delivery),
-      sessionState,
-      serializedContext,
-    }),
-  );
-  return { ...input };
-}
-
-describe("buffered task completion batching", () => {
-  beforeEach(() => vi.mocked(routeDeliverToChildren).mockReset());
-  afterEach(() => vi.mocked(routeDeliverToChildren).mockReset());
-
-  it.each(["completed", "failed", "cancelled"] as const)(
-    "keeps routed %s remainders behind the cohort barrier",
-    async (status) => {
-      const input = batchingInput(2);
-      const original =
-        status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
-      const admission = input.queue.enqueueDelivery(original);
-      assert(admission !== undefined);
-      const routed = {
-        ...original,
-        payloads: original.payloads.map(({ task: _task, ...payload }) => payload),
-      };
-      input.queue.replaceDelivery(admission.sequence, routed);
-      const last = completion("task_1");
-      input.inbox = createMockInbox([
-        messageRead("still working"),
-        { result: { done: false, value: last } },
-      ]);
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        delivery: { payloads: [{ message: "still working" }] },
-      });
-      expect(input.queue.pendingCount).toBe(1);
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        delivery: { payloads: [...routed.payloads, ...report(last).payloads] },
-      });
-      expect(input.queue.pendingCount).toBe(0);
-    },
-  );
-
-  it.each(["completed", "failed", "cancelled"] as const)(
-    "auto wakes for a %s outcome while its cross-turn sibling remains unfinished",
-    async (status) => {
-      const input = batchingInput(2, true);
-      await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
-      const first =
-        status === "completed" ? completion("task_0") : terminalDelivery("task_0", status);
-      input.queue.enqueueDelivery(first);
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        kind: "turn",
-        delivery: report(first),
-      });
-      expect(input.queue.pendingCount).toBe(0);
-    },
-  );
-
-  it("auto combines ready siblings without waiting for the remaining task", async () => {
-    const input = batchingInput(3);
-    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
-    const first = completion("task_0");
-    const second = completion("task_1");
-    input.queue.enqueueDelivery(first);
-    input.queue.enqueueDelivery(first);
-    input.queue.enqueueDelivery(second);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: {
-        payloads: [...report(first).payloads, ...report(second).payloads],
-        taskDeliveryIds: [first.taskDeliveryId, second.taskDeliveryId],
-      },
-    });
-    expect(input.queue.pendingCount).toBe(0);
-    input.queue.enqueueDelivery(first);
-    expect(input.queue.pendingCount).toBe(0);
-  });
-
-  it("auto preserves intervening user input and deferred delivery boundaries", async () => {
-    const input = batchingInput(3);
-    await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
-    const question = {
-      kind: "deliver",
-      payloads: [{ message: "Alice checks the status." }],
-    } as const;
-    const first = completion("task_0");
-    const second = completion("task_1");
-    input.queue.enqueueDelivery(first);
-    input.queue.enqueueDelivery(question);
-    input.queue.enqueueDelivery(second);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: question,
-    });
-    expect(
-      input.queue.takeNext(undefined, { taskDeliveryPolicy: "auto", deferDeliveries: true }),
-    ).toBeUndefined();
-    expect(input.queue.pendingCount).toBe(2);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [...report(first).payloads, ...report(second).payloads] },
-    });
-  });
-
-  it("delivers 100 buffered sibling results and their metadata in one parent turn", async () => {
-    const input = batchingInput();
-    const deliveries = Array.from({ length: 100 }, (_, index) => completion(`task_${index}`));
-    const queue = queueOf(...deliveries);
-    const next = await nextTurnDelivery({ ...input, queue });
-
-    expect(next).toMatchObject({
-      kind: "turn",
-      delivery: {
-        taskDeliveryId: "task_0:ready:completed",
-        payloads: deliveries.flatMap((delivery) => report(delivery).payloads),
-        deliveryMetadata: deliveries.map((delivery, payloadIndex) => ({
-          ...delivery.deliveryMetadata![0],
-          payloadIndex,
-        })),
-      },
-    });
-    expect(queue.pendingCount).toBe(0);
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(101);
-  });
-
-  it.each([
-    ["input request", { ...completion("task_2"), taskDeliveryId: "task_2:input:request-1" }],
-    ["update", { ...completion("task_2"), taskDeliveryId: "task_2:update:1" }],
-    ["other cohort", completion("other-cohort")],
-    ["unknown task", completion("unknown-task")],
-    ["user message", { kind: "deliver", payloads: [{ message: "user direction" }] }],
-    [
-      "caller",
-      {
-        ...completion("task_2"),
-        caller: {
-          callId: "call",
-          subagentName: "worker",
-          replyTo: { kind: "hook", token: "reply" },
-          taskId: "task_2",
-        },
-      },
-    ],
-  ] satisfies readonly (readonly [string, DeliverHookPayload])[])(
-    "services a %s while retaining incomplete cohorts",
-    async (_name, boundary) => {
-      const input = batchingInput();
-      const first = completion("task_0");
-      const second = completion("task_1");
-      const later = completion("task_3");
-      const queue = queueOf(first, second, boundary, later);
-      const next = await nextTurnDelivery({ ...input, queue });
-      expect(next).toMatchObject({ kind: "turn", delivery: report(boundary) });
-      expect(queue.pendingCount).toBe(3);
-    },
-  );
-
-  it.each([false, true])(
-    "keeps the cohort across a user turn (cross-turn launches: %s)",
-    async (crossTurn) => {
-      const input = batchingInput(3, crossTurn);
-      const first = completion("task_0");
-      const second = completion("task_1");
-      const last = completion("task_2");
-      input.queue.enqueueDelivery(first);
-      input.inbox = createMockInbox([
-        { result: { done: false, value: second } },
-        messageRead("user question"),
-        { result: { done: false, value: last } },
-      ]);
-
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        kind: "turn",
-        delivery: { payloads: [{ message: "user question" }] },
-      });
-      expect(input.queue.pendingCount).toBe(2);
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(3);
-
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        kind: "turn",
-        delivery: {
-          payloads: [
-            ...report(first).payloads,
-            ...report(second).payloads,
-            ...report(last).payloads,
-          ],
-        },
-      });
-      expect(input.queue.pendingCount).toBe(0);
-      expect(routeDeliverToChildren).toHaveBeenCalledTimes(5);
-    },
-  );
-
-  it("batches a whole cohort when every completion arrives after the active turn", async () => {
-    const input = batchingInput(3);
-    const deliveries = [completion("task_0"), completion("task_1"), completion("task_2")];
-    input.inbox = createMockInbox(
-      deliveries.map((value) => ({ result: { done: false, value }, source: "session" })),
-    );
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: deliveries.flatMap((delivery) => report(delivery).payloads) },
-    });
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(4);
-  });
-
-  it("routes intervening child settlement before releasing the completion cohort", async () => {
-    const input = batchingInput(2);
-    const first = completion("task_0");
-    const last = completion("task_1");
-    const settlement: DeliverHookPayload = {
-      kind: "deliver",
-      payloads: [
-        {
-          task: {
-            agentRequests: [
-              {
-                taskId: "task_1",
-                replyTo: "child-reply",
-                request: {
-                  kind: "agent-settled",
-                  result: {
-                    callId: "child-call",
-                    kind: "subagent-result",
-                    origin: "child",
-                    subagentName: "worker",
-                    output: "done",
-                    outcome: {
-                      kind: "terminal",
-                      result: { kind: "succeeded", output: "done" },
-                      usageDelta: {
-                        inputTokens: 211,
-                        outputTokens: 37,
-                        cacheReadTokens: 0,
-                        cacheWriteTokens: 0,
-                      },
-                    },
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    };
-    for (const delivery of [first, settlement, last]) input.queue.enqueueDelivery(delivery);
-    vi.mocked(routeDeliverToChildren).mockImplementation(
-      async ({ delivery, sessionState, serializedContext }) => ({
-        kind: "continue",
-        remainder: delivery.payloads.some((payload) => payload.task?.agentRequests !== undefined)
-          ? undefined
-          : report(delivery),
-        sessionState,
-        serializedContext,
-      }),
-    );
-
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
-    });
-    expect(vi.mocked(routeDeliverToChildren).mock.calls.map(([call]) => call.delivery)).toEqual([
-      first,
-      settlement,
-      last,
-      expect.objectContaining({ payloads: [...report(first).payloads, ...report(last).payloads] }),
-    ]);
-    expect(input.queue.pendingCount).toBe(0);
-  });
-
-  it("combines siblings across buffered deliveries from another cohort", async () => {
-    const input = batchingInput(2);
-    const first = completion("task_0");
-    const last = completion("task_1");
-    const other = completion("other-cohort");
-    for (const delivery of [first, other, last]) input.queue.enqueueDelivery(delivery);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
-    });
-    expect(input.queue.pendingCount).toBe(1);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: report(other),
-    });
-  });
-
-  it.each(["clear", "compact", "reset", "session-timeout"] as const)(
-    "services %s without releasing an incomplete cohort",
-    async (kind) => {
-      const input = batchingInput(2);
-      const first = completion("task_0");
-      input.queue.enqueueDelivery(first);
-      const value: SessionInboxPayload =
-        kind === "session-timeout" ? { kind, ownerRunId: "owner-1" } : { kind };
-      input.inbox = createMockInbox([{ result: { done: false, value } }]);
-      await expect(nextTurnDelivery(input)).resolves.toEqual({
-        kind: kind === "session-timeout" ? "expired" : kind,
-      });
-      expect(input.queue.pendingCount).toBe(1);
-      expect(routeDeliverToChildren).toHaveBeenCalledOnce();
-    },
-  );
-
-  it("does not wait for a cancelled sibling whose notifications are discarded", async () => {
-    const input = batchingInput(2);
-    const first = completion("task_0");
-    input.queue.enqueueDelivery(first);
-    input.inbox = createMockInbox([cancelRead({ taskId: "task_1" })]);
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: report(first),
-    });
-  });
-
-  it("releases a cohort when cancellation is already recorded without waiting for its echo", () => {
-    const input = batchingInput(2);
-    const state = recordWorkflowTaskView(input.cursor.sessionState.snapshot.session.state, {
-      taskId: "task_1",
-      metadata: { kind: "subagent", name: "worker" },
-      status: "cancelled",
-    }).state;
-    input.queue.enqueueDelivery(completion("task_0"));
-    expect(input.queue.takeNext(state)).toMatchObject({ kind: "turn" });
-    expect(input.queue.pendingCount).toBe(0);
-  });
-
-  it.each(["failed", "cancelled"] as const)(
-    "does not admit a second terminal notification with a different %s outcome",
-    (status) => {
-      for (const deliveries of [
-        [completion("task_0"), terminalDelivery("task_0", status)],
-        [terminalDelivery("task_0", status), completion("task_0")],
-      ]) {
-        const queue = new SessionInputQueue();
-        const [first, late] = deliveries;
-        if (first === undefined || late === undefined) throw new Error("Expected two deliveries.");
-        expect(queue.enqueueDelivery(first)).toBeDefined();
-        expect(queue.enqueueDelivery(late)).toBeUndefined();
-        expect(queue.pendingCount).toBe(1);
-        expect(queue.takeNext(undefined)).toBeDefined();
-        expect(queue.enqueueDelivery(late)).toBeUndefined();
-        expect(queue.pendingCount).toBe(0);
-      }
-    },
-  );
-
-  it("ignores duplicate notifications while waiting for the last sibling", async () => {
-    const input = batchingInput(2);
-    const first = completion("task_0");
-    const last = completion("task_1");
-    input.inbox = createMockInbox(
-      [first, first, last].map((value) => ({
-        result: { done: false, value },
-        source: "session",
-      })),
-    );
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-      kind: "turn",
-      delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
-    });
-  });
-
-  it.each(["failed", "cancelled"] as const)(
-    "batches %s with successful siblings from the same cohort",
-    async (status) => {
-      const input = batchingInput(2);
-      const first = completion("task_0");
-      const terminal = terminalDelivery("task_1", status);
-      for (const delivery of [first, terminal]) input.queue.enqueueDelivery(delivery);
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        kind: "turn",
-        delivery: { payloads: [...report(first).payloads, ...report(terminal).payloads] },
-      });
-      expect(input.queue.pendingCount).toBe(0);
-    },
-  );
-
-  it.each(["failed", "cancelled"] as const)(
-    "batches an all-%s cohort into one report",
-    async (status) => {
-      const input = batchingInput(2);
-      const first = terminalDelivery("task_0", status);
-      const last = terminalDelivery("task_1", status);
-      for (const delivery of [first, last]) input.queue.enqueueDelivery(delivery);
-      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
-        kind: "turn",
-        delivery: { payloads: [...report(first).payloads, ...report(last).payloads] },
-      });
-      expect(input.queue.pendingCount).toBe(0);
-    },
-  );
-
-  it("services ready authorization before a buffered completion batch", async () => {
-    const input = batchingInput();
-    const queue = queueOf(completion("task_0"), completion("task_1"));
-    queue.enqueueAuthorization(authorizationCallbackPayload.payloads);
-    const next = await nextTurnDelivery({ ...input, queue, inbox: createMockInbox([]) });
-    expect(next.kind).toBe("authorization-resume");
-    expect(queue.pendingCount).toBe(2);
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
   });
 });

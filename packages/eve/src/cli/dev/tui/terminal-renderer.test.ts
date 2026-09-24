@@ -1723,14 +1723,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
       streamOf([
         {
           type: "tool-call",
-          input: { taskIds: ["task_123"] },
-          toolCallId: "cancel-1",
-          toolName: "task_cancel",
+          input: { filePath: "/workspace/report.md" },
+          toolCallId: "read-1",
+          toolName: "read_file",
         },
         {
           type: "tool-result",
-          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
-          toolCallId: "cancel-1",
+          output: { content: "Research finished." },
+          toolCallId: "read-1",
         },
         { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
         { type: "assistant-complete", id: "wake-1" },

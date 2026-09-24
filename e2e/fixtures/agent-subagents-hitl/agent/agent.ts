@@ -3,14 +3,16 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
-const STOCK_PRICE = "178.92";
+
+const outputText = (output: unknown) =>
+  typeof output === "string" ? output : JSON.stringify(output);
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
-  const prompt = request.messages.map((entry) => entry.text).join("\n");
   if (message.includes("Call the stock-price subagent exactly once")) {
-    return request.toolResults.some((result) => result.name === "stock-price")
-      ? "The stock price is being fetched."
+    const result = request.toolResults.find((entry) => entry.name === "stock-price");
+    return result !== undefined
+      ? `Stock price result: ${outputText(result.output)}`
       : {
           toolCalls: [
             {
@@ -22,20 +24,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
             },
           ],
         };
-  }
-  if (prompt.includes("Background task reporting") && prompt.includes(STOCK_PRICE)) {
-    return `The stock price is ${STOCK_PRICE}.`;
-  }
-  if (
-    request.messages.some(
-      (entry) =>
-        entry.role === "user" &&
-        entry.text.startsWith("Background task ") &&
-        entry.text.includes("(collision-child) is completed.\n\nResult:\n") &&
-        entry.text.includes(COLLISION_MARKER),
-    )
-  ) {
-    return COLLISION_MARKER;
   }
   if (request.lastUserMessage?.includes(COLLISION_MARKER) !== true) {
     return `Mock reply: ${message}`;
@@ -62,8 +50,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   if (gateResults.length === 1 && subagentResults.length === 1) {
-    // The subagent tool result is a working receipt; its result arrives in a later turn.
-    return "The gate was approved; the child is still working.";
+    return outputText(subagentResults[0]!.output);
   }
 
   throw new Error("Mixed runtime-action step resumed before both tool results were available.");

@@ -1,4 +1,4 @@
-import { getBackgroundTasks, getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -16,9 +16,6 @@ import { getAgentHandleStore } from "#subagents/handles/store.js";
 /** Parses retained work with this deployment's code before deciding whether it can move. */
 export function isSessionStateIdleForHandoff(sessionState: DurableSessionState): boolean {
   const { state } = readDurableSession(sessionState);
-  // Decoding every background task, terminal ones included, rejects corrupt outcomes before any
-  // busy-work shortcut.
-  const backgroundTasks = getBackgroundTasks(state).query();
   const handles = getAgentHandleStore(state);
 
   // These registries are deleted when work settles. Their ordinary readers
@@ -44,8 +41,7 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
       handles.handles.every(
         (handle) => handle.phase === "parked" || handle.phase === "available",
       )) &&
-    getBlockingWorkflowToolRuns(state).length === 0 &&
-    backgroundTasks.every((task) => task.status !== "working")
+    getBlockingWorkflowToolRuns(state).length === 0
   );
 }
 

@@ -31,7 +31,6 @@ import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/mes
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { TaskInputRequestDelivery } from "#tasks/types.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
@@ -66,38 +65,6 @@ export async function runProxySubagentEventStep(input: {
   });
 }
 
-/** Emits a task request whose proxy routes were committed by a prior step. */
-export async function emitRecordedTaskInputRequestStep(input: {
-  readonly request: TaskInputRequestDelivery;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<ProxySubagentEventResult> {
-  "use step";
-
-  const durableSession = readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  return await emitProxiedSubagentEvent({
-    ctx,
-    durableSession,
-    hookPayload: {
-      callId: input.request.taskId,
-      childContinuationToken: input.request.replyTo,
-      childSessionId: input.request.taskId,
-      event: {
-        requests: (input.request.requests ?? [input.request.request]) as never,
-        sequence: input.request.sequence,
-        stepIndex: input.request.stepIndex,
-        turnId: input.request.turnId,
-      },
-      kind: "subagent-input-request",
-      subagentName: input.request.taskId,
-    },
-    sessionWritable: input.sessionWritable,
-    recordProxyInputRequests: false,
-  });
-}
-
 /** Applies one proxied child event to an already-hydrated parent context. */
 export async function emitProxiedSubagentEvent(input: {
   readonly answerHook?: AnswerHookRoute;
@@ -105,7 +72,6 @@ export async function emitProxiedSubagentEvent(input: {
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
   readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly recordProxyInputRequests?: boolean;
 }): Promise<ProxySubagentEventResult> {
   const { ctx } = input;
   const adapter = ctx.require(ChannelKey);
@@ -161,11 +127,7 @@ export async function emitProxiedSubagentEvent(input: {
 
   setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
-  if (
-    input.recordProxyInputRequests !== false &&
-    proxyEntries !== undefined &&
-    input.hookPayload.kind === "subagent-input-request"
-  ) {
+  if (proxyEntries !== undefined && input.hookPayload.kind === "subagent-input-request") {
     const answerHook = input.answerHook;
     scopedSession = upsertProxyInputRequests({
       entries:

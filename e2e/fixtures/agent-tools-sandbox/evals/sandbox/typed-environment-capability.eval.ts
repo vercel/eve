@@ -9,11 +9,7 @@ export default defineEval({
       "Ask the `deny-all` subagent with message: Verify the configured environment sandbox capability.",
     );
     turn.expectOk();
-    const completed = await t.target
-      .watchTurn(turn.sessionId, { startIndex: requireStreamIndex(turn.session) })
-      .result();
-    completed.expectOk();
-    const called = completed.events.find(
+    const called = turn.events.find(
       (event) => event.type === "subagent.called" && event.data.name === "deny-all",
     );
     if (called?.type !== "subagent.called") {
@@ -28,11 +24,3 @@ export default defineEval({
     childTurn.calledTool("verify-typed-sandbox", { output: { blocked: true } });
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Typed sandbox turn has no stream index.");
-  return streamIndex;
-}

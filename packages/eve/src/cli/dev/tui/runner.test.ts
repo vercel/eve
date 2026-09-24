@@ -1055,10 +1055,10 @@ describe("EveTUIRunner idle session follow", () => {
         data: {
           actions: [
             {
-              callId: "cancel-1",
-              input: { taskIds: ["task_123"] },
+              callId: "read-1",
+              input: { filePath: "/workspace/report.md" },
               kind: "tool-call",
-              toolName: "task_cancel",
+              toolName: "read_file",
             },
           ],
           sequence: 1,
@@ -1070,10 +1070,10 @@ describe("EveTUIRunner idle session follow", () => {
         type: "action.result",
         data: {
           result: {
-            callId: "cancel-1",
+            callId: "read-1",
             kind: "tool-result",
-            output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
-            toolName: "task_cancel",
+            output: { content: "Research finished." },
+            toolName: "read_file",
           },
           sequence: 1,
           status: "completed",
@@ -3622,122 +3622,6 @@ describe("EveTUIRunner renderer teardown", () => {
     await completed.promise;
 
     expect(completeSubagent).toHaveBeenCalledWith({ authoritative: true, callId: "call-child" });
-  });
-
-  it("keeps a subagent section open when action.result returns a working receipt", async () => {
-    const backgroundSubagent = vi.fn();
-    const completeSubagent = vi.fn();
-    const runner = new EveTUIRunner({
-      name: "Weather Agent",
-      renderer: fakeRenderer({
-        readPrompt: vi.fn().mockResolvedValueOnce("delegate").mockResolvedValueOnce(undefined),
-        renderStream: vi.fn(async (result) => {
-          for await (const event of result.events as AsyncIterable<unknown>) void event;
-        }),
-        subagents: {
-          begin: vi.fn(),
-          background: backgroundSubagent,
-          upsertStep: vi.fn(),
-          upsertTool: vi.fn(),
-          removeTool: vi.fn(),
-          markChildToolCallId: vi.fn(),
-          complete: completeSubagent,
-        },
-      }),
-      session: sessionYielding([
-        {
-          type: "subagent.called",
-          data: {
-            callId: "call-child",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
-            name: "researcher",
-            sequence: 0,
-            sessionId: "parent-session",
-            toolName: "researcher",
-            turnId: "turn-parent",
-            workflowId: "workflow-parent",
-          },
-        },
-        {
-          type: "action.result",
-          data: {
-            status: "completed",
-            sequence: 1,
-            stepIndex: 0,
-            turnId: "turn-parent",
-            result: {
-              kind: "tool-result",
-              callId: "call-child",
-              output: { agentId: "agent-1", status: "working", taskId: "task_123" },
-              toolName: "researcher",
-            },
-          },
-        },
-        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
-      ]),
-    });
-
-    await runner.run();
-
-    expect(backgroundSubagent).toHaveBeenCalledWith({ callId: "call-child" });
-    expect(completeSubagent).not.toHaveBeenCalled();
-  });
-
-  it("does not settle a subagent section when completed carries a background receipt", async () => {
-    const backgroundSubagent = vi.fn();
-    const completeSubagent = vi.fn();
-    const runner = new EveTUIRunner({
-      name: "Weather Agent",
-      renderer: fakeRenderer({
-        readPrompt: vi.fn().mockResolvedValueOnce("delegate").mockResolvedValueOnce(undefined),
-        renderStream: vi.fn(async (result) => {
-          for await (const event of result.events as AsyncIterable<unknown>) void event;
-        }),
-        subagents: {
-          begin: vi.fn(),
-          background: backgroundSubagent,
-          upsertStep: vi.fn(),
-          upsertTool: vi.fn(),
-          removeTool: vi.fn(),
-          markChildToolCallId: vi.fn(),
-          complete: completeSubagent,
-        },
-      }),
-      session: sessionYielding([
-        {
-          type: "subagent.called",
-          data: {
-            callId: "call-child",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
-            name: "researcher",
-            sequence: 0,
-            sessionId: "parent-session",
-            toolName: "researcher",
-            turnId: "turn-parent",
-            workflowId: "workflow-parent",
-          },
-        },
-        {
-          type: "subagent.completed",
-          data: {
-            backgroundTask: { status: "working", taskId: "task_123" },
-            callId: "call-child",
-            output: '{"status":"working","taskId":"task_123"}',
-            subagentName: "researcher",
-          },
-        },
-        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
-      ]),
-    });
-
-    await runner.run();
-
-    expect(backgroundSubagent).toHaveBeenCalledWith({ callId: "call-child" });
-    expect(completeSubagent).not.toHaveBeenCalled();
   });
 
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {

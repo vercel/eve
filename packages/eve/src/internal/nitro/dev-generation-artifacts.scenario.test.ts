@@ -695,13 +695,12 @@ describe("development generation artifacts", () => {
     const app = await scenarioApp({
       files: {
         "agents/assistant/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agents/assistant/agent/instructions.md": "Use the background tool.",
+        "agents/assistant/agent/instructions.md": "Use the mission plan tool.",
         "agents/assistant/agent/tools/request_mission_plan.mjs": [
           'import { defineWorkflowTool } from "eve/tools";',
           "",
           "export default defineWorkflowTool({",
           '  description: "Run a mission plan.",',
-          '  execution: "background",',
           "  inputSchema: {},",
           "  async execute() {",
           '    "use workflow";',

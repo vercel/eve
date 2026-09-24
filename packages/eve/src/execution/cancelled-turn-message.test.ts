@@ -19,19 +19,16 @@ function session(): HarnessSession {
 }
 
 describe("preserveCancelledTurnMessage", () => {
-  it("preserves the framework kind on a cancelled task delivery", async () => {
+  it("preserves the framework kind on a cancelled framework delivery", async () => {
     const result = await preserveCancelledTurnMessage(
       session(),
-      markFrameworkStepInput(
-        { message: "Background task task_1 completed." },
-        "execution.background_task",
-      ),
+      markFrameworkStepInput({ message: "Continue the report." }, "execution.continuation"),
     );
 
     expect(result.history).toEqual([
       {
-        content: "Background task task_1 completed.",
-        kind: "execution.background_task",
+        content: "Continue the report.",
+        kind: "execution.continuation",
         role: "user",
       },
     ]);

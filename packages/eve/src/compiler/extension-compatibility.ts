@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 57,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 57],
+    current: 58,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 58],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -60,12 +60,13 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       52: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      57: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   dynamicTool: {
-    current: 54,
+    current: 55,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 55,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -96,11 +97,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       50: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       51: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       53: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      54: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   channel: {
-    current: 31,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31],
+    current: 32,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 32],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -114,39 +116,43 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       30: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      31: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   schedule: {
-    current: 15,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    current: 16,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      15: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   subagent: {
-    current: 19,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19],
+    current: 20,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
+      19: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   connection: {
-    current: 26,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26],
+    current: 27,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 27],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       25: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      26: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   hook: {
-    current: 27,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27],
+    current: 28,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 28],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -160,22 +166,25 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       24: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       26: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      27: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   skill: { current: 2, supported: [1, 2], dropped: {} },
   dynamicSkill: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 22],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      21: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 22,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22],
+    current: 23,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 23],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      22: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

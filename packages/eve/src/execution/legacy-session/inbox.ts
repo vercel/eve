@@ -78,26 +78,8 @@ export function encodeLegacyCommand(command: Command, declaredVersion: unknown):
   ) {
     throw new UnsupportedLegacySessionError();
   }
-  if (command.kind !== "send" && command.kind !== "deliver") {
-    const value: Record<string, unknown> = { ...command, version };
-    if (command.kind === "cancel" && version < 6) {
-      if (command.tasks === true)
-        throw new Error("This session cannot cancel owned tasks before import.");
-      delete value.tasks;
-    }
-    return value;
-  }
-  const payloads = (command.kind === "send" ? [command.payload] : command.payloads).map(
-    (payload) => {
-      if (payload.task === undefined || version >= 5) return payload;
-      const {
-        agentRequests: _agentRequests,
-        inputRequests: _inputRequests,
-        ...task
-      } = payload.task;
-      return { ...payload, task };
-    },
-  );
+  if (command.kind !== "send" && command.kind !== "deliver") return { ...command, version };
+  const payloads = command.kind === "send" ? [command.payload] : command.payloads;
   let caller = command.caller;
   if (caller?.activityObserver !== undefined && version < 7) {
     const { activityObserver, ...rest } = caller;
@@ -130,7 +112,6 @@ export function encodeLegacyCommand(command: Command, declaredVersion: unknown):
     payload: coalesceDeliverPayloads(payloads),
     payloads,
     requestId: command.requestId,
-    taskDeliveryId: command.taskDeliveryId,
     turnPolicy: command.turnPolicy,
     version,
   };

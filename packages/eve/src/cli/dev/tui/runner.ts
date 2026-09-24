@@ -1,4 +1,3 @@
-import { isJsonObjectValue } from "#shared/json.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
@@ -1637,7 +1636,6 @@ export class EveTUIRunner {
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
-        onSubagentBackgrounded: (callId) => this.#subagentPump.background(callId),
         onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
         // Cancellation is turn-scoped; background descendants survive.
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
@@ -2102,7 +2100,6 @@ type EveStreamTranslatorInput = {
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
-  onSubagentBackgrounded?: (callId: string) => void;
   onSubagentCompleted?: (callId: string) => void;
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
@@ -2149,7 +2146,6 @@ async function* eveEventsToTUIStream(
     pendingInputRequests,
     turnState,
     onSubagentCalled,
-    onSubagentBackgrounded,
     onSubagentCompleted,
     onTurnCancelled,
     onConnectionAuthRequired,
@@ -2414,17 +2410,6 @@ async function* eveEventsToTUIStream(
 
       case "action.result": {
         const resultEvent = event as ActionResultStreamEvent;
-        const result = resultEvent.data.result;
-        const output = "output" in result ? result.output : undefined;
-        if (
-          resultEvent.data.status === "completed" &&
-          isJsonObjectValue(output) &&
-          output.status === "working" &&
-          typeof output.taskId === "string" &&
-          typeof output.agentId === "string"
-        ) {
-          onSubagentBackgrounded?.(result.callId);
-        }
         if (resultEvent.data.result.kind !== "tool-result") {
           break;
         }
@@ -2534,11 +2519,7 @@ async function* eveEventsToTUIStream(
 
       case "subagent.completed": {
         const completed = event as SubagentCompletedStreamEvent;
-        if (completed.data.backgroundTask === undefined) {
-          onSubagentCompleted?.(completed.data.callId);
-        } else {
-          onSubagentBackgrounded?.(completed.data.callId);
-        }
+        onSubagentCompleted?.(completed.data.callId);
         break;
       }
 

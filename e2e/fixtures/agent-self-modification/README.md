@@ -17,7 +17,6 @@ This exercises the current standard scaffold without duplicating it in the fixtu
 ## Cases
 
 - `add-agent-browser.eval.ts` asks for browser automation without naming a registry address. It checks the child's registry search and approved install, and compares the resulting extension with the checkout's official registry source. `add-slack-channel.eval.ts` similarly checks discovery, then verifies that the setup-bearing Slack item is handed off to `eve add channel/slack` without installation. Neither case needs service credentials or an external account.
-- `create-background-replication-check.eval.ts` creates a ten-second background workflow, calls it on the next turn of the authoring session, and checks its immediate receipt, delayed completion, task identity, typed input, and structured positive result.
 - `create-incident-triage.eval.ts` creates an incident-triage tool and checks precedence and threshold rules across typed inputs.
 - `create-shipping-quote.eval.ts` creates a quote calculator and checks destination, started-kilogram, free-shipping, and expedited pricing boundaries.
 - `offer-repair.eval.ts` reproduces an incorrect reorder recommendation, checks that the parent offers but does not start a repair, confirms it, and verifies the repaired tool.
@@ -38,7 +37,7 @@ The harness snapshots the complete `agent/` tree plus installer-mutated project 
 
 Keep `maxConcurrency: 1`. The harness also serializes cleanup that continues after an eval timeout and acquires a checkout lock before snapshotting source. A concurrent `eve eval` process fails before mutation. If cleanup cannot safely restore source, the lock remains with owner diagnostics; remove it only after inspecting the retained backup and confirming no eval or development server is mutating the fixture.
 
-Forced rebuilds isolate source-authoring and runtime correctness in the other cases. The background replication case instead verifies that automatic rebuilding makes a newly authored capability available on the next turn of the existing session. These cases do not verify deployed proposal/merge behavior. Real-model e2e runs belong in CI. The fixture-only cleanup tests need no model or running server:
+Forced rebuilds isolate source-authoring and runtime correctness. These cases do not verify deployed proposal/merge behavior. Real-model e2e runs belong in CI. The fixture-only cleanup tests need no model or running server:
 
 ```sh
 pnpm --filter agent-self-modification test:scenario

@@ -50,10 +50,7 @@ type WorkflowToolExecute = (
 
 /** Executes one registered workflow body and reports progress to its owner. */
 export async function executeWorkflowBody(
-  input: WorkflowBodyInput & {
-    readonly execution: "background" | "blocking";
-    readonly runId?: string;
-  },
+  input: WorkflowBodyInput & { readonly runId?: string },
   signal: AbortSignal,
 ): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
@@ -82,10 +79,7 @@ export async function executeWorkflowBody(
         reportCount += 1;
         next = await iterator.next();
       }
-      output =
-        (next.value as JsonValue | undefined) ??
-        (input.execution === "blocking" ? last : undefined) ??
-        null;
+      output = (next.value as JsonValue | undefined) ?? last ?? null;
     }
     return { outcome: { output, status: "completed" }, reportCount };
   } catch (error) {
@@ -104,14 +98,10 @@ export async function executeWorkflowBody(
 }
 
 export function createWorkflowBodyRef(
-  input: WorkflowBodyDefinition & {
-    readonly execution: "background" | "blocking";
-    readonly runId?: string;
-  },
+  input: WorkflowBodyDefinition & { readonly runId?: string },
 ): WorkflowToolRunRef {
   return {
     callId: input.callId,
-    execution: input.execution,
     input: input.input,
     runId: input.runId ?? getWorkflowMetadata().workflowRunId,
     sequence: input.session.turn.sequence,

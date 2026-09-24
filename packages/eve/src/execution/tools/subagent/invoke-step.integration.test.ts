@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
   dispatchAgentInvocation,
-  settleTaskAgentInvocationStep,
+  settleAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
@@ -172,7 +172,7 @@ describe("blocking workflow agent continuation", () => {
       }),
     };
     let sessionState = createDurableSessionState({ session });
-    let previousSettlement: Parameters<typeof settleTaskAgentInvocationStep>[0] | undefined;
+    let previousSettlement: Parameters<typeof settleAgentInvocationStep>[0] | undefined;
 
     for (const [index, message] of ["first", "second"].entries()) {
       const callId = `workflow-call:${String(index)}`;
@@ -196,7 +196,7 @@ describe("blocking workflow agent continuation", () => {
       ]);
 
       if (previousSettlement !== undefined) {
-        const stale = await settleTaskAgentInvocationStep({
+        const stale = await settleAgentInvocationStep({
           ...previousSettlement,
           sessionState: dispatched.sessionState,
         });
@@ -204,7 +204,7 @@ describe("blocking workflow agent continuation", () => {
         expect(stale.completion).toBeUndefined();
         expect(stale.sessionState).toBe(dispatched.sessionState);
       }
-      const settlement: Parameters<typeof settleTaskAgentInvocationStep>[0] = {
+      const settlement: Parameters<typeof settleAgentInvocationStep>[0] = {
         serializedContext: dispatched.serializedContext ?? {},
         ownerId: "workflow-run-1",
         result: {
@@ -226,14 +226,14 @@ describe("blocking workflow agent continuation", () => {
         },
         sessionState: dispatched.sessionState,
       };
-      const settled = await settleTaskAgentInvocationStep(settlement);
+      const settled = await settleAgentInvocationStep(settlement);
       expect(settled.settled).toBe(true);
       expect(settled.completion).toEqual({
         type: "subagent.completed",
         data: { callId, subagentName: identity.name, output: message },
       });
       const restored = JSON.parse(JSON.stringify(settled.sessionState));
-      const duplicate = await settleTaskAgentInvocationStep({
+      const duplicate = await settleAgentInvocationStep({
         ...settlement,
         sessionState: restored,
       });

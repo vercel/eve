@@ -11,7 +11,7 @@ export default defineChannel({
         .object({
           sessionId: z.string().min(1).max(128),
           key: z.string().uuid(),
-          action: z.enum(["ready", "release", "status"]),
+          action: z.enum(["ready", "release"]),
         })
         .parse(params);
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(60_000)]);
@@ -33,8 +33,6 @@ export default defineChannel({
         await reader.cancel();
         reader.releaseLock();
       }
-      // Cancellation disposes the hook; the published run identity remains readable.
-      if (action === "status") return Response.json({ status: await getRun(gate.runId).status });
       const hook = await getHookByToken(gate.token);
       const metadata = await hook.metadata;
       if (

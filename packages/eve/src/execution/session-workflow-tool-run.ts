@@ -5,10 +5,9 @@ import type {
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
-import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
+import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
+import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/cancel-owner.js";
 import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
@@ -24,7 +23,6 @@ import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
-  readonly callbackMetadataUrl: string;
   readonly cursor: SessionStateCursor;
   readonly message: T;
 }
@@ -123,7 +121,7 @@ async function handleWorkflowToolRunRequest(
       return;
     }
     await cursor.apply(
-      await applyTaskAgentRequest(
+      await applyAgentRequest(
         {
           ownerId: message.from.runId,
           replyTo: message.replyTo,
@@ -176,7 +174,6 @@ function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHo
 
 function requestContext(input: HandlerInput<unknown>) {
   return {
-    callbackBaseUrl: resolveWorkflowCallbackBaseUrl(input.callbackMetadataUrl),
     sessionWritable: input.cursor.sessionWritable,
     serializedContext: input.cursor.serializedContext,
     sessionState: input.cursor.sessionState,

@@ -184,23 +184,21 @@ widen capture and use metadata-only tracing.
 
 ## How remote dispatch and callbacks work
 
-A remote subagent runs as a durable background task in its own deployment:
+A remote subagent runs in its own deployment, and the parent turn waits for its answer:
 
 1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
-2. The call returns `{ status: "working", taskId, agentId }` after the remote accepts the child.
-3. The callback later settles the task and sends a task notification to the parent.
+2. The remote child runs its turn.
+3. The child posts its answer to the callback URL, and the answer becomes the tool result for the parent's call.
 
 The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
 
 Clients follow a remote child through the parent. [`session.streamSubagent()`](./client/streaming#follow-a-subagent) reads `subagent.called.data.childStreamPath`, a route on the parent deployment. The parent verifies that the child belongs to that session, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
 
-An admitted task survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
-
-You can also steer a running remote background child by calling its subagent tool with the same `agentId` and an updated `message`. eve cancels the old task and requests cancellation of the remote turn before continuing the same remote session under a new task ID. The remote must support the standard eve cancellation and session-message routes. See [Agent messaging](../subagents#agent-messaging) for the shared steering contract.
+Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-A failed _start_ rejects admission before a task receipt is returned. After a remote starts, a terminal failure callback fails the task and notifies the parent with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
+A failed _start_ fails the tool call. After a remote starts, a terminal failure callback fails the call with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
 
 ## What to read next
 

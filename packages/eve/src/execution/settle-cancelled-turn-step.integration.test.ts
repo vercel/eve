@@ -7,9 +7,9 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { setHarnessEmissionState } from "#harness/emission.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import {
-  getWorkflowToolRuns,
+  getBlockingWorkflowToolRuns,
   registerWorkflowToolRun,
-  type BackgroundWorkflowToolRun,
+  type BlockingWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import {
@@ -195,36 +195,18 @@ describe("settleCancelledTurnStep handle store", () => {
     });
   });
   it.each([false, true])(
-    "retains task payloads on turn cancellation (paused=%s)",
+    "removes only the cancelled turn's workflow runs (paused=%s)",
     async (paused) => {
-      const runtime = await createTestRuntime({ agent: { name: "settle-mixed-invocations" } });
+      const runtime = await createTestRuntime({ agent: { name: "settle-turn-invocations" } });
       await runtime.run(async () => {
-        const background: BackgroundWorkflowToolRun = {
-          callId: "background-call",
-          lifetime: "session",
+        const earlier: BlockingWorkflowToolRun = {
+          callId: "earlier-call",
+          lifetime: "turn",
           toolName: "research",
-          origin: { turnId: "turn-1", stepIndex: 0 },
-          address: { runId: "background-run", hookToken: "background-hook" },
-          task: {
-            taskId: "background-task",
-            metadata: { kind: "tool", name: "research" },
-            dispatchContext: { auth: { current: null, initiator: null } },
-          },
+          origin: { turnId: "turn-0", stepIndex: 0 },
+          address: { runId: "earlier-run", hookToken: "earlier-hook" },
         };
-        let session = registerWorkflowToolRun(createCancelledTurnSession([]), background);
-        session = registerWorkflowToolRun(session, {
-          ...background,
-          callId: "completed-call",
-          task: {
-            ...background.task,
-            taskId: "completed-task",
-            outcome: {
-              status: "completed",
-              lastOutput: { type: "result", data: "retained output" },
-            },
-          },
-        });
-        const tasks = getWorkflowToolRuns(session.state);
+        let session = registerWorkflowToolRun(createCancelledTurnSession([]), earlier);
         session = registerWorkflowToolRun(session, {
           callId: "waiting-call",
           toolName: "research",
@@ -236,7 +218,6 @@ describe("settleCancelledTurnStep handle store", () => {
           session = setPendingCoordinationBatch({
             event: { sequence: 3, stepIndex: 1, turnId: "turn-1" },
             responseMessages: [],
-            runtimeActions: [],
             tasks: [],
             session: setHarnessEmissionState(session, {
               sequence: 4,
@@ -250,7 +231,9 @@ describe("settleCancelledTurnStep handle store", () => {
           serializedContext: buildSerializedContext(),
           sessionState: createDurableSessionState({ session }),
         });
-        expect(getWorkflowToolRuns(result.sessionState.snapshot.session.state)).toEqual(tasks);
+        expect(getBlockingWorkflowToolRuns(result.sessionState.snapshot.session.state)).toEqual([
+          earlier,
+        ]);
       });
     },
   );

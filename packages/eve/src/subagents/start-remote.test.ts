@@ -27,7 +27,7 @@ const taskObserver = {
 describe("startRemoteSubagent", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("derives a child identity when no task-owned observer is supplied", async () => {
+  it("derives a child identity under the supplied activity observer", async () => {
     await startRemoteSubagent({
       action: {
         callId: "call-remote",
@@ -58,7 +58,6 @@ describe("startRemoteSubagent", () => {
         traceContext: undefined,
       },
       session: { sessionId: "parent-session" },
-      taskId: "task-1",
     } as never);
 
     expect(startRemoteAgentSession).toHaveBeenCalledWith(
@@ -74,7 +73,6 @@ describe("startRemoteSubagent", () => {
             rootTurnId: "root-turn",
           }),
         },
-        taskId: "task-1",
       }),
     );
   });

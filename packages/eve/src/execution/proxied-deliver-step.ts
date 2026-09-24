@@ -7,7 +7,6 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
-import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   resumeWorkflowToolRunAnswers,
@@ -22,11 +21,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
-import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
-import {
-  createTaskInputRequestId,
-  retireProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
+import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 
 export type RoutedDeliverResult =
   | {
@@ -45,16 +40,13 @@ interface ChildBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly childResponseUrl?: string;
   readonly dismissedRequestIds: string[];
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
   readonly retireRequestIds: string[];
-  readonly sourcePayloadIndexes: number[];
-  readonly taskId?: string;
 }
 
-/** Splits an envelope and validates task routes before forwarding descendant input. */
+/** Splits an envelope and forwards descendant input to the children that asked for it. */
 export async function routeProxiedDeliverStep(input: {
   readonly delivery: DeliverHookPayload;
   readonly sessionWritable: WritableStream<Uint8Array>;
@@ -68,8 +60,7 @@ export async function routeProxiedDeliverStep(input: {
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
   // Only a person's own message may answer or skip a pending question.
-  const resolveMessage =
-    sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
+  const resolveMessage = sourceDelivery.caller === undefined;
   // Every payload routes against the same state, so an answer-hook request
   // resolved by an earlier payload is hidden from later ones; its hook accepts
   // one answer, and later messages must reach the parent instead.
@@ -77,10 +68,7 @@ export async function routeProxiedDeliverStep(input: {
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
-      allowRoute: (requestId, route) =>
-        !resolvedQuestions.has(requestId) &&
-        (route.taskId === undefined ||
-          getBackgroundTasks(durableSession.state).get(route.taskId) !== undefined),
+      allowRoute: (requestId) => !resolvedQuestions.has(requestId),
       payload,
       resolveMessage,
       state: durableSession.state,
@@ -95,26 +83,20 @@ export async function routeProxiedDeliverStep(input: {
       const key = [
         forChild.childContinuationToken,
         forChild.childSessionInbox?.sessionId ?? "",
-        forChild.childResponseUrl ?? "",
-        forChild.taskId ?? "",
       ].join("\0");
       const child = children.get(key) ?? {
         answerHook: forChild.answerHook,
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
-        childResponseUrl: forChild.childResponseUrl,
         dismissedRequestIds: [],
         metadata: [],
         payloads: [],
         retireRequestIds: [],
-        sourcePayloadIndexes: [],
-        taskId: forChild.taskId,
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
       child.dismissedRequestIds.push(...(forChild.dismissedRequestIds ?? []));
       child.retireRequestIds.push(...forChild.retireRequestIds);
-      child.sourcePayloadIndexes.push(sourcePayloadIndex);
       if (routed.forSelf === undefined && childIndex === 0) {
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
           if (metadata.payloadIndex === sourcePayloadIndex) {
@@ -128,37 +110,6 @@ export async function routeProxiedDeliverStep(input: {
 
   let retired = false;
   for (const child of children.values()) {
-    // A task-owned executor is addressed through its task controller. The
-    // controller forwards the answer and clears `input_required` as one
-    // durable decision, so its view cannot claim the child resumed first.
-    const taskId = child.taskId;
-    if (taskId !== undefined) {
-      const entry = getBackgroundTasks(durableSession.state).get(taskId)?.run;
-      if (entry === undefined) {
-        mergeStrandedResponses(parentPayloads, child, taskId);
-        continue;
-      }
-      const delivery = await sendTaskInboundPayload({
-        taskInboxToken: entry.address.hookToken,
-        payload: {
-          auth: sourceDelivery.auth,
-          childContinuationToken: child.childContinuationToken,
-          childSessionInbox: child.childSessionInbox,
-          childResponseUrl: child.childResponseUrl,
-          inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
-          kind: "input-response",
-          taskId,
-        },
-      });
-      if (delivery === "unreachable") {
-        mergeStrandedResponses(parentPayloads, child, taskId);
-        continue;
-      }
-      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
-      retired = true;
-      continue;
-    }
-
     if (child.answerHook !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
@@ -251,29 +202,5 @@ async function emitQuestionResolutions(input: {
     );
   } finally {
     writer.releaseLock();
-  }
-}
-
-// Answers to a task that finished mid-flight rejoin the parent-local
-// remainder, where the model sees them as stale rather than silently
-// vanishing.
-function mergeStrandedResponses(
-  parentPayloads: Map<number, DeliverPayload>,
-  child: ChildBucket,
-  taskId: string,
-): void {
-  for (const [childPayloadIndex, payload] of child.payloads.entries()) {
-    const sourcePayloadIndex = child.sourcePayloadIndexes[childPayloadIndex];
-    if (sourcePayloadIndex === undefined) continue;
-    const strandedResponses: InputResponse[] = (payload.inputResponses ?? []).map((response) => ({
-      ...response,
-      requestId: createTaskInputRequestId(taskId, response.requestId),
-    }));
-    if (strandedResponses.length === 0) continue;
-    const forSelf = parentPayloads.get(sourcePayloadIndex);
-    parentPayloads.set(sourcePayloadIndex, {
-      ...forSelf,
-      inputResponses: [...(forSelf?.inputResponses ?? []), ...strandedResponses],
-    });
   }
 }

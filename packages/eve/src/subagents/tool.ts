@@ -94,8 +94,6 @@ export function buildSubagentRunInput(input: {
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
-  /** Owning task when this child starts from a background workflow tool. */
-  readonly taskId?: string;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -122,7 +120,6 @@ export function buildSubagentRunInput(input: {
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };
-  if (input.taskId !== undefined) adapterState.taskId = input.taskId;
   const reusesOwnerSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition.kind ===
       "parent" || input.selfAgent;
@@ -160,7 +157,6 @@ export function buildSubagentRunInput(input: {
     parentTraceContext: input.parent.traceContext,
     activityObserver: input.activityObserver,
   };
-  if (input.taskId !== undefined) runInput.taskId = input.taskId;
 
   return { childContinuationToken, runInput };
 }

@@ -4,13 +4,11 @@ import type {
   ActivityObserverConfig,
   SessionCallback,
   SessionCapabilities,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 export interface ParsedCreateBody {
-  taskDeliveryPolicy?: TaskDeliveryPolicy;
   activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;

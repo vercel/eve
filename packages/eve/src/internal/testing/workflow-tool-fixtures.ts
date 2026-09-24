@@ -180,18 +180,6 @@ export async function* reportingDeployWorkflow(
   return { plan };
 }
 
-export async function* backgroundDeployWorkflow(
-  input: DeployInput,
-  _ctx: WorkflowToolContext,
-): AsyncGenerator<string, { readonly plan: string }> {
-  "use workflow";
-
-  const plan = await planDeployStep(input.service);
-  yield `planned ${input.service}`;
-  yield `review ${plan}`;
-  return { plan };
-}
-
 async function planDeployStep(service: string): Promise<string> {
   "use step";
 
@@ -263,11 +251,4 @@ export async function askThenRaceWorkflow(
   });
   const answer = await Promise.race([pending, workflowSleep("50ms")]);
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
-}
-
-/** Receives the actual delegated result over the durable parent hook. */
-export async function receiveDelegatedResultWorkflow(token: string): Promise<unknown> {
-  "use workflow";
-  using result = createHook<unknown>({ token });
-  return await result;
 }

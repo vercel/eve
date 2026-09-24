@@ -31,23 +31,6 @@ function textFilePart(overrides: {
 }
 
 describe("coalesceDeliveries", () => {
-  it("keeps the last explicit task policy when batching authored sends", () => {
-    const result = coalesceDeliveries([
-      {
-        kind: "deliver" as const,
-        payloads: [{ message: "First" }],
-        taskDeliveryPolicy: "cohort" as const,
-      },
-      {
-        kind: "deliver" as const,
-        payloads: [{ message: "Second" }],
-        taskDeliveryPolicy: "auto" as const,
-      },
-      { kind: "deliver" as const, payloads: [{ message: "Third" }] },
-    ]);
-    expect(result.taskDeliveryPolicy).toBe("auto");
-  });
-
   const caller = {
     callId: "call-1",
     replyTo: { kind: "hook" as const, token: "turn-caller" },
@@ -125,22 +108,19 @@ describe("coalesceTurnInputs", () => {
   it("preserves a framework kind only when all merged message content shares it", () => {
     expect(
       coalesceTurnInputs(
-        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
-        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "first" }, "execution.continuation"),
+        markFrameworkStepInput({ message: "second" }, "execution.continuation"),
       ),
-    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.background_task"));
+    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.continuation"));
     expect(
-      coalesceTurnInputs(
-        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
-        {
-          message: "second",
-        },
-      ),
+      coalesceTurnInputs(markFrameworkStepInput({ message: "first" }, "execution.continuation"), {
+        message: "second",
+      }),
     ).toEqual({ message: "first\n\nsecond" });
     expect(
       coalesceTurnInputs(
         markFrameworkStepInput({ message: "first" }, "context.instruction"),
-        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "second" }, "execution.continuation"),
       ),
     ).toEqual({ message: "first\n\nsecond" });
   });
@@ -311,7 +291,6 @@ describe("createFrameworkUserMessage", () => {
     "context.state",
     "context.compaction",
     "memory.load",
-    "execution.background_task",
     "execution.continuation",
     "execution.retry",
   ] as const)("recognizes %s as a framework message kind", (kind) => {
@@ -319,14 +298,11 @@ describe("createFrameworkUserMessage", () => {
   });
 
   it("brands framework-authored user-role messages", () => {
-    const message = createFrameworkUserMessage(
-      "execution.background_task",
-      "Background task task_1 completed.",
-    );
+    const message = createFrameworkUserMessage("execution.retry", "The last response was empty.");
 
     expect(message).toEqual({
-      content: "Background task task_1 completed.",
-      kind: "execution.background_task",
+      content: "The last response was empty.",
+      kind: "execution.retry",
       role: "user",
     });
     expect(isFrameworkUserMessage(message)).toBe(true);

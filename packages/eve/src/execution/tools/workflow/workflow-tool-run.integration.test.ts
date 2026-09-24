@@ -5,21 +5,17 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
-import { setAgentHandleStore } from "#subagents/handles/store.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
   askThenRaceWorkflow,
   authorizedDeployWorkflow,
-  backgroundDeployWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
   holdUntilAbortedWorkflow,
   reportingDeployWorkflow,
-  receiveDelegatedResultWorkflow,
   stepThenRaceWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
@@ -30,10 +26,7 @@ import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import {
-  defineWorkflowTool,
-  type BlockingWorkflowToolDefinition,
-} from "#tools/workflow-definition.js";
+import { defineWorkflowTool, type WorkflowToolDefinition } from "#tools/workflow-definition.js";
 import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
@@ -76,7 +69,6 @@ function buildSerializedContext(input: {
  */
 async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
-  readonly background?: boolean;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
@@ -88,9 +80,8 @@ async function createWorkflowToolRuntime(input: {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({
           default: defineWorkflowTool({
-            execution: input.background === true ? "background" : undefined,
             description: `Deploys a service (${input.toolName}).`,
-            execute: input.execute as BlockingWorkflowToolDefinition["execute"],
+            execute: input.execute as WorkflowToolDefinition["execute"],
             inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
           }),
         }),
@@ -141,71 +132,56 @@ async function waitForWorkflowToolRunTerminal(runId: string, timeout = 15_000): 
   throw new Error(`Timed out waiting for run ${runId} to reach a terminal status.`);
 }
 
-function eventsText(events: readonly { readonly data?: unknown }[]): string {
-  return events.map((event) => JSON.stringify(event.data ?? null)).join("\n");
-}
-
 describe("workflow step authorization", () => {
-  it.each([false, true])(
-    "resolves a user token inside a step (background=%s)",
-    async (background) => {
-      const runtime = await createWorkflowToolRuntime({
-        agentName: "workflow-step-token",
-        background,
-        execute: authorizedDeployWorkflow,
-        toolName: "deploy_service",
-      });
-      await runtime.run(async () => {
-        const run = await start(workflowEntry, [
-          {
-            kind: "initial",
-            ownerDeploymentId: "dpl_inline",
-            input: { message: 'Run deploy_service with service "preauthorized"' },
-            serializedContext: {
-              ...buildSerializedContext({
-                continuationToken: "http:step-token",
-                mode: "conversation",
-              }),
-              "eve.auth": {
-                attributes: {},
-                authenticator: "test-idp",
-                issuer: "test-idp",
-                principalId: "user-1",
-                principalType: "user",
-              },
+  it("resolves a user token inside a step", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-step-token",
+      execute: authorizedDeployWorkflow,
+      toolName: "deploy_service",
+    });
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "preauthorized"' },
+          serializedContext: {
+            ...buildSerializedContext({
+              continuationToken: "http:step-token",
+              mode: "conversation",
+            }),
+            "eve.auth": {
+              attributes: {},
+              authenticator: "test-idp",
+              issuer: "test-idp",
+              principalId: "user-1",
+              principalType: "user",
             },
           },
-        ]);
-        const stream = captureTurnEvents(run);
-        try {
-          let text = "";
-          for (let i = 0; i < 5 && !text.includes("authenticatedAs"); i++) {
-            text += JSON.stringify(await stream.nextTurn());
-          }
-          expect(text).toContain("authenticatedAs");
-          expect(text).toContain("user-1");
-          expect(text).not.toContain("secret:");
-          expect(text).not.toContain("authorization.required");
-        } finally {
-          stream.dispose();
-          await run.cancel();
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        let text = "";
+        for (let i = 0; i < 5 && !text.includes("authenticatedAs"); i++) {
+          text += JSON.stringify(await stream.nextTurn());
         }
-      });
-    },
-    60_000,
-  );
+        expect(text).toContain("authenticatedAs");
+        expect(text).toContain("user-1");
+        expect(text).not.toContain("secret:");
+        expect(text).not.toContain("authorization.required");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
 
-  it.each([
-    { background: false, service: "interactive" },
-    { background: true, service: "interactive" },
-    { background: false, service: "retry" },
-    { background: true, service: "retry" },
-  ])(
-    "parks on its own callback and resumes the step (background=$background, service=$service)",
-    async ({ background, service }) => {
+  it.each(["interactive", "retry"])(
+    "parks on its own callback and resumes the step (service=%s)",
+    async (service) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth",
-        background,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });
@@ -313,19 +289,11 @@ describe("workflow step authorization", () => {
     60_000,
   );
 
-  it.each([
-    { background: false, disposition: "denied" },
-    { background: true, disposition: "denied" },
-    { background: false, disposition: "rejected" },
-    { background: true, disposition: "rejected" },
-    { background: false, disposition: "cancel" },
-    { background: true, disposition: "cancel" },
-  ])(
-    "closes authorization on $disposition (background=$background)",
-    async ({ background, disposition }) => {
+  it.each(["denied", "rejected", "cancel"])(
+    "closes authorization on %s",
+    async (disposition) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth-failure",
-        background,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });
@@ -368,10 +336,10 @@ describe("workflow step authorization", () => {
           const executorRunId = (await world.hooks.getByToken(token)).runId;
           const params = { token, attemptId: required.data.attemptId!, name: required.data.name };
           if (disposition === "cancel") {
-            await resumeSessionInbox(
-              sessionCommandHookToken(run.runId),
-              background ? { kind: "cancel", tasks: true } : { kind: "cancel", turnId: "turn_0" },
-            );
+            await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+              kind: "cancel",
+              turnId: "turn_0",
+            });
           } else {
             url.searchParams.set("code", disposition === "denied" ? "denied" : "approved");
             expect(
@@ -379,10 +347,8 @@ describe("workflow step authorization", () => {
             ).toBe(200);
           }
           if (disposition === "cancel") {
-            if (!background) {
-              events.push(...(await stream.nextTurn()));
-              expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
-            }
+            events.push(...(await stream.nextTurn()));
+            expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
           } else {
             for (
               let i = 0;
@@ -698,182 +664,6 @@ describe("workflow tools", () => {
     });
   }, 30_000);
 
-  it.each(["session-timeout", "reset"] as const)(
-    "fails the retained caller when a yielded child receives %s",
-    async (kind) => {
-      const runtime = await createWorkflowToolRuntime({
-        agentName: `yielded-child-${kind}`,
-        background: true,
-        execute: holdUntilAbortedWorkflow,
-        toolName: "deploy_service",
-      });
-      await runtime.run(async () => {
-        const parentToken = `parent-result-${kind}`;
-        const parent = await start(receiveDelegatedResultWorkflow, [parentToken]);
-        let child: ReturnType<typeof getRun> | undefined;
-        let stream: ReturnType<typeof captureTurnEvents> | undefined;
-        let nestedRunId: string | undefined;
-        try {
-          await waitForHook(parent, { token: parentToken });
-          const before = await listWorkflowToolRunIds();
-          child = await start(workflowEntry, [
-            {
-              kind: "initial",
-              ownerDeploymentId: "dpl_inline",
-              input: { message: 'Run deploy_service with service "api"' },
-              serializedContext: {
-                ...buildSerializedContext({
-                  continuationToken: `child-${kind}`,
-                  mode: "conversation",
-                }),
-                "eve.channel": {
-                  kind: "subagent",
-                  state: {
-                    callId: "delegate",
-                    subagentName: "detector",
-                    parentContinuationToken: parentToken,
-                    parentSessionId: parent.runId,
-                  },
-                },
-              },
-            },
-          ]);
-          stream = captureTurnEvents(child);
-          const yielded = await stream.nextTurn();
-          expect(filterEventsByType(yielded, "turn.completed")).toHaveLength(1);
-          expect(yielded.at(-1)?.type).toBe("session.waiting");
-          nestedRunId = await waitForNewWorkflowToolRun(before);
-          await waitForHook({ runId: nestedRunId });
-          expect(await parent.status).toBe("running");
-          await resumeSessionInbox(
-            sessionCommandHookToken(child.runId),
-            kind === "session-timeout" ? { kind, ownerRunId: child.runId } : { kind },
-          );
-          await expect(parent.returnValue).resolves.toMatchObject({
-            kind: "runtime-action-result",
-            results: [
-              {
-                callId: "delegate",
-                isError: true,
-                outcome: {
-                  kind: "terminal",
-                  result: { kind: "failed" },
-                },
-              },
-            ],
-          });
-          await expect(child.returnValue).resolves.toEqual({
-            output: "The session ended before the delegated task completed.",
-          });
-          expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
-        } finally {
-          stream?.dispose();
-          if (nestedRunId !== undefined) {
-            const nested = getRun(nestedRunId);
-            const status = await nested.status;
-            if (status === "pending" || status === "running") await nested.cancel();
-          }
-          for (const run of [child, parent]) {
-            if (run === undefined) continue;
-            const status = await run.status;
-            if (status === "pending" || status === "running") await run.cancel();
-          }
-        }
-      });
-    },
-    30_000,
-  );
-
-  it("cancels nested work after its owning child has yielded", async () => {
-    const runtime = await createWorkflowToolRuntime({
-      agentName: "yielded-child-cancel",
-      background: true,
-      execute: holdUntilAbortedWorkflow,
-      toolName: "deploy_service",
-    });
-    await runtime.run(async () => {
-      const before = await listWorkflowToolRunIds();
-      const child = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
-            continuationToken: "http:yielded-child-cancel",
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(child);
-      let nestedRunId: string | undefined;
-      try {
-        const yielded = await stream.nextTurn();
-        expect(filterEventsByType(yielded, "turn.completed")).toHaveLength(1);
-        expect(yielded.at(-1)?.type).toBe("session.waiting");
-        nestedRunId = await waitForNewWorkflowToolRun(before);
-        await waitForHook({ runId: nestedRunId });
-        expect(await getRun(nestedRunId).status).toBe("running");
-
-        await cancelBackgroundAgentTask({
-          entry: {
-            callId: "delegate",
-            toolName: "child",
-            lifetime: "session",
-            origin: { turnId: "parent-turn", stepIndex: 0 },
-            address: { runId: child.runId, hookToken: "unused" },
-            task: {
-              taskId: "outer-task",
-              metadata: { kind: "subagent", name: "child" },
-              dispatchContext: { auth: { current: null, initiator: null } },
-            },
-          },
-          session: {
-            state: setAgentHandleStore(undefined, {
-              handles: [
-                {
-                  phase: "claimed",
-                  ownerId: "outer-task",
-                  operationId: "delegate",
-                  identity: { id: "child", name: "child", nodeId: "subagents/child" },
-                  address: {
-                    kind: "agent/local",
-                    sessionId: child.runId,
-                    continuationToken: "child",
-                  },
-                },
-              ],
-            }),
-          },
-          serializedContext: {},
-        });
-
-        // The held step can finish only after its abort signal fires or its 60s timer expires.
-        // Finishing within 15s proves cancellation reached the yielded child's work.
-        expect(await waitForWorkflowToolRunTerminal(nestedRunId)).toBe("completed");
-
-        // This input follows the cancellation notification in the child's inbox.
-        // It must be the next turn, without a task notification waking the child first.
-        await resumeSessionInbox(sessionCommandHookToken(child.runId), {
-          kind: "send",
-          payload: { message: "Hello again" },
-        });
-        const next = await stream.nextTurn();
-        expect(
-          filterEventsByType(next, "message.received").map((event) => event.data.message),
-        ).toEqual(["Hello again"]);
-        expect(filterEventsByType(next, "turn.failed")).toHaveLength(0);
-      } finally {
-        stream.dispose();
-        if (nestedRunId !== undefined) {
-          const nested = getRun(nestedRunId);
-          const status = await nested.status;
-          if (status === "pending" || status === "running") await nested.cancel();
-        }
-        await child.cancel();
-      }
-    });
-  }, 30_000);
-
   it("cancels the run when the waiting turn is cancelled and lets the body clean up", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
@@ -924,61 +714,6 @@ describe("workflow tools", () => {
     });
   }, 60_000);
 
-  it("runs a session-owned background workflow invocation", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
-    const runtime = await createWorkflowToolRuntime({
-      agentName: "workflow-tool-background",
-      execute: backgroundDeployWorkflow,
-      toolName: "report_deploy",
-    });
-
-    await runtime.run(async () => {
-      enableBackgroundTool(runtime, "report_deploy");
-
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: 'Run report_deploy with service "api"' },
-          serializedContext: buildSerializedContext({
-            acceptedDeploymentId: "dpl_inline",
-            continuationToken: "http:workflow-tool-background",
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        const receiptTurn = await stream.nextTurn();
-        const receipt = filterEventsByType(receiptTurn, "action.result").find(
-          (event) => event.data.result.kind === "tool-result",
-        );
-        expect(receipt?.data.result.output).toMatchObject({ status: "working" });
-        expect(filterEventsByType(receiptTurn, "turn.failed")).toHaveLength(0);
-
-        const notifications: string[] = [];
-        for (
-          let turn = 0;
-          turn < 3 && !notifications.some((text) => text.includes("is completed"));
-          turn += 1
-        ) {
-          const woken = await stream.nextTurn();
-          expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
-          notifications.push(eventsText(filterEventsByType(woken, "message.received")));
-        }
-        const text = notifications.join("\n");
-        expect(text).not.toContain("Review plan:api");
-        expect(text).not.toContain("update: planned api");
-        expect(text).toContain("is completed");
-        expect(text).toContain("plan:api");
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 90_000);
-
   it("streams a waiting tool's yields as action.partial and settles with its return", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-progress",
@@ -1016,142 +751,4 @@ describe("workflow tools", () => {
       }
     });
   }, 30_000);
-
-  it("wakes the agent with the failure when a background workflow tool throws", async () => {
-    const runtime = await createWorkflowToolRuntime({
-      agentName: "workflow-tool-background-fail",
-      execute: failingDeployWorkflow,
-      toolName: "deploy_service",
-    });
-
-    await runtime.run(async () => {
-      enableBackgroundTool(runtime, "deploy_service");
-
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
-            continuationToken: "http:workflow-tool-background-fail",
-            mode: "conversation",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        const receiptTurn = await stream.nextTurn();
-        expect(filterEventsByType(receiptTurn, "turn.failed")).toHaveLength(0);
-
-        const notifications: string[] = [];
-        for (
-          let turn = 0;
-          turn < 3 && !notifications.some((t) => t.includes("failed"));
-          turn += 1
-        ) {
-          const woken = await stream.nextTurn();
-          expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
-          notifications.push(eventsText(filterEventsByType(woken, "message.received")));
-        }
-        const text = notifications.join("\n");
-        expect(text).toContain("(deploy_service) failed.");
-        expect(text).toContain("deploy of api exploded");
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 90_000);
-
-  it("lets a background workflow tool ask now and act when answered", async () => {
-    const runtime = await createWorkflowToolRuntime({
-      agentName: "workflow-tool-background-hitl",
-      execute: confirmDeployWorkflow,
-      toolName: "confirm_deploy",
-    });
-
-    await runtime.run(async () => {
-      enableBackgroundTool(runtime, "confirm_deploy");
-
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: 'Run confirm_deploy with service "api"' },
-          serializedContext: buildSerializedContext({
-            continuationToken: "http:workflow-tool-background-hitl",
-            mode: "conversation",
-            requestInput: true,
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        const receiptTurn = await stream.nextTurn();
-        expect(filterEventsByType(receiptTurn, "turn.failed")).toHaveLength(0);
-        expect(
-          filterEventsByType(receiptTurn, "action.result").some(
-            (event) =>
-              event.data.result.kind === "tool-result" &&
-              typeof event.data.result.output === "object" &&
-              event.data.result.output !== null &&
-              "taskId" in event.data.result.output,
-          ),
-        ).toBe(true);
-
-        // The question arrives after the turn that called the tool ended.
-        let request: InputRequestedStreamEvent["data"]["requests"][number] | undefined;
-        for (let turn = 0; turn < 3 && request === undefined; turn += 1) {
-          const woken = await stream.nextTurn();
-          expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
-          request = (
-            filterEventsByType(woken, "input.requested")[0] as InputRequestedStreamEvent | undefined
-          )?.data.requests[0];
-        }
-        expect(request).toMatchObject({ kind: "question", prompt: "Apply plan:api?" });
-
-        // The stable session inbox already took the task's wake, so it is
-        // known to exist; answer through it directly.
-        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
-          kind: "send",
-          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
-        });
-
-        const notifications: string[] = [];
-        for (
-          let turn = 0;
-          turn < 3 && !notifications.some((text) => text.includes("is completed"));
-          turn += 1
-        ) {
-          const woken = await stream.nextTurn();
-          expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
-          notifications.push(eventsText(filterEventsByType(woken, "message.received")));
-        }
-        const text = notifications.join("\n");
-        expect(text).toContain("is completed");
-        expect(text).toContain('\\"approved\\":true');
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 90_000);
 });
-
-/** Flags one manifest tool as `execution: "background"` under `experimental.tasks`. */
-function enableBackgroundTool(runtime: TestRuntime, toolName: string): void {
-  const artifacts = runtime.session.compiledArtifacts;
-  if (artifacts === null) throw new Error("expected installed compiled artifacts");
-  runtime.session.compiledArtifacts = {
-    ...artifacts,
-    manifest: {
-      ...artifacts.manifest,
-      config: artifacts.manifest.config,
-      tools: artifacts.manifest.tools.map((tool) =>
-        tool.name === toolName ? { ...tool, execution: "background" as const } : tool,
-      ),
-    },
-  };
-}

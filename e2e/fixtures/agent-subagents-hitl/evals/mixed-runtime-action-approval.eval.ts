@@ -1,4 +1,4 @@
-import { defineEval, type EveEvalContext, type EveEvalSession, type EveEvalTurn } from "eve/evals";
+import { defineEval } from "eve/evals";
 
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
 
@@ -6,9 +6,8 @@ const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
  * Regression coverage for https://github.com/vercel/eve/issues/1201.
  *
  * One model step requests an approval-gated tool and a subagent together.
- * The background task may return its receipt first, but the root turn must
- * retain the approval and re-park instead of resuming the model with an
- * unanswered tool call.
+ * The child may finish first, but the root turn must retain the approval and
+ * re-park instead of resuming the model with an unanswered tool call.
  */
 export default defineEval({
   description: "A root approval and subagent call from one model step both survive parking.",
@@ -23,30 +22,17 @@ export default defineEval({
     const session = parked.session;
 
     parked.calledTool("collision-gate", { count: 1, status: "pending" });
-    parked.calledSubagent("collision-child", { count: 1, status: "working" });
     parked.eventOrder([
       { type: "actions.requested" },
-      {
-        type: "action.result",
-        data: {
-          result: {
-            kind: "tool-result",
-            toolName: "collision-child",
-            output: { status: "working" },
-          },
-        },
-      },
       { type: "input.requested" },
       { type: "session.waiting" },
     ]);
     session.requireInputRequest({ display: "confirmation", toolName: "collision-gate" });
 
+    // The model resumes only with both results, and replies with the child's answer.
     const resumed = await session.respondAll("approve");
     resumed.expectOk();
-    const completed = resumed.message?.includes(COLLISION_MARKER)
-      ? resumed
-      : await waitForMessage(t, resumed.session, COLLISION_MARKER);
-    completed.messageIncludes(COLLISION_MARKER);
+    resumed.messageIncludes(COLLISION_MARKER);
 
     t.succeeded();
     t.noFailedActions();
@@ -58,24 +44,3 @@ export default defineEval({
     });
   },
 });
-
-type SessionCursor = Pick<EveEvalSession, "sessionId" | "state">;
-
-async function waitForMessage(
-  t: EveEvalContext,
-  initialSession: SessionCursor,
-  marker: string,
-): Promise<EveEvalTurn> {
-  let session = initialSession;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (session.sessionId === undefined || session.state === undefined) {
-      throw new Error("Mixed approval completion wait has no parent session cursor.");
-    }
-    const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
-    const turn = await live.result();
-    turn.noFailedActions();
-    if (turn.message?.includes(marker) === true) return turn;
-    session = live.session;
-  }
-  throw new Error("Mixed approval result did not reach the parent after five turns.");
-}

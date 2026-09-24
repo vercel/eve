@@ -7,7 +7,7 @@ export default defineEval({
   tags: ["real-model"],
   description: "The built-in recursive agent tool is exposed only to the root session.",
   async test(t) {
-    const started = await t.send(
+    const turn = await t.send(
       [
         "Use the built-in agent subagent exactly once.",
         "Give the child this task:",
@@ -16,24 +16,11 @@ export default defineEval({
         `After the child returns, reply with its exact output and no other token.`,
       ].join(" "),
     );
-    started.expectOk();
-
-    const completed = await t.target
-      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(started.session) })
-      .result();
-    completed.expectOk();
-    completed.messageIncludes(CHILD_TOKEN);
+    turn.expectOk();
+    turn.messageIncludes(CHILD_TOKEN);
 
     t.succeeded();
     t.calledSubagent("agent", { status: "completed", count: 1 });
     t.noFailedActions();
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Parent session has no stream index.");
-  return streamIndex;
-}

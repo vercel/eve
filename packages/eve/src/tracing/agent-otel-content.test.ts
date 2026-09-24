@@ -14,7 +14,6 @@ const FRAMEWORK_MESSAGE_KINDS = [
   "context.state",
   "context.compaction",
   "memory.load",
-  "execution.background_task",
   "execution.continuation",
   "execution.retry",
 ] as const satisfies readonly FrameworkMessageKind[];
@@ -60,13 +59,13 @@ describe("GenAI message attributes", () => {
       genAiInputMessagesAttribute([
         { content: "A real user message.", kind: "user", role: "user" },
         {
-          content: "A background task completed.",
-          kind: "execution.background_task",
+          content: "The last response was empty.",
+          kind: "execution.retry",
           role: "user",
         },
       ]),
     ).toBe(
-      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.background_task","parts":[{"content":"A background task completed.","type":"text"}],"role":"user"}]',
+      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.retry","parts":[{"content":"The last response was empty.","type":"text"}],"role":"user"}]',
     );
   });
 

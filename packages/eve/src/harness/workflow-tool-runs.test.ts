@@ -22,14 +22,6 @@ function session(state?: HarnessSession["state"]): HarnessSession {
 }
 
 describe("workflow tool run records", () => {
-  it("rejects the previous registry format before using its run records", () => {
-    expect(() =>
-      getBlockingWorkflowToolRuns({
-        "eve.workflowTool": { version: 1, runs: [RECORD] },
-      }),
-    ).toThrow("Corrupt workflow tool run registry");
-  });
-
   it("records, finds, and removes runs by call id", () => {
     const recorded = registerWorkflowToolRun(session({ other: true }), RECORD);
     expect(getBlockingWorkflowToolRuns(recorded.state)).toEqual([RECORD]);
@@ -95,11 +87,11 @@ describe("workflow tool run records", () => {
     expect(findBlockingWorkflowToolRun(overlapping.state, RECORD.callId, "turn-1")).toEqual(RECORD);
   });
 
-  it("rejects malformed state", () => {
-    expect(() =>
+  it("ignores malformed state instead of failing the session", () => {
+    expect(
       getBlockingWorkflowToolRuns({
         "eve.workflowTool": { version: 3, runs: { not: "an array" } },
       }),
-    ).toThrow("Corrupt workflow tool run registry");
+    ).toEqual([]);
   });
 });

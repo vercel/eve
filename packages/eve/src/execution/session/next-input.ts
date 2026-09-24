@@ -1,6 +1,4 @@
-import { TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { DeliverPayload } from "#channel/types.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   SessionControl,
@@ -8,10 +6,7 @@ import type {
   TurnSelection,
 } from "#execution/session/input-queue.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
-import {
-  admitSessionInboxPayload,
-  applySessionCancellation,
-} from "#execution/session/admission.js";
+import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
@@ -42,23 +37,8 @@ export async function nextTurnDelivery(input: {
   // pumped) is the only kind that may move the session to another deployment.
   let freshSequence: number | undefined;
   while (true) {
-    for (const { delivery, sequence } of queue.taskDeliveries()) {
-      const routed = await routeDeliverToChildren({
-        delivery,
-        sessionWritable: cursor.sessionWritable,
-        serializedContext: cursor.serializedContext,
-        sessionState: cursor.sessionState,
-      });
-      await cursor.apply(routed);
-      queue.replaceDelivery(sequence, routed.kind === "cancel-turn" ? undefined : routed.remainder);
-      if (routed.kind === "cancel-turn") return routed;
-    }
-    const selected = queue.takeNext(cursor.sessionState.snapshot.session.state, {
+    const selected = queue.takeNext({
       deferDeliveries: input.deferDeliveries,
-      taskDeliveryPolicy:
-        cursor.serializedContext[TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME] === "auto"
-          ? "auto"
-          : "cohort",
       expectedAttemptIds: input.expectedAttemptIds,
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
@@ -86,8 +66,6 @@ export async function nextTurnDelivery(input: {
       case "workflow":
         return { kind: "workflow", message: admitted.message };
       case "cancel":
-        await applySessionCancellation(admitted.command, input);
-        break;
       case "delivery":
       case "consumed":
       case "runtime-action-result":

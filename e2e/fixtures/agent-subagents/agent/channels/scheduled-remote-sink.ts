@@ -1,6 +1,6 @@
 import { defineChannel, POST } from "eve/channels";
 
-/** Rejects any non-null scheduled reply except the late remote-agent result. */
+/** Rejects any non-null scheduled reply except the one built from the remote-agent result. */
 export default defineChannel<undefined, void, { id: string }>({
   routes: [POST("/scheduled-remote-sink", async () => new Response("ok"))],
   receive(input, { from }) {

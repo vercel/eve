@@ -1,7 +1,6 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload, SessionCommand } from "#channel/types.js";
-import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
@@ -74,11 +73,7 @@ export async function admitSessionInboxPayload(
 
   switch (command.kind) {
     case "deliver": {
-      const admission = input.queue.enqueueDelivery(
-        command,
-        input.cursor.sessionState.snapshot.session.state,
-      );
-      return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
+      return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
     }
     case "clear":
     case "compact":
@@ -96,23 +91,4 @@ export async function admitSessionInboxPayload(
     case "cancel":
       return { command, kind: "cancel" };
   }
-}
-
-/** Applies accepted cancellation effects after the active-turn guard passes. */
-export async function applySessionCancellation(
-  command: SessionCancellation,
-  input: {
-    readonly cursor: SessionStateCursor;
-    readonly queue: SessionInputQueue;
-  },
-): Promise<void> {
-  if (command.tasks === true) {
-    const cancelled = await cancelAllIndexedSessionTasksStep({
-      serializedContext: input.cursor.serializedContext,
-      sessionState: input.cursor.sessionState,
-    });
-    await input.cursor.apply(cancelled);
-    input.queue.discardStaleNotifications(input.cursor.sessionState.snapshot.session.state);
-  }
-  if (command.taskId !== undefined) input.queue.cancelTask(command.taskId);
 }

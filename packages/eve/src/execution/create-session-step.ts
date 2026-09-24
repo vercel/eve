@@ -39,7 +39,6 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-  readonly taskId?: string;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -80,7 +79,6 @@ export async function createSessionStep(input: {
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
-    taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
   });
 

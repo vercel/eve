@@ -112,7 +112,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "message.received":
-      if (event.data.kind === "execution.background_task") return data;
       return upsertMessage(data, {
         id: `${receivedMessageEventId(event)}:user`,
         metadata: {

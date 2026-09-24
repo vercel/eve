@@ -35,13 +35,13 @@ describe("defineTool approvalKey", () => {
     expect(definition.approvalKey?.({ scope: "repo" })).toBe("write:repo");
   });
 
-  it("rejects background execution", () => {
+  it("rejects the removed execution option", () => {
     const definition = {
       description: "Scoped background write",
-      execution: "background",
+      execution: "blocking",
       inputSchema: z.object({ scope: z.string() }),
       execute: async () => null,
     };
-    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
+    expect(() => defineTool(definition)).toThrow('defineTool: "execution" is no longer supported.');
   });
 });

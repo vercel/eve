@@ -7,7 +7,6 @@ import {
   isWorkflowToolDefinition,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
-  type TaskReceipt,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -70,20 +69,19 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
-  it("provides progress yields and receipt projections for background workflows", () => {
+  it("provides progress yields and projects the returned output", () => {
     const definition = defineWorkflowTool({
       description: "Report a deployment",
-      execution: "background",
       inputSchema: z.object({ service: z.string() }),
       async *execute(input, ctx) {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
         yield { status: "planning" };
-        return { deployed: input.service };
+        return { status: `deployed ${input.service}` };
       },
-      toModelOutput(receipt) {
-        expectTypeOf(receipt).toEqualTypeOf<TaskReceipt>();
-        return { type: "text", value: receipt.taskId };
+      toModelOutput(output) {
+        expectTypeOf(output).toEqualTypeOf<{ status: string }>();
+        return { type: "text", value: output.status };
       },
     });
     expect(isWorkflowToolDefinition(definition)).toBe(true);

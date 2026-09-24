@@ -355,25 +355,6 @@ test("a failed eval restores source, releases its checkout lock, and preserves t
   await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
 });
 
-test("waitForRebuild polls until the authored runtime revision changes", async () => {
-  await withHarness(async ({ harness, target, close }) => {
-    let reads = 0;
-    const fetch = target.fetch;
-    target.fetch = async (path, options) => {
-      if (path === "/eve/v1/dev/runtime-artifacts") {
-        reads += 1;
-        return response({ revision: reads < 3 ? "before" : "after" });
-      }
-      return fetch(path, options);
-    };
-
-    const previous = await harness.runtimeRevision();
-    assert.equal(await harness.waitForRebuild(previous), "after");
-    assert.equal(reads, 3);
-    await close();
-  });
-});
-
 test("apply rejects a rebuild response without a runtime revision", async () => {
   await withHarness(async ({ harness, target, close }) => {
     let apply = true;
@@ -387,46 +368,6 @@ test("apply rejects a rebuild response without a runtime revision", async () => 
     await assert.rejects(harness.apply(), /did not return a runtime revision/);
     await close();
   });
-});
-
-test("request falls back to a parent-boundary watch when the initial event is missed", async () => {
-  const root = await sourceTree();
-  const calls = [];
-  const continuation = {
-    sessionId: "parent",
-    events: [],
-    async waitForEvent() {
-      return { data: { name: "self-modification__agent", childSessionId: "child" } };
-    },
-    async result() {
-      return completedTurn("parent");
-    },
-  };
-  const child = {
-    sessionId: "child",
-    events: [],
-    async result() {
-      return completedTurn("child");
-    },
-  };
-  const target = targetFor({ calls, turns: { parent: continuation, child } });
-  const parent = {
-    sessionId: "parent",
-    events: [],
-    session: { state: { streamIndex: 10 } },
-    async waitForEvent() {
-      throw new Error("stream boundary");
-    },
-    async result() {
-      return completedTurn("parent");
-    },
-  };
-  const t = context(target);
-  t.session = async () => ({ start: async () => parent });
-  const harness = await SelfModificationHarness.create(t, root);
-  await harness.request("make a change");
-  await harness.close();
-  await rm(root, { recursive: true, force: true });
 });
 
 for (const emitsCalled of [false, true]) {

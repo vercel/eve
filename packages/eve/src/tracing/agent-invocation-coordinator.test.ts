@@ -7,7 +7,6 @@ import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinat
 import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
 import { deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import { deriveTaskId } from "#tasks/task-id.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
@@ -180,16 +179,12 @@ describe("agent invocation trace coordinator", () => {
 
     const prepared = prepareAgentInvocationTrace({
       invocation: { callId: "workflow:background", kind: "subagent-call", name: "research" },
-      ownerId: "background-task",
+      ownerId: "workflow-run",
       startTimeMs: 2,
       serializedContext: serializeContext(context),
       sessionId: "session-1",
-      taskId: deriveTaskId({
-        callId: "workflow",
-        parentSessionId: "session-1",
-        parentTurnId: "turn-1",
-      }),
-      turnId: "later-turn",
+      sessionState,
+      turnId: "turn-1",
     });
 
     expect(prepared.dispatch.parentTraceContext?.spanId).toBe(

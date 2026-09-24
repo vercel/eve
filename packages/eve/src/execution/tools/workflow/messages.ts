@@ -52,7 +52,6 @@ export type WorkflowToolRequest =
 /** Identifies the sending workflow tool run to an owner shared by many runs. */
 export interface WorkflowToolRunRef {
   readonly callId: string;
-  readonly execution: "background" | "blocking";
   readonly input: JsonObject;
 
   readonly runId: string;

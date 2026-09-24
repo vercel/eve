@@ -88,40 +88,6 @@ The `auth` option controls which principal the session runs as. A handler may in
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 
-## Background task results
-
-New sessions started by schedules default to `"cohort"`: background
-outcomes wait for overlapping tasks to settle before waking the parent. To report
-independently useful results as they arrive, pass `taskDeliveryPolicy: "auto"` to
-`send(...)` inside a schedule handler:
-
-```ts title="agent/schedules/digest.ts"
-import { defineSchedule } from "eve/schedules";
-import slack from "../channels/slack";
-
-export default defineSchedule({
-  cron: "0 9 * * *",
-  run({ to, waitUntil, appAuth }) {
-    waitUntil(
-      to(slack, { channelId: "C0123ABC" }).send("Prepare the daily reports.", {
-        auth: appAuth,
-        taskDeliveryPolicy: "auto",
-      }),
-    );
-  },
-});
-```
-
-The option belongs to `send(...)`. Markdown schedules use the `"cohort"` default;
-use a handler when you need to override it. Sending to an existing session preserves
-its policy unless the send supplies an explicit value.
-
-Under `"auto"`, a model call may finish silently while related work is pending.
-Available results remain in the next reporting context so the parent can combine
-previously withheld outputs later. A scheduled task-mode session stays alive while
-it owns pending background tasks. See
-[Background task results](./channels/overview#background-task-results).
-
 ## Session continuity
 
 Markdown schedules start a new session on every fire. Handler schedules do too, unless they send to an existing conversation, such as a Slack thread. Store data that must survive across fires outside session state.

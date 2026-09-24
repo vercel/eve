@@ -6,7 +6,6 @@ import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
-import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 import {
   handleWorkflowWebhookRequest,
   WORKFLOW_WEBHOOK_ROUTE_PATTERN,
@@ -39,7 +38,6 @@ import {
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
-  EVE_TASK_INPUT_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
@@ -140,7 +138,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
-      POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),
       GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
@@ -308,7 +305,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
-            taskDeliveryPolicy: body.taskDeliveryPolicy,
             activityObserver: body.activityObserver,
             audienceAuth: authResult,
             auth: messageResult.auth,
@@ -396,7 +392,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const session = attachSession(sessionId);
           const options = attachClientContext(
             {
-              taskDeliveryPolicy: body.taskDeliveryPolicy,
               activityObserver: body.activityObserver,
               auth: dispatchAuth,
               callback: body.callback,
@@ -458,11 +453,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({
-            taskId: body.taskId,
-            tasks: body.tasks,
-            turnId: body.turnId,
-          });
+          result = await attachSession(sessionId).cancel({ turnId: body.turnId });
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(

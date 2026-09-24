@@ -79,21 +79,24 @@ describe("createCurrentMessages", () => {
   });
 
   it("prepares tracked announcements without advancing the recorded baseline", () => {
-    const recorded = { taskState: "working" };
+    const recorded = { availableSkills: "working" };
     const current = createCurrentMessages([{ role: "user", content: "working", kind: "user" }], {
       historyState: recorded,
     });
 
-    current.addAnnouncements({ taskState: "working" });
-    current.addAnnouncements({ taskState: "completed" });
-    current.addAnnouncements({ taskState: "completed", availableSkills: "completed" });
+    current.addAnnouncements({ availableSkills: "working" });
+    current.addAnnouncements({ availableSkills: "completed" });
+    current.addAnnouncements({ availableSkills: "completed", deliveryInstruction: "completed" });
 
-    expect(recorded).toEqual({ taskState: "working" });
-    expect(current.historyState).toEqual({ taskState: "completed", availableSkills: "completed" });
+    expect(recorded).toEqual({ availableSkills: "working" });
+    expect(current.historyState).toEqual({
+      availableSkills: "completed",
+      deliveryInstruction: "completed",
+    });
     expect(current.history).toEqual([
       { role: "user", content: "working", kind: "user" },
       { role: "user", content: "completed", kind: "context.state" },
-      { role: "user", content: "completed", kind: "context.state" },
+      { role: "user", content: "completed", kind: "context.instruction" },
     ]);
   });
 
@@ -101,19 +104,16 @@ describe("createCurrentMessages", () => {
     const current = createCurrentMessages([]);
     current.addAnnouncements({
       deliveryInstruction: "report",
-      taskState: "working",
       availableSkills: "skills",
     });
-    current.addAnnouncements({ availableSkills: "", taskState: undefined });
+    current.addAnnouncements({ availableSkills: "", deliveryInstruction: undefined });
 
     expect(current.history).toEqual([
       { role: "user", content: "skills", kind: "context.state" },
-      { role: "user", content: "working", kind: "context.state" },
       { role: "user", content: "report", kind: "context.instruction" },
     ]);
     expect(current.historyState).toEqual({
       availableSkills: "skills",
-      taskState: "working",
       deliveryInstruction: "report",
     });
   });
@@ -169,9 +169,9 @@ describe("createCurrentMessages", () => {
       approvalTail,
     ]);
 
-    current.addAnnouncements({ taskState: "task state" });
+    current.addAnnouncements({ availableSkills: "skills" });
 
-    expect(current.systemMessages).toEqual([{ role: "system", content: "task state" }]);
+    expect(current.systemMessages).toEqual([{ role: "system", content: "skills" }]);
     expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
     expect(current.historyState).toEqual({});
   });

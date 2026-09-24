@@ -13,9 +13,8 @@ import type {
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { deriveTaskId } from "#tasks/task-id.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { getBlockingWorkflowToolRuns, getBackgroundTasks } from "#harness/workflow-tool-runs.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 
 import { createLogger } from "#internal/logging.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -38,7 +37,7 @@ const AgentTraceContextKey = new ContextKey<AgentTraceContextState>(AGENT_TRACE_
   },
 });
 
-/** Run after task-provider commits, so a returned background receipt keeps its anchor. */
+/** Drops trace anchors for finished work while keeping anchors for workflow runs still in flight. */
 export function pruneAgentTraceState(
   context: ContextAccessor,
   sessionId: string,
@@ -62,24 +61,12 @@ function pruneTraceOwnership(
   const state = context.get(AgentTraceContextKey);
   if (state === undefined) return;
   const calls = new Set(getBlockingWorkflowToolRuns(sessionState).map((run) => run.callId));
-  const tasks = new Set(
-    getBackgroundTasks(sessionState)
-      .query({ state: "working" })
-      .map((task) => task.taskId),
-  );
   const actionAnchors = Object.fromEntries(
     Object.entries(state.actionAnchors).filter(
       ([key, action]) =>
         action.sessionId !== sessionId ||
         state.actions[key] !== undefined ||
-        calls.has(action.callId) ||
-        tasks.has(
-          deriveTaskId({
-            callId: action.callId,
-            parentSessionId: sessionId,
-            parentTurnId: action.turnId,
-          }),
-        ),
+        calls.has(action.callId),
     ),
   );
   const retainedCalls = new Set(
@@ -161,24 +148,6 @@ export function readActionTraceContext(
       traceId: action.parent.traceId,
     },
     state.sessions[action.sessionId]?.decision,
-  );
-}
-
-/** Task IDs already bind the originating call and turn, including after that turn ends. */
-export function readTaskActionTrace(
-  serializedContext: Readonly<Record<string, unknown>>,
-  sessionId: string,
-  taskId: string,
-): AgentActionTraceState | undefined {
-  const state = deserializeAgentTraceContextState(serializedContext[AgentTraceContextKey.name]);
-  return Object.values(state.actionAnchors).find(
-    (action) =>
-      action.sessionId === sessionId &&
-      deriveTaskId({
-        callId: action.callId,
-        parentSessionId: sessionId,
-        parentTurnId: action.turnId,
-      }) === taskId,
   );
 }
 

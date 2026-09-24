@@ -35,7 +35,6 @@ export async function emitSubagentEventStep(input: {
     const sink = createSessionEventSink({
       adapter: ctx.require(ChannelKey),
       ctx,
-      isFirstTurn: input.sessionState.emissionState.sequence === 0,
       sessionWritable: input.sessionWritable,
       sessionId: input.sessionState.sessionId,
     });

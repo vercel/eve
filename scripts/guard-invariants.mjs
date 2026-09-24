@@ -113,11 +113,16 @@
  *             `defineSandboxProvider()` and does not import sandbox runtime
  *             orchestration, registries, key derivation, or session state.
  *             Built-ins and authored providers must share one contract.
+ *   rule 45 — The removed background-task surface stays removed. Tool calls
+ *             resolve inside their turn; source, tests, docs, apps, and e2e
+ *             fixtures must not reintroduce task receipts, delivery policies,
+ *             cohort notifications, or background tool execution.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
+import { execFileSync } from "node:child_process";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -1060,6 +1065,55 @@ async function checkRule31RemovedCliReferences() {
   return violations;
 }
 
+// ---------- Rule 45: removed background-task surface stays removed ----------
+
+const REMOVED_BACKGROUND_TASK_REFERENCES = [
+  /\btask_cancel\b/,
+  /\btaskDeliveryPolicy\b/,
+  /\bTaskDeliveryPolicy\b/,
+  /\btaskDeliveryIds?\b/,
+  /\bTaskReceipt\b/,
+  /\b(?:TurnTaskDeliveryKey|TaskDeliveryPolicyKey|BackgroundToolExecutorKey|getBackgroundTasks)\b/,
+  /\bexecution\.background_task\b/,
+  /\bexecution:\s*["']background["']/,
+  /["']#(?:tasks|execution\/tasks)\//,
+];
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule45RemovedBackgroundTaskReferences() {
+  /** @type {Violation[]} */
+  const violations = [];
+
+  // Tracked files only: ignored build output can hold stale copies of removed names.
+  const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8" })
+    .split("\0")
+    .filter((posix) => posix !== "" && isActiveCliReferenceFile(posix));
+  for (const posix of tracked) {
+    let content;
+    try {
+      content = await readFile(join(REPO_ROOT, posix), "utf8");
+    } catch {
+      continue;
+    }
+    const lines = content.split(/\r?\n/);
+
+    lines.forEach((line, index) => {
+      if (!REMOVED_BACKGROUND_TASK_REFERENCES.some((pattern) => pattern.test(line))) return;
+      violations.push({
+        rule: 45,
+        file: posix,
+        line: index + 1,
+        message:
+          "references the removed background-task surface. Tool calls, including subagent calls and workflow tools, resolve inside their turn. Historical mentions belong only in changelogs or changesets.",
+      });
+    });
+  }
+
+  return violations;
+}
+
 // ---------- Rule 32: research document frontmatter ----------
 
 const RESEARCH_DIR = "research";
@@ -1506,6 +1560,9 @@ async function main() {
 
   // Rule 32
   violations.push(...(await checkRule32ResearchFrontmatter()));
+
+  // Rule 45
+  violations.push(...(await checkRule45RemovedBackgroundTaskReferences()));
 
   // Rule 33
   violations.push(...state.rule33);
