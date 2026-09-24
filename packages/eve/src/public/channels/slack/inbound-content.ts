@@ -41,6 +41,16 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
     return extracted;
   }
 
+  const attachmentText = extractLegacyAttachmentLines(raw.attachments).join("\n").trim();
+  if (attachmentText) {
+    if (normalizedTrimmed.includes(normalizedExtracted)) return text;
+    const blockText = extractBlockKitLines(raw.blocks).join("\n").trim();
+    if (blockText && normalizedTrimmed.includes(normalizeComparableText(blockText))) {
+      return `${text}\n${attachmentText}`;
+    }
+    return `${text}\n${extracted}`;
+  }
+
   return text;
 }
 

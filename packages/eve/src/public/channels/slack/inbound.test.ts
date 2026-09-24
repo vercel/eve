@@ -538,6 +538,24 @@ describe("Block Kit inbound markdown", () => {
     expect(message?.markdown).toContain("CI Bot");
   });
 
+  it("keeps a short link preview alongside a question in the model-visible markdown", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "Can you check this alert? <https://x/a>",
+        channel: "C01",
+        ts: "1234567890.123458",
+        attachments: [{ title: "Grafana Alerts", text: "[FIRING:12] parse errors" }],
+      },
+    });
+
+    expect(message?.markdown).toContain("Can you check this alert?");
+    expect(message?.markdown).toContain("Grafana Alerts");
+    expect(message?.markdown).toContain("[FIRING:12] parse errors");
+  });
+
   it("keeps plain top-level text when there are no blocks or attachments", () => {
     const message = parseMessageEvent({
       type: "event_callback",

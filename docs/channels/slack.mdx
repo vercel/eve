@@ -187,7 +187,7 @@ export default slackChannel({
 
 The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
-When a Slack message shares another Slack message, eve extracts the forwarded message body from Slack's message-unfurl attachment and includes it in `<content>`. The original top-level comment, when present, remains alongside the forwarded content.
+When a Slack message includes a link preview, eve includes its attachment text in `<content>` alongside the sender's message, including when the link has words around it. Shared Slack messages work the same way: eve extracts the forwarded message body from Slack's message-unfurl attachment and keeps any top-level comment.
 
 #### Restrict who can invoke the agent
 
