@@ -3,6 +3,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { InputRequest } from "#shared/input.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
+import type { HarnessToolMap } from "#harness/types.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
 // schemas are the single source for the runtime narrowing and the static
