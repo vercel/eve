@@ -115,25 +115,49 @@ function tokenize(text: string): string[] {
     .filter((t) => t.length > 1);
 }
 
-function scoreMatch(queryTokens: string[], tool: ConnectionToolMetadata): number {
-  const nameTokens = tokenize(tool.name);
-  const descTokens = tokenize(tool.description);
-  let score = 0;
+interface MatchScore {
+  readonly exactName: boolean;
+  readonly nameMatches: number;
+  readonly descriptionMatches: number;
+}
 
-  for (const qt of queryTokens) {
-    for (const nt of nameTokens) {
-      if (nt.includes(qt) || qt.includes(nt)) {
-        score += 3;
-      }
-    }
-    for (const dt of descTokens) {
-      if (dt.includes(qt) || qt.includes(dt)) {
-        score += 1;
-      }
-    }
-  }
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/[\s_.\-/]+/g, "");
+}
 
-  return score;
+function countMatchingTokens(queryTokens: string[], fieldTokens: string[]): number {
+  return [...new Set(queryTokens)].filter((queryToken) =>
+    fieldTokens.some(
+      (fieldToken) => fieldToken.includes(queryToken) || queryToken.includes(fieldToken),
+    ),
+  ).length;
+}
+
+function scoreMatch(
+  query: string,
+  queryTokens: string[],
+  connectionName: string,
+  tool: ConnectionToolMetadata,
+): MatchScore | undefined {
+  const exactName = [tool.name, qualifiedConnectionToolName(connectionName, tool.name)].some(
+    (name) => normalizeName(query) === normalizeName(name),
+  );
+  const nameMatches = countMatchingTokens(queryTokens, tokenize(tool.name));
+  const descriptionMatches = countMatchingTokens(queryTokens, tokenize(tool.description));
+
+  return exactName || nameMatches > 0 || descriptionMatches > 0
+    ? { exactName, nameMatches, descriptionMatches }
+    : undefined;
+}
+
+function compareMatchScores(a: MatchScore, b: MatchScore): number {
+  if (a.exactName !== b.exactName) return Number(b.exactName) - Number(a.exactName);
+
+  const aHasNameMatch = a.nameMatches > 0;
+  const bHasNameMatch = b.nameMatches > 0;
+  if (aHasNameMatch !== bHasNameMatch) return Number(bHasNameMatch) - Number(aHasNameMatch);
+
+  return b.nameMatches - a.nameMatches || b.descriptionMatches - a.descriptionMatches;
 }
 
 async function resolveInteractiveAuth(
@@ -179,7 +203,7 @@ async function executeConnectionSearch(
 
   const limit = input.limit ?? 10;
   const queryTokens = tokenize(input.keywords);
-  const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
+  const results: Array<{ item: ConnectionSearchResultItem; score: MatchScore }> = [];
   const failedConnections: ConnectionSearchResultItem[] = [];
 
   const targetConnections =
@@ -263,8 +287,8 @@ async function executeConnectionSearch(
     }
 
     for (const tool of tools) {
-      const score = scoreMatch(queryTokens, tool);
-      if (score > 0) {
+      const score = scoreMatch(input.keywords, queryTokens, conn.connectionName, tool);
+      if (score !== undefined) {
         results.push({
           item: {
             connection: conn.connectionName,
@@ -292,7 +316,7 @@ async function executeConnectionSearch(
     throw new Error(terminalFailures.map((failure) => failure.error).join("\n"));
   }
 
-  results.sort((a, b) => b.score - a.score);
+  results.sort((a, b) => compareMatchScores(a.score, b.score));
   const matched = results.slice(0, limit).map((r) => r.item);
 
   if (matched.length > 0) {

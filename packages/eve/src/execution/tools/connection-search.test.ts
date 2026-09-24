@@ -362,6 +362,107 @@ describe("connection_search", () => {
     ]);
   });
 
+  it("recognizes qualified exact names across case and separator styles", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "Searches records after list-records is used.",
+            inputSchema: { type: "object" },
+            name: "search-records",
+          },
+          {
+            description: "Lists CRM records.",
+            inputSchema: { type: "object" },
+            name: "list-records",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "CRM__LIST.RECORDS", limit: 2 }),
+    ).resolves.toMatchObject([
+      { qualifiedName: "crm__list-records" },
+      { qualifiedName: "crm__search-records" },
+    ]);
+  });
+
+  it("ranks partial name matches above description-only matches", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "Update, update, update, and update records before auditing.",
+            inputSchema: { type: "object" },
+            name: "audit-records",
+          },
+          {
+            description: "Modify a CRM record.",
+            inputSchema: { type: "object" },
+            name: "update-record",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "update", limit: 2 }),
+    ).resolves.toMatchObject([
+      { qualifiedName: "crm__update-record" },
+      { qualifiedName: "crm__audit-records" },
+    ]);
+  });
+
+  it("does not rank repeated description tokens above the same shorter match", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "List customer records.",
+            inputSchema: { type: "object" },
+            name: "browse",
+          },
+          {
+            description: "List, list, list, list, and list customer records.",
+            inputSchema: { type: "object" },
+            name: "search",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "list records", limit: 2 }),
+    ).resolves.toMatchObject([{ qualifiedName: "crm__browse" }, { qualifiedName: "crm__search" }]);
+  });
+
+  it("keeps description-only matches discoverable", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "Find customer accounts.",
+            inputSchema: { type: "object" },
+            name: "lookup",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "accounts" }),
+    ).resolves.toMatchObject([{ qualifiedName: "crm__lookup" }]);
+  });
+
   it("returns connection summaries when loading succeeds without a keyword match", async () => {
     const incident = connection("incident");
     const connectionRegistry = registry({
@@ -690,5 +791,186 @@ describe("connection_search", () => {
     });
 
     expect(isAuthorizationSignal(result)).toBe(true);
+  });
+});
+
+// Seeded generative checks. Words and connection names are chosen so none is a
+// substring of another, which makes "shares a word" the exact match oracle.
+describe("connection_search ranking properties", () => {
+  const WORDS: readonly string[] = [
+    "account",
+    "invoice",
+    "ticket",
+    "record",
+    "project",
+    "issue",
+    "user",
+    "team",
+    "deploy",
+    "message",
+    "channel",
+    "comment",
+  ];
+  const CONNECTIONS = ["crm", "desk", "ops"] as const;
+  const SEPARATORS = ["-", "_", ".", " ", "/", "__"] as const;
+  const CASES = 150;
+
+  interface GeneratedTool {
+    readonly connection: string;
+    readonly name: string;
+    readonly nameWords: readonly string[];
+    readonly descriptionWords: readonly string[];
+  }
+
+  interface SearchItem {
+    readonly qualifiedName?: string;
+  }
+
+  function random(seed: number): () => number {
+    let state = seed >>> 0;
+    return () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function pick<T>(next: () => number, items: readonly T[]): T {
+    return items[Math.floor(next() * items.length)]!;
+  }
+
+  function sample<T>(next: () => number, items: readonly T[], count: number): T[] {
+    const pool = [...items];
+    const picked: T[] = [];
+    while (picked.length < count && pool.length > 0) {
+      picked.push(pool.splice(Math.floor(next() * pool.length), 1)[0]!);
+    }
+    return picked;
+  }
+
+  function randomCase(next: () => number, text: string): string {
+    return [...text].map((c) => (next() < 0.5 ? c.toUpperCase() : c)).join("");
+  }
+
+  function generateCatalog(next: () => number): GeneratedTool[] {
+    const names = new Set<string>();
+    const tools: GeneratedTool[] = [];
+    const size = 2 + Math.floor(next() * 7);
+    while (tools.length < size) {
+      const nameWords = sample(next, WORDS, 1 + Math.floor(next() * 3));
+      const name = nameWords.join(pick(next, ["-", "_"]));
+      if (names.has(nameWords.join(""))) continue;
+      names.add(nameWords.join(""));
+      const descriptionWords = Array.from({ length: Math.floor(next() * 6) }, () =>
+        pick(next, WORDS),
+      );
+      tools.push({ connection: pick(next, CONNECTIONS), name, nameWords, descriptionWords });
+    }
+    return tools;
+  }
+
+  function catalogRegistry(tools: readonly GeneratedTool[], repeatDescriptions = 1) {
+    return registry({
+      connections: CONNECTIONS.map(connection),
+      loadTools: Object.fromEntries(
+        CONNECTIONS.map((name) => [
+          name,
+          async () =>
+            tools
+              .filter((tool) => tool.connection === name)
+              .map((tool) => ({
+                description: Array.from({ length: repeatDescriptions }, () =>
+                  tool.descriptionWords.join(", "),
+                ).join(". "),
+                inputSchema: { type: "object" },
+                name: tool.name,
+              })),
+        ]),
+      ),
+    });
+  }
+
+  function qualified(tool: GeneratedTool): string {
+    return `${tool.connection}__${tool.name}`;
+  }
+
+  async function search(
+    tools: readonly GeneratedTool[],
+    keywords: string,
+    repeatDescriptions = 1,
+  ): Promise<string[]> {
+    const result = (await executeConnectionSearch(catalogRegistry(tools, repeatDescriptions), {
+      keywords,
+      limit: 100,
+    })) as SearchItem[];
+    return result.flatMap((item) => (item.qualifiedName ? [item.qualifiedName] : []));
+  }
+
+  it("uses a vocabulary with no substring collisions", () => {
+    const tokens = [...WORDS, ...CONNECTIONS];
+    for (const a of tokens) {
+      for (const b of tokens) {
+        if (a !== b) expect(a.includes(b), `${a} contains ${b}`).toBe(false);
+      }
+    }
+  });
+
+  it("ranks the exact tool first for any case and separator spelling", async () => {
+    for (let seed = 1; seed <= CASES; seed++) {
+      const next = random(seed);
+      const tools = generateCatalog(next);
+      const target = pick(next, tools);
+      const parts = next() < 0.5 ? target.nameWords : [target.connection, ...target.nameWords];
+      const keywords = randomCase(
+        next,
+        parts.map((part, i) => (i === 0 ? part : `${pick(next, SEPARATORS)}${part}`)).join(""),
+      );
+
+      const ranked = await search(tools, keywords);
+      expect(ranked[0], `seed ${seed}: ${JSON.stringify({ keywords, tools })}`).toBe(
+        qualified(target),
+      );
+    }
+  });
+
+  it("returns exactly the tools sharing a query word, name matches first", async () => {
+    for (let seed = 1; seed <= CASES; seed++) {
+      const next = random(seed);
+      const tools = generateCatalog(next);
+      const queryWords = sample(next, WORDS, 1 + Math.floor(next() * 3));
+      const keywords = randomCase(next, queryWords.join(pick(next, [" ", ", ", "-"])));
+      const nameHit = (tool: GeneratedTool) => tool.nameWords.some((w) => queryWords.includes(w));
+      const descriptionHit = (tool: GeneratedTool) =>
+        tool.descriptionWords.some((w) => queryWords.includes(w));
+      const context = `seed ${seed}: ${JSON.stringify({ keywords, tools })}`;
+
+      const ranked = await search(tools, keywords);
+      const expected = tools.filter((tool) => nameHit(tool) || descriptionHit(tool));
+      expect(new Set(ranked), context).toEqual(new Set(expected.map(qualified)));
+
+      const byName = new Map(tools.map((tool) => [qualified(tool), tool]));
+      const firstDescriptionOnly = ranked.findIndex((name) => !nameHit(byName.get(name)!));
+      if (firstDescriptionOnly !== -1) {
+        expect(
+          ranked.slice(firstDescriptionOnly).every((name) => !nameHit(byName.get(name)!)),
+          context,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("does not change ranking when descriptions repeat their words", async () => {
+    for (let seed = 1; seed <= CASES; seed++) {
+      const next = random(seed);
+      const tools = generateCatalog(next);
+      const keywords = sample(next, WORDS, 1 + Math.floor(next() * 3)).join(" ");
+      const repeat = 2 + Math.floor(next() * 5);
+
+      expect(await search(tools, keywords, repeat), `seed ${seed}, repeat ${repeat}`).toEqual(
+        await search(tools, keywords),
+      );
+    }
   });
 });
