@@ -6,7 +6,7 @@ This internal harness compares immutable eve source revisions and named runtime 
 
 Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition.
 
-Both matrix axes are named maps. Omit `matrix.source` to run against the planner checkout's HEAD: the planner records one source entry named `head` with the full commit SHA. In GitHub Actions, this is the dispatched revision, not a moving branch reference. Uncommitted source changes are not included. Set `analysis.compare.axis` to `"configuration"` and choose a configuration baseline when using this default; the compared axis requires at least two entries. An explicit source map must be non-empty and use full commit SHAs, not `"HEAD"`.
+Both matrix axes are named maps. Omit `matrix.source` to run against the planner checkout's HEAD: the planner records one source entry named `head` with the full commit SHA. In GitHub Actions, this is the PR head commit or dispatched revision, not a moving branch reference. Uncommitted source changes are not included. Set `analysis.compare.axis` to `"configuration"` and choose a configuration baseline when using this default; the compared axis requires at least two entries. An explicit source map must be non-empty and use full commit SHAs, not `"HEAD"`.
 
 Source values are whole immutable commit trees and configuration values are explicit combinations of full model IDs and reasoning settings. Shared settings are merged with each configuration field-by-field in the `parent` and `selfModification` scopes. Overrides win; a configuration that overrides an authored model default changes that source behavior and should be avoided in an instruction-change experiment. Omitted reasoning means the fixture default. The fixture adapter rejects unknown scopes and source checkouts that do not implement scoped overrides. Judge configuration remains fixed.
 
@@ -24,18 +24,34 @@ Each measurement definition is a plain synchronous ESM object. Its declared metr
 
 ## Dispatch
 
-Commit the definition and imported measurement modules at the trusted dispatch revision; keep them clean. Dispatch from that repository ref:
+Commit and push the definition and imported measurement modules before triggering a run. Only run trusted repository code: experiments execute with model-provider credentials.
+
+### Run on a draft PR
+
+Add the `run-eval-experiment` label to a same-repository PR, including a draft, to run `experiments/self-modification.mjs` at that PR's head commit:
+
+```sh
+gh pr edit <pr-number> --add-label run-eval-experiment
+```
+
+The label must already exist in the repository. If needed, a maintainer can create it with `gh label create run-eval-experiment`. Fork PRs are excluded. The workflow uses `pull_request`, so it can run before the workflow is merged to `main`.
+
+Only adding the label triggers the experiment; opening the PR, pushing commits, or marking it ready for review does not. Remove and re-add the label to run again at the latest PR head. An existing run continues at its original commit.
+
+### Dispatch another definition
+
+Once the workflow exists on the repository's default branch, you can manually dispatch any committed experiment definition from a trusted repository ref:
 
 ```sh
 gh workflow run eval-experiment.yml --ref my-experiment-branch \
   -f definition=experiments/self-modification.mjs
 ```
 
-Only dispatch trusted repository code. The workflow does not accept arbitrary uploads. GitHub Actions is the live execution environment; do not run provider-backed e2e suites locally. The planner resolves full source SHAs, fixture/eval selections, requested settings, measurement schemas, and a deterministic counterbalanced schedule into `plan.json`. Source comparisons retain baseline-to-candidate diff evidence but do not apply patches to another checkout.
+The workflow does not accept arbitrary uploads. GitHub Actions is the live execution environment; do not run provider-backed e2e suites locally. The planner resolves full source SHAs, fixture/eval selections, requested settings, measurement schemas, and a deterministic counterbalanced schedule into `plan.json`. Source comparisons retain baseline-to-candidate diff evidence but do not apply patches to another checkout.
 
 ## Artifacts and offline reanalysis
 
-The workflow archives `plan.json`, per-invocation records, raw logs and timestamped eval artifact directories, normalized samples, and JSON/Markdown reports. Download with `gh run download <run-id>`. To rederive from the downloaded execution evidence without launching an eval:
+The Actions run summary contains the Markdown report; the workflow does not post a PR comment. The workflow archives `plan.json`, per-invocation records, raw logs and timestamped eval artifact directories, normalized samples, and JSON/Markdown reports for 14 days. Download with `gh run download <run-id>`. To rederive from the downloaded execution evidence without launching an eval:
 
 ```sh
 node scripts/eval-experiments/extract.mjs ./execution ./plan.json ./samples.json ./experiments/self-modification.mjs <analysis-revision>

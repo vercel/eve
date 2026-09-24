@@ -1,6 +1,8 @@
 name: Eval experiment
 
 on:
+  pull_request:
+    types: [labeled]
   workflow_dispatch:
     inputs:
       definition:
@@ -18,15 +20,22 @@ concurrency:
 
 jobs:
   execute:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.label.name == 'run-eval-experiment' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
       EVE_SANDBOX_IMAGE_TAG: latest
+      DEFINITION: ${{ inputs.definition || 'experiments/self-modification.mjs' }}
+      EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout experiment revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.EXPERIMENT_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Setup pnpm
@@ -36,8 +45,6 @@ jobs:
         with:
           node-version-file: .nvmrc
       - name: Validate definition and write plan
-        env:
-          DEFINITION: ${{ inputs.definition }}
         run: |
           case "$DEFINITION" in experiments/*.mjs) ;; *) echo "Definition must be under experiments/"; exit 1 ;; esac
           node scripts/eval-experiments/plan.mjs "$DEFINITION" plan.json
@@ -49,11 +56,9 @@ jobs:
         run: node scripts/eval-experiments/run.mjs plan.json checkouts.json execution
       - name: Reanalyze archived evidence
         if: always()
-        env:
-          DEFINITION: ${{ inputs.definition }}
         run: |
           set +e
-          node scripts/eval-experiments/extract.mjs execution plan.json samples.json "$DEFINITION" "${GITHUB_SHA}"
+          node scripts/eval-experiments/extract.mjs execution plan.json samples.json "$DEFINITION" "$EXPERIMENT_SHA"
           extract_status=$?
           node scripts/eval-experiments/compare.mjs plan.json samples.json report.json report.md
           compare_status=$?
