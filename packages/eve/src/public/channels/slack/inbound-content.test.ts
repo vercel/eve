@@ -430,19 +430,40 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toBe(`${text}\nGrafana Alerts\n[FIRING:12] parse errors, severity critical`);
   });
 
-  it("keeps a short preview without repeating top-level rich-text blocks", () => {
+  it.each([
+    ["short", "[FIRING:12] parse errors"],
+    ["long", "[FIRING:12] parse errors, severity critical; check the adapter logs"],
+  ])("keeps a %s preview without repeating a URL-only rich-text link", (_name, preview) => {
     const text = "Can you check <https://x/a>?";
     const result = resolveSlackInboundMrkdwn(text, {
       blocks: [
         {
           type: "rich_text",
-          elements: [{ type: "rich_text_section", elements: [{ type: "text", text }] }],
+          elements: [
+            {
+              type: "rich_text_section",
+              elements: [
+                { type: "text", text: "Can you check " },
+                { type: "link", url: "https://x/a" },
+                { type: "text", text: "?" },
+              ],
+            },
+          ],
         },
       ],
-      attachments: [{ title: "Grafana Alerts", text: "[FIRING:12] parse errors" }],
+      attachments: [{ title: "Grafana Alerts", text: preview }],
     });
 
-    expect(result).toBe(`${text}\nGrafana Alerts\n[FIRING:12] parse errors`);
+    expect(result).toBe(`${text}\nGrafana Alerts\n${preview}`);
+  });
+
+  it("keeps nonredundant block content and an attachment alongside top-level text", () => {
+    const result = resolveSlackInboundMrkdwn("Alert", {
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "Check the dashboard" } }],
+      attachments: [{ text: "Latency is high" }],
+    });
+
+    expect(result).toBe("Alert\nCheck the dashboard\nLatency is high");
   });
 
   it("does not repeat top-level blocks when a preview is longer than the comment", () => {
