@@ -333,6 +333,35 @@ describe("connection_search", () => {
     ).rejects.toThrow('Failed to start authorization for "salesforce": OAuth provider unavailable');
   });
 
+  it("ranks an exact tool-name match above repeated description mentions", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description:
+              "Use list-records, list-records, list-records, list-records, and list-records before searching.",
+            inputSchema: { type: "object" },
+            name: "search-records",
+          },
+          {
+            description: "List CRM records.",
+            inputSchema: { type: "object" },
+            name: "list-records",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "list-records", limit: 2 }),
+    ).resolves.toMatchObject([
+      { qualifiedName: "crm__list-records" },
+      { qualifiedName: "crm__search-records" },
+    ]);
+  });
+
   it("returns connection summaries when loading succeeds without a keyword match", async () => {
     const incident = connection("incident");
     const connectionRegistry = registry({
