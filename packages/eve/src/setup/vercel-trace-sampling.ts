@@ -5,13 +5,16 @@ import { z } from "#compiled/zod/index.js";
 import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
-import { captureVercel } from "./primitives/run-vercel.js";
 import { readProjectLink, type VercelProjectReference } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
 import { WizardCancelledError } from "./step.js";
 
 const TRACE_CONFIG_TIMEOUT_MS = 15_000;
 const AGENT_PROJECT_TRACING_SAMPLING = [{ type: "head_sampling", rate: 1 }] as const;
+const TracingConfigSchema = z.object({
+  enabled: z.boolean(),
+  sampling: z.array(z.unknown()),
+});
 const DeclinedOfferSchema = z.object({
   version: z.literal(1),
   orgId: z.string(),
@@ -36,34 +39,42 @@ async function declinedOffer(appRoot: string, link: VercelProjectReference): Pro
   }
 }
 
-async function setTraceSampling(
-  appRoot: string,
+async function readTraceSampling(
   link: VercelProjectReference,
   signal?: AbortSignal,
-): Promise<boolean> {
-  const result = await captureVercel(
-    [
-      "traces",
-      "config",
-      "set",
-      "any",
-      "100",
-      "--json",
-      "--project",
-      link.projectId,
-      "--scope",
-      link.orgId,
-    ],
-    { cwd: appRoot, nonInteractive: true, signal, timeoutMs: TRACE_CONFIG_TIMEOUT_MS },
-  );
-  signal?.throwIfAborted();
-  return result.ok;
+): Promise<number | undefined> {
+  try {
+    const token = await readVercelCliToken();
+    if (token === undefined) return undefined;
+    const tracingQuery = new URLSearchParams({
+      projectId: link.projectId,
+      teamId: link.orgId,
+    });
+    const response = await fetch(
+      `https://api.vercel.com/v1/drains/tracing/config?${tracingQuery.toString()}`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+        method: "GET",
+        redirect: "error",
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(TRACE_CONFIG_TIMEOUT_MS)])
+          : AbortSignal.timeout(TRACE_CONFIG_TIMEOUT_MS),
+      },
+    );
+    if (!response.ok) return undefined;
+    const parsed = TracingConfigSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data.sampling.length : undefined;
+  } catch {
+    signal?.throwIfAborted();
+    return undefined;
+  }
 }
 
 export async function configureTraceSampling(
   link: VercelProjectReference,
   prompter: Pick<Prompter, "log">,
   signal?: AbortSignal,
+  context: "created" | "deployed" = "created",
 ): Promise<void> {
   try {
     const token = await readVercelCliToken();
@@ -96,7 +107,9 @@ export async function configureTraceSampling(
   } catch {
     signal?.throwIfAborted();
     prompter.log.warning(
-      "The Vercel project was created, but trace sampling could not be configured. Set it to 100% for all environments in the Vercel project settings.",
+      context === "created"
+        ? "The Vercel project was created, but trace sampling could not be configured. Set it to 100% for all environments in the Vercel project settings."
+        : "Deployment succeeded, but trace sampling could not be configured. Set it to 100% in the Vercel project settings.",
     );
   }
 }
@@ -111,35 +124,14 @@ export async function offerTraceSampling(
   if (link === undefined || link.projectId !== projectId) return;
   if (await declinedOffer(appRoot, link)) return;
 
-  const rules = await captureVercel(
-    ["traces", "config", "ls", "--json", "--project", link.projectId, "--scope", link.orgId],
-    { cwd: appRoot, nonInteractive: true, signal, timeoutMs: TRACE_CONFIG_TIMEOUT_MS },
-  );
-  signal?.throwIfAborted();
-  if (!rules.ok) {
+  const ruleCount = await readTraceSampling(link, signal);
+  if (ruleCount === undefined) {
     prompter.log.warning(
-      "Could not check Vercel trace sampling rules. Check the project's Tracing settings if you need Agent Runs.",
+      "Could not check Vercel trace sampling. Check the project's Tracing settings if you need Agent Runs.",
     );
     return;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rules.stdout);
-  } catch {
-    // An unknown response cannot establish that the project has no rules.
-  }
-  const entries = Array.isArray(parsed)
-    ? parsed
-    : typeof parsed === "object" && parsed !== null && "rules" in parsed
-      ? parsed.rules
-      : undefined;
-  if (!Array.isArray(entries)) {
-    prompter.log.warning(
-      "Could not read Vercel trace sampling rules. Check the project's Tracing settings if you need Agent Runs.",
-    );
-    return;
-  }
-  if (entries.length > 0) return;
+  if (ruleCount > 0) return;
 
   let choice: "enable" | "decline";
   try {
@@ -160,11 +152,15 @@ export async function offerTraceSampling(
   }
 
   if (choice === "enable") {
-    if (!(await setTraceSampling(appRoot, link, signal))) {
+    const latestRuleCount = await readTraceSampling(link, signal);
+    if (latestRuleCount === undefined) {
       prompter.log.warning(
-        "Deployment succeeded, but trace sampling could not be configured. Set it to 100% in the Vercel project settings.",
+        "Deployment succeeded, but eve could not verify trace sampling before enabling it. Check the project's Tracing settings.",
       );
+      return;
     }
+    if (latestRuleCount > 0) return;
+    await configureTraceSampling(link, prompter, signal, "deployed");
     return;
   }
 
