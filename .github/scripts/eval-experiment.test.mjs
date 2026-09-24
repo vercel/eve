@@ -31,12 +31,25 @@ test("checkout and analysis use the same immutable experiment revision", () => {
   assert.doesNotMatch(workflow, /\$\{GITHUB_SHA\}/u);
 });
 
+test("notification is PR-only, separately permissioned and does not execute PR code", () => {
+  const notify = workflow.split("\n  notify:\n")[1];
+  const before = workflow.split("\n  notify:\n")[0];
+  assert.ok(notify);
+  assert.match(notify, /github\.event_name == 'pull_request'/u);
+  assert.match(notify, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/u);
+  assert.match(notify, /issues: write/u);
+  assert.doesNotMatch(before, /issues: write/u);
+  assert.doesNotMatch(notify, /actions\/checkout|node scripts\/eval-experiments/u);
+  assert.match(notify, /eve-eval-experiment-run-\$\{context\.runId\}/u);
+  assert.match(notify, /pr\.data\.head\.sha !== process\.env\.EXPERIMENT_SHA/u);
+});
+
 test("PR runs select the example definition while dispatch accepts an input", () => {
   assert.match(workflow, /workflow_dispatch:\n\s+inputs:\n\s+definition:/u);
   assert.match(
     workflow,
     /DEFINITION: \$\{\{ inputs\.definition \|\| 'experiments\/self-modification\.mjs' \}\}/u,
   );
-  assert.equal((workflow.match(/DEFINITION:/gu) ?? []).length, 1);
+  assert.equal((workflow.match(/DEFINITION:/gu) ?? []).length, 2);
   assert.match(workflow, /plan\.mjs "\$DEFINITION" plan\.json/u);
 });
