@@ -76,16 +76,23 @@ export function resolveWebSearchOutputSchema(backend: WebSearchBackend): JsonObj
  * - Direct/BYO Anthropic models: native Anthropic search
  * - Direct/BYO Google models: native Google search grounding
  * - Other BYO models: not available (returns `null`)
+ *
+ * `modelProvider` is the provider of the resolved AI SDK model. It is needed
+ * for live dynamic selections because their runtime reference has no source
+ * metadata to distinguish a direct provider from AI Gateway.
  */
 export function resolveWebSearchBackend(
   modelRef: RuntimeModelReference,
   gatewayProvider: WebSearchProvider = "exa",
+  modelProvider?: string,
 ): WebSearchBackend | null {
-  if (modelRef.source === undefined) {
+  const providerId =
+    modelProvider?.split(".")[0] ??
+    (modelRef.source === undefined ? "gateway" : (modelRef.id.split("/")[0] ?? ""));
+
+  if (providerId === "gateway") {
     return gatewayProvider;
   }
-
-  const providerId = modelRef.id.split("/")[0] ?? "";
 
   if (providerId === "openai" || providerId.startsWith("openai.")) {
     return "openai";
@@ -95,7 +102,7 @@ export function resolveWebSearchBackend(
     return "anthropic";
   }
 
-  if (providerId.startsWith("google.")) {
+  if (providerId === "google" || providerId.startsWith("google.")) {
     return "google";
   }
 

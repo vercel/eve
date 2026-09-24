@@ -287,6 +287,7 @@ export async function buildToolSetWithProviderTools(input: {
   readonly backgroundBatch?: BackgroundToolCallBatch;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
+  readonly modelProvider?: string;
   readonly tools: HarnessToolMap;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
@@ -306,7 +307,11 @@ export async function buildToolSetWithProviderTools(input: {
       definition.execute === undefined &&
       !disabled?.has(definition.name)
     ) {
-      const backend = resolveWebSearchBackend(input.modelReference, handling.provider);
+      const backend = resolveWebSearchBackend(
+        input.modelReference,
+        handling.provider,
+        input.modelProvider,
+      );
       if (backend === null) {
         delete tools[definition.name];
       } else {

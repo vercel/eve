@@ -19,7 +19,7 @@ import {
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
-import { resolveProviderHeaders } from "#internal/gateway.js";
+import { resolveModelProvider, resolveProviderHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
@@ -1391,6 +1391,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         backgroundBatch,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: requireSessionModelReference(session),
+        modelProvider: resolveModelProvider(model),
         tools: advertisedHarnessTools,
       });
 

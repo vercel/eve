@@ -29,6 +29,11 @@ export function resolveProviderHeaders(model: LanguageModel): Record<string, str
   return Object.fromEntries(appendPackageUserAgent(new Headers()));
 }
 
+/** Provider identity reported by the model, normalized for bare Gateway ids. */
+export function resolveModelProvider(model: LanguageModel): string | undefined {
+  return typeof model === "string" ? "gateway" : model.provider;
+}
+
 export function isGatewayModel(model: LanguageModel): boolean {
-  return typeof model === "string" || model.provider?.split(".")[0] === "gateway";
+  return resolveModelProvider(model)?.split(".")[0] === "gateway";
 }
