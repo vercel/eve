@@ -4,6 +4,7 @@ import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js"
 import type {
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
+  SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
@@ -12,7 +13,12 @@ import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import {
+  createEmptyHookRegistry,
+  createRuntimeHookRegistry,
+  type RuntimeHookRegistry,
+} from "#runtime/hooks/registry.js";
+import type { ResolvedHookDefinition } from "#runtime/types.js";
 import {
   BundleKey,
   ChannelKey,
@@ -47,7 +53,10 @@ const turnAgent = {
   workspaceSpec: {} as never,
 };
 
-function buildBundle(adapter: ChannelAdapter): CompiledBundle {
+function buildBundle(
+  adapter: ChannelAdapter,
+  hookRegistry: RuntimeHookRegistry = createEmptyHookRegistry(),
+): CompiledBundle {
   return {
     adapterRegistry: {
       adaptersByKind: new Map([[adapter.kind, adapter]]),
@@ -60,7 +69,7 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
         turnAgent,
       },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry,
     resolvedAgent: { config: {} },
     subagentRegistry: {},
     toolRegistry: {},
@@ -68,11 +77,15 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
   } as never;
 }
 
-function buildContext(input: { readonly adapter: ChannelAdapter; readonly sessionId: string }): {
+function buildContext(input: {
+  readonly adapter: ChannelAdapter;
+  readonly hookRegistry?: RuntimeHookRegistry;
+  readonly sessionId: string;
+}): {
   readonly bundle: ReturnType<typeof buildBundle>;
   readonly ctx: ContextContainer;
 } {
-  const bundle = buildBundle(input.adapter);
+  const bundle = buildBundle(input.adapter, input.hookRegistry);
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, bundle);
@@ -121,6 +134,36 @@ function authorizationPayload(
     childSessionId: "child-session",
     event,
     kind: "subagent-authorization-event",
+    subagentName: "researcher",
+  };
+}
+
+function inputRequestPayload(): SubagentInputRequestHookPayload {
+  return {
+    callId: "call-child",
+    childContinuationToken: "subagent:parent:call-child",
+    childSessionId: "child-session",
+    event: {
+      requests: [
+        {
+          action: {
+            callId: "call-child",
+            input: {},
+            kind: "tool-call",
+            toolName: "write",
+          },
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [{ id: "approve", label: "Approve", style: "primary" }],
+          prompt: "Approve?",
+          requestId: "request-child",
+        },
+      ],
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "child-turn",
+    },
+    kind: "subagent-input-request",
     subagentName: "researcher",
   };
 }
@@ -253,5 +296,49 @@ describe("subagent authorization proxy", () => {
     expect(decodeEvent(chunks[3]!)).toMatchObject(completedEvent);
     expect(decodeEvent(chunks[4]!).type).toBe("turn.completed");
     expect(decodeEvent(chunks[5]!).type).toBe("session.waiting");
+  });
+});
+
+describe("subagent input proxy", () => {
+  it("dispatches the parent input.requested hook after channel delivery", async () => {
+    const calls: string[] = [];
+    const adapter: ChannelAdapter = {
+      kind: "input-proxy-test",
+      "input.requested"() {
+        calls.push("channel");
+      },
+    };
+    const hook: ResolvedHookDefinition = {
+      events: {
+        "input.requested"(event, hookContext) {
+          calls.push("hook");
+          expect(event.type).toBe("input.requested");
+          if (event.type !== "input.requested") throw new Error("Unexpected event type");
+          expect(event.data.turnId).toBe("child-turn");
+          expect(hookContext.session.turn.id).toBe("turn_0");
+        },
+      },
+      exportName: undefined,
+      logicalPath: "hooks/input.ts",
+      slug: "input",
+      sourceId: "hooks/input.ts",
+      sourceKind: "module",
+    };
+    const hookRegistry = createRuntimeHookRegistry([hook]);
+    const session = createSession("parent-session");
+    const { ctx } = buildContext({
+      adapter,
+      hookRegistry,
+      sessionId: session.sessionId,
+    });
+
+    await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: projectToDurableSession(session),
+      hookPayload: inputRequestPayload(),
+      sessionWritable: createCapturingWritable([]),
+    });
+
+    expect(calls).toEqual(["channel", "hook"]);
   });
 });
