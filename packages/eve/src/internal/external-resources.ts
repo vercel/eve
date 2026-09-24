@@ -94,12 +94,14 @@ export async function createConnectManifest(input: {
   }
   try {
     const compiler = (await import(pathToFileURL(modulePath).href)) as {
-      readonly createConnectManifestFromEveResources?: (snapshot: unknown) => unknown;
+      readonly experimental_createConnectManifestFromEveResources?: (snapshot: unknown) => unknown;
     };
-    if (typeof compiler.createConnectManifestFromEveResources !== "function") {
-      throw new TypeError("missing createConnectManifestFromEveResources export");
+    if (typeof compiler.experimental_createConnectManifestFromEveResources !== "function") {
+      throw new TypeError("missing experimental_createConnectManifestFromEveResources export");
     }
-    return parseJsonObject(compiler.createConnectManifestFromEveResources(input.snapshot));
+    return parseJsonObject(
+      compiler.experimental_createConnectManifestFromEveResources(input.snapshot),
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
