@@ -39,6 +39,7 @@ import {
   startPendingAgentTasks,
 } from "#tasks/owner-body.js";
 import { hasPendingTaskInput } from "#tasks/input.js";
+import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
   DetachTimers,
   DISMISSED_CALL_GRACE_MS,
@@ -118,6 +119,9 @@ export class SessionExecution {
         serializedContext: result.serializedContext,
         sessionState: result.sessionState,
       });
+      // The only emitter that does not flush its own: a remote caller must see
+      // what the step asked or resolved before the result or a later answer.
+      await flushUnsentCallerEvents(cursor);
       await turn.admitBoundary();
       turn.resetSteering();
 
@@ -198,10 +202,9 @@ export class SessionExecution {
   }
 
   private async finishCancelledTurn(): Promise<TurnOutcome> {
-    const taskQuestionPending = await cancelTurnDescendants(this.input.cursor);
-    return taskQuestionPending
-      ? { cancelled: true, kind: "park", taskQuestionPending }
-      : { cancelled: true, kind: "park" };
+    const { cursor } = this.input;
+    await cancelTurnDescendants(cursor);
+    return { cancelled: true, kind: "park" };
   }
 
   /**

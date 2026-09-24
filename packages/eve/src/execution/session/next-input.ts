@@ -11,6 +11,7 @@ import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
+import { hasOwnPendingInput } from "#tasks/input.js";
 import { applyTaskDeadline, applyTaskReport } from "#tasks/owner-body.js";
 import { nextTaskResultTurn } from "#tasks/results.js";
 
@@ -128,7 +129,6 @@ export async function nextTurnDelivery(input: {
 
 // Read raw so the workflow body does not import the harness.
 const OPEN_TURN_STATE_KEYS = [
-  "eve.runtime.pendingInputBatch",
   "eve.runtime.pendingCoordinationBatch",
   "eve.runtime.deferredStepInput",
   "eve.harness.pendingWorkflowInterrupt",
@@ -137,6 +137,5 @@ const OPEN_TURN_STATE_KEYS = [
 /** Whether a turn still waits on answers or actions, even though its stream turn closed. */
 export function hasOpenTurnWork(state: Record<string, unknown> | undefined): boolean {
   if (OPEN_TURN_STATE_KEYS.some((key) => state?.[key] !== undefined)) return true;
-  const batches = state?.["eve.runtime.pendingInputBatches"];
-  return Array.isArray(batches) && batches.length > 0;
+  return hasOwnPendingInput(state);
 }

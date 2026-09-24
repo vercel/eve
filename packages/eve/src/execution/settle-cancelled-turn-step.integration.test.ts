@@ -90,4 +90,28 @@ describe("settleCancelledTurnStep", () => {
       );
     });
   });
+
+  it.each([
+    ["no second boundary once a task's request ended", { endedByTaskInput: true as const }, []],
+    ["a boundary when nothing else ended", {}, ["turn.cancelled", "session.waiting"]],
+  ])("streams %s the cancelled turn's stream", async (_label, flag, expected) => {
+    // Alice's background notes task asked mid-turn, which ended the turn's stream.
+    const runtime = await createTestRuntime({ agent: { name: "settle-cancel-handles" } });
+    const between = { sequence: 4, sessionStarted: true, stepIndex: 0, turnId: "", ...flag };
+    const session = setHarnessEmissionState(createCancelledTurnSession(), between);
+    const chunks: string[] = [];
+
+    await runtime.run(async () => {
+      const result = await settleCancelledTurnStep({
+        sessionWritable: new WritableStream<Uint8Array>({
+          write: (chunk) => void chunks.push(new TextDecoder().decode(chunk)),
+        }),
+        serializedContext: buildSerializedContext(),
+        sessionState: createDurableSessionState({ session }),
+      });
+
+      expect(chunks.map((chunk) => (JSON.parse(chunk) as { type: string }).type)).toEqual(expected);
+      expect(result.sessionState.emissionState.turnId).toBe("");
+    });
+  });
 });

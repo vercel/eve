@@ -49,16 +49,18 @@ interface TaskInputSurface {
 
 /**
  * Surfaces a child's human-input event for its task, once admitted against
- * the requests this owner holds (`admitTaskInputEvent`).
+ * the requests this owner holds (`admitTaskInputEvent`), and returns the
+ * requested IDs it refused.
  */
 export async function surfaceTaskInputStep(
   input: TaskInputSurface & { readonly event: TaskInputEvent; readonly taskId: string },
-): Promise<TaskInputTransition> {
+): Promise<TaskInputTransition & { readonly refused: readonly string[] }> {
   "use step";
 
   const session = readDurableSession(input.sessionState);
   const table = getTaskTable(session);
   const unchanged = {
+    refused: [],
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   };
@@ -70,20 +72,18 @@ export async function surfaceTaskInputStep(
     sessionPending: getPendingInputRequestIds(session.state),
     table,
   });
-  if (admitted.refused.length > 0) {
+  const { refused } = admitted;
+  if (refused.length > 0) {
     log.warn("a child asked with request IDs already pending elsewhere; they are dropped", {
-      requestIds: admitted.refused,
+      requestIds: refused,
       taskId: input.taskId,
     });
   }
-  if (admitted.events.length === 0) return unchanged;
+  if (admitted.events.length === 0) return { ...unchanged, refused };
   const ctx = await deserializeContext(input.serializedContext);
   const { taskId } = input;
-  return await publishTaskInput(
-    ctx,
-    input,
-    admitted.events.map((event) => ({ event, taskId })),
-  );
+  const events = admitted.events.map((event) => ({ event, taskId }));
+  return { ...(await publishTaskInput(ctx, input, events)), refused };
 }
 
 /** Publishes input events the owner itself decided for its tasks. */
@@ -100,30 +100,26 @@ export async function publishTaskInputStep(
 }
 
 /**
- * Sends each task the answers meant for it and returns the resolutions to
- * publish for the answers that reached their child (`sentAnswerResolutions`).
- * It publishes nothing itself, so a failed publish never sends an answer twice.
+ * Sends one task the answers meant for it and returns the resolutions to
+ * publish once they reached its child (`sentAnswerResolutions`). Each task's
+ * send is its own step, and it publishes nothing itself, so neither a failed
+ * publish nor another task's failed send sends an answer twice.
  */
-export async function answerTasksStep(input: {
-  readonly answers: readonly TaskAnswers[];
+export async function answerTaskStep(input: {
+  readonly answers: TaskAnswers;
   readonly delivery: DeliverHookPayload;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
 }): Promise<readonly TaskInputPublication[]> {
   "use step";
 
-  const ctx = await deserializeContext(input.serializedContext);
-  const resolved: TaskInputPublication[] = [];
-  for (const answers of input.answers) {
-    const sent = await answerTask({
-      answers,
-      ctx,
-      delivery: input.delivery,
-      ownerSessionId: input.sessionId,
-    });
-    if (sent === "delivered") resolved.push(...sentAnswerResolutions(answers));
-  }
-  return resolved;
+  const sent = await answerTask({
+    answers: input.answers,
+    ctx: await deserializeContext(input.serializedContext),
+    delivery: input.delivery,
+    ownerSessionId: input.sessionId,
+  });
+  return sent === "delivered" ? sentAnswerResolutions(input.answers) : [];
 }
 
 /**
@@ -166,7 +162,13 @@ async function publishTaskInput(
           (event.type === "input.requested" || event.type.startsWith("authorization."))
         ) {
           const emission = await emitTurnEpilogue(emit, getHarnessEmissionState(next.state), mode);
-          next = setHarnessEmissionState(next, emission);
+          const asked =
+            event.type === "input.requested" &&
+            event.data.requests.some(({ kind }) => kind !== "session-limit");
+          next = setHarnessEmissionState(
+            next,
+            asked ? { ...emission, endedByTaskInput: true } : emission,
+          );
         }
         next = recordTaskInput(next, event, taskId, now);
       }

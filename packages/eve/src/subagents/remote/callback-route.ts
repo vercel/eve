@@ -96,6 +96,8 @@ const taskInputCallbackSchema = z.object({
     z.object({
       data: z.object({
         requests: z.array(inputRequestSchema).min(1).max(MAX_TASK_INPUT_ITEMS),
+        /** The remote child's own task that asked, when the child surfaces a descendant's request. */
+        taskId: z.string().min(1).optional(),
         ...inputCoordinates,
       }),
       type: z.literal("input.requested"),

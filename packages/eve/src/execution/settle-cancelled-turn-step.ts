@@ -49,8 +49,6 @@ export async function settleCancelledTurnStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /** A task's question, other than a session-limit prompt, waited when the turn was cancelled. */
-  readonly taskQuestionPending?: boolean;
 }): Promise<CancelledTurnSettleResult> {
   "use step";
 
@@ -76,11 +74,11 @@ export async function settleCancelledTurnStep(input: {
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
-  // A task's question already streamed this turn's waiting boundary when it
+  // A task's request already streamed this turn's waiting boundary when it
   // surfaced (clearing the turn id); re-emitting would fabricate a turn id
-  // and duplicate the boundary. A declined session-limit prompt still needs
-  // one: the answer's sender waits for it.
-  const alreadyEpilogued = isHarnessBetweenTurns(session) && input.taskQuestionPending === true;
+  // and duplicate the boundary.
+  const alreadyEpilogued =
+    isHarnessBetweenTurns(session) && emissionState.endedByTaskInput === true;
 
   if (!alreadyEpilogued) {
     const writer = input.sessionWritable.getWriter();

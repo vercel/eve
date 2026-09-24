@@ -13,6 +13,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
 import { answerTaskInput } from "#tasks/owner-body.js";
+import { flushUnsentCallerEventsStep } from "#subagents/remote/unsent-caller-events-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -28,6 +29,9 @@ vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
   answerTaskInput: vi.fn(),
 }));
 vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
+vi.mock("#subagents/remote/unsent-caller-events-step.js", () => ({
+  flushUnsentCallerEventsStep: vi.fn(),
+}));
 vi.mock("#tasks/cancel.js", async (importOriginal) => ({
   ...(await importOriginal()),
   cancelTasksStep: vi.fn(
@@ -120,6 +124,40 @@ describe("SessionExecution turn checkpoints", () => {
       ).resolves.toMatchObject({ kind: "park" });
     },
   );
+
+  it("sends a remote caller what a step could not forward before the turn reports", async () => {
+    // Alice's remote research agent approved a refund while its caller's callback was down.
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    const sessionState = state("");
+    const unsent = { "eve.unsentCallerEvents": [{ body: { event: {} }, url: "https://p/cb" }] };
+    vi.mocked(turnStep).mockResolvedValue({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: unsent,
+      sessionState,
+      settled: { output: "Refund issued." },
+    });
+    vi.mocked(flushUnsentCallerEventsStep).mockResolvedValue({});
+    const execution = createExecution({ inbox, sessionState });
+
+    await expect(execution.runTurn(undefined)).resolves.toMatchObject({ kind: "park" });
+
+    expect(flushUnsentCallerEventsStep).toHaveBeenCalledExactlyOnceWith({
+      serializedContext: unsent,
+    });
+    expect(execution.cursor.serializedContext).toEqual({});
+  });
 
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {

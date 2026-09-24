@@ -17,13 +17,14 @@ import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import type { WaitedTaskChanges } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
 import {
+  hasOwnPendingInput,
   hasPendingTaskInput,
   planTaskAnswers,
   taskInputResolutions,
   withdrawnTaskInput,
   type TaskInputPublication,
 } from "#tasks/input.js";
-import { answerTasksStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
+import { answerTaskStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
 import type { TaskDeadlineSignal, TaskInputEvent } from "#tasks/protocol.js";
 import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
@@ -182,16 +183,10 @@ export async function settleWorkflowTask(
 
 /**
  * Cancels the agent tasks and workflow tool calls the active turn is waiting
- * on, without waiting for their children to stop. Returns whether it withdrew
- * a request of theirs other than a session-limit prompt: that request ended
- * the turn's stream when it surfaced. A background task's request, which may
- * predate the turn, does not count.
+ * on, without waiting for their children to stop.
  */
-export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<boolean> {
-  const before = getTaskTable(cursor.sessionState.snapshot.session);
+export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<void> {
   await cancelTasks(cursor, { kind: "active-turn" });
-  const after = getTaskTable(cursor.sessionState.snapshot.session);
-  return withdrawnTaskInput(before, after).some(({ request }) => request.kind !== "session-limit");
 }
 
 /** Cancels the selected working tasks and publishes their `task.settled` events. */
@@ -250,23 +245,24 @@ export async function applyTaskDeadline(
 /**
  * Surfaces a child's human-input event for its task and passes it on to this
  * session's caller at once: a question must not wait for the next input.
+ * Returns the requested IDs it refused (see `admitTaskInputEvent`).
  */
 export async function surfaceTaskInput(
   cursor: SessionStateCursor,
   taskId: string,
   event: TaskInputEvent,
-): Promise<void> {
-  await cursor.apply(
-    await surfaceTaskInputStep({
-      event,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-      sessionWritable: cursor.sessionWritable,
-      taskId,
-    }),
-  );
+): Promise<readonly string[]> {
+  const surfaced = await surfaceTaskInputStep({
+    event,
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+    sessionWritable: cursor.sessionWritable,
+    taskId,
+  });
+  await cursor.apply(surfaced);
   await syncTaskTimer(cursor);
   await flushUnsentCallerEvents(cursor);
+  return surfaced.refused;
 }
 
 /** Publishes input events the owner decided for its tasks, as `surfaceTaskInput` does a child's. */
@@ -310,15 +306,23 @@ export async function answerTaskInput(
 ): Promise<TaskAnswerRouting> {
   const session = cursor.sessionState.snapshot.session;
   if (!hasPendingTaskInput(session)) return { kind: "continue", remainder: delivery };
-  const plan = planTaskAnswers({ delivery, table: getTaskTable(session) });
+  const plan = planTaskAnswers({
+    delivery,
+    sessionAsks: hasOwnPendingInput(session.state),
+    table: getTaskTable(session),
+  });
   if (plan.answers.length > 0) {
-    const resolved = await answerTasksStep({
-      answers: plan.answers,
-      delivery,
-      serializedContext: cursor.serializedContext,
-      sessionId: cursor.sessionState.sessionId,
-    });
-    await publishTaskInput(cursor, resolved);
+    const sent = await Promise.all(
+      plan.answers.map((answers) =>
+        answerTaskStep({
+          answers,
+          delivery,
+          serializedContext: cursor.serializedContext,
+          sessionId: cursor.sessionState.sessionId,
+        }),
+      ),
+    );
+    await publishTaskInput(cursor, sent.flat());
   }
   if (plan.cancelTurn) return { kind: "cancel-turn" };
   const dismissedTaskIds = plan.answers.flatMap((answers) =>

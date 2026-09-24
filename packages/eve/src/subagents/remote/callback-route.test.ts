@@ -131,6 +131,14 @@ describe("session callback route", () => {
   it.each([
     ["input.requested", { data: { ...COORDINATES, requests: [REQUEST] }, type: "input.requested" }],
     [
+      // The child asks for a descendant; the owner needs the child's task ID to tell them apart.
+      "input.requested surfaced for its own task",
+      {
+        data: { ...COORDINATES, requests: [REQUEST], taskId: "billing-aaaaaa" },
+        type: "input.requested",
+      },
+    ],
+    [
       "input.resolved",
       {
         data: {

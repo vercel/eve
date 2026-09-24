@@ -4,7 +4,7 @@ import { flushUnsentCallerEventsStep } from "#subagents/remote/unsent-caller-eve
 
 /**
  * Sends the human-input events a remotely called session could not forward
- * to its caller when they happened, before the session waits for input.
+ * to its caller when they happened, before it reports or waits for input.
  * When the caller still does not take them after the step's retries, a
  * request, approval, or sign-in event is dropped, and the call's time limit
  * bounds the caller's wait for it. A resolution is kept for the next flush:

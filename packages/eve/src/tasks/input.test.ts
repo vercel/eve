@@ -7,6 +7,7 @@ import type { InputRequest } from "#shared/input.js";
 import {
   admitTaskInputEvent,
   applyTaskInputEvent,
+  hasOwnPendingInput,
   hasPendingTaskInput,
   planTaskAnswers,
   sentAnswerResolutions,
@@ -274,6 +275,43 @@ describe("admitTaskInputEvent", () => {
     expect(second.events).toEqual([requested([request("d-2")])]);
   });
 
+  it("keeps every batch a remote child surfaces for its own tasks at shared coordinates", () => {
+    // Alice's remote research agent fans out: its billing and support agents ask in their first
+    // step, and its deploy workflow asks twice from one call, all at the same coordinates.
+    const REMOTE = {
+      callbackBaseUrl: "https://a",
+      kind: "remote" as const,
+      sessionId: "r",
+      url: "u",
+    };
+    let remote = waiting("research-aaaaaa", [request("own-1")], REMOTE);
+    const asks = [
+      requested([request("billing-q")], 0, "billing-bbbbbb"),
+      requested([request("support-q")], 0, "support-cccccc"),
+      requested([request("deploy-q1")], 0, "deploy-dddddd"),
+      requested([request("deploy-q2")], 0, "deploy-dddddd"),
+    ];
+    for (const event of asks) {
+      const admitted = admitTaskInputEvent({
+        event,
+        record: remote,
+        sessionPending: new Set(),
+        table: taskTable([remote]),
+      });
+      expect(admitted).toEqual({ events: [event], refused: [] });
+      const table = record(taskTable([remote]), [{ event, taskId: remote.id }]);
+      remote = findTask(table, remote.id)!;
+    }
+
+    expect(remote.input?.flatMap((batch) => batch.requests.map((r) => r.requestId))).toEqual([
+      "own-1",
+      "billing-q",
+      "support-q",
+      "deploy-q1",
+      "deploy-q2",
+    ]);
+  });
+
   it("passes other input events through", () => {
     const event: TaskInputEvent = {
       data: { description: "Sign in", name: "linear", sequence: 0, stepIndex: 0, turnId: "t" },
@@ -365,6 +403,17 @@ describe("sentAnswerResolutions", () => {
     expect(findTask(record(taskTable([research]), resolutions), research.id)?.input).toEqual([
       batch([request("a-1", { kind: "tool-approval" })]),
     ]);
+  });
+
+  it("keeps a descendant's question until the child resolves it for the session that asked", () => {
+    // Alice's research agent passes her answer on to its billing agent, which asked.
+    const research = waiting("research-aaaaaa", [], LOCAL, {
+      input: [{ ...batch([request("b-1")]), from: "billing-bbbbbb" }],
+    });
+    const answers = plan([research], { payloads: [{ message: "eu-west" }] }).answers;
+
+    expect(answers[0]?.responses).toEqual([{ requestId: "b-1", text: "eu-west" }]);
+    expect(sentAnswerResolutions(answers[0]!)).toEqual([]);
   });
 
   it("ignores a dismissed workflow question", () => {
@@ -483,6 +532,22 @@ describe("planTaskAnswers", () => {
     expect(result.remainder).toEqual({ kind: "deliver", ...delivery });
   });
 
+  it("leaves a person's text to the session's own pending approval", () => {
+    // Alice's agent waits on her approval while its research task asks a free-text question.
+    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "approve" }] };
+    const research = [waiting("research-aaaaaa", [request("r-1")], LOCAL)];
+    const deploy = [waiting("deploy-bbbbbb", [request("d-1", { dismissible: true })], WORKFLOW)];
+    const withOwn = (records: readonly TaskRecord[]) =>
+      planTaskAnswers({ delivery, sessionAsks: true, table: taskTable(records) });
+
+    expect(plan(research, delivery).answers).toHaveLength(1);
+    expect(withOwn(research)).toEqual({ answers: [], cancelTurn: false, remainder: delivery });
+    // The text still moves past a dismissible question it did not answer.
+    expect(routed(withOwn(deploy).answers)).toEqual([
+      { dismissed: ["d-1"], responses: [], taskId: "deploy-bbbbbb" },
+    ]);
+  });
+
   it("leaves a message alone when an approval, not a question, is pending", () => {
     const approval = request("a-1", { kind: "tool-approval" });
 
@@ -546,6 +611,13 @@ describe("planTaskAnswers", () => {
       }),
     ).toEqual({ answers: [], cancelTurn: false, remainder: delivery });
   });
+});
+
+it("reads the session's own pending input batches, including a legacy singleton", () => {
+  expect(hasOwnPendingInput(undefined)).toBe(false);
+  expect(hasOwnPendingInput({ "eve.runtime.pendingInputBatches": [] })).toBe(false);
+  expect(hasOwnPendingInput({ "eve.runtime.pendingInputBatches": [{ requests: [] }] })).toBe(true);
+  expect(hasOwnPendingInput({ "eve.runtime.pendingInputBatch": { requests: [] } })).toBe(true);
 });
 
 it("reports pending task input from the task table alone", () => {

@@ -72,8 +72,6 @@ export type TurnOutcome =
   | {
       readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
-      /** See `cancelTurnDescendants`. */
-      readonly taskQuestionPending?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;
     };

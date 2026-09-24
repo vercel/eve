@@ -67,6 +67,18 @@ export function hasPendingTaskInput(session: { readonly state?: SessionStateMap 
   return getTaskTable(session).records.some((record) => record.input !== undefined);
 }
 
+/**
+ * Whether the session itself waits on an input batch, read raw so the
+ * workflow body does not import the harness.
+ */
+export function hasOwnPendingInput(state: SessionStateMap | undefined): boolean {
+  const batches = state?.["eve.runtime.pendingInputBatches"];
+  return (
+    (Array.isArray(batches) && batches.length > 0) ||
+    state?.["eve.runtime.pendingInputBatch"] !== undefined
+  );
+}
+
 /** The requests tasks waited on in `before` that no task waits on in `after`. */
 export function withdrawnTaskInput(
   before: TaskTable,
@@ -114,11 +126,17 @@ export interface AdmittedTaskInput {
  * none remain, which also drops a repeat. A requested ID already pending on
  * another task or on this session itself (`sessionPending`) is refused, so no
  * child can take the answers meant for another; one pending on this task is
- * a repeat. A retried child step asks again at the coordinates of its first
- * batch, which the child never resolves, so that batch is withdrawn first.
- * Only an agent's own batches are compared: a descendant's coordinates can
- * repeat another session's, and a workflow run asks each question at its
- * call's coordinates.
+ * a repeat.
+ *
+ * A retried child step asks again at the coordinates of its first batch,
+ * which the child never resolves, so that batch is withdrawn first. Only an
+ * agent's own batches (no `taskId`, no `from`) are compared: an agent asks
+ * once per step for itself, and a new turn or step moves past a batch it
+ * leaves open, so two of its own batches meet at one set of coordinates only
+ * after a retry. Batches it surfaces for its own tasks never replace: a
+ * descendant numbers its turns like any session, and a workflow run asks
+ * every question at its call's coordinates, so they share coordinates while
+ * live. Each such batch goes when its asker resolves or withdraws it.
  */
 export function admitTaskInputEvent(input: {
   readonly event: TaskInputEvent;
@@ -173,10 +191,12 @@ export function admitTaskInputEvent(input: {
 
 /**
  * The resolutions the owner publishes once a task's child has its answers. A
- * question takes the answer it was sent, and a dismissed one is ignored, so
- * neither takes a second answer. An approval stays until the child resolves
- * it: the child's response policy may refuse the responder and keep the
- * request pending for another.
+ * question the child asked itself takes the answer it was sent, and a
+ * dismissed one is ignored, so neither takes a second answer. An approval
+ * stays until the child resolves it: the child's response policy may refuse
+ * the responder and keep the request pending for another. So does a
+ * descendant's request (`from`), which the child passes on and resolves once
+ * the answer reaches the session that asked.
  */
 export function sentAnswerResolutions(answers: TaskAnswers): readonly TaskInputPublication[] {
   const { record } = answers;
@@ -184,12 +204,14 @@ export function sentAnswerResolutions(answers: TaskAnswers): readonly TaskInputP
   const dismissed = new Set(answers.dismissed);
   return taskInputResolutions(
     (record.input ?? []).flatMap((batch) =>
-      batch.requests.flatMap((request) =>
-        dismissed.has(request.requestId) ||
-        (request.kind !== "tool-approval" && responses.has(request.requestId))
-          ? [{ batch, record, request }]
-          : [],
-      ),
+      batch.from !== undefined
+        ? []
+        : batch.requests.flatMap((request) =>
+            dismissed.has(request.requestId) ||
+            (request.kind !== "tool-approval" && responses.has(request.requestId))
+              ? [{ batch, record, request }]
+              : [],
+          ),
     ),
     responses,
   );
@@ -225,10 +247,13 @@ interface TaskAnswersDraft extends TaskAnswers {
  * message, in a payload without responses, answers the only pending question
  * when it resolves against it, the way a session resolves text against its
  * own pending requests; otherwise it dismisses every dismissible question and
- * stays with this session. A delegating caller's message never answers.
+ * stays with this session. While this session waits on its own approval or
+ * session-limit prompt (`sessionAsks`), the text is left to those. A
+ * delegating caller's message never answers.
  */
 export function planTaskAnswers(input: {
   readonly delivery: DeliverHookPayload;
+  readonly sessionAsks?: boolean;
   readonly table: TaskTable;
 }): TaskAnswerPlan {
   const { delivery } = input;
@@ -259,7 +284,10 @@ export function planTaskAnswers(input: {
       const questions = [...pending.values()].filter(({ request }) => request.kind === "question");
       const [only] = questions;
       const answer =
-        questions.length === 1 && only !== undefined && typeof message === "string"
+        input.sessionAsks !== true &&
+        questions.length === 1 &&
+        only !== undefined &&
+        typeof message === "string"
           ? resolveTextToResponse(message, only.request)
           : undefined;
       if (answer === undefined) {

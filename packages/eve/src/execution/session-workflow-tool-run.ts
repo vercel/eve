@@ -120,9 +120,11 @@ async function handleWorkflowToolRunRequest(
     return;
   }
   // Surfaced like a child's question; the owner resolves it when it answers.
-  await surfaceTaskInput(
+  const refused = await surfaceTaskInput(
     cursor,
     taskId,
     workflowAskInputEvent({ ...message, request: message.request }),
   );
+  // No one can answer an ask whose ID is taken; dismissed, the run moves on.
+  if (refused.length > 0) await dismissStaleWorkflowRequestStep(message);
 }

@@ -34,6 +34,7 @@ vi.mock("#tasks/cancel.js", async (importOriginal) => ({
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(emitSubagentEventStep).mockResolvedValue({} as never);
+  vi.mocked(surfaceTaskInput).mockResolvedValue([]);
 });
 
 const from = {
@@ -149,6 +150,16 @@ it("surfaces a working task's question for its task, answered through the ask's 
     type: "input.requested",
   });
   expect(dismissStaleWorkflowRequestStep).not.toHaveBeenCalled();
+});
+
+it("dismisses a working task's question the owner refused, so the run never waits on it", async () => {
+  vi.mocked(surfaceTaskInput).mockResolvedValue(["answer-hook"]);
+  const request = { kind: "ask" as const, request: { prompt: "Deploy now?" } };
+  const message = { from, kind: "request" as const, replyTo: "answer-hook", request };
+
+  await handleWorkflowToolRunMessage({ cursor: createCursor([workflowTask]), message });
+
+  expect(dismissStaleWorkflowRequestStep).toHaveBeenCalledExactlyOnceWith(message);
 });
 
 it.each([

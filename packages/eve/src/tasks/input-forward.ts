@@ -38,8 +38,8 @@ function isTaskInputEvent(event: UnstampedMessageStreamEvent): event is TaskInpu
  * event it emits to the caller of its current turn, so the caller can surface
  * it and route answers back. A local caller takes it in its inbox; a remote
  * caller through its callback. A remote forward that fails, or would overtake
- * an earlier failed one, is kept in context and sent again before the session
- * waits for input (`flushUnsentCallerEvents`); retrying it here would re-run
+ * an earlier failed one, is kept in context and sent again once the step that
+ * emitted it ends (`flushUnsentCallerEvents`); retrying it here would re-run
  * the step that emitted it.
  */
 export async function forwardTaskInputToCaller(input: {

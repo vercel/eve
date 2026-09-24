@@ -5,10 +5,11 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import type { ToolInputResponse } from "#tools/definition.js";
 
 /**
- * Handles a request from a run whose task the owner no longer waits on,
- * such as a cancelled or orphaned run. Nothing reaches the user: a
- * `ctx.ask` question resolves as dismissed so the run can unwind, and other
- * requests are dropped.
+ * Handles a request the owner does not surface: from a run whose task the
+ * owner no longer waits on, such as a cancelled or orphaned run, or an ask
+ * refused because its ID is already pending. Nothing reaches the user: a
+ * `ctx.ask` question resolves as dismissed so the run can move on, and
+ * other requests are dropped.
  */
 export async function dismissStaleWorkflowRequestStep(
   message: WorkflowToolRunRequestMessage,
@@ -16,7 +17,7 @@ export async function dismissStaleWorkflowRequestStep(
   "use step";
 
   createLogger("execution.workflow-tool-run").warn(
-    "dropped a request from a workflow run whose task is no longer working",
+    "dropped a workflow run's request that the owner does not surface",
     {
       callId: message.from.callId,
       requestKind: message.request.kind,

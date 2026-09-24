@@ -17,7 +17,7 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
-import { answerTasksStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
+import { answerTaskStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
 import type { TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
@@ -185,7 +185,36 @@ describe("surfaceTaskInputStep", () => {
     });
     expect(ctx.require(ChannelKey).state).toEqual({ pending: ["q-1"] });
     expect(result.sessionState.continuationToken).toBe("http:question-thread");
+    // Cancelling the turn now must not end its stream a second time.
+    expect(result.sessionState.emissionState).toMatchObject({ endedByTaskInput: true, turnId: "" });
+    expect(result.refused).toEqual([]);
+  });
+
+  it("leaves a turn a session-limit prompt ended open to the boundary its decline streams", async () => {
+    setup();
+    const limit = { ...QUESTION, kind: "session-limit" as const, requestId: "limit-1" };
+
+    const result = await surface(ownerState([createTaskRecord()]), {
+      data: { ...COORDINATES, requests: [limit] },
+      type: "input.requested",
+    });
+
+    expect(published().map((event) => event.type)).toContain("session.waiting");
     expect(result.sessionState.emissionState.turnId).toBe("");
+    expect(result.sessionState.emissionState).not.toHaveProperty("endedByTaskInput");
+  });
+
+  it("returns the requested IDs it refused because they are pending elsewhere", async () => {
+    setup();
+    const billing = waiting({ id: "billing-aaaaaa" });
+
+    const result = await surface(ownerState([createTaskRecord(), billing]), {
+      data: { ...COORDINATES, requests: [QUESTION] },
+      type: "input.requested",
+    });
+
+    expect(result.refused).toEqual(["q-1"]);
+    expect(published()).toEqual([]);
   });
 
   it("repeats a child's resolution and resumes the task's clock without ending a turn", async () => {
@@ -207,6 +236,7 @@ describe("surfaceTaskInputStep", () => {
     const state = ownerState([createTaskRecord()]);
 
     await expect(surface(state, resolution("answered"))).resolves.toEqual({
+      refused: [],
       serializedContext: {},
       sessionState: state,
     });
@@ -244,6 +274,8 @@ describe("surfaceTaskInputStep", () => {
     expect(events[3]).toMatchObject({ data: { requestId: "a-1", taskId: TASK_ID } });
     // Neither records a request: a sign-in does not stop the task's clock.
     expect(record(afterSignIn.sessionState)).not.toHaveProperty("input");
+    // A cancel after a sign-in still streams its own boundary.
+    expect(afterSignIn.sessionState.emissionState).not.toHaveProperty("endedByTaskInput");
   });
 });
 
@@ -279,7 +311,7 @@ describe("publishTaskInputStep", () => {
   });
 });
 
-describe("answerTasksStep", () => {
+describe("answerTaskStep", () => {
   const delivery = { kind: "deliver" as const, payloads: [] };
   const answers = (task: TaskRecord) => ({
     deliveryMetadata: [],
@@ -287,28 +319,24 @@ describe("answerTasksStep", () => {
     record: task,
     responses: [{ requestId: "q-1", text: "eu" }],
   });
+  const send = (task: TaskRecord) =>
+    answerTaskStep({ answers: answers(task), delivery, serializedContext: {}, sessionId: "owner" });
 
-  it("returns the resolutions of the answers that reached a child, and publishes nothing", async () => {
+  it("returns the resolutions of answers that reached the child, and publishes nothing", async () => {
     setup();
-    const local = waiting();
-    const remote = waiting({ id: "billing-aaaaaa" });
     vi.mocked(answerTask).mockResolvedValueOnce("delivered").mockResolvedValueOnce("retry");
 
-    const resolved = await answerTasksStep({
-      answers: [answers(local), answers(remote)],
-      delivery,
-      serializedContext: {},
-      sessionId: "owner",
-    });
-
+    await expect(send(waiting())).resolves.toEqual([
+      { event: resolution("answered"), taskId: TASK_ID },
+    ]);
+    // An answer that may yet arrive keeps its question answerable.
+    await expect(send(waiting())).resolves.toEqual([]);
     expect(answerTask).toHaveBeenNthCalledWith(1, {
-      answers: answers(local),
+      answers: answers(waiting()),
       ctx,
       delivery,
       ownerSessionId: "owner",
     });
-    // The remote answer may yet arrive, so its question stays answerable.
-    expect(resolved).toEqual([{ event: resolution("answered"), taskId: TASK_ID }]);
     expect(published()).toEqual([]);
   });
 

@@ -8,7 +8,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
-import { answerTasksStep, publishTaskInputStep } from "#tasks/input-step.js";
+import { answerTaskStep, publishTaskInputStep } from "#tasks/input-step.js";
 import {
   answerTaskInput,
   applyTaskDeadline,
@@ -48,7 +48,7 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep
 vi.mock("#tasks/cancel.js", () => ({ cancelTasksStep: vi.fn() }));
 vi.mock("#tasks/workflow-task.js", () => ({ settleWorkflowTaskStep: vi.fn() }));
 vi.mock("#tasks/input-step.js", () => ({
-  answerTasksStep: vi.fn(),
+  answerTaskStep: vi.fn(),
   publishTaskInputStep: vi.fn(),
   surfaceTaskInputStep: vi.fn(),
 }));
@@ -229,53 +229,11 @@ describe("cancelTurnDescendants", () => {
       sessionState: cursor.sessionState,
     });
 
-    await expect(cancelTurnDescendants(cursor)).resolves.toBe(false);
+    await cancelTurnDescendants(cursor);
 
     expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ selector: { kind: "active-turn" } }),
     );
-  });
-
-  it.each([
-    ["a question", "question", true],
-    ["only a session-limit prompt", "session-limit", false],
-  ] as const)(
-    "reports whether %s was pending before the cancel withdrew it",
-    async (_l, kind, pending) => {
-      const cursor = createCursor(
-        stateWith(taskTableState([waitingOn(kind)])),
-        vi.fn(async () => {}),
-      );
-      vi.mocked(cancelTasksStep).mockResolvedValue({
-        events: [],
-        replies: [],
-        results: [],
-        serializedContext: {},
-        sessionState: createTestSessionState(),
-      });
-
-      await expect(cancelTurnDescendants(cursor)).resolves.toBe(pending);
-    },
-  );
-
-  it("does not count a background task's question that the cancel leaves waiting", async () => {
-    // Alice's notes task, started in an earlier turn, still asks; the cancelled turn asked nothing.
-    const notes = createTaskRecord({
-      ...waitingOn("question"),
-      id: "notes-bbbbbb",
-      mode: "background",
-    });
-    const state = stateWith(taskTableState([notes]));
-    const cursor = createCursor(state, vi.fn());
-    vi.mocked(cancelTasksStep).mockResolvedValue({
-      events: [],
-      replies: [],
-      results: [],
-      serializedContext: {},
-      sessionState: state,
-    });
-
-    await expect(cancelTurnDescendants(cursor)).resolves.toBe(false);
   });
 });
 
@@ -311,24 +269,51 @@ describe("answerTaskInput", () => {
       kind: "continue",
       remainder: answer,
     });
-    expect(answerTasksStep).not.toHaveBeenCalled();
+    expect(answerTaskStep).not.toHaveBeenCalled();
   });
 
-  it("sends a task its answers in one step, then publishes what they resolved in another", async () => {
-    const cursor = createCursor(stateWith(taskTableState([waitingOn("question")])), vi.fn());
-    vi.mocked(answerTasksStep).mockResolvedValue([resolved]);
+  it("sends each task its answers in its own step, then publishes what they resolved", async () => {
+    const billing = createTaskRecord({
+      ...waitingOn("question"),
+      callId: "call-2",
+      id: "billing-aaaaaa",
+      input: [
+        {
+          requests: [{ kind: "question", requestId: "b-1" }],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "child-turn",
+        },
+      ],
+    });
+    const cursor = createCursor(
+      stateWith(taskTableState([waitingOn("question"), billing])),
+      vi.fn(),
+    );
+    vi.mocked(answerTaskStep).mockResolvedValueOnce([resolved]).mockResolvedValueOnce([]);
+    const both = {
+      kind: "deliver" as const,
+      payloads: [{ inputResponses: [{ requestId: "q-1" }, { requestId: "b-1", text: "eu" }] }],
+    };
 
-    await expect(answerTaskInput(cursor, answer)).resolves.toEqual({
+    await expect(answerTaskInput(cursor, both)).resolves.toEqual({
       dismissedTaskIds: [],
       kind: "continue",
       remainder: undefined,
     });
-    expect(answerTasksStep).toHaveBeenCalledExactlyOnceWith({
-      answers: [expect.objectContaining({ responses: [{ requestId: "q-1" }] })],
-      delivery: answer,
+    expect(answerTaskStep).toHaveBeenCalledTimes(2);
+    expect(answerTaskStep).toHaveBeenNthCalledWith(1, {
+      answers: expect.objectContaining({ responses: [{ requestId: "q-1" }] }),
+      delivery: both,
       serializedContext: {},
       sessionId: cursor.sessionState.sessionId,
     });
+    expect(answerTaskStep).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        answers: expect.objectContaining({ responses: [{ requestId: "b-1", text: "eu" }] }),
+      }),
+    );
     expect(publishTaskInputStep).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ events: [resolved] }),
     );
@@ -336,25 +321,44 @@ describe("answerTaskInput", () => {
 
   it("never sends an answer again when publishing its resolution fails", async () => {
     const cursor = createCursor(stateWith(taskTableState([waitingOn("question")])), vi.fn());
-    vi.mocked(answerTasksStep).mockResolvedValue([resolved]);
+    vi.mocked(answerTaskStep).mockResolvedValue([resolved]);
     vi.mocked(publishTaskInputStep).mockRejectedValue(new Error("caller inbox unavailable"));
 
     await expect(answerTaskInput(cursor, answer)).rejects.toThrow("caller inbox unavailable");
     // The send is its own step: a retried publish replays its recorded result.
-    expect(answerTasksStep).toHaveBeenCalledOnce();
-    expect(vi.mocked(answerTasksStep).mock.calls[0]![0]).not.toHaveProperty("sessionWritable");
+    expect(answerTaskStep).toHaveBeenCalledOnce();
+    expect(vi.mocked(answerTaskStep).mock.calls[0]![0]).not.toHaveProperty("sessionWritable");
+  });
+
+  it("leaves a person's text to the session's own pending approval", async () => {
+    // Alice's agent waits on her approval while its research task asks a free-text question.
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([waitingOn("question")]),
+        "eve.runtime.pendingInputBatches": [{ requests: [{}], responseMessages: [] }],
+      }),
+      vi.fn(),
+    );
+    const text = { kind: "deliver" as const, payloads: [{ message: "approve" }] };
+
+    await expect(answerTaskInput(cursor, text)).resolves.toEqual({
+      dismissedTaskIds: [],
+      kind: "continue",
+      remainder: text,
+    });
+    expect(answerTaskStep).not.toHaveBeenCalled();
   });
 
   it("stops the turn once a descendant's declined session-limit prompt is sent on", async () => {
     const cursor = createCursor(stateWith(taskTableState([waitingOn("session-limit")])), vi.fn());
-    vi.mocked(answerTasksStep).mockResolvedValue([]);
+    vi.mocked(answerTaskStep).mockResolvedValue([]);
     const stop = {
       kind: "deliver" as const,
       payloads: [{ inputResponses: [{ optionId: "stop", requestId: "q-1" }] }],
     };
 
     await expect(answerTaskInput(cursor, stop)).resolves.toEqual({ kind: "cancel-turn" });
-    expect(answerTasksStep).toHaveBeenCalledOnce();
+    expect(answerTaskStep).toHaveBeenCalledOnce();
     expect(publishTaskInputStep).not.toHaveBeenCalled();
   });
 });

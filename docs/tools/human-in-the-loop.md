@@ -176,7 +176,7 @@ Approvals and questions share one protocol:
 3. The turn parks at `session.waiting`, durably, for as long as it takes.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
-For `ctx.ask()` questions from workflow tools and questions from subagents, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question this session's workflow tools created with `dismissible: true` resolves as `dismissed`.
+For `ctx.ask()` questions from workflow tools and questions from subagents, a follow-up message answers the question only when exactly one question is pending and the session has no approval or session-limit prompt of its own pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question this session's workflow tools created with `dismissible: true` resolves as `dismissed`.
 
 In an interactive root session, a follow-up message that answers nothing also moves the calls still waiting to the background, such as a workflow tool whose question is not dismissible or a subagent waiting on an approval. Their requests stay pending and answerable, and each call's result arrives in a later message once it finishes. See [Detach a waited call](/docs/concepts/tasks#detach-a-waited-call).
 
