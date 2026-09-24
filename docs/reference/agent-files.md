@@ -64,6 +64,13 @@ Paths below are relative to the agent directory. Root agents can use every path;
 | `schedules/`                                            | Recurring jobs                            | No                     | `defineSchedule` modules or Markdown prompts with `cron` frontmatter; recursive nesting is supported.                                   |
 | `subagents/`                                            | Specialist child agents                   | Yes                    | Local directories or remote-agent definitions; nested subagents are supported.                                                          |
 
+## Colocated tests
+
+eve ignores `*.test.*`, `*.spec.*`, and `__tests__/` during automatic discovery
+and when choosing extension runtime entries. The filename patterns apply to
+`.ts`, `.mts`, `.cts`, `.js`, `.mjs`, and `.cjs` modules. Explicit imports,
+sandbox workspace files, and packaged skill resources are unaffected.
+
 ## Files available in the sandbox
 
 Agent source files are not automatically available to shell commands. Put files to copy into the sandbox's `/workspace/` under `agent/sandbox/workspace/`. Skill runtime files are seeded separately under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback. See [Sandboxes](/docs/sandbox) and [Skills](/docs/skills).
