@@ -22,18 +22,8 @@ import type { TaskOwnerUpdate } from "#tasks/owner.js";
 import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
 import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
-import {
-  renderBackgroundReceipt,
-  renderTooManyBackgroundTasks,
-  type TaskReceipt,
-} from "#tasks/render.js";
-import {
-  encodeTaskCreator,
-  holdTaskResult,
-  MAX_BACKGROUND_TASKS,
-  type TaskCreator,
-  workingBackgroundTaskIds,
-} from "#tasks/results.js";
+import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
+import { encodeTaskCreator, holdTaskResult, type TaskCreator } from "#tasks/results.js";
 import { findWorkflowTask, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
 
@@ -76,23 +66,12 @@ export async function startWorkflowTask<
     (record) => record.callId === request.callId && record.turnId === input.turnId,
   );
   if (background && existing === undefined) {
-    const working = workingBackgroundTaskIds(table);
-    if (working.length >= MAX_BACKGROUND_TASKS) {
-      return {
-        events: [],
-        result: {
-          callId: request.callId,
-          isError: true,
-          kind: "tool-result",
-          output: {
-            code: "TOO_MANY_BACKGROUND_TASKS",
-            message: renderTooManyBackgroundTasks(working, MAX_BACKGROUND_TASKS),
-          },
-          toolName: request.toolName,
-        },
-        session,
-      };
-    }
+    const rejected = tooManyBackgroundTasksResult({
+      callId: request.callId,
+      table,
+      toolName: request.toolName,
+    });
+    if (rejected !== undefined) return { events: [], result: rejected, session };
   }
   const started = startTask(table, {
     callId: request.callId,
@@ -110,7 +89,7 @@ export async function startWorkflowTask<
   // A background call still owes the turn its receipt.
   if (started.kind === "existing") {
     return started.record.mode === "background"
-      ? { events: [], result: receiptResult(started.record), session }
+      ? { events: [], result: backgroundReceiptResult(started.record, request.toolName), session }
       : { events: [], session };
   }
   if (started.kind !== "started") {
@@ -171,20 +150,8 @@ export async function startWorkflowTask<
   const adoptedRecord = findTask(adopted.table, record.id)!;
   return {
     events: [taskStartedEvent({ child, ownerSessionId: session.sessionId, record: adoptedRecord })],
-    result: background ? receiptResult(adoptedRecord) : undefined,
+    result: background ? backgroundReceiptResult(adoptedRecord, request.toolName) : undefined,
     session: setTaskTable(session, adopted.table),
-  };
-}
-
-/** The immediate tool result of a background call: clients read the receipt, the model reads its text. */
-function receiptResult(record: TaskRecord): RuntimeToolResultActionResult {
-  const receipt: TaskReceipt = { status: "working", taskId: record.id };
-  return {
-    callId: record.callId,
-    kind: "tool-result",
-    modelOutput: renderBackgroundReceipt(record),
-    output: { ...receipt },
-    toolName: record.name,
   };
 }
 

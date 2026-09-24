@@ -109,6 +109,19 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
+  /**
+   * Whether a steering message waits in the queue. A delegated session that
+   * finds one as its turn ends runs it for the same caller before replying.
+   */
+  hasSteeringMessage(callerCallId: string | undefined): boolean {
+    return this.entries.some(
+      (entry) =>
+        entry.kind === "delivery" &&
+        isSteeringDelivery(entry.delivery, callerCallId) &&
+        entry.delivery.payloads.some((payload) => payload.message !== undefined),
+    );
+  }
+
   takeSteering(
     admitted: ReadonlySet<number>,
     callerCallId: string | undefined,

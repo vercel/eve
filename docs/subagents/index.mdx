@@ -12,7 +12,9 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 A subagent call is an ordinary tool call. The parent turn waits for the subagent's answer, and the
 answer becomes the tool result. Several subagent calls in one model step run in parallel, and the
 turn waits for all of them. In an interactive root session, a new message can move waiting calls to
-the background; see [Steering while a call waits](#steering-while-a-call-waits). If the child session expires, resets, or closes before replying, the
+the background; see [Steering while a call waits](#steering-while-a-call-waits). The model can also
+run a call in the background from the start; see
+[Run a call in the background](#run-a-call-in-the-background). If the child session expires, resets, or closes before replying, the
 call fails with `AGENT_SESSION_ENDED` and reports the usage accumulated since the child's previous
 answer. This applies to root-agent copies, declared local subagents, and remote subagents. The
 subagent session remains available for later calls.
@@ -38,6 +40,47 @@ task-mode run, and in a turn that a schedule started, a steering message is appl
 waited calls return, in the same turn. Workflow tool calls in the same turn follow the same rules;
 see [Detach a waited call](./tools/workflows#detach-a-waited-call).
 
+## Run a call in the background
+
+In an interactive root session, every agent tool accepts `background?: boolean`: the built-in
+`agent`, declared and dynamic subagents, and remote agents. The model decides per call; there is no
+author option. The parameter's description tells the model to use it only when the user does not
+need the answer to continue, never to poll or call again to check on the agent, and to make calls
+whose answers it needs together in the same step without `background`.
+
+With `background: true`, the call starts the agent exactly like a waited call and returns a receipt
+at once. The model reads:
+
+```text
+Agent researcher-7k2m9q is working in the background. Its result will arrive in a later message. Do not poll or repeat this work. Continue with anything that does not depend on it; if nothing remains, tell the user briefly what you started and end your turn.
+```
+
+Clients read the structured receipt on `action.result`: `output` is `{ status: "working", taskId }`,
+and `task.started` reports `mode: "background"`. The agent's answer arrives later in its own
+`task.result` message, by the same delivery rules as a
+[`detach: true` workflow tool](./tools/workflows#return-a-receipt-with-detach): an idle session
+starts a result turn, and a result waits for a turn from the principal whose call started the agent.
+A background call's result is never held back for other calls; only calls that one steering
+message detached wait for each other. Results from the same principal that are ready together still
+share one message. Until its result arrives, the agent appears in the `<tasks>` block of the
+`[Tasks]` note.
+
+A background agent call counts toward the 10 working background tasks a session holds, the same
+limit as `detach: true` workflow tools and detached calls. A call over the limit does not start and
+fails with `TOO_MANY_BACKGROUND_TASKS`. Passing the `agentId` of an idle agent with
+`background: true` gives it new work in the background.
+
+Only interactive root sessions offer the parameter, and the decision is fixed for the session, so the
+tool list does not change between turns. A subagent's session, a task-mode run, and a session that a
+schedule created do not see it, and every agent call there waits. A schedule can also send a
+message into an existing interactive session; the turn that message starts treats
+`background: true` as a waited call, so a scheduled run posts one final reply. `ctx.agent` in a
+workflow body always waits.
+
+`background` and detach cover different moments. `background: true` skips the wait when the model
+makes the call. Detach moves calls that are already waiting to the background when a new message
+arrives. Both deliver results the same way, and `task_cancel` stops either kind.
+
 ## The built-in `agent` tool
 
 The root session receives `agent` by default. The model calls it to delegate a task to a new copy of the root agent or continue an existing copy:
@@ -45,12 +88,13 @@ The root session receives `agent` by default. The model calls it to delegate a t
 ```ts
 {
   message: string;       // everything the child needs; it does not see the parent's history
-  agentId?: string;      // continue an existing child
+  agentId?: string;      // give an idle child more work, or message a working one
   outputSchema?: object; // require structured output for this turn
+  background?: boolean;  // interactive root sessions only
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` needs no configuration: each call waits for the copy's answer, which becomes the tool result. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` needs no configuration: each call waits for the copy's answer, which becomes the tool result, unless the model [runs it in the background](#run-a-call-in-the-background). Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -230,7 +274,7 @@ The root built-in `agent` tool is the exception. Its children reuse the root's s
 
 ## What the parent sees
 
-eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
+eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape, plus `background?` in interactive root sessions. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
@@ -241,8 +285,9 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 ```ts
 {
   message: string;       // all context the child needs; it never sees the parent's history
-  agentId?: string;      // continue an existing child
+  agentId?: string;      // give an idle child more work, or message a working one
   outputSchema?: object; // require structured output for this turn
+  background?: boolean;  // interactive root sessions only
 }
 ```
 
@@ -278,9 +323,17 @@ Subagent model calls automatically retry classified transient provider failures,
 
 A child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child. An `agentId` that matches no agent in the session fails with `UNKNOWN_AGENT`, and passing an agent's id through a different subagent tool fails with `AGENT_MISMATCH`. Agent ids look like `researcher-7k2m9q`: the agent's name and six characters that eve assigns before the child starts.
 
-A child that is still working on another call returns `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
+Pass the `agentId` of a child that is still working to send it a message, such as a correction or an added requirement. The message joins the child's current call instead of starting a new one: eve publishes no new `task.started`, and the call returns at once with a receipt. For a background child, the model reads:
 
-Whenever the set of parked (idle) children changes, eve appends a framework-injected note labeled `[Tasks]` to the conversation. Its `<idle_agents>` block lists each child's id, name, and a one-line summary of its last answer, most recent first, up to 10 children. Its `<tasks>` block lists each [background task](./tools/workflows#return-a-receipt-with-detach) whose result has not reached history yet, with its status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and a child that is working does not appear until it parks again.
+```text
+Sent your message to agent researcher-7k2m9q, which is still working. Its result will arrive in a later message.
+```
+
+The child still delivers exactly one result for its current call, through that call: a background child's result arrives in a `task.result` message, and a waited call's result stays that call's tool result. The child receives the message as a steering message: in its current turn, or in its next turn for the same call when it is waiting on its own background tasks. A child that has not started yet receives the message when it starts. A message that reaches the child after it has replied does not change the result that is already on its way. The child keeps running as the principal whose call started its current work.
+
+Delivery failures are reported to the caller as `AGENT_UNREACHABLE`; eve does not start a replacement child session to hide them.
+
+Whenever the set of parked (idle) children changes, eve appends a framework-injected note labeled `[Tasks]` to the conversation. Its `<idle_agents>` block lists each child's id, name, and a one-line summary of its last answer, most recent first, up to 10 children. Its `<tasks>` block lists each [background task](./tools/workflows#return-a-receipt-with-detach) whose result has not reached history yet, with its status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), and the most recent note is authoritative. A child working in the background appears in `<tasks>`; a child working on a waited call does not appear until it parks again.
 
 The parent keeps its children only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 

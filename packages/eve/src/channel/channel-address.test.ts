@@ -6,6 +6,8 @@ import {
   getChannelActivityPresentation,
 } from "#channel/activity-renderer.js";
 import type { Runtime } from "#channel/types.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ScheduleIdKey } from "#context/keys.js";
 
 function createRuntime(): Runtime {
   return {
@@ -57,6 +59,25 @@ describe("createChannelAddress", () => {
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
       command: { kind: "clear" },
       sessionId: "sess_1",
+    });
+  });
+
+  it("marks a message a schedule sends to an existing session with the schedule", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, "daily-digest");
+
+    await contextStorage.run(scope, () => address.send("Post the digest.", { auth: null }));
+
+    expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
+      command: expect.objectContaining({ kind: "send", scheduleId: "daily-digest" }),
+      continuationToken: "slack:C1:T1",
     });
   });
 

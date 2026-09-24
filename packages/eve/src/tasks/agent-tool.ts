@@ -17,9 +17,12 @@ export function isAgentTaskRequest(
   return request.workflowId === AGENT_TASK_WORKFLOW_ID;
 }
 
-/** Reads one model agent call. The tool name is the agent's name. */
+/**
+ * Reads one model agent call. The tool name is the agent's name. `background`
+ * stays on the call, not the agent's input: the owner decides whether to honor it.
+ */
 export function agentTaskCallFromRequest(request: RuntimeWorkflowTaskRequest): AgentTaskCall {
-  const { agentId, message, outputSchema } = request.input;
+  const { agentId, background, message, outputSchema } = request.input;
   const input: { agentId?: string; message: string; outputSchema?: JsonObject; target: string } = {
     message: typeof message === "string" ? message : "",
     target: request.toolName,
@@ -28,7 +31,8 @@ export function agentTaskCallFromRequest(request: RuntimeWorkflowTaskRequest): A
   if (typeof outputSchema === "object" && outputSchema !== null && !Array.isArray(outputSchema)) {
     input.outputSchema = outputSchema as JsonObject;
   }
-  return { callId: request.callId, input, toolName: request.toolName };
+  const call = { callId: request.callId, input, toolName: request.toolName };
+  return background === true ? { ...call, background: true } : call;
 }
 
 /**

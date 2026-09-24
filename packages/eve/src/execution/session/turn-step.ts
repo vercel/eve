@@ -35,6 +35,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
   TurnDeliveryIdsKey,
+  TurnScheduleIdKey,
 } from "#context/keys.js";
 import {
   BundleKey,
@@ -325,6 +326,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       ) {
         ctx.set(TurnDeliveryIdsKey, [ctx.require(ChannelDeliveryKey).deliveryId]);
       }
+    }
+    if (!initialEmissionState.turnId) {
+      if (rawDelivery?.scheduleId === undefined) ctx.delete(TurnScheduleIdKey);
+      else ctx.set(TurnScheduleIdKey, rawDelivery.scheduleId);
     }
 
     if (runtimeResults !== undefined) {

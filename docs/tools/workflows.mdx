@@ -320,7 +320,9 @@ const result = await ctx.agent("reviewer", {
 ```
 
 The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
-continue an existing child. An inline `outputSchema` requires structured output and determines the
+continue an idle child. A workflow body waits for the child's own answer, so an `agentId` that names
+a child still working on another call fails with `AGENT_BUSY`, and `ctx.agent` never runs a call in
+the background. An inline `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
 ### Route to a hidden subagent with Jev
@@ -614,7 +616,8 @@ eve asks it once more and accepts whatever it returns.
 Until its result reaches history, a background task appears in the `[Tasks]` note that eve adds to
 the conversation, with its current status. The note drops the task once its result is delivered.
 
-A session holds at most 10 working background tasks, including detached calls. A `detach: true` call
+A session holds at most 10 working background tasks, including detached calls and agent calls made
+with [`background: true`](/docs/subagents#run-a-call-in-the-background). A `detach: true` call
 over that limit does not start and fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background
 run still publish `action.partial` for the originating call and never wake the model. Cancelling a
 turn does not cancel background tasks it started, and when the session ends, eve cancels every

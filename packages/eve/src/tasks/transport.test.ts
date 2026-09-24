@@ -12,9 +12,11 @@ import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
+  isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
 } from "#subagents/remote-dispatch.js";
-import { deliverToChild, runCommands } from "#tasks/transport.js";
+import { encodeTaskCreator } from "#tasks/results.js";
+import { deliverToChild, runCommands, sendAgentMessage } from "#tasks/transport.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
 vi.mock("#subagents/remote-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
   continueRemoteAgentSession: vi.fn(),
+  isRetryableRemoteAgentContinueError: vi.fn(),
   resolveRemoteAgentForAction: vi.fn(),
 }));
 
@@ -70,6 +73,7 @@ beforeEach(() => {
   dispatchSession.mockResolvedValue({ status: "accepted" });
   vi.mocked(createWorkflowRuntime).mockReturnValue({ dispatchSession } as never);
   vi.mocked(resolveRemoteAgentForAction).mockReturnValue({ name: "research" } as never);
+  vi.mocked(isRetryableRemoteAgentContinueError).mockReturnValue(true);
 });
 
 describe("deliverToChild", () => {
@@ -279,5 +283,93 @@ describe("runCommands", () => {
       expect.objectContaining({ childKind: "local", taskId: "research-abc234" }),
     );
     error.mockRestore();
+  });
+});
+
+describe("sendAgentMessage", () => {
+  const ALICE = {
+    attributes: {},
+    authenticator: "slack",
+    principalId: "U-alice",
+    principalType: "user",
+  } as const;
+  const command = { kind: "message" as const, message: "Also cover the pricing change." };
+
+  it("steers a local agent without a new caller or a new principal", async () => {
+    await expect(
+      sendAgentMessage({
+        command,
+        ctx: contextWithBundle(),
+        record: createTaskRecord({ child: localChild }),
+      }),
+    ).resolves.toBeUndefined();
+
+    // No caller: the child's current caller keeps the generation. No auth:
+    // the child keeps acting as the principal that started it.
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
+      command: {
+        kind: "send",
+        payload: { message: "Also cover the pricing change." },
+        turnPolicy: "steer",
+      },
+      sessionId: "child-session",
+    });
+  });
+
+  it("steers a remote agent where it runs, without a new callback", async () => {
+    await expect(
+      sendAgentMessage({
+        command: { ...command, outputSchema: { type: "object" } },
+        ctx: contextWithBundle(),
+        record: createTaskRecord({
+          child: remoteChild,
+          creator: encodeTaskCreator({ auth: ALICE }),
+        }),
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(continueRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
+      auth: ALICE,
+      message: "Also cover the pricing change.",
+      outputSchema: { type: "object" },
+      remote: { name: "research", url: "https://child.example" },
+      sessionId: "remote-child",
+      turnPolicy: "steer",
+    });
+    expect(dispatchSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a local session that ended", localChild, "is no longer reachable"],
+    ["a remote session that is unavailable", remoteChild, "is temporarily unreachable"],
+  ])("reports %s as AGENT_UNREACHABLE", async (_label, child, message) => {
+    dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
+    vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const failure = await sendAgentMessage({
+      command,
+      ctx: contextWithBundle(),
+      record: createTaskRecord({ child }),
+    });
+
+    expect(failure).toMatchObject({
+      code: "AGENT_UNREACHABLE",
+      message: expect.stringContaining(message),
+    });
+    error.mockRestore();
+  });
+
+  it("delivers a held message when its agent starts, as a command effect", async () => {
+    await runCommands(
+      [{ commands: [command], kind: "send", record: createTaskRecord({ child: localChild }) }],
+      contextWithBundle(),
+    );
+
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
+      command: expect.objectContaining({ kind: "send", turnPolicy: "steer" }),
+      sessionId: "child-session",
+    });
+    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
   });
 });

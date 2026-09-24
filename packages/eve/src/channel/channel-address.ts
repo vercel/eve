@@ -22,6 +22,7 @@ import type {
   TurnPolicy,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { withScheduleProvenance } from "#channel/schedule-provenance.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -104,8 +105,9 @@ export function createChannelAddress<TState = undefined>(input: {
             ? undefined
             : (options.turnPolicy ?? input.turnPolicy ?? DEFAULT_TURN_POLICY),
       };
-      const command: Extract<SessionCommand, { readonly kind: "send" }> =
-        caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller };
+      const command: Extract<SessionCommand, { readonly kind: "send" }> = withScheduleProvenance(
+        caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
+      );
       const dispatch = async (): Promise<Session | undefined> => {
         const result = await input.runtime.dispatchContinuation({
           command,

@@ -20,9 +20,20 @@ describe("session inbox payloads", () => {
       kind: "deliver",
       payloads: [{ message: "hello" }],
       requestId: undefined,
+      scheduleId: undefined,
       title: undefined,
       turnPolicy: undefined,
     });
+  });
+
+  it("keeps the schedule that sent a message", () => {
+    expect(
+      decodeSessionInboxPayload({
+        kind: "send",
+        payload: { message: "Post the digest." },
+        scheduleId: "daily-digest",
+      }),
+    ).toMatchObject({ kind: "deliver", scheduleId: "daily-digest" });
   });
 
   it("accepts only current delivery and control kinds", () => {

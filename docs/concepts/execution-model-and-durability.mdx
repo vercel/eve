@@ -153,7 +153,7 @@ When a session is waiting, a delivery through its ID or any claimed channel addr
 
 An executing eve tool finishes and commits its result before steering reaches the next model request. Subagent calls and workflow tools that wait for a person, webhook, or timer behave differently depending on the session:
 
-- **Interactive root session** (a root session in conversation mode, in a turn a schedule did not start): a message that answers a pending question answers it and does not steer. Otherwise, pending questions created with `dismissible: true` resolve as `dismissed`, and every other waited call moves to the background. The turn continues at once with those calls' receipts and the message in one model step, and the calls' results arrive later as task results. See [Detach a waited call](../tools/workflows#detach-a-waited-call).
+- **Interactive root session** (a root session in conversation mode, in a turn a schedule did not start; a schedule starts the first turn of a session it creates and any turn that a message it sends starts in an existing session): a message that answers a pending question answers it and does not steer. Otherwise, pending questions created with `dismissible: true` resolve as `dismissed`, and every other waited call moves to the background. The turn continues at once with those calls' receipts and the message in one model step, and the calls' results arrive later as task results. See [Detach a waited call](../tools/workflows#detach-a-waited-call).
 - **Subagent sessions, task-mode runs, and scheduled turns:** the message is applied after the wait ends, in the same turn.
 
 Steering does not cancel the turn or the calls it waits on. The one exception is eve's `sleep` tool: in any session, a steering message ends a waited `sleep` early, and the call reports the time it waited. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
@@ -167,7 +167,9 @@ Every built-in and custom channel accepts a default `turnPolicy`, and imperative
 ## Background tasks
 
 A [workflow tool](../tools/workflows#return-a-receipt-with-detach) defined with `detach: true` runs
-in the background: its call returns a receipt, and the turn continues without waiting. A waited call
+in the background: its call returns a receipt, and the turn continues without waiting. In an
+interactive root session, an agent call made with
+[`background: true`](../subagents#run-a-call-in-the-background) does the same. A waited call
 that [detaches](../tools/workflows#detach-a-waited-call) joins the background the same way. When a
 background task finishes, eve holds its result in durable session state and delivers it as typed
 session input, not as a channel message. The model reads one `task.result` message per delivery,
@@ -188,7 +190,7 @@ every working task, and eve delivers nothing afterward.
 
 ## Subagents
 
-A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result. A call that is still working at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
+A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result, unless the model [runs the call in the background](../subagents#run-a-call-in-the-background) in an interactive root session. A call that is still working at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
 
 ## How eve orders session history
 

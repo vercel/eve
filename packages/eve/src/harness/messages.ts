@@ -408,6 +408,7 @@ interface DeliverLike {
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
+  readonly scheduleId?: string;
 }
 
 /**
@@ -452,11 +453,15 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     );
   }
 
-  return {
+  const coalesced: T = {
     ...first,
     auth,
     caller,
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
     payloads,
   };
+  // A turn is scheduled only when a schedule sent all of its input.
+  if (rest.every((item) => item.scheduleId !== undefined)) return coalesced;
+  const { scheduleId: _scheduleId, ...unscheduled } = coalesced;
+  return unscheduled as T;
 }

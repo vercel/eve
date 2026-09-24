@@ -17,6 +17,7 @@ import {
   SandboxKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  TurnScheduleIdKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
@@ -152,13 +153,17 @@ export async function prepareCoordinationDispatch(input: {
 /**
  * A root session in conversation mode, in a turn a schedule did not start:
  * the same session test that adds eve's background-task instructions, plus
- * the rule that a scheduled turn never detaches, so it posts one final reply.
+ * the rule that a scheduled turn never detaches or runs agent calls in the
+ * background, so it posts one final reply. A schedule starts the first turn
+ * of a session it created, and any turn its delivery starts in an existing
+ * session.
  */
 export function isInteractiveRootTurn(ctx: ContextContainer, turnSequence: number): boolean {
   if (ctx.get(ModeKey) !== "conversation") return false;
   if (ctx.get(ParentSessionKey) !== undefined || ctx.get(SessionCallbackKey) !== undefined) {
     return false;
   }
+  if (ctx.get(TurnScheduleIdKey) !== undefined) return false;
   return !(turnSequence === 0 && ctx.get(ScheduleIdKey) !== undefined);
 }
 

@@ -39,6 +39,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         kind: "deliver",
         payloads: [command.payload],
         requestId: command.requestId,
+        scheduleId: command.scheduleId,
         turnPolicy: command.turnPolicy,
       };
     }

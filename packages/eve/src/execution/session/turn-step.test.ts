@@ -23,6 +23,7 @@ import {
   SessionIdKey,
   SessionTraceSeedKey,
   TurnDeliveryIdsKey,
+  TurnScheduleIdKey,
   HistoryStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -1214,6 +1215,51 @@ describe("turnStep", () => {
         }),
       ]);
     }
+  });
+
+  it("marks only the turn a schedule's delivery starts as scheduled", async () => {
+    const emission = (turnId: string) => ({
+      "eve.harness.emission": { sequence: 2, sessionStarted: true, stepIndex: 0, turnId },
+    });
+    installSessionStoreMocks([createStubSession({ state: emission("") })]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTurnStepTestBundle());
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => async (stepSession) => ({
+      next: null,
+      session: stepSession,
+    }));
+
+    // Alice's thread is idle when the daily-digest schedule posts into it.
+    const scheduled = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "Post the daily digest." }],
+        scheduleId: "daily-digest",
+      },
+      sessionWritable: createTestWritable("scheduled"),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(scheduled.serializedContext[TurnScheduleIdKey.name]).toBe("daily-digest");
+
+    // A message that steers the scheduled turn keeps it scheduled.
+    installSessionStoreMocks([createStubSession({ state: emission("turn_2") })]);
+    const steered = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "Include the deploy notes." }] },
+      sessionWritable: createTestWritable("steered"),
+      serializedContext: scheduled.serializedContext,
+      sessionState: createStubSessionState(),
+    });
+    expect(steered.serializedContext[TurnScheduleIdKey.name]).toBe("daily-digest");
+
+    // Alice's own next message starts an ordinary turn.
+    installSessionStoreMocks([createStubSession({ state: emission("") })]);
+    const next = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "Thanks, that helps." }] },
+      sessionWritable: createTestWritable("next"),
+      serializedContext: steered.serializedContext,
+      sessionState: createStubSessionState(),
+    });
+    expect(next.serializedContext[TurnScheduleIdKey.name]).toBeUndefined();
   });
 
   it("prepares resumed-session history before dynamic runtime refresh", async () => {

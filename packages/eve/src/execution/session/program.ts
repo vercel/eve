@@ -338,7 +338,10 @@ async function runSessionLoop(
         action.settled !== undefined &&
         // A delegated call settles only when this session is quiescent: the
         // caller waits for the result turn that reports the background work.
-        !hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)
+        !hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state) &&
+        // A message the owner sent this working agent as its turn ended joins
+        // the same call, so the reply that settles it has seen the message.
+        !(progress.caller !== undefined && queue.hasSteeringMessage(progress.caller.callId))
       ) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({

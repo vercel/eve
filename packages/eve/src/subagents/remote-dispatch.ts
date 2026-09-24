@@ -13,6 +13,7 @@ import type {
   CancelTurnResult,
   SessionAuthContext,
   SessionTraceContext,
+  TurnPolicy,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
@@ -225,6 +226,8 @@ export async function continueRemoteAgentSession(input: {
   readonly outputSchema?: JsonObject;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
+  /** How the message treats the remote session's active turn; the receiver's default otherwise. */
+  readonly turnPolicy?: TurnPolicy;
 }): Promise<void> {
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
@@ -233,6 +236,7 @@ export async function continueRemoteAgentSession(input: {
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     outputSchema?: JsonObject;
+    turnPolicy?: TurnPolicy;
   } = {
     activityObserver: input.activityObserver,
     callback: input.callback,
@@ -242,6 +246,7 @@ export async function continueRemoteAgentSession(input: {
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }
+  if (input.turnPolicy !== undefined) requestBody.turnPolicy = input.turnPolicy;
 
   const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
     body: JSON.stringify(requestBody),

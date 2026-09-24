@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { ModeKey, ParentSessionKey, ScheduleIdKey, SessionCallbackKey } from "#context/keys.js";
+import {
+  ModeKey,
+  ParentSessionKey,
+  ScheduleIdKey,
+  SessionCallbackKey,
+  TurnScheduleIdKey,
+} from "#context/keys.js";
 import { isInteractiveRootTurn } from "#execution/coordination-dispatch-shared.js";
 
 function context(configure: (ctx: ContextContainer) => void = () => {}): ContextContainer {
@@ -43,5 +49,14 @@ describe("isInteractiveRootTurn", () => {
     const scheduled = context((ctx) => ctx.set(ScheduleIdKey, "daily-report"));
     expect(isInteractiveRootTurn(scheduled, 0)).toBe(false);
     expect(isInteractiveRootTurn(scheduled, 1)).toBe(true);
+  });
+
+  it("excludes a turn a schedule's delivery started in an existing session", () => {
+    expect(
+      isInteractiveRootTurn(
+        context((ctx) => ctx.set(TurnScheduleIdKey, "digest")),
+        4,
+      ),
+    ).toBe(false);
   });
 });

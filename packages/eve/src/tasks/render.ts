@@ -51,9 +51,15 @@ export function renderDetachedReceipt(
     : `This call is taking a while, so it moved to the background as ${as}. Its result will arrive in a later message. Do not poll or repeat this work.`;
 }
 
-/** Tool result for a call that sent a message to an agent that is still working. */
-export function renderSteeringReceipt(record: Pick<TaskRecord, "id">): string {
-  return `Sent your message to agent ${record.id}, which is still working. Its result will arrive in a later message.`;
+/**
+ * Tool result for a call that sent a message to an agent that is still
+ * working. A background agent's result arrives later; a waited agent's result
+ * goes to the call that is waiting for it.
+ */
+export function renderSteeringReceipt(record: Pick<TaskRecord, "id" | "mode">): string {
+  return record.mode === "background"
+    ? `Sent your message to agent ${record.id}, which is still working. Its result will arrive in a later message.`
+    : `Sent your message to agent ${record.id}, which is still working on another call. That call will receive its result.`;
 }
 
 /** Tool result for a `sleep` that a steering message ended early. */
@@ -158,7 +164,7 @@ export const AGENT_MESSAGING_INSTRUCTION =
 
 /** Description of the `agentId` input on every agent tool. */
 export const AGENT_ID_PARAMETER_DESCRIPTION =
-  "The id of an idle agent from the latest [Tasks] note, to give it more work in the same child session. Omit this field (or pass null or an empty string) to start a new agent.";
+  "The id of an agent from the latest [Tasks] note or a receipt. An idle agent gets more work in the same child session; an agent that is still working receives this message as a correction to its current work. Omit this field (or pass null or an empty string) to start a new agent.";
 
 /** How a model-written workflow program calls agents with `ctx.agent`. */
 export const WORKFLOW_PROGRAM_AGENT_CONTRACT =
@@ -226,9 +232,13 @@ export function renderAgentMismatch(record: Pick<TaskRecord, "id" | "name">): st
   return `Agent "${record.id}" is a ${record.name} agent. Call the ${record.name} tool to continue it.`;
 }
 
-/** `AGENT_BUSY` error message for a call that names an agent still working on an earlier call. */
+/**
+ * `AGENT_BUSY` error for a `ctx.agent` call that names a working agent. A
+ * workflow body awaits the agent's output, so it cannot join a generation it
+ * did not start; model calls send the agent a message instead.
+ */
 export function renderAgentBusy(agentId: string): string {
-  return `Agent "${agentId}" is still working on an earlier call. Wait for its result before giving it more work.`;
+  return `Agent "${agentId}" is still working on another call, so a workflow cannot give it more work until it answers. Omit agentId to start a new agent.`;
 }
 
 /**

@@ -12,17 +12,19 @@ import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
-import type { JsonValue } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import { renderAgentUnreachable } from "#tasks/render.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
+  isRetryableRemoteAgentContinueError,
   resolveRemoteAgentForAction,
 } from "#subagents/remote-dispatch.js";
 import type { ChildAddress, TaskCommand } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { readTaskCreator } from "#tasks/results.js";
 import type { TaskEffect } from "#tasks/table.js";
 
 // Owner → child delivery: new generations for idle agents and owner commands.
@@ -35,7 +37,7 @@ export type CommandEffect = Extract<TaskEffect, { kind: "send" }>;
 
 /**
  * Sends owner commands to started children without waiting for them to act.
- * Only `cancel` is issued before P2.
+ * A lost request is logged, never retried: the child may already have it.
  */
 export async function runCommands(
   effects: readonly CommandEffect[],
@@ -54,21 +56,23 @@ async function runCommand(
   ctx: ContextContainer | undefined,
 ): Promise<void> {
   const child = record.child;
-  if (child === undefined || command.kind !== "cancel") return;
+  if (child === undefined) return;
+  if (command.kind === "message") {
+    // The call that sent it already returned its receipt; the agent's result still arrives.
+    const failure = await sendAgentMessage({ command, ctx, record });
+    if (failure !== undefined) {
+      log.warn("a held message did not reach its agent", { taskId: record.id });
+    }
+    return;
+  }
+  if (command.kind !== "cancel") return;
   try {
     if (child.kind === "remote") {
-      const bundle = ctx?.get(BundleKey);
-      if (ctx === undefined || bundle === undefined || record.nodeId === undefined) return;
-      const selection = getDynamicSubagentSelection(ctx, record.nodeId);
-      const resolved = resolveRemoteAgentForAction({
-        dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-        nodeId: record.nodeId,
-        remoteAgentName: record.name,
-        registry: bundle.subagentRegistry.subagentsByNodeId,
-      });
+      const remote = resolveRemoteChild(record, ctx);
+      if (remote === undefined) return;
       // Cancel where the child runs; the registry may point at a newer deployment.
       await cancelRemoteAgentTurn({
-        remote: { ...resolved, url: child.url },
+        remote: { ...remote, url: child.url },
         sessionId: child.sessionId,
       });
       return;
@@ -89,6 +93,75 @@ async function runCommand(
       taskId: record.id,
     });
   }
+}
+
+/**
+ * Sends a `message` command to a working agent. It carries no caller, so the
+ * child's current caller keeps the generation: a local or remote child applies
+ * it as steering of its current turn, or as its next turn when it is holding
+ * that caller until its own background work settles. Returns the call's error
+ * output when the message did not reach the child.
+ */
+export async function sendAgentMessage(input: {
+  readonly command: Extract<TaskCommand, { readonly kind: "message" }>;
+  readonly ctx: ContextContainer | undefined;
+  readonly record: TaskRecord;
+}): Promise<JsonValue | undefined> {
+  const { command, record } = input;
+  const child = record.child;
+  const unreachable = (permanent: boolean): JsonValue => ({
+    code: AGENT_UNREACHABLE,
+    message: renderAgentUnreachable(record.id, permanent ? "gone" : "temporary"),
+  });
+  const bundle = input.ctx?.get(BundleKey);
+  if (child === undefined || bundle === undefined) return unreachable(false);
+  const payload: { message: string; outputSchema?: JsonObject } = { message: command.message };
+  if (command.outputSchema !== undefined) payload.outputSchema = command.outputSchema;
+  try {
+    if (child.kind === "remote") {
+      const remote = resolveRemoteChild(record, input.ctx);
+      if (remote === undefined) return unreachable(true);
+      // The child's current generation already has the owner's callback.
+      await continueRemoteAgentSession({
+        auth: readTaskCreator(record.creator).auth,
+        ...payload,
+        remote: { ...remote, url: child.url },
+        sessionId: child.sessionId,
+        turnPolicy: "steer",
+      });
+      return undefined;
+    }
+    if (child.kind !== "local") return unreachable(true);
+    // Without `auth`, the child keeps acting as the principal that started it.
+    const result = await createWorkflowRuntime({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      nodeId: record.nodeId,
+    }).dispatchSession({
+      command: { kind: "send", payload, turnPolicy: "steer" },
+      sessionId: child.sessionId,
+    });
+    return result.status === "accepted" ? undefined : unreachable(result.retryable !== true);
+  } catch (error) {
+    logError(log, "failed to send a message to a working agent", error, {
+      childKind: child.kind,
+      taskId: record.id,
+    });
+    return unreachable(
+      isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
+    );
+  }
+}
+
+function resolveRemoteChild(record: TaskRecord, ctx: ContextContainer | undefined) {
+  const bundle = ctx?.get(BundleKey);
+  if (ctx === undefined || bundle === undefined || record.nodeId === undefined) return undefined;
+  const selection = getDynamicSubagentSelection(ctx, record.nodeId);
+  return resolveRemoteAgentForAction({
+    dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
+    nodeId: record.nodeId,
+    remoteAgentName: record.name,
+    registry: bundle.subagentRegistry.subagentsByNodeId,
+  });
 }
 
 /**

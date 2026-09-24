@@ -189,6 +189,8 @@ export type SessionCommand =
       readonly payload: DeliverPayload;
       readonly delivery?: ChannelDeliveryMetadata;
       readonly requestId?: string;
+      /** Authored schedule whose dispatch sent this message. */
+      readonly scheduleId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
   | {
@@ -259,6 +261,11 @@ export interface DeliverHookPayload {
   readonly requestId?: string;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
+  /**
+   * Authored schedule whose dispatch sent every payload. A turn it starts is
+   * a scheduled turn: its agent calls wait, so it posts one final reply.
+   */
+  readonly scheduleId?: string;
   readonly turnPolicy?: TurnPolicy;
 }
 

@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
-import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
+import {
+  isInteractiveRootTurn,
+  prepareActionDispatch,
+} from "#execution/coordination-dispatch-shared.js";
 import {
   createDurableSessionState,
   readDurableSession,
@@ -39,9 +42,14 @@ import {
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
 import { cancelTask, evaluateTaskDeadlines, pruneTaskTable } from "#tasks/table.js";
+import { renderBackgroundReceipt, renderSteeringReceipt } from "#tasks/render.js";
+import { deliverableTaskResults } from "#tasks/results.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
-vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
+vi.mock("#execution/coordination-dispatch-shared.js", () => ({
+  isInteractiveRootTurn: vi.fn(),
+  prepareActionDispatch: vi.fn(),
+}));
 vi.mock("#execution/tools/subagent/start.js", () => ({ startSubagent: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
@@ -129,6 +137,7 @@ beforeEach(() => {
   );
   dispatchSession.mockResolvedValue({ status: "accepted" });
   vi.mocked(createWorkflowRuntime).mockReturnValue({ dispatchSession } as never);
+  vi.mocked(isInteractiveRootTurn).mockReturnValue(true);
 });
 
 describe("startAgentTasks", () => {
@@ -404,18 +413,27 @@ describe("startAgentTasks", () => {
     expect(records(update.sessionState)).toEqual(table.records);
   });
 
-  it("rejects more work for an agent that is still working", async () => {
+  it("tells a ctx.agent caller that a working agent cannot take its call", async () => {
     const working = createTaskRecord({ callId: "call-0", child: LOCAL_CHILD });
 
-    const update = await start([modelCall({ agentId: working.id })], [working]);
+    const update = await start(
+      [
+        {
+          ...modelCall({ agentId: working.id }),
+          workflowCaller: { replyTo: "reply", runId: "run-1" },
+        },
+      ],
+      [working],
+    );
 
-    expect(update.results).toEqual([
+    expect(update.replies).toEqual([
       expect.objectContaining({
-        isError: true,
-        output: expect.objectContaining({ code: "AGENT_BUSY" }),
+        result: expect.objectContaining({
+          isError: true,
+          output: expect.objectContaining({ code: "AGENT_BUSY" }),
+        }),
       }),
     ]);
-    expect(update.events).toEqual([]);
     expect(dispatchSession).not.toHaveBeenCalled();
     expect(records(update.sessionState)).toEqual([working]);
   });
@@ -475,6 +493,299 @@ describe("startAgentTasks", () => {
         type: "task.started",
       },
     ]);
+  });
+});
+
+describe("explicit background agent calls", () => {
+  it("commits a background record with its creator, starts the child, and returns the receipt", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+
+    const update = await start([modelCall({ background: true })]);
+
+    const [record] = records(update.sessionState);
+    expect(record).toMatchObject({
+      callId: "call-1",
+      creator: { auth: null },
+      mode: "background",
+      status: "working",
+    });
+    expect(startSubagent).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ parentContinuationToken: OWNER_INBOX, taskId: record?.id }),
+    );
+    expect(update.results).toEqual([
+      {
+        callId: "call-1",
+        kind: "tool-result",
+        modelOutput: renderBackgroundReceipt(record!),
+        output: { status: "working", taskId: record?.id },
+        toolName: "research",
+      },
+    ]);
+    // A local child announces itself when it reports task.started.
+    expect(update.events).toEqual([]);
+  });
+
+  it("holds the background result for its own task.result message, not the tool result", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+    const started = await start([modelCall({ background: true })]);
+    const adopted = await applyTaskReport({
+      now: NOW,
+      payload: {
+        callId: "call-1",
+        child: { continuationToken: "child-token", sessionId: "child-session" },
+        kind: "task.started",
+      },
+      serializedContext: {},
+      sessionState: started.sessionState,
+    });
+    expect(adopted.events).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ mode: "background" }) }),
+    ]);
+
+    const settled = await applyTaskReport({
+      now: NOW,
+      payload: resultPayload(
+        childResult({
+          kind: "parked",
+          result: { kind: "succeeded", output: "Draft: Orbit ships today." },
+          usageDelta: ZERO_USAGE,
+        }),
+      ),
+      serializedContext: {},
+      sessionState: adopted.sessionState,
+    });
+
+    expect(settled.results).toEqual([]);
+    expect(settledTaskIds(settled.events)).toHaveLength(1);
+    const session = readDurableSession(settled.sessionState);
+    // Explicit background calls have no detach group, so the result is deliverable on its own.
+    expect(deliverableTaskResults(session.state)).toEqual([
+      expect.objectContaining({
+        outcome: { output: "Draft: Orbit ships today.", status: "completed" },
+        taskId: records(started.sessionState)[0]?.id,
+      }),
+    ]);
+    expect(records(settled.sessionState)[0]).toMatchObject({ delivered: false });
+  });
+
+  it.each([
+    ["a turn a schedule started", { interactive: false, workflow: false }],
+    ["a ctx.agent call", { interactive: true, workflow: true }],
+  ])("waits for a background call in %s", async (_label, { interactive, workflow }) => {
+    vi.mocked(isInteractiveRootTurn).mockReturnValue(interactive);
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+    const call = modelCall({ background: true });
+
+    const update = await start([
+      workflow ? { ...call, workflowCaller: { replyTo: "reply", runId: "run-1" } } : call,
+    ]);
+
+    expect(records(update.sessionState)).toEqual([
+      expect.objectContaining({ mode: "foreground", status: "working" }),
+    ]);
+    expect(update.results).toEqual([]);
+    expect(update.replies).toEqual([]);
+    expect(startSubagent).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a background call over the cap without starting it", async () => {
+    const working = Array.from({ length: 10 }, (_, index) =>
+      createTaskRecord({
+        callId: `call-bg-${index}`,
+        id: `research-bg${String(index).padStart(4, "0")}`,
+        mode: "background",
+      }),
+    );
+
+    const update = await start([modelCall({ background: true })], working);
+
+    expect(update.results).toEqual([
+      {
+        callId: "call-1",
+        isError: true,
+        kind: "tool-result",
+        output: {
+          code: "TOO_MANY_BACKGROUND_TASKS",
+          message: expect.stringContaining("10 background tasks are already running"),
+        },
+        toolName: "research",
+      },
+    ]);
+    expect(startSubagent).not.toHaveBeenCalled();
+    expect(records(update.sessionState)).toEqual(working);
+  });
+
+  it("gives an idle agent a new background generation", async () => {
+    const idle = createTaskRecord({
+      callId: "call-0",
+      child: LOCAL_CHILD,
+      delivered: true,
+      status: "completed",
+      turnId: "turn-0",
+    });
+
+    const update = await start(
+      [modelCall({ agentId: idle.id, background: true, message: "Now the FAQ." })],
+      [idle],
+    );
+
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
+      command: expect.objectContaining({
+        caller: expect.objectContaining({ callId: "call-1" }),
+        payload: { message: "Now the FAQ.", outputSchema: undefined },
+      }),
+      sessionId: "child-session",
+    });
+    expect(records(update.sessionState)).toEqual([
+      expect.objectContaining({ generation: 2, id: idle.id, mode: "background" }),
+    ]);
+    expect(update.results).toEqual([
+      expect.objectContaining({ modelOutput: renderBackgroundReceipt(idle) }),
+    ]);
+  });
+});
+
+describe("steering a working agent", () => {
+  const working = createTaskRecord({
+    callId: "call-0",
+    child: LOCAL_CHILD,
+    mode: "background",
+    turnId: "turn-0",
+  });
+
+  it("sends the message into the current generation and returns the steering receipt", async () => {
+    const update = await start(
+      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [working],
+    );
+
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
+      command: { kind: "send", payload: { message: "Also cover pricing." }, turnPolicy: "steer" },
+      sessionId: "child-session",
+    });
+    expect(update.results).toEqual([
+      {
+        callId: "call-1",
+        kind: "tool-result",
+        modelOutput: renderSteeringReceipt(working),
+        output: { status: "working", taskId: working.id },
+        toolName: "research",
+      },
+    ]);
+    // No new generation and no task.started: the agent keeps its original caller.
+    expect(update.events).toEqual([]);
+    expect(records(update.sessionState)).toEqual([working]);
+    expect(startSubagent).not.toHaveBeenCalled();
+  });
+
+  it("steers in the background regardless of the call's background flag", async () => {
+    const update = await start(
+      [modelCall({ agentId: working.id, background: true, message: "Shorter, please." })],
+      [working],
+    );
+
+    expect(update.results).toEqual([
+      expect.objectContaining({ modelOutput: renderSteeringReceipt(working) }),
+    ]);
+    expect(records(update.sessionState)).toEqual([working]);
+  });
+
+  it("holds the message for an agent that has not started, and sends it when it starts", async () => {
+    const unstarted = createTaskRecord({ callId: "call-0", mode: "background", turnId: "turn-0" });
+
+    const update = await start(
+      [modelCall({ agentId: unstarted.id, message: "Also cover pricing." })],
+      [unstarted],
+    );
+
+    expect(dispatchSession).not.toHaveBeenCalled();
+    expect(update.results).toEqual([
+      expect.objectContaining({ modelOutput: renderSteeringReceipt(unstarted) }),
+    ]);
+    expect(records(update.sessionState)).toEqual([
+      { ...unstarted, pendingCommands: [{ kind: "message", message: "Also cover pricing." }] },
+    ]);
+
+    const adopted = await applyTaskReport({
+      now: NOW,
+      payload: {
+        callId: "call-0",
+        child: { continuationToken: "child-token", sessionId: "child-session" },
+        kind: "task.started",
+      },
+      serializedContext: {},
+      sessionState: update.sessionState,
+    });
+
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
+      command: { kind: "send", payload: { message: "Also cover pricing." }, turnPolicy: "steer" },
+      sessionId: "child-session",
+    });
+    expect(records(adopted.sessionState)).toEqual([{ ...unstarted, child: LOCAL_CHILD }]);
+  });
+
+  it("delivers exactly one result for the steered generation", async () => {
+    const steered = await start(
+      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [working],
+    );
+    const report = resultPayload({
+      ...childResult({
+        kind: "parked",
+        result: { kind: "succeeded", output: "Draft with pricing." },
+        usageDelta: ZERO_USAGE,
+      }),
+      callId: "call-0",
+    });
+
+    const first = await applyTaskReport({
+      now: NOW,
+      payload: report,
+      serializedContext: {},
+      sessionState: steered.sessionState,
+    });
+    const repeated = await applyTaskReport({
+      now: NOW,
+      payload: report,
+      serializedContext: {},
+      sessionState: first.sessionState,
+    });
+
+    expect(settledTaskIds(first.events)).toEqual([working.id]);
+    expect(deliverableTaskResults(readDurableSession(first.sessionState).state)).toHaveLength(1);
+    expect(repeated.events).toEqual([]);
+    expect(deliverableTaskResults(readDurableSession(repeated.sessionState).state)).toHaveLength(1);
+  });
+
+  it("tells the model a waited agent's result goes to the call waiting for it", async () => {
+    const waited = createTaskRecord({ callId: "call-0", child: LOCAL_CHILD });
+
+    const update = await start([modelCall({ agentId: waited.id })], [waited]);
+
+    expect(update.results).toEqual([
+      expect.objectContaining({ modelOutput: renderSteeringReceipt(waited) }),
+    ]);
+    expect(renderSteeringReceipt(waited)).toContain("That call will receive its result.");
+  });
+
+  it("returns AGENT_UNREACHABLE instead of a receipt when the message does not arrive", async () => {
+    dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
+
+    const update = await start([modelCall({ agentId: working.id })], [working]);
+
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+      }),
+    ]);
+  });
+
+  it("never returns AGENT_BUSY to the model", async () => {
+    for (const record of [working, createTaskRecord({ callId: "call-0", child: LOCAL_CHILD })]) {
+      const update = await start([modelCall({ agentId: record.id })], [record]);
+      expect(JSON.stringify(update.results)).not.toContain("AGENT_BUSY");
+    }
   });
 });
 
@@ -1090,7 +1401,13 @@ function settledTaskIds(events: readonly UnstampedMessageStreamEvent[]): string[
 }
 
 function modelCall(
-  input: { readonly agentId?: string; readonly message?: string; readonly target?: string } = {},
+  input: {
+    readonly agentId?: string;
+    readonly background?: boolean;
+    readonly callId?: string;
+    readonly message?: string;
+    readonly target?: string;
+  } = {},
 ): AgentTaskCall {
   const target = input.target ?? "research";
   const callInput: { agentId?: string; message: string; target: string } = {
@@ -1098,7 +1415,8 @@ function modelCall(
     target,
   };
   if (input.agentId !== undefined) callInput.agentId = input.agentId;
-  return { callId: "call-1", input: callInput, toolName: target };
+  const call = { callId: input.callId ?? "call-1", input: callInput, toolName: target };
+  return input.background === true ? { ...call, background: true } : call;
 }
 
 async function start(

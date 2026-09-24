@@ -89,6 +89,22 @@ describe("coalesceDeliveries", () => {
       { ...metadata("delivery-2"), payloadIndex: 1 },
     ]);
   });
+
+  it("keeps a schedule only when the schedule sent every delivery", () => {
+    const scheduled = { kind: "deliver" as const, payloads: [{ message: "digest" }] };
+    expect(
+      coalesceDeliveries([
+        { ...scheduled, scheduleId: "digest" },
+        { ...scheduled, scheduleId: "digest" },
+      ]).scheduleId,
+    ).toBe("digest");
+    expect(
+      coalesceDeliveries([{ ...scheduled, scheduleId: "digest" }, scheduled]),
+    ).not.toHaveProperty("scheduleId");
+    expect(
+      coalesceDeliveries([scheduled, { ...scheduled, scheduleId: "digest" }]),
+    ).not.toHaveProperty("scheduleId");
+  });
 });
 
 describe("coalesceTurnInputs", () => {

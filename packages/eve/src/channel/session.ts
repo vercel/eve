@@ -19,6 +19,7 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
+import { withScheduleProvenance } from "#channel/schedule-provenance.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import {
@@ -140,7 +141,9 @@ export function createSession(
         title: options.title,
       };
       return await runtime.dispatchSession({
-        command: caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
+        command: withScheduleProvenance(
+          caller === undefined ? commandWithoutCaller : { ...commandWithoutCaller, caller },
+        ),
         sessionId: id,
       });
     },

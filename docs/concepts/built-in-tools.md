@@ -215,7 +215,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and the call waits for the copy's answer, which becomes the tool result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and the call waits for the copy's answer, which becomes the tool result. In an interactive root session, the model can pass `background: true` to get a receipt at once and receive the answer later in a `task.result` message; see [Run a call in the background](../subagents#run-a-call-in-the-background). Passing the `agentId` of a copy that is still working sends it a message instead of starting new work. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -235,7 +235,7 @@ export default disableTool();
 
 ### `task_cancel`
 
-`task_cancel` lets the model stop background tasks, such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach). eve advertises it only when the session can have background tasks: a root session in conversation mode whose agent has an agent or workflow tool, or any session whose agent has a `detach: true` tool. The decision is fixed for the session, and it is the same one that adds eve's background-task instructions, which mention `task_cancel`, to the system prompt.
+`task_cancel` lets the model stop background tasks, such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach) and agent calls made with [`background: true`](../subagents#run-a-call-in-the-background). eve advertises it only when the session can have background tasks: a root session in conversation mode whose agent has an agent or workflow tool, or any session whose agent has a `detach: true` tool. The decision is fixed for the session, and it is the same one that adds eve's background-task instructions, which mention `task_cancel`, to the system prompt.
 
 The model passes 1 to 50 IDs from receipts or the `[Tasks]` note:
 

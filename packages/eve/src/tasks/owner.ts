@@ -4,7 +4,10 @@ import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#ch
 import type { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
-import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
+import {
+  isInteractiveRootTurn,
+  prepareActionDispatch,
+} from "#execution/coordination-dispatch-shared.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -45,8 +48,11 @@ import {
   SUBAGENT_EXECUTION_FAILED,
 } from "#subagents/agent-handle-errors.js";
 import { renderAgentBusy, renderAgentUnreachable } from "#tasks/render.js";
+import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
+import { steerWorkingAgent } from "#tasks/steer.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
+import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
   flushAgentInvocationTraces,
@@ -87,6 +93,8 @@ export interface AgentTaskCall {
   readonly input: InternalAgentInput;
   readonly toolName?: string;
   readonly workflowCaller?: TaskRecord["workflowCaller"];
+  /** The model asked not to wait (`background: true`); honored only in interactive root turns. */
+  readonly background?: boolean;
 }
 
 /** A result owed to a `ctx.agent` caller. */
@@ -166,8 +174,10 @@ export async function startAgentTasks(input: {
   const emission = getHarnessEmissionState(durableSession.state);
   // The pending batch keeps the waiting turn's ID even after a child's
   // question clears the live one, so a turn cancel still reaches these tasks.
-  const turnId =
-    getPendingCoordinationBatch(durableSession.state)?.event.turnId ?? activeTurnId(emission);
+  const pendingEvent = getPendingCoordinationBatch(durableSession.state)?.event;
+  const turnId = pendingEvent?.turnId ?? activeTurnId(emission);
+  // Elsewhere, and in a turn a schedule started, `background: true` waits like any call.
+  const backgroundAllowed = isInteractiveRootTurn(ctx, pendingEvent?.sequence ?? emission.sequence);
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -231,30 +241,57 @@ export async function startAgentTasks(input: {
     const action = entry.kind === "start" ? entry.target.action : entry.action;
     const name = action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
     const agentId = readAgentId(action);
+    const toolName = call.toolName ?? call.input.target;
+    const background =
+      call.background === true && call.workflowCaller === undefined && backgroundAllowed;
     let table = readTasks(session);
     const started = startTask(table, {
       agentId,
       callId: call.callId,
       creator: encodeTaskCreator(prepared.creator),
       kind: "agent",
-      mode: "foreground",
+      mode: background ? "background" : "foreground",
       name,
       nodeId: action.nodeId,
       now: input.now,
       ownerId: session.sessionId,
+      steering: {
+        message: call.input.message,
+        outputSchema: normalizeRequestedOutputSchema(call.input.outputSchema),
+      },
       timeoutMs: resolveAgentTaskTimeout({ action, bundle: prepared.bundle, ctx }),
       turnId,
       workflowCaller: call.workflowCaller,
     });
-    // A replayed call already started its child and resolved its caller.
-    if (started.kind === "existing") continue;
+    if (started.kind === "existing") {
+      // A replayed call already started its child; a background call still owes its receipt.
+      if (started.record.mode === "background" && call.workflowCaller === undefined) {
+        results.push(backgroundReceiptResult(started.record, toolName));
+      }
+      continue;
+    }
     if (started.kind === "rejected") {
       fail(call, action, { code: started.error.code, message: started.error.message });
       continue;
     }
     if (started.kind === "steered") {
-      fail(call, action, { code: AGENT_BUSY, message: renderAgentBusy(started.record.id) });
+      if (call.workflowCaller !== undefined) {
+        // `ctx.agent` resolves to the agent's own output, which belongs to the call that started it.
+        fail(call, action, { code: AGENT_BUSY, message: renderAgentBusy(started.record.id) });
+        continue;
+      }
+      session = setTaskTable(session, started.transition.table);
+      results.push(
+        await steerWorkingAgent({ callId: call.callId, ctx, steered: started, toolName }),
+      );
       continue;
+    }
+    if (background) {
+      const rejected = tooManyBackgroundTasksResult({ callId: call.callId, table, toolName });
+      if (rejected !== undefined) {
+        results.push(rejected);
+        continue;
+      }
     }
     const { record } = started;
     table = started.table;
@@ -360,6 +397,7 @@ export async function startAgentTasks(input: {
         }),
       );
     }
+    if (background) results.push(backgroundReceiptResult(record, toolName));
   }
 
   return {
