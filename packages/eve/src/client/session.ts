@@ -221,7 +221,8 @@ export class ClientSession {
    * `startIndex` to resume. Stop at a child turn boundary with
    * `isCurrentTurnBoundaryEvent`.
    *
-   * @throws {Error} When `called` belongs to a different session.
+   * @throws {Error} When `called` belongs to a different session or has no
+   * `childStreamPath` because an older eve version recorded it.
    */
   streamSubagent(
     called: SubagentCalledStreamEvent,
@@ -230,6 +231,12 @@ export class ClientSession {
     if (called.data.sessionId !== this.#state.sessionId) {
       throw new Error(
         `streamSubagent() requires a subagent.called event from session ${this.#state.sessionId}, but it came from session ${called.data.sessionId}.`,
+      );
+    }
+    // Events persisted before childStreamPath existed replay without it.
+    if (typeof called.data.childStreamPath !== "string") {
+      throw new Error(
+        `streamSubagent() requires a subagent.called event with childStreamPath, but call ${called.data.callId} has none. The event was recorded by an older eve version.`,
       );
     }
     const startIndex = options?.startIndex ?? 0;

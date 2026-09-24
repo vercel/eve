@@ -48,27 +48,15 @@ export default defineEval({
   },
 });
 
-/** The parent may finish its turn before recording the dispatch; watch one more turn if so. */
+/** The parent may finish its turn before recording the dispatch; wait for it on the stream if so. */
 async function requireRemoteCall(
   t: EveEvalContext,
   turn: EveEvalTurn,
 ): Promise<SubagentCalledStreamEvent> {
-  const first = findRemoteCall(turn.events);
-  if (first !== undefined) return first;
-
-  const next = await t.target
-    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .result();
-  const second = findRemoteCall(next.events);
-  if (second === undefined) throw new Error("The parent did not call remote-loopback.");
-  return second;
-}
-
-function findRemoteCall(
-  events: readonly MessageStreamEvent[],
-): SubagentCalledStreamEvent | undefined {
-  for (const event of events) {
+  for (const event of turn.events) {
     if (event.type === "subagent.called" && event.data.name === "remote-loopback") return event;
   }
-  return undefined;
+  return await t.target
+    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
+    .waitForEvent("subagent.called", { data: { name: "remote-loopback" } });
 }

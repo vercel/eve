@@ -1439,4 +1439,16 @@ describe("ClientSession.streamSubagent", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("rejects a subagent event recorded before childStreamPath existed", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+    const { childStreamPath: _, ...legacyData } = calledEvent().data;
+    const legacy = { ...calledEvent(), data: legacyData } as SubagentCalledStreamEvent;
+
+    expect(() => session.streamSubagent(legacy)).toThrow(
+      "streamSubagent() requires a subagent.called event with childStreamPath, but call call_1 has none. The event was recorded by an older eve version.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
