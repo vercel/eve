@@ -62,6 +62,23 @@ describe("normalizeSubagentConfig", () => {
     ).toThrow("Invalid subagent.");
   });
 
+  it("validates a remote subagent's timeout", () => {
+    const remote = (timeout: unknown) =>
+      normalizeSubagentConfig(
+        {
+          ...defineRemoteAgent({ description: "Drafts content.", url: "https://content.example" }),
+          timeout,
+        },
+        "Invalid subagent.",
+      );
+
+    expect(() => remote(3 * 60 * 60_000)).not.toThrow();
+    expect(() => remote(false)).not.toThrow();
+    expect(() => remote(0)).toThrow(
+      'Invalid subagent. "timeout" must be a positive number of milliseconds or false, received 0.',
+    );
+  });
+
   it("preserves a remote subagent's tool setting", () => {
     expect(
       normalizeSubagentConfig(

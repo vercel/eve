@@ -533,6 +533,33 @@ A subagent session and a task-mode run wait for their own background tasks befor
 subagent answers its caller with the reply it gives after it has seen the results, and a task-mode
 run returns the output of the result turn that delivers the last result.
 
+## Limit a call with `timeout`
+
+A workflow tool call has no time limit of its own; the session's lifetime bounds it. Set `timeout`,
+in milliseconds, to fail a call that runs longer:
+
+```ts title="agent/tools/run_tests.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Run the test suite in the sandbox.",
+  inputSchema: z.object({ filter: z.string().optional() }),
+  timeout: 20 * 60_000,
+  async execute(input, ctx) {
+    "use workflow";
+    return await runTests(input, ctx); // A "use step" helper.
+  },
+});
+```
+
+A call still working at the limit fails with `TIMED_OUT`. A waited call gets that error as its tool
+result, a `detach: true` call delivers it as a failed task result, and `task.settled` reports
+`failed` with the same error. eve then cancels the run, which unwinds as described in
+[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). Time the run spends waiting on
+`ctx.ask` or an approval does not count toward the limit. `timeout: false` is the same as leaving it
+unset.
+
 ## Cancel and clean up: `ctx.abortSignal`
 
 `ctx.abortSignal` aborts when the run is cancelled, for example when the turn that made the call is
@@ -559,7 +586,8 @@ first.
 
 The caller does not wait for that cleanup. Cancelling the turn records the call as cancelled at
 once and signals the run, which unwinds on its own. A run that cannot receive the signal yet, for
-example because it has only just started, is stopped immediately.
+example because it has only just started, is stopped immediately. A run that has not ended 35
+seconds after the signal, 5 seconds past its own grace period, is stopped outright.
 
 ## Workflow tool examples
 
@@ -674,10 +702,11 @@ its requests.
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the tool invocation.
 
-Starting a waiting workflow tool can also be retried. If dispatch is interrupted after starting a
-run, its retry starts another run, and both may execute. The parent tracks the run returned by the
-successful dispatch attempt. Use an application idempotency key for side effects that must happen
-only once.
+Starting a workflow tool can also be retried. If dispatch is interrupted after starting a run, its
+retry starts another run, but only one of them executes the body: each run first claims a command
+hook derived from the call's task, and a run that finds the hook taken exits without running the
+body or reporting. Steps inside the body still retry per their own policy, so use an application
+idempotency key for side effects that must happen only once.
 
 The workflow id derives from the executor's module path and function name. Inline executors use
 the tool module and the name `execute`; imported executors use their declaring module and name.

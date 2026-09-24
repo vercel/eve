@@ -91,6 +91,7 @@ export async function compileAgentConfig(
     source: ModuleSourceRef;
     tool?: boolean;
     limits?: CompiledAgentDefinition["limits"];
+    timeout?: CompiledAgentDefinition["timeout"];
   } = {
     compaction,
     name: manifest.agentId,
@@ -140,6 +141,10 @@ export async function compileAgentConfig(
 
   if (definition.tool !== undefined) {
     compiledConfig.tool = definition.tool;
+  }
+
+  if (definition.timeout !== undefined) {
+    compiledConfig.timeout = definition.timeout;
   }
 
   if (definition.limits !== undefined) {

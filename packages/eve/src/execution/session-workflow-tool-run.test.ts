@@ -4,10 +4,12 @@ import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-r
 import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { dismissStaleWorkflowRequestStep } from "#execution/tools/workflow/stale-request-step.js";
+import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cancelTasksStep } from "#tasks/owner.js";
+import { cancelTasksStep } from "#tasks/cancel.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
 
@@ -20,7 +22,11 @@ vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
   resumeHookStep: vi.fn(),
 }));
-vi.mock("#tasks/owner.js", async (importOriginal) => ({
+vi.mock("#execution/tools/workflow/stale-request-step.js", () => ({
+  dismissStaleWorkflowRequestStep: vi.fn(),
+}));
+vi.mock("#subagents/event-proxy-step.js", () => ({ runProxySubagentEventStep: vi.fn() }));
+vi.mock("#tasks/cancel.js", async (importOriginal) => ({
   ...(await importOriginal()),
   cancelTasksStep: vi.fn(),
 }));
@@ -36,6 +42,7 @@ const from = {
   runId: "run",
   sequence: 0,
   stepIndex: 0,
+  taskId: "research-abc234",
   toolName: "research",
   turnId: "turn",
 };
@@ -82,10 +89,7 @@ it.each([
       },
     ],
   ],
-  [
-    "a task on another run",
-    [{ ...workflowTask, child: { ...workflowTask.child!, runId: "other" } }],
-  ],
+  ["another task", [{ ...workflowTask, id: "research-def567" }]],
 ])("rejects an agent request when the run has %s", async (_label, records) => {
   await handleWorkflowToolRunMessage({
     cursor: createCursor(records as TaskRecord[]),
@@ -109,6 +113,83 @@ it.each([
       },
     ],
   });
+});
+
+it("proxies a working task's question with its taskId", async () => {
+  const cursor = createCursor([workflowTask]);
+  vi.mocked(runProxySubagentEventStep).mockResolvedValue(unchanged(cursor));
+  const request = { kind: "ask" as const, request: { prompt: "Deploy now?" } };
+
+  await handleWorkflowToolRunMessage({
+    cursor,
+    message: { from, kind: "request", replyTo: "answer-hook", request },
+  });
+
+  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      answerHook: expect.objectContaining({ runId: "run" }),
+      taskId: workflowTask.id,
+    }),
+  );
+  expect(dismissStaleWorkflowRequestStep).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["no task", []],
+  [
+    "a cancelled task",
+    [
+      {
+        ...workflowTask,
+        cancelConfirmBy: "2026-09-24T14:00:30.000Z",
+        status: "cancelled" as const,
+      },
+    ],
+  ],
+])(
+  "dismisses a question or approval from a run with %s instead of asking the user",
+  async (_label, records) => {
+    const cursor = createCursor(records as TaskRecord[]);
+    const ask = { kind: "ask" as const, request: { prompt: "Deploy now?" } };
+    const approval = {
+      action: { callId: "call", input: {}, kind: "tool-call" as const, toolName: "deploy" },
+      kind: "tool-approval" as const,
+      prompt: "Approve?",
+      requestId: "approval-1",
+    };
+
+    for (const request of [ask, approval]) {
+      const message = { from, kind: "request" as const, replyTo: "answer-hook", request };
+      await handleWorkflowToolRunMessage({ cursor, message });
+      expect(dismissStaleWorkflowRequestStep).toHaveBeenLastCalledWith(message);
+    }
+    expect(runProxySubagentEventStep).not.toHaveBeenCalled();
+  },
+);
+
+it("proxies a working task's authorization event with its taskId and drops a stale run's", async () => {
+  const event = {
+    childSessionId: "child",
+    event: { data: { name: "github" }, type: "authorization.required" },
+    kind: "subagent-authorization-event",
+  } as never;
+  const request = { event, kind: "authorization-request" as const };
+  const working = createCursor([workflowTask]);
+  vi.mocked(runProxySubagentEventStep).mockResolvedValue(unchanged(working));
+
+  await handleWorkflowToolRunMessage({
+    cursor: working,
+    message: { from, kind: "request", replyTo: "reply", request },
+  });
+  await handleWorkflowToolRunMessage({
+    cursor: createCursor([]),
+    message: { from, kind: "request", replyTo: "reply", request },
+  });
+
+  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ hookPayload: event, taskId: workflowTask.id }),
+  );
+  expect(dismissStaleWorkflowRequestStep).toHaveBeenCalledOnce();
 });
 
 it("cancels the run's agent tasks, settles its task, and returns the outcome as a tool result", async () => {

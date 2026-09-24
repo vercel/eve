@@ -1,3 +1,4 @@
+import { WORKFLOW_CANCELLATION_CLEANUP_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
@@ -14,20 +15,44 @@ import {
   type TaskOutcome,
 } from "#tasks/protocol.js";
 import { decodeTaskRecord, TASK_RECORD_VERSION, type TaskRecord } from "#tasks/record.js";
+import {
+  renderAgentMismatch,
+  renderAgentUnreachable,
+  renderLastStatus,
+  renderNotAnAgent,
+  renderTimedOut,
+  renderUnknownAgent,
+} from "#tasks/render.js";
 
 /** Session state key holding the owner's task records. */
 export const TASK_TABLE_STATE_KEY = "eve.taskTable";
 
-/** How long a cancelled child has to confirm before the owner hard-stops it. */
-export const TASK_CANCEL_CONFIRM_MS = 30_000;
+/**
+ * How long a cancelled agent has to confirm before the owner hard-stops it:
+ * the same cleanup window a workflow run gives its own body.
+ */
+export const TASK_CANCEL_CONFIRM_MS = WORKFLOW_CANCELLATION_CLEANUP_MS;
+
+/**
+ * A cancelled workflow run unwinds for its full cleanup window before it
+ * reports; the margin keeps the hard stop from racing that report.
+ */
+export const WORKFLOW_TASK_CANCEL_CONFIRM_MS = WORKFLOW_CANCELLATION_CLEANUP_MS + 5_000;
 
 /** Default time limit for one agent generation, in active (non-waiting) time. */
 export const DEFAULT_AGENT_TIMEOUT_MS = 2 * 60 * 60_000;
 
-const LAST_STATUS_MAX_LENGTH = 200;
+const MAX_DATE_MS = 8.64e15;
 
+declare const TASK_TABLE: unique symbol;
+
+/**
+ * The owner's task records. Only this module's transitions produce a table,
+ * so no other code can write a record into one.
+ */
 export interface TaskTable {
   readonly records: readonly TaskRecord[];
+  readonly [TASK_TABLE]: true;
 }
 
 /** A record that could not be decoded; it is reported as `STATE_LOST` and removed. */
@@ -65,12 +90,16 @@ export type TaskEffect =
       readonly record: TaskRecord;
       readonly usage?: TokenUsage;
     }
-  | { readonly kind: "reconcile"; readonly record: TaskRecord }
   | {
-      /** The run to terminate. The record no longer names it: a stopped run takes no more work. */
-      readonly kind: "hard-stop";
+      /**
+       * A stopped child did not confirm within its window. `child` is the run
+       * to hard-stop, which the record no longer names: a stopped run takes no
+       * more work. A remote child already has the cancel request, and an
+       * unstarted one has nothing to stop.
+       */
+      readonly kind: "unconfirmed";
       readonly record: TaskRecord;
-      readonly child: Extract<ChildAddress, { readonly kind: "local" | "workflow" }>;
+      readonly child?: Extract<ChildAddress, { readonly kind: "local" | "workflow" }>;
     };
 
 export interface TaskTransition {
@@ -78,7 +107,11 @@ export interface TaskTransition {
   readonly effects: readonly TaskEffect[];
 }
 
-const EMPTY_TABLE: TaskTable = { records: [] };
+function toTable(records: readonly TaskRecord[]): TaskTable {
+  return { records } as TaskTable;
+}
+
+const EMPTY_TABLE = toTable([]);
 
 /** Reads the table, decoding each record on its own so one bad record never fails the session. */
 export function readTaskTable(state: SessionStateMap | undefined): {
@@ -111,7 +144,7 @@ export function readTaskTable(state: SessionStateMap | undefined): {
     ids.add(decoded.record.id);
     records.push(decoded.record);
   }
-  return { lost, table: { records } };
+  return { lost, table: toTable(records) };
 }
 
 export function writeTaskTable(
@@ -172,29 +205,28 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
   );
   if (existing !== undefined) return { kind: "existing", record: existing };
 
-  const deadlineAt =
+  const deadlineMs =
     input.timeoutMs === false || input.timeoutMs === undefined
       ? undefined
-      : new Date(Date.parse(input.now) + input.timeoutMs).toISOString();
+      : Date.parse(input.now) + input.timeoutMs;
+  // A limit past the last representable date can never expire before the session does.
+  const deadlineAt =
+    deadlineMs === undefined || deadlineMs > MAX_DATE_MS
+      ? undefined
+      : new Date(deadlineMs).toISOString();
 
   if (input.agentId !== undefined) {
     const agent = findTask(table, input.agentId);
     if (agent === undefined) {
       return {
         kind: "rejected",
-        error: {
-          code: "UNKNOWN_AGENT",
-          message: `No agent with id "${input.agentId}" exists in this session. Omit agentId to start a new agent.`,
-        },
+        error: { code: "UNKNOWN_AGENT", message: renderUnknownAgent(input.agentId) },
       };
     }
     if (agent.kind !== "agent") {
       return {
         kind: "rejected",
-        error: {
-          code: "UNKNOWN_AGENT",
-          message: `"${input.agentId}" is a task, not an agent. Use task_cancel to stop it.`,
-        },
+        error: { code: "UNKNOWN_AGENT", message: renderNotAnAgent(input.agentId) },
       };
     }
     if (
@@ -203,19 +235,13 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     ) {
       return {
         kind: "rejected",
-        error: {
-          code: "AGENT_MISMATCH",
-          message: `Agent "${agent.id}" is a ${agent.name} agent. Call the ${agent.name} tool to continue it.`,
-        },
+        error: { code: "AGENT_MISMATCH", message: renderAgentMismatch(agent) },
       };
     }
     if (isTerminalTaskStatus(agent.status) && agent.child === undefined) {
       return {
         kind: "rejected",
-        error: {
-          code: "AGENT_UNREACHABLE",
-          message: `Agent "${agent.id}" can no longer be given more work. Omit agentId to start a new agent.`,
-        },
+        error: { code: "AGENT_UNREACHABLE", message: renderAgentUnreachable(agent.id, "ended") },
       };
     }
     if (!isTerminalTaskStatus(agent.status)) {
@@ -271,7 +297,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     v: TASK_RECORD_VERSION,
     workflowCaller: input.workflowCaller,
   });
-  return { kind: "started", record, table: { records: [...table.records, record] } };
+  return { kind: "started", record, table: toTable([...table.records, record]) };
 }
 
 /**
@@ -364,12 +390,12 @@ export function cancelTask(table: TaskTable, taskId: string, now: string): TaskT
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
   const cancelled = withoutUndefined({
     ...record,
-    cancelConfirmBy: new Date(Date.parse(now) + TASK_CANCEL_CONFIRM_MS).toISOString(),
+    cancelConfirmBy: cancelConfirmBy(record, now),
     clockStoppedAt: undefined,
     deadlineAt: undefined,
     // The owner already knows the outcome; there is nothing left to deliver.
     delivered: true,
-    lastStatus: summarizeOutcome({ status: "cancelled" }),
+    lastStatus: renderLastStatus({ status: "cancelled" }),
     status: "cancelled" as const,
   });
   return issueCommand(replace(table, cancelled), cancelled, { kind: "cancel" });
@@ -380,15 +406,12 @@ export function timeOutTask(table: TaskTable, taskId: string, now: string): Task
   const record = findTask(table, taskId);
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
   const outcome: TaskOutcome = {
-    error: {
-      code: "TIMED_OUT",
-      message: `The ${record.kind === "agent" ? "agent" : "task"} did not finish within its time limit and was stopped.`,
-    },
+    error: { code: "TIMED_OUT", message: renderTimedOut(record.kind) },
     status: "failed",
   };
   const timedOut = withoutUndefined({
     ...settleRecord(record, outcome),
-    cancelConfirmBy: new Date(Date.parse(now) + TASK_CANCEL_CONFIRM_MS).toISOString(),
+    cancelConfirmBy: cancelConfirmBy(record, now),
   });
   const commanded = issueCommand(replace(table, timedOut), timedOut, { kind: "cancel" });
   return {
@@ -398,8 +421,9 @@ export function timeOutTask(table: TaskTable, taskId: string, now: string): Task
 }
 
 /**
- * Evaluates deadlines. Due working tasks need one reconciliation read; a
- * cancelled task past its confirmation window needs a hard stop.
+ * Evaluates deadlines. A due working task times out and its child is asked
+ * to stop; a stopped task past its confirmation window is reported
+ * unconfirmed, with the run to hard-stop when the owner can stop it.
  */
 export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransition {
   const nowMs = Date.parse(now);
@@ -412,7 +436,9 @@ export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransi
       record.deadlineAt !== undefined &&
       Date.parse(record.deadlineAt) <= nowMs
     ) {
-      effects.push({ kind: "reconcile", record });
+      const timedOut = timeOutTask(next, record.id, now);
+      next = timedOut.table;
+      effects.push(...timedOut.effects);
       continue;
     }
     if (record.cancelConfirmBy !== undefined && Date.parse(record.cancelConfirmBy) <= nowMs) {
@@ -424,7 +450,11 @@ export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransi
         child: child === undefined ? record.child : undefined,
       });
       next = replace(next, confirmed);
-      if (child !== undefined) effects.push({ child, kind: "hard-stop", record: confirmed });
+      effects.push(
+        child === undefined
+          ? { kind: "unconfirmed", record: confirmed }
+          : { child, kind: "unconfirmed", record: confirmed },
+      );
     }
   }
   return { effects, table: next };
@@ -481,13 +511,13 @@ export function pruneTaskTable(table: TaskTable): TaskTable {
     if (record.cancelConfirmBy !== undefined) return true;
     return record.kind === "agent" && record.child !== undefined;
   });
-  return records.length === table.records.length ? table : { records };
+  return records.length === table.records.length ? table : toTable(records);
 }
 
 /** Removes one agent record, for example after its child session ended. */
 export function removeTask(table: TaskTable, taskId: string): TaskTable {
   const records = table.records.filter((record) => record.id !== taskId);
-  return records.length === table.records.length ? table : { records };
+  return records.length === table.records.length ? table : toTable(records);
 }
 
 /** Agents that finished their last generation and can be given more work. */
@@ -511,24 +541,15 @@ function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
     ...record,
     clockStoppedAt: undefined,
     deadlineAt: undefined,
-    lastStatus: summarizeOutcome(outcome),
+    lastStatus: renderLastStatus(outcome),
     status: outcome.status,
   });
 }
 
-function summarizeOutcome(outcome: TaskOutcome): string {
-  const text =
-    outcome.status === "completed"
-      ? typeof outcome.output === "string"
-        ? outcome.output
-        : JSON.stringify(outcome.output)
-      : outcome.status === "failed"
-        ? `Failed: ${outcome.error.message}`
-        : "Cancelled.";
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length <= LAST_STATUS_MAX_LENGTH
-    ? line
-    : `${line.slice(0, LAST_STATUS_MAX_LENGTH - 1)}…`;
+function cancelConfirmBy(record: TaskRecord, now: string): string {
+  const window =
+    record.kind === "workflow" ? WORKFLOW_TASK_CANCEL_CONFIRM_MS : TASK_CANCEL_CONFIRM_MS;
+  return new Date(Date.parse(now) + window).toISOString();
 }
 
 /** Extends the deadline by the time spent waiting on a human. */
@@ -542,10 +563,10 @@ function resumeDeadline(record: TaskRecord, now: string): string | undefined {
 
 function replace(table: TaskTable, record: TaskRecord): TaskTable {
   const index = table.records.findIndex((candidate) => candidate.id === record.id);
-  if (index < 0) return { records: [...table.records, record] };
+  if (index < 0) return toTable([...table.records, record]);
   const records = [...table.records];
   records[index] = record;
-  return { records };
+  return toTable(records);
 }
 
 function withoutUndefined<T extends object>(value: T): T {

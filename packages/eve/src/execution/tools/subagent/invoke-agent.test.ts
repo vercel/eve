@@ -69,6 +69,7 @@ const from: WorkflowToolRunRef = {
   runId: "run-1",
   sequence: 0,
   stepIndex: 0,
+  taskId: "research-abc234",
   toolName: "research",
   turnId: "turn-1",
 };

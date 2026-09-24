@@ -48,7 +48,7 @@ export async function dispatchCoordinationStep(
       now,
       request,
       session: nextSession,
-      startRun: () =>
+      startRun: (record) =>
         startWorkflowToolRun({
           agents: prepared.workflowAgents,
           callId: request.callId,
@@ -63,6 +63,7 @@ export async function dispatchCoordinationStep(
             turn: { id: batch.event.turnId, sequence: batch.event.sequence },
           },
           stepIndex: batch.event.stepIndex,
+          taskId: record.id,
           toolName: request.toolName,
           workflowId: request.workflowId,
         }),

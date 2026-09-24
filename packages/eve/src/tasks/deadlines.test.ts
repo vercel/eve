@@ -8,7 +8,11 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
-import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
+import {
+  requestWorkflowTurnCancellation,
+  resolveHookOwnerRunId,
+  resolveSessionOwnerRunId,
+} from "#execution/workflow-runtime.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
@@ -16,18 +20,22 @@ import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { applyTaskDeadlines } from "#tasks/deadlines.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
-import {
-  getTaskTable,
-  readTaskTimer,
-  TASK_TIMER_STATE_KEY,
-  taskTimerWakeToArm,
-} from "#tasks/state.js";
+import { getTaskTable, planTaskTimer, readTaskTimer, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
+import { recordNestedAgentInvocationTerminal } from "#tracing/agent-invocation-terminal.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   requestWorkflowTurnCancellation: vi.fn(),
+  resolveHookOwnerRunId: vi.fn(),
+  resolveSessionOwnerRunId: vi.fn(),
+}));
+vi.mock("#tracing/agent-invocation-terminal.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  recordNestedAgentInvocationTerminal: vi.fn(
+    (input: { readonly serializedContext: Record<string, unknown> }) => input.serializedContext,
+  ),
 }));
 vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -57,6 +65,11 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(deserializeContext).mockResolvedValue(new ContextContainer());
   vi.mocked(getWorld).mockResolvedValue(WORLD as never);
+  vi.mocked(resolveSessionOwnerRunId).mockImplementation(async (sessionId) => sessionId);
+  vi.mocked(resolveHookOwnerRunId).mockResolvedValue(undefined);
+  vi.mocked(recordNestedAgentInvocationTerminal).mockImplementation(
+    (input) => input.serializedContext,
+  );
 });
 
 describe("applyTaskDeadlines", () => {
@@ -95,7 +108,15 @@ describe("applyTaskDeadlines", () => {
       }),
     ]);
     // The confirmation window is the next wake.
-    expect(taskTimerWakeToArm(stateOf(update.sessionState))).toBe("2026-09-24T14:00:35.000Z");
+    expect(wakeToArm(stateOf(update.sessionState))).toBe("2026-09-24T14:00:35.000Z");
+    // The generation's invocation span ends with the timeout.
+    expect(recordNestedAgentInvocationTerminal).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        callId: "call-1",
+        sessionId: "parent",
+        terminal: expect.objectContaining({ error: expect.any(Error), outcome: "failed" }),
+      }),
+    );
   });
 
   it("replies to a ctx.agent caller instead of returning a tool result", async () => {
@@ -175,38 +196,47 @@ describe("applyTaskDeadlines", () => {
     expect(records(update.sessionState).map((record) => record.id)).toEqual(["billing-abc234"]);
     expect(records(update.sessionState)[0]).not.toHaveProperty("cancelConfirmBy");
     expect([...getProxyInputRequests(stateOf(update.sessionState)).keys()]).toEqual(["other"]);
+    // Each unconfirmed agent generation's span ends as cancelled; workflow tasks have none.
+    expect(
+      vi
+        .mocked(recordNestedAgentInvocationTerminal)
+        .mock.calls.map(([call]) => [call.callId, call.terminal.outcome]),
+    ).toEqual([
+      ["call-1", "cancelled"],
+      ["call-3", "cancelled"],
+    ]);
   });
 
-  it("settles a workflow task whose run already ended without reporting", async () => {
-    vi.mocked(getRun).mockReturnValue({ status: Promise.resolve("completed") } as never);
-    const working = createTaskRecord({
-      child: WORKFLOW_CHILD,
-      deadlineAt: DEADLINE,
-      id: "deploy-abc234",
-      kind: "workflow",
-      name: "deploy",
-    });
+  it("hard-stops the run that owns the child now, not the run the owner first knew", async () => {
+    // Bob's idle research agent handed off to a successor run on a new deployment,
+    // and a retried start left the deploy task's first run holding its command hook.
+    vi.mocked(resolveSessionOwnerRunId).mockResolvedValue("child-successor-run");
+    vi.mocked(resolveHookOwnerRunId).mockResolvedValue("run-0");
+    const confirmBy = "2026-09-24T14:00:30.000Z";
+    const tasks = [
+      createTaskRecord({ cancelConfirmBy: confirmBy, child: LOCAL_CHILD, status: "cancelled" }),
+      createTaskRecord({
+        callId: "call-2",
+        cancelConfirmBy: confirmBy,
+        child: WORKFLOW_CHILD,
+        id: "deploy-abc234",
+        kind: "workflow",
+        name: "deploy",
+        status: "cancelled",
+      }),
+    ].map((record) => ({ ...record, delivered: true }));
 
-    const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+    await applyTaskDeadlines(input(tasks, { now: "2026-09-24T14:00:31.000Z" }));
 
-    expect(getRun).toHaveBeenCalledExactlyOnceWith("run-1");
-    const error = {
-      code: "EXECUTION_FAILED",
-      message: "The workflow run ended without reporting a result.",
-    };
-    expect(update.results).toEqual([
-      { callId: "call-1", isError: true, kind: "tool-result", output: error, toolName: "deploy" },
+    expect(resolveSessionOwnerRunId).toHaveBeenCalledExactlyOnceWith("child-session");
+    expect(resolveHookOwnerRunId).toHaveBeenCalledExactlyOnceWith("command-1");
+    expect(vi.mocked(cancelRun).mock.calls.map((call) => call[1])).toEqual([
+      "child-successor-run",
+      "run-0",
     ]);
-    expect(update.events).toEqual([
-      expect.objectContaining({ data: expect.objectContaining({ error, status: "failed" }) }),
-    ]);
-    expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
-    // Nothing to confirm: the run already ended, so the settled record is pruned.
-    expect(records(update.sessionState)).toEqual([]);
   });
 
-  it("times out a workflow task whose run is still going and asks it to stop", async () => {
-    vi.mocked(getRun).mockReturnValue({ status: Promise.resolve("running") } as never);
+  it("times out a due workflow task like an agent, without reading the run's status", async () => {
     const working = createTaskRecord({
       child: WORKFLOW_CHILD,
       deadlineAt: DEADLINE,
@@ -225,6 +255,10 @@ describe("applyTaskDeadlines", () => {
       { hookToken: "command-1", runId: "run-1" },
       expect.any(String),
     );
+    expect(getRun).not.toHaveBeenCalled();
+    // The run gets its full 30-second cleanup window plus a margin before a hard stop.
+    expect(records(update.sessionState)[0]?.cancelConfirmBy).toBe("2026-09-24T14:00:40.000Z");
+    expect(recordNestedAgentInvocationTerminal).not.toHaveBeenCalled();
   });
 
   it("clears the fired timer so the owner re-arms for the next deadline", async () => {
@@ -237,18 +271,20 @@ describe("applyTaskDeadlines", () => {
     const update = await applyTaskDeadlines(
       input(tasks, {
         now: AFTER_DEADLINE,
-        state: { [TASK_TIMER_STATE_KEY]: { runId: "timer-1", wakeAt: DEADLINE } },
+        state: {
+          [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner", runId: "timer-1", wakeAt: DEADLINE },
+        },
       }),
     );
 
     expect(readTaskTimer(stateOf(update.sessionState))).toBeUndefined();
     // The second task's deadline is still open; the first now awaits its confirmation.
-    expect(taskTimerWakeToArm(stateOf(update.sessionState))).toBe("2026-09-24T14:00:35.000Z");
+    expect(wakeToArm(stateOf(update.sessionState))).toBe("2026-09-24T14:00:35.000Z");
   });
 
   it("ignores a stale signal: nothing is due, and a later armed timer stays armed", async () => {
     const working = createTaskRecord({ child: LOCAL_CHILD, deadlineAt: DEADLINE });
-    const armed = { runId: "timer-2", wakeAt: DEADLINE };
+    const armed = { ownerRunId: "owner", runId: "timer-2", wakeAt: DEADLINE };
 
     const update = await applyTaskDeadlines(
       input([working], {
@@ -262,7 +298,7 @@ describe("applyTaskDeadlines", () => {
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(records(update.sessionState)).toEqual([working]);
     expect(readTaskTimer(stateOf(update.sessionState))).toEqual(armed);
-    expect(taskTimerWakeToArm(stateOf(update.sessionState))).toBeUndefined();
+    expect(wakeToArm(stateOf(update.sessionState))).toBeUndefined();
   });
 
   it("trusts the armed timer's wake time when this step's clock lags it", async () => {
@@ -272,12 +308,31 @@ describe("applyTaskDeadlines", () => {
       input([working], {
         now: "2026-09-24T13:59:59.900Z",
         signal: { kind: "task.deadline", ownerRunId: "owner", wakeAt: DEADLINE },
-        state: { [TASK_TIMER_STATE_KEY]: { runId: "timer-1", wakeAt: DEADLINE } },
+        state: {
+          [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner", runId: "timer-1", wakeAt: DEADLINE },
+        },
       }),
     );
 
     expect(update.results).toHaveLength(1);
     expect(readTaskTimer(stateOf(update.sessionState))).toBeUndefined();
+  });
+
+  it("does not trust the wake time of a signal from a timer another owner run armed", async () => {
+    const working = createTaskRecord({ child: LOCAL_CHILD, deadlineAt: DEADLINE });
+
+    const update = await applyTaskDeadlines(
+      input([working], {
+        now: "2026-09-24T13:59:59.900Z",
+        signal: { kind: "task.deadline", ownerRunId: "previous-owner", wakeAt: DEADLINE },
+        state: {
+          [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner", runId: "timer-1", wakeAt: DEADLINE },
+        },
+      }),
+    );
+
+    expect(update.results).toEqual([]);
+    expect(readTaskTimer(stateOf(update.sessionState))?.runId).toBe("timer-1");
   });
 
   it("leaves a task waiting on a human alone", async () => {
@@ -299,7 +354,7 @@ describe("applyTaskDeadlines", () => {
     const state = taskTableState([working]);
     const table = state["eve.taskTable"] as { records: unknown[] };
     table.records.push({ id: "old-abc234", name: "old", v: 0 });
-    expect(taskTimerWakeToArm(state)).toBe(new Date(0).toISOString());
+    expect(wakeToArm(state)).toBe(new Date(0).toISOString());
 
     const update = await applyTaskDeadlines({
       now: "2026-09-24T13:00:00.000Z",
@@ -310,9 +365,15 @@ describe("applyTaskDeadlines", () => {
 
     expect(update).toMatchObject({ events: [], replies: [], results: [] });
     expect(stateOf(update.sessionState)?.["eve.taskTable"]).toEqual({ records: [working] });
-    expect(taskTimerWakeToArm(stateOf(update.sessionState))).toBe(DEADLINE);
+    expect(wakeToArm(stateOf(update.sessionState))).toBe(DEADLINE);
   });
 });
+
+/** The wake the owner would arm next, ignoring clock and owner-run checks. */
+function wakeToArm(state: SessionStateMap | undefined): string | undefined {
+  const plan = planTaskTimer(state, { nowMs: 0, ownerRunId: "owner" });
+  return plan.kind === "arm" ? plan.wakeAt : undefined;
+}
 
 function input(
   tasks: readonly TaskRecord[],

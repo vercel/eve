@@ -23,6 +23,7 @@ import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
+import type { TaskTimeout } from "#shared/task-timeout.js";
 import type { Node } from "#shared/node.js";
 import type {
   SourceRef,
@@ -302,6 +303,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       name: string;
       outputSchema?: JsonObject;
       path: string;
+      timeout?: TaskTimeout;
       tool?: boolean;
       url: string;
     }

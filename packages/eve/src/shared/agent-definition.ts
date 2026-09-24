@@ -317,6 +317,7 @@ export type InternalAgentDefinition = {
   source?: ModuleSourceRef;
   tool?: boolean;
   limits?: AgentLimitsDefinition;
+  timeout?: number | false;
 };
 
 /**
@@ -370,6 +371,18 @@ type PublicAgentDefinitionBase = {
    * per-message output schema.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
+  /**
+   * Time limit for each call of this agent as a subagent, in milliseconds of
+   * active time: time the call spends waiting on a question, approval, or
+   * sign-in that reaches the root channel does not count. A call still
+   * working at the limit fails with `TIMED_OUT`, and eve cancels its turn.
+   * `false` removes the limit; the parent session's lifetime still bounds
+   * the call. On the root agent, it applies to calls of the built-in `agent`
+   * tool.
+   *
+   * @default 7_200_000 (2 hours)
+   */
+  readonly timeout?: number | false;
 };
 
 /**

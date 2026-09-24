@@ -703,6 +703,45 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("bundles the task timer workflow without Node.js builtins or the logger", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-task-timer-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+
+    try {
+      await writeFile(compiledArtifactsBootstrapPath, "export {};\n");
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [resolvePackageSourceFilePath("src/tasks/timer.ts")],
+      );
+
+      // The driver build fails outright when a Node.js builtin reaches it.
+      await builder.build();
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      expect(encodedChunksMatch).not.toBeNull();
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+
+      expect(decodedWorkflowCode).toContain("taskTimerWorkflow");
+      expect(decodedWorkflowCode).not.toMatch(/from ["']node:/u);
+      expect(decodedWorkflowCode).not.toContain("createLogger");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("allows a node builtin used only inside a use step body", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-node-step-ok-"));
     const outDir = join(tempRoot, "workflow-build");

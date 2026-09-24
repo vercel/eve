@@ -11,6 +11,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
+import { normalizeTaskTimeout, type TaskTimeout } from "#shared/task-timeout.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
@@ -309,6 +310,7 @@ async function resolveRuntimeRemoteAgent(input: {
     path: string;
     sourceId: string;
     sourceKind: "module";
+    timeout?: TaskTimeout;
     tool?: boolean;
     url: string;
   } = {
@@ -335,6 +337,14 @@ async function resolveRuntimeRemoteAgent(input: {
 
   if (resolvedRecord.forwardPrincipal === true) {
     resolvedRemoteAgent.forwardPrincipal = true;
+  }
+
+  const timeout = normalizeTaskTimeout(
+    resolvedRecord.timeout,
+    `Remote agent "${input.sourceRef.logicalPath}"`,
+  );
+  if (timeout !== undefined) {
+    resolvedRemoteAgent.timeout = timeout;
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);

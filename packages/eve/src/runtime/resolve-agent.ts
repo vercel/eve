@@ -191,6 +191,7 @@ function createResolvedAgentConfig(
     outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
     source?: NonNullable<ResolvedAgent["config"]>["source"];
+    timeout?: NonNullable<ResolvedAgent["config"]>["timeout"];
     tool?: boolean;
     limits?: NonNullable<ResolvedAgent["config"]>["limits"];
   } = {
@@ -267,6 +268,10 @@ function createResolvedAgentConfig(
 
   if (manifest.config.tool !== undefined) {
     config.tool = manifest.config.tool;
+  }
+
+  if (manifest.config.timeout !== undefined) {
+    config.timeout = manifest.config.timeout;
   }
 
   if (manifest.config.limits !== undefined) {

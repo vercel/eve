@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -16,22 +16,29 @@ import {
   startAgentTasks,
   syncTaskTimer,
 } from "#tasks/owner-body.js";
-import { cancelTasksStep, ensureTaskCallbackAliasStep, startAgentTasksStep } from "#tasks/owner.js";
+import { cancelTasksStep } from "#tasks/cancel.js";
+import { ensureTaskCallbackAliasStep, startAgentTasksStep } from "#tasks/owner.js";
 import { TASK_CALLBACK_ALIAS_STATE_KEY, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
-import { armTaskTimerStep } from "#tasks/timer-steps.js";
+import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
 vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
   emitSubagentEventStep: vi.fn(),
 }));
 vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
-vi.mock("#tasks/timer-steps.js", () => ({ armTaskTimerStep: vi.fn() }));
+vi.mock("#tasks/timer-steps.js", () => ({
+  armTaskTimerStep: vi.fn(),
+  cancelTaskTimerStep: vi.fn(),
+}));
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
+}));
 vi.mock("#tasks/owner.js", () => ({
   applyTaskReportStep: vi.fn(),
-  cancelTasksStep: vi.fn(),
   ensureTaskCallbackAliasStep: vi.fn(),
   startAgentTasksStep: vi.fn(),
 }));
+vi.mock("#tasks/cancel.js", () => ({ cancelTasksStep: vi.fn() }));
 vi.mock("#tasks/workflow-task.js", () => ({ settleWorkflowTaskStep: vi.fn() }));
 
 const ALIAS = `eve:task-callback:${"ab".repeat(24)}`;
@@ -168,6 +175,7 @@ describe("settleWorkflowTask", () => {
         runId: "run-1",
         sequence: 0,
         stepIndex: 0,
+        taskId: "deploy-abc234",
         toolName: "deploy",
         turnId: "turn-1",
       },
@@ -185,14 +193,25 @@ describe("settleWorkflowTask", () => {
 
 describe("syncTaskTimer", () => {
   const DEADLINE = "2026-09-24T14:00:00.000Z";
+  const BEFORE_DEADLINE = Date.parse("2026-09-24T12:00:00.000Z");
 
   beforeEach(() => {
+    vi.useFakeTimers({ now: BEFORE_DEADLINE, toFake: ["Date"] });
     vi.mocked(armTaskTimerStep).mockImplementation(async (input) => ({
       sessionState: stateWith({
         ...input.sessionState.snapshot.session.state,
-        [TASK_TIMER_STATE_KEY]: { runId: "timer-new", wakeAt: input.wakeAt },
+        [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner-1", runId: "timer-new", wakeAt: input.wakeAt },
       }),
     }));
+    vi.mocked(cancelTaskTimerStep).mockImplementation(async (input) => {
+      const { [TASK_TIMER_STATE_KEY]: _timer, ...state } =
+        input.sessionState.snapshot.session.state ?? {};
+      return { sessionState: stateWith(state) };
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("arms the timer once an owner update records a deadline", async () => {
@@ -215,16 +234,21 @@ describe("syncTaskTimer", () => {
       expect.objectContaining({ wakeAt: DEADLINE }),
     );
     expect(cursor.sessionState.snapshot.session.state?.[TASK_TIMER_STATE_KEY]).toEqual({
+      ownerRunId: "owner-1",
       runId: "timer-new",
       wakeAt: DEADLINE,
     });
   });
 
-  it("keeps an armed timer that fires no later than the next deadline", async () => {
+  it("keeps a timer this owner armed that fires no later than the next deadline", async () => {
     const cursor = createCursor(
       stateWith({
         ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
-        [TASK_TIMER_STATE_KEY]: { runId: "timer-1", wakeAt: "2026-09-24T13:00:00.000Z" },
+        [TASK_TIMER_STATE_KEY]: {
+          ownerRunId: "owner-1",
+          runId: "timer-1",
+          wakeAt: "2026-09-24T13:00:00.000Z",
+        },
       }),
       vi.fn(async () => {}),
     );
@@ -232,13 +256,18 @@ describe("syncTaskTimer", () => {
     await syncTaskTimer(cursor);
 
     expect(armTaskTimerStep).not.toHaveBeenCalled();
+    expect(cancelTaskTimerStep).not.toHaveBeenCalled();
   });
 
   it("re-arms when a deadline is earlier than the armed timer", async () => {
     const cursor = createCursor(
       stateWith({
         ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
-        [TASK_TIMER_STATE_KEY]: { runId: "timer-1", wakeAt: "2026-09-24T15:00:00.000Z" },
+        [TASK_TIMER_STATE_KEY]: {
+          ownerRunId: "owner-1",
+          runId: "timer-1",
+          wakeAt: "2026-09-24T15:00:00.000Z",
+        },
       }),
       vi.fn(async () => {}),
     );
@@ -250,7 +279,60 @@ describe("syncTaskTimer", () => {
     );
   });
 
-  it("arms nothing when no task has a deadline", async () => {
+  it("re-arms a timer a predecessor owner armed, which may have retired with its deployment", async () => {
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
+        [TASK_TIMER_STATE_KEY]: {
+          ownerRunId: "owner-0",
+          runId: "timer-1",
+          wakeAt: "2026-09-24T13:00:00.000Z",
+        },
+      }),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ wakeAt: DEADLINE }),
+    );
+  });
+
+  it("re-arms for now when the armed timer's signal is overdue", async () => {
+    vi.setSystemTime(Date.parse("2026-09-24T14:05:00.000Z"));
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
+        [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner-1", runId: "timer-1", wakeAt: DEADLINE },
+      }),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ wakeAt: "2026-09-24T14:05:00.000Z" }),
+    );
+  });
+
+  it("cancels the armed timer once no task needs a wake", async () => {
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([createTaskRecord()]),
+        [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner-1", runId: "timer-1", wakeAt: DEADLINE },
+      }),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).not.toHaveBeenCalled();
+    expect(cancelTaskTimerStep).toHaveBeenCalledOnce();
+    expect(cursor.sessionState.snapshot.session.state?.[TASK_TIMER_STATE_KEY]).toBeUndefined();
+  });
+
+  it("arms nothing when no task has a deadline and no timer is armed", async () => {
     const cursor = createCursor(
       stateWith(taskTableState([createTaskRecord()])),
       vi.fn(async () => {}),
@@ -259,6 +341,7 @@ describe("syncTaskTimer", () => {
     await syncTaskTimer(cursor);
 
     expect(armTaskTimerStep).not.toHaveBeenCalled();
+    expect(cancelTaskTimerStep).not.toHaveBeenCalled();
   });
 });
 

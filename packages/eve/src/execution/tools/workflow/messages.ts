@@ -51,6 +51,7 @@ export interface WorkflowToolRunRef {
   readonly runId: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId: string;
   readonly toolName: string;
   readonly turnId: string;
 }

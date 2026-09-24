@@ -29,6 +29,7 @@ export default defineRemoteAgent({
 | `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
 | `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
 | `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type for the first turn of each fresh remote session. A continuation may provide its own per-call schema.                              |
+| `timeout`          | `number \| false`                             | No       | `7_200_000`       | Time limit for each call, in milliseconds of active time. A call still working at the limit fails with `TIMED_OUT`. `false` removes the limit.           |
 | `tool`             | `boolean`                                     | No       | `true`            | Expose the remote agent as a tool to the parent model. Set `false` to allow only `ctx.agent()` calls from authored workflow tools.                       |
 
 ## Dynamic remote agents
@@ -193,6 +194,18 @@ A remote subagent runs in its own deployment, and the parent turn waits for its 
 The parent stream carries the same `task.started`, `action.result`, and `task.settled` events as local delegation. For a remote call, `task.started.data.child.remote.url` records the target.
 
 Clients follow a remote child through the parent. [`session.streamSubagent()`](./client/streaming#follow-a-subagent) reads `task.started.data.child.streamPath`, a route on the parent deployment. The parent verifies that the child belongs to that session, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
+
+Each remote call has the same time limit as a local one: 2 hours of active time unless you set `timeout` on the definition, in milliseconds, or `false` to keep only the parent session's lifetime as the limit. A call still working at the limit fails with `TIMED_OUT`, and eve sends the remote child a cancellation. A remote agent that typically runs longer needs a larger `timeout`:
+
+```ts title="agent/subagents/content.ts"
+import { defineRemoteAgent } from "eve";
+
+export default defineRemoteAgent({
+  url: () => process.env.CONTENT_AGENT_URL ?? "https://content-agent.example.com",
+  description: "Drafts long-form content. Typical runs take 5 to 15 minutes.",
+  timeout: 3 * 60 * 60_000,
+});
+```
 
 Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 

@@ -11,6 +11,7 @@ import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { getTaskTable, readTaskTimer } from "#tasks/state.js";
 import { cancelTaskTimer } from "#tasks/timer-steps.js";
+import { resolveSessionOwnerRunId } from "#execution/workflow-runtime.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
@@ -69,7 +70,7 @@ export async function terminateChildSessionsStep(input: {
           sessionId: child.sessionId,
         });
       } else if (child.kind === "local") {
-        await cancelRun(await getWorld(), child.sessionId, {
+        await cancelRun(await getWorld(), await resolveSessionOwnerRunId(child.sessionId), {
           cancelReason: "Parent session ended",
         });
       } else if (!isTerminalTaskStatus(record.status)) {

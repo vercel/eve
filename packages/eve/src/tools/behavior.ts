@@ -1,4 +1,5 @@
 import type { WebSearchProvider } from "#shared/web-search.js";
+import type { TaskTimeout } from "#shared/task-timeout.js";
 import type { WorkflowToolDetach } from "#tools/workflow-definition.js";
 
 /** Session facts that can hide a selected tool without changing source composition. */
@@ -12,6 +13,7 @@ export type CompiledToolHandling =
       readonly kind: "workflow-tool";
       readonly workflowId: string;
       readonly detach?: WorkflowToolDetach;
+      readonly timeout?: TaskTimeout;
     };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */

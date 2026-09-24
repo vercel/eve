@@ -1436,4 +1436,32 @@ describe("ClientSession.streamSubagent", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("rejects a remote child proxied through another parent session", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession({ sessionId: "session_2", streamIndex: 0 });
+
+    expect(() => session.streamSubagent(startedEvent())).toThrow(
+      "streamSubagent() requires a task.started event from session session_2, but task research-abc234 streams from /eve/v1/session/session_1/subagents/call_1/child_1/stream.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a child whose stream path names another session", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+    const started = startedEvent({ remote: false });
+    const tampered: TaskStartedStreamEvent = {
+      ...started,
+      data: {
+        ...started.data,
+        child: { sessionId: "child_1", streamPath: "/eve/v1/session/other_session/stream" },
+      },
+    };
+
+    expect(() => session.streamSubagent(tampered)).toThrow(
+      "streams from /eve/v1/session/other_session/stream",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

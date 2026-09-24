@@ -9,6 +9,7 @@ import type { JsonValue } from "#shared/json.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import type { TaskError, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { AGENT_CALL_CANCELLED_MESSAGE } from "#tasks/render.js";
 
 // Conversions between the child's settled turn, the kernel's outcome, and
 // the tool result the owner's model reads.
@@ -57,7 +58,7 @@ export function toToolResult(
     output:
       outcome.status === "failed"
         ? result.output
-        : { code: SUBAGENT_EXECUTION_FAILED, message: "The agent invocation was cancelled." },
+        : { code: SUBAGENT_EXECUTION_FAILED, message: AGENT_CALL_CANCELLED_MESSAGE },
     toolName: record.name,
   };
 }

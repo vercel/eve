@@ -582,6 +582,7 @@ const compiledAgentCompactionDefinitionSchema: z.ZodType<CompiledAgentCompaction
 const sessionTokenLimitSchema = z.union([z.number().int().positive(), z.literal(false)]);
 const sessionTokenCostLimitSchema = z.union([z.number().finite().positive(), z.literal(false)]);
 const sessionTimeoutSchema = z.union([z.number().int().positive(), z.literal(false)]);
+const taskTimeoutSchema = z.union([z.number().finite().positive(), z.literal(false)]);
 
 const compiledAgentLimitsDefinitionSchema = z
   .object({
@@ -609,6 +610,7 @@ const compiledAgentConfigBaseFields = {
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
   source: moduleSourceRefSchema,
+  timeout: taskTimeoutSchema.optional(),
   tool: z.boolean().optional(),
   limits: compiledAgentLimitsDefinitionSchema.optional(),
 };
@@ -825,6 +827,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
               .union([z.boolean(), z.object({ timeout: z.number().positive() }).strict()])
               .optional(),
             kind: z.literal("workflow-tool"),
+            timeout: taskTimeoutSchema.optional(),
             workflowId: z.string(),
           })
           .strict(),
@@ -1205,6 +1208,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
           },
     source: { ...config.source },
+    timeout: config.timeout,
     tool: config.tool,
   };
 

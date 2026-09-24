@@ -4,10 +4,10 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { isInactiveTimeoutTarget } from "#execution/session/timeout-steps.js";
+import { resolveHookOwnerRunId, resolveSessionOwnerRunId } from "#execution/workflow-runtime.js";
 import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { settledEvents } from "#tasks/events.js";
 import {
@@ -21,29 +21,19 @@ import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { holdTaskResult } from "#tasks/results.js";
 import { readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
+import { evaluateTaskDeadlines, markTaskDelivered, type TaskEffect } from "#tasks/table.js";
+import { runCommands } from "#tasks/transport.js";
 import {
-  applyTaskMessage,
-  evaluateTaskDeadlines,
-  markTaskDelivered,
-  timeOutTask,
-  type TaskEffect,
-  type TaskTable,
-  type TaskTransition,
-} from "#tasks/table.js";
-import { runCommands, type CommandEffect } from "#tasks/transport.js";
+  flushAgentInvocationTraces,
+  invocationError,
+  recordNestedAgentInvocationTerminal,
+} from "#tracing/agent-invocation-terminal.js";
 
 // Owner-side handling of the timer's `task.deadline` signal: time out due
-// tasks after one reconciliation read, and hard-stop children that did not
-// confirm a cancel in time. Nothing here waits on a child.
-
-const log = createLogger("tasks.deadlines");
+// tasks, and hard-stop children that did not confirm a stop in time.
+// Nothing here waits on a child.
 
 const HARD_STOP_REASON = "The task did not stop within its cancellation window.";
-
-const ENDED_WITHOUT_RESULT: TaskError = {
-  code: "EXECUTION_FAILED",
-  message: "The workflow run ended without reporting a result.",
-};
 
 /** Applies one timer signal. Every signal is re-evaluated, so a stale one does nothing. */
 export async function applyTaskDeadlinesStep(input: {
@@ -67,48 +57,61 @@ export async function applyTaskDeadlines(input: {
   // The armed timer's own signal proves its wake time passed, even when this
   // step's clock lags the clock the timer slept on.
   const nowMs =
-    armed !== undefined && input.signal.wakeAt === armed.wakeAt
+    armed !== undefined &&
+    input.signal.wakeAt === armed.wakeAt &&
+    input.signal.ownerRunId === armed.ownerRunId
       ? Math.max(Date.parse(input.now), Date.parse(armed.wakeAt))
       : Date.parse(input.now);
   const now = new Date(nowMs).toISOString();
 
   const evaluated = evaluateTaskDeadlines(readTasks(session), now);
   let table = evaluated.table;
-  const commands: CommandEffect[] = [];
-  const events: UnstampedMessageStreamEvent[] = [];
+  let serializedContext = input.serializedContext;
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   // Background results are delivered by a later model step, not to a caller.
   const held: { readonly outcome: TaskOutcome; readonly record: TaskRecord }[] = [];
   for (const effect of evaluated.effects) {
-    if (effect.kind === "hard-stop") {
-      await hardStop(effect);
-      const { child } = effect;
-      // The stopped run can no longer take an answer.
-      session = clearProxyInputRequestsWhere(session, (route) =>
-        child.kind === "local"
-          ? route.childContinuationToken === child.continuationToken
-          : route.answerHook?.runId === child.runId,
-      );
+    if (effect.kind === "unconfirmed") {
+      const { child, record } = effect;
+      if (child !== undefined) {
+        const runId = await hardStop(child, record);
+        // The stopped run can no longer take an answer.
+        session = clearProxyInputRequestsWhere(session, (route) =>
+          child.kind === "local"
+            ? route.childContinuationToken === child.continuationToken
+            : route.answerHook?.runId === runId || route.answerHook?.runId === child.runId,
+        );
+      }
+      // A child that never confirmed its stop ends its generation's span here.
+      serializedContext = recordTaskTraceTerminal({
+        nowMs,
+        outcome: { status: "cancelled" },
+        record: effect.record,
+        serializedContext,
+        sessionId: session.sessionId,
+      });
       continue;
     }
-    if (effect.kind !== "reconcile") continue;
-    const transition = await reconcile(table, effect.record, now);
-    table = transition.table;
-    commands.push(...commandEffects(transition.effects));
-    events.push(...settledEvents(transition.effects));
-    for (const settled of transition.effects) {
-      if (settled.kind !== "settled" || settled.outcome.status !== "failed") continue;
-      if (settled.record.mode === "background" && settled.record.workflowCaller === undefined) {
-        held.push({ outcome: settled.outcome, record: settled.record });
-        continue;
-      }
-      // The result goes straight to whoever waits on the call, so it is delivered now.
-      table = markTaskDelivered(table, settled.record.id, settled.record.generation);
-      resolveCaller(settled.record, settled.outcome.error, { replies, results });
+    if (effect.kind !== "settled" || effect.outcome.status !== "failed") continue;
+    const { outcome, record } = effect;
+    serializedContext = recordTaskTraceTerminal({
+      nowMs,
+      outcome,
+      record,
+      serializedContext,
+      sessionId: session.sessionId,
+    });
+    if (record.mode === "background" && record.workflowCaller === undefined) {
+      held.push({ outcome, record });
+      continue;
     }
+    // The result goes straight to whoever waits on the call, so it is delivered now.
+    table = markTaskDelivered(table, record.id, record.generation);
+    resolveCaller(record, outcome.error, { replies, results });
   }
-  if (commands.length > 0) await runCommands(commands, await readContext(input.serializedContext));
+  const commands = commandEffects(evaluated.effects);
+  if (commands.length > 0) await runCommands(commands, await readContext(serializedContext));
 
   // Once its wake time passes the armed timer has fired; clearing it lets the
   // owner arm one for the next deadline.
@@ -117,67 +120,63 @@ export async function applyTaskDeadlines(input: {
   session = setTaskTable({ ...session, state: writeTaskTimer(session.state, timer) }, table);
   for (const { outcome, record } of held) session = holdTaskResult(session, record, outcome);
   return {
-    events,
+    events: settledEvents(evaluated.effects),
     replies,
     results,
-    serializedContext: input.serializedContext,
+    serializedContext: await flushAgentInvocationTraces(serializedContext),
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }
 
 /**
- * One read of the child's state before timing a task out. A workflow run
- * that already ended without its outcome reaching the owner settles the task
- * `failed`. An agent's session outlives each call, so its run status says
- * nothing about this call's result, and a remote session has no read route;
- * both time out, and a result that arrives later is dropped.
+ * Terminates the child's current run. A local child may have handed off to
+ * a successor run, so the run that owns its stable inbox is stopped; a
+ * duplicate workflow run never ran the body, so the run that owns the
+ * command hook is stopped. Returns the run it stopped.
  */
-async function reconcile(
-  table: TaskTable,
+async function hardStop(
+  child: NonNullable<Extract<TaskEffect, { kind: "unconfirmed" }>["child"]>,
   record: TaskRecord,
-  now: string,
-): Promise<TaskTransition> {
-  if (record.child?.kind === "workflow" && (await hasRunEnded(record.child.runId))) {
-    return applyTaskMessage(
-      table,
-      {
-        generation: record.generation,
-        kind: "task.settled",
-        outcome: { error: ENDED_WITHOUT_RESULT, status: "failed" },
-        taskId: record.id,
-      },
-      now,
-    );
-  }
-  return timeOutTask(table, record.id, now);
-}
-
-async function hasRunEnded(runId: string): Promise<boolean> {
+): Promise<string> {
+  let runId = child.kind === "local" ? child.sessionId : child.runId;
   try {
-    const status = await getRun(runId).status;
-    return status === "completed" || status === "failed" || status === "cancelled";
-  } catch (error) {
-    // A run the world no longer knows has ended.
-    if (isInactiveTimeoutTarget(error)) return true;
-    logError(log, "failed to read a task run's status", error, { runId });
-    return false;
-  }
-}
-
-async function hardStop(effect: Extract<TaskEffect, { kind: "hard-stop" }>): Promise<void> {
-  const { child, record } = effect;
-  const runId = child.kind === "local" ? child.sessionId : child.runId;
-  try {
+    runId =
+      child.kind === "local"
+        ? await resolveSessionOwnerRunId(child.sessionId)
+        : ((await resolveHookOwnerRunId(child.commandToken)) ?? child.runId);
     await cancelRun(await getWorld(), runId, { cancelReason: HARD_STOP_REASON });
   } catch (error) {
     if (!isInactiveTimeoutTarget(error)) {
-      logError(log, "failed to hard-stop a task child", error, {
+      logError(createLogger("tasks.deadlines"), "failed to hard-stop a task child", error, {
         childKind: child.kind,
         runId,
         taskId: record.id,
       });
     }
   }
+  return runId;
+}
+
+/** Ends the agent invocation span of the record's generation; later settlements are no-ops. */
+function recordTaskTraceTerminal(input: {
+  readonly nowMs: number;
+  readonly outcome: TaskOutcome;
+  readonly record: TaskRecord;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionId: string;
+}): Record<string, unknown> {
+  const { outcome, record } = input;
+  if (record.kind !== "agent") return input.serializedContext;
+  return recordNestedAgentInvocationTerminal({
+    callId: record.callId,
+    serializedContext: input.serializedContext,
+    sessionId: input.sessionId,
+    terminal: {
+      acceptedAtMs: input.nowMs,
+      error: outcome.status === "failed" ? invocationError(outcome.error) : undefined,
+      outcome: outcome.status,
+    },
+  });
 }
 
 function resolveCaller(

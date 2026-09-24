@@ -480,6 +480,29 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
+/** The run that currently owns a hook, or `undefined` when no run does. */
+export async function resolveHookOwnerRunId(token: string): Promise<string | undefined> {
+  try {
+    return normalizeWorkflowHook(await getHookByToken(token)).runId;
+  } catch (error) {
+    if (HookNotFoundError.is(error)) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The run that owns a session now. An idle session can hand off to a
+ * successor run, so its original run ID may no longer be the one running;
+ * the stable inbox names the current owner. Falls back to the session ID,
+ * which is its first run's ID, when no run owns the inbox.
+ */
+export async function resolveSessionOwnerRunId(sessionId: string): Promise<string> {
+  return (
+    (await resolveHookOwnerRunId(sessionInboxHookToken(sessionCommandHookToken(sessionId)))) ??
+    sessionId
+  );
+}
+
 async function waitForHookRelease(token: string, ownerRunId: string): Promise<void> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {

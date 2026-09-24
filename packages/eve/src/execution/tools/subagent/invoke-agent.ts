@@ -7,6 +7,7 @@ import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
+import { renderAgentClosedWithoutResult } from "#tasks/render.js";
 import type { AgentInput } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 
@@ -86,7 +87,7 @@ export async function invokeAgent(
       // A result or invocation error is authoritative; reply-hook cleanup is best effort.
     }
   }
-  throw new Error(`Agent "${input.target}" closed without a result.`);
+  throw new Error(renderAgentClosedWithoutResult(input.target));
 }
 
 async function nextAgentReply(

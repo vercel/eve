@@ -194,6 +194,76 @@ export const RESULT_TURN_REPLY_PROMPT =
 /** Error message for a delegated call whose agent session ended before it replied. */
 export const AGENT_SESSION_ENDED_MESSAGE = "The agent's session ended before it replied.";
 
+/** Error message for an agent call the owner cancelled. */
+export const AGENT_CALL_CANCELLED_MESSAGE = "The agent invocation was cancelled.";
+
+/** `TIMED_OUT` error message for a call still working at its time limit. */
+export function renderTimedOut(kind: TaskKind): string {
+  return `The ${noun(kind)} did not finish within its time limit and was stopped.`;
+}
+
+/** `UNKNOWN_AGENT` error message for an `agentId` that names nothing in the session. */
+export function renderUnknownAgent(agentId: string): string {
+  return `No agent with id "${agentId}" exists in this session. Omit agentId to start a new agent.`;
+}
+
+/** `UNKNOWN_AGENT` error message for an `agentId` that names a workflow task. */
+export function renderNotAnAgent(taskId: string): string {
+  return `"${taskId}" is a task, not an agent. Use task_cancel to stop it.`;
+}
+
+/** `AGENT_MISMATCH` error message for an `agentId` passed to another agent's tool. */
+export function renderAgentMismatch(record: Pick<TaskRecord, "id" | "name">): string {
+  return `Agent "${record.id}" is a ${record.name} agent. Call the ${record.name} tool to continue it.`;
+}
+
+/** `AGENT_BUSY` error message for a call that names an agent still working on an earlier call. */
+export function renderAgentBusy(agentId: string): string {
+  return `Agent "${agentId}" is still working on an earlier call. Wait for its result before giving it more work.`;
+}
+
+/**
+ * `AGENT_UNREACHABLE` error message. `ended`: the owner knows the agent's
+ * session is gone; `gone`: delivery found no session; `temporary`: delivery
+ * may succeed on a later call.
+ */
+export function renderAgentUnreachable(
+  agentId: string,
+  reason: "ended" | "gone" | "temporary",
+): string {
+  switch (reason) {
+    case "ended":
+      return `Agent "${agentId}" can no longer be given more work. Omit agentId to start a new agent.`;
+    case "gone":
+      return `Agent "${agentId}" is no longer reachable. Omit agentId to start a new agent.`;
+    case "temporary":
+      return `Agent "${agentId}" is temporarily unreachable. Try again.`;
+  }
+}
+
+/** Error for a `ctx.agent` call whose child closed its reply channel without answering. */
+export function renderAgentClosedWithoutResult(target: string): string {
+  return `Agent "${target}" closed without a result.`;
+}
+
+const LAST_STATUS_MAX_LENGTH = 200;
+
+/** One-line summary of an agent's last answer, listed with idle agents in the `[Tasks]` note. */
+export function renderLastStatus(outcome: TaskOutcome): string {
+  const text =
+    outcome.status === "completed"
+      ? typeof outcome.output === "string"
+        ? outcome.output
+        : JSON.stringify(outcome.output)
+      : outcome.status === "failed"
+        ? `Failed: ${outcome.error.message}`
+        : "Cancelled.";
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= LAST_STATUS_MAX_LENGTH
+    ? line
+    : `${line.slice(0, LAST_STATUS_MAX_LENGTH - 1)}…`;
+}
+
 /** Body of a `<task_result>` block projected from a definition's `toModelOutput`. */
 export function renderModelOutputBody(output: ToolModelOutput): string {
   switch (output.type) {

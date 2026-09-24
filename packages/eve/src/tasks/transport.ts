@@ -14,6 +14,7 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
+import { renderAgentUnreachable } from "#tasks/render.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
@@ -91,6 +92,23 @@ async function runCommand(
 }
 
 /**
+ * Cancels the turn of a local child whose task no longer exists: its owner
+ * stopped the task and pruned the record before the child reported
+ * `task.started`, so the held cancel never reached it.
+ */
+export async function cancelOrphanedChild(input: {
+  readonly callId: string;
+  readonly sessionId: string;
+}): Promise<void> {
+  log.warn("cancelling a child whose task no longer exists", input);
+  try {
+    await requestWorkflowTurnCancellation({ sessionId: input.sessionId });
+  } catch (error) {
+    logError(log, "failed to cancel a child whose task no longer exists", error, input);
+  }
+}
+
+/**
  * Gives an idle agent its next generation. A lost response is never retried:
  * the child may already have accepted the message.
  */
@@ -108,9 +126,7 @@ export async function deliverToChild(input: {
   const outputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
   const unreachable = (permanent: boolean): JsonValue => ({
     code: AGENT_UNREACHABLE,
-    message: permanent
-      ? `Agent "${record.id}" is no longer reachable. Omit agentId to start a new agent.`
-      : `Agent "${record.id}" is temporarily unreachable. Try again.`,
+    message: renderAgentUnreachable(record.id, permanent ? "gone" : "temporary"),
   });
   try {
     if (child.kind === "remote") {

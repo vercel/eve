@@ -8,6 +8,7 @@ import {
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 import type { JsonObject } from "#shared/json.js";
+import { normalizeTaskTimeout } from "#shared/task-timeout.js";
 import { isDynamicSentinel, type DynamicToolEventName } from "#dynamic/definition.js";
 import type { LocalSubagentSourceRef } from "#discover/manifest.js";
 
@@ -73,11 +74,13 @@ export function normalizeSubagentConfig(value: unknown, message: string): Normal
         "kind",
         "outputSchema",
         "path",
+        "timeout",
         "tool",
         "url",
       ],
       message,
     );
+    normalizeTaskTimeout(record.timeout, message);
     if (record.forwardPrincipal !== undefined) {
       expectBoolean(
         record.forwardPrincipal,

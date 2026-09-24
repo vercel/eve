@@ -39,6 +39,20 @@ describe("createPreparedWorkflowToolHarnessDefinition", () => {
       } as never),
     ).toMatchObject({ detach: true, workflowId: "workflow//./agent/tools/remind//execute" });
   });
+
+  it("carries a workflow tool's timeout to the harness", () => {
+    expect(
+      createPreparedWorkflowToolHarnessDefinition({
+        description: "Run Bob's test suite.",
+        inputSchema: { type: "object" },
+        kind: "authored-tool",
+        logicalPath: "tools/run_tests.ts",
+        name: "run_tests",
+        sourceId: "agent",
+        task: { timeout: 60_000, workflowId: "workflow//./agent/tools/run_tests//execute" },
+      } as never),
+    ).toMatchObject({ timeout: 60_000 });
+  });
 });
 
 describe("parseWorkflowToolInput", () => {

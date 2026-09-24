@@ -181,7 +181,7 @@ every working task, and eve delivers nothing afterward.
 
 ## Subagents
 
-A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result. A call that is still working after 2 hours of active time fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
+A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result. A call that is still working at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
 
 ## How eve orders session history
 

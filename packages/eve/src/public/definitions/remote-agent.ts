@@ -57,6 +57,17 @@ export interface RemoteAgentDefinition {
    */
   readonly path: string;
   /**
+   * Time limit for each call of this remote agent, in milliseconds of active
+   * time: time the call spends waiting on a question, approval, or sign-in
+   * that reaches the root channel does not count. A call still working at
+   * the limit fails with `TIMED_OUT`, and eve cancels the remote turn.
+   * `false` removes the limit; the parent session's lifetime still bounds
+   * the call.
+   *
+   * @default 7_200_000 (2 hours)
+   */
+  readonly timeout?: number | false;
+  /**
    * Whether eve exposes this remote agent to the parent model as a tool.
    * Defaults to `true`; `false` keeps it callable from workflow tools.
    */

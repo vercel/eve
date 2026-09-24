@@ -15,7 +15,9 @@ const {
   getWorldMock,
   resetRemoteAgentSessionMock,
   resolveRemoteAgentStreamHeadersMock,
+  resolveSessionOwnerRunIdMock,
 } = vi.hoisted(() => ({
+  resolveSessionOwnerRunIdMock: vi.fn(),
   cancelRunMock: vi.fn(),
   deserializeContextMock: vi.fn(),
   getWorldMock: vi.fn(),
@@ -34,6 +36,9 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: cancelRunMock,
   getWorld: getWorldMock,
 }));
+vi.mock("#execution/workflow-runtime.js", () => ({
+  resolveSessionOwnerRunId: resolveSessionOwnerRunIdMock,
+}));
 
 const remoteChild = {
   callbackBaseUrl: "https://parent.example.com",
@@ -50,6 +55,22 @@ describe("terminateChildSessionsStep", () => {
     getWorldMock.mockResolvedValue("world");
     resetRemoteAgentSessionMock.mockResolvedValue({ ok: true, status: "no_active_session" });
     resolveRemoteAgentStreamHeadersMock.mockResolvedValue({ authorization: "Bearer fresh" });
+    resolveSessionOwnerRunIdMock.mockImplementation(async (sessionId: string) => sessionId);
+  });
+
+  it("stops the run that owns a local child's inbox after the child handed off", async () => {
+    resolveSessionOwnerRunIdMock.mockResolvedValue("session-idle-successor");
+
+    await terminateChildSessionsStep({
+      sessionState: makeSessionState([
+        localRecord({ id: "research-bbbbbb", sessionId: "session-idle", status: "completed" }),
+      ]),
+    });
+
+    expect(resolveSessionOwnerRunIdMock).toHaveBeenCalledExactlyOnceWith("session-idle");
+    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-idle-successor", {
+      cancelReason: "Parent session ended",
+    });
   });
 
   it("stops working and idle local children", async () => {
@@ -128,7 +149,13 @@ describe("terminateChildSessionsStep", () => {
         snapshot: {
           session: {
             ...sessionState.snapshot.session,
-            state: { "eve.taskTimer": { runId: "timer-1", wakeAt: "2026-09-24T14:00:00.000Z" } },
+            state: {
+              "eve.taskTimer": {
+                ownerRunId: "owner-1",
+                runId: "timer-1",
+                wakeAt: "2026-09-24T14:00:00.000Z",
+              },
+            },
           },
         },
       },

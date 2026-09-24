@@ -5,6 +5,7 @@ import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,
   createEveSessionStreamRoutePath,
+  createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
@@ -220,7 +221,8 @@ export class ClientSession {
    * `startIndex` to resume. Stop at a child turn boundary with
    * `isCurrentTurnBoundaryEvent`.
    *
-   * @throws {Error} When the task runs no child session to follow.
+   * @throws {Error} When the task runs no child session to follow, or when its
+   * `child.streamPath` belongs to another session.
    */
   streamSubagent(
     started: TaskStartedStreamEvent,
@@ -230,6 +232,21 @@ export class ClientSession {
     if (child === undefined) {
       throw new Error(
         `streamSubagent() requires a task.started event with a child session, but ${started.data.kind} task ${started.data.taskId} has none.`,
+      );
+    }
+    // A remote child streams through its parent's proxy route, which names
+    // the parent session; a local child streams from its own session route.
+    const expectedPath =
+      child.remote === undefined
+        ? createEveSessionStreamRoutePath(child.sessionId)
+        : createEveSubagentStreamRoutePath({
+            callId: started.data.callId,
+            childSessionId: child.sessionId,
+            parentSessionId: this.#state.sessionId,
+          });
+    if (child.streamPath !== expectedPath) {
+      throw new Error(
+        `streamSubagent() requires a task.started event from session ${this.#state.sessionId}, but task ${started.data.taskId} streams from ${child.streamPath}.`,
       );
     }
     const startIndex = options?.startIndex ?? 0;

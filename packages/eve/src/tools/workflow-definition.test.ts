@@ -165,6 +165,53 @@ describe("defineWorkflowTool", () => {
     );
   });
 
+  it.each<number | false>([30 * 60_000, false])(
+    "accepts timeout: %j and compiles it",
+    (timeout) => {
+      const execute = Object.assign(async () => 1, { workflowId: "workflow//run_tests//execute" });
+      const definition = defineWorkflowTool({
+        description: "Run Bob's test suite.",
+        execute,
+        inputSchema: {},
+        timeout,
+      });
+
+      const entry = normalizeToolDefinition(definition, "Invalid tool.");
+
+      expect(entry).toMatchObject({ definition: { timeout }, kind: "tool" });
+    },
+  );
+
+  it.each([
+    ["zero", 0],
+    ["a negative number", -1_000],
+    ["infinity", Number.POSITIVE_INFINITY],
+    ["a duration string", "30m"],
+    ["true", true],
+  ])("rejects timeout given %s", (_label, timeout) => {
+    expect(() =>
+      defineWorkflowTool({
+        description: "Run Bob's test suite.",
+        async execute() {
+          "use workflow";
+          return 1;
+        },
+        inputSchema: {},
+        timeout: timeout as never,
+      }),
+    ).toThrow(
+      'defineWorkflowTool: "timeout" must be a positive number of milliseconds or false, received',
+    );
+  });
+
+  it("rejects timeout on a tool that is not a workflow tool", () => {
+    const definition = { description: "Ordinary", execute: async () => 1, timeout: 1_000 };
+
+    expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
+      '"timeout" is only supported on defineWorkflowTool()',
+    );
+  });
+
   it.each(["defineTool", "bare object"])("rejects a workflow executor in %s", (kind) => {
     const execute = Object.assign(async () => 1, { workflowId: "workflow//test//execute" });
     const definition = { description: "Ordinary", inputSchema: {}, execute };

@@ -42,8 +42,17 @@ export const TASK_TIMER_STATE_KEY = "eve.taskTimer";
 /** A wake time already in the past: the timer fires as soon as it starts. */
 export const WAKE_NOW = new Date(0).toISOString();
 
+/**
+ * How long after its wake time an armed timer may take to signal. Past it,
+ * the signal was lost (a failed timer run or an undeliverable signal) and
+ * the owner arms a new timer instead of waiting forever.
+ */
+export const TASK_TIMER_GRACE_MS = 60_000;
+
 /** The timer the owner last armed. It may already have fired. */
 export interface ArmedTaskTimer {
+  /** The owner run that armed it. A successor re-arms: the old timer may retire with its deployment. */
+  readonly ownerRunId: string;
   readonly runId: string;
   readonly wakeAt: string;
 }
@@ -51,11 +60,16 @@ export interface ArmedTaskTimer {
 export function readTaskTimer(state: SessionStateMap | undefined): ArmedTaskTimer | undefined {
   const value = state?.[TASK_TIMER_STATE_KEY];
   if (typeof value !== "object" || value === null) return undefined;
-  const { runId, wakeAt } = value as { readonly runId?: unknown; readonly wakeAt?: unknown };
-  return typeof runId === "string" &&
+  const { ownerRunId, runId, wakeAt } = value as {
+    readonly ownerRunId?: unknown;
+    readonly runId?: unknown;
+    readonly wakeAt?: unknown;
+  };
+  return typeof ownerRunId === "string" &&
+    typeof runId === "string" &&
     typeof wakeAt === "string" &&
     !Number.isNaN(Date.parse(wakeAt))
-    ? { runId, wakeAt }
+    ? { ownerRunId, runId, wakeAt }
     : undefined;
 }
 
@@ -70,18 +84,38 @@ export function writeTaskTimer(
   return Object.keys(next).length === 0 ? undefined : next;
 }
 
+/** What the owner does with its timer after a table change. */
+export type TaskTimerPlan =
+  | { readonly kind: "keep" }
+  | { readonly kind: "arm"; readonly wakeAt: string }
+  /** Nothing is due any more: stop the armed timer so a settled session is not woken. */
+  | { readonly kind: "cancel" };
+
 /**
- * The wake time the owner must arm, or `undefined` when the armed timer
- * fires no later than the table needs. An unreadable record wakes the owner
- * at once: the deadline step's write removes it, so it cannot block handoff.
+ * Decides whether the owner arms, keeps, or cancels its timer. The armed
+ * timer is kept only when this owner run armed it, it fires no later than
+ * the table needs, and its signal is not overdue. An unreadable record wakes
+ * the owner at once: the deadline step's write removes it, so it cannot
+ * block handoff. A wake time in the past is armed for `nowMs`.
  */
-export function taskTimerWakeToArm(state: SessionStateMap | undefined): string | undefined {
+export function planTaskTimer(
+  state: SessionStateMap | undefined,
+  current: { readonly nowMs: number; readonly ownerRunId: string },
+): TaskTimerPlan {
   const { lost, table } = readTaskTable(state);
-  const wakeAt = lost.length > 0 ? WAKE_NOW : nextTaskWakeAt(table);
-  if (wakeAt === undefined) return undefined;
+  const needed = lost.length > 0 ? WAKE_NOW : nextTaskWakeAt(table);
   const armed = readTaskTimer(state);
-  if (armed !== undefined && Date.parse(armed.wakeAt) <= Date.parse(wakeAt)) return undefined;
-  return wakeAt;
+  if (needed === undefined) return armed === undefined ? { kind: "keep" } : { kind: "cancel" };
+  const wakeAtMs = Math.max(Date.parse(needed), current.nowMs);
+  if (
+    armed !== undefined &&
+    armed.ownerRunId === current.ownerRunId &&
+    Date.parse(armed.wakeAt) <= wakeAtMs &&
+    Date.parse(armed.wakeAt) + TASK_TIMER_GRACE_MS >= current.nowMs
+  ) {
+    return { kind: "keep" };
+  }
+  return { kind: "arm", wakeAt: new Date(wakeAtMs).toISOString() };
 }
 
 /** Session state key holding the owner's remote callback alias. */
@@ -112,15 +146,16 @@ export function hasWorkingTasks(session: { readonly state?: SessionStateMap }): 
 /** The identity a workflow tool run reports with. */
 export interface WorkflowRunReference {
   readonly callId: string;
-  readonly runId: string;
+  readonly taskId: string;
   readonly toolName: string;
   readonly turnId: string;
 }
 
 /**
- * The workflow task a run reports for: the task its call started in its turn,
- * whose child is that run. A task the owner cancelled still matches until
- * the run confirms it stopped.
+ * The workflow task a run reports for. It matches by task, not run: a
+ * retried start can leave a second run, but only the run that claimed the
+ * task's command hook executes the body and reports. A task the owner
+ * stopped still matches until the run confirms it.
  */
 export function findWorkflowTask(
   table: TaskTable,
@@ -129,38 +164,11 @@ export function findWorkflowTask(
   return table.records.find(
     (record) =>
       record.kind === "workflow" &&
+      record.id === from.taskId &&
       record.callId === from.callId &&
       record.turnId === from.turnId &&
       record.name === from.toolName &&
       record.child?.kind === "workflow" &&
-      record.child.runId === from.runId &&
       (!isTerminalTaskStatus(record.status) || record.cancelConfirmBy !== undefined),
   );
-}
-
-/** Whether the owner still waits on the workflow task this run reports for. */
-export function isWorkingWorkflowTask(
-  session: { readonly state?: SessionStateMap },
-  from: WorkflowRunReference,
-): boolean {
-  const record = findWorkflowTask(getTaskTable(session), from);
-  return record !== undefined && !isTerminalTaskStatus(record.status);
-}
-
-/**
- * Whether a tool result read from the shared inbox answers a workflow tool
- * call the owner still waits on: exactly one working workflow task has that
- * call, and its name matches.
- */
-export function isWorkflowTaskResult(
-  session: { readonly state?: SessionStateMap },
-  result: { readonly callId: string; readonly toolName: string },
-): boolean {
-  const matches = getTaskTable(session).records.filter(
-    (record) =>
-      record.kind === "workflow" &&
-      record.callId === result.callId &&
-      !isTerminalTaskStatus(record.status),
-  );
-  return matches.length === 1 && matches[0]!.name === result.toolName;
 }

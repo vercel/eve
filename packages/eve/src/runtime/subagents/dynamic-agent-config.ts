@@ -9,6 +9,7 @@ import {
   type AgentReasoningDefinition,
 } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TaskTimeout } from "#shared/task-timeout.js";
 import { serializeOutputSchema } from "#tools/schema.js";
 
 export interface DynamicSubagentAgentConfig {
@@ -21,6 +22,7 @@ export interface DynamicSubagentAgentConfig {
   readonly model: DynamicSubagentModelReference;
   readonly outputSchema?: JsonObject;
   readonly reasoning?: AgentReasoningDefinition;
+  readonly timeout?: TaskTimeout;
   readonly tool?: boolean;
 }
 
@@ -58,6 +60,7 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
     model: DynamicSubagentModelReference;
     outputSchema?: JsonObject;
     reasoning?: AgentReasoningDefinition;
+    timeout?: TaskTimeout;
     tool?: boolean;
   } = {
     description: definition.description,
@@ -101,6 +104,9 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   }
   if (definition.reasoning !== undefined) {
     config.reasoning = definition.reasoning;
+  }
+  if (definition.timeout !== undefined) {
+    config.timeout = definition.timeout;
   }
   if (definition.tool !== undefined) {
     config.tool = definition.tool;

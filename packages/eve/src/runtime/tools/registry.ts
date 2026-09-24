@@ -116,9 +116,15 @@ async function createPreparedRuntimeTool(
 
               workflowId,
             }
-          : workflowHandling?.detach === undefined
-            ? { workflowId }
-            : { detach: workflowHandling.detach, workflowId },
+          : {
+              ...(workflowHandling?.detach === undefined
+                ? {}
+                : { detach: workflowHandling.detach }),
+              ...(workflowHandling?.timeout === undefined
+                ? {}
+                : { timeout: workflowHandling.timeout }),
+              workflowId,
+            },
   };
 }
 

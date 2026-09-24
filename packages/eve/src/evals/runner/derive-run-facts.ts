@@ -61,6 +61,9 @@ export function deriveRunFacts(
   const toolCallsByCallId = new Map<string, MutableToolCall>();
   const subagentCalls: MutableSubagentCall[] = [];
   const subagentCallsByCallId = new Map<string, MutableSubagentCall>();
+  // Model calls whose input matches the agent tool contract, in case their
+  // task settles without ever starting a child.
+  const agentToolCallsByCallId = new Map<string, { name: string; turnIndex: number }>();
   const inputRequests: InputRequest[] = [];
   let turnIndex = -1;
   let messageCount = 0;
@@ -111,6 +114,12 @@ export function deriveRunFacts(
         for (const action of event.data.actions) {
           if (action.kind === "tool-call") {
             ensureToolCall(action.callId, action.toolName, action.input);
+            if (isAgentToolInput(action.input)) {
+              agentToolCallsByCallId.set(action.callId, {
+                name: action.toolName,
+                turnIndex: Math.max(turnIndex, 0),
+              });
+            }
           } else if (action.kind === "load-skill") {
             ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
           }
@@ -155,8 +164,16 @@ export function deriveRunFacts(
       }
 
       case "task.settled": {
-        // Only agent tasks recorded by `task.started` join here; workflow
-        // tasks and calls that failed before their child started stay tool calls.
+        // Agent tasks join by `task.started`. An agent call that failed or
+        // was cancelled before its child started has only `task.settled`;
+        // its model call names the agent. The stream cannot tell such a call
+        // from a workflow tool with the same input shape that failed to start.
+        const unstarted = agentToolCallsByCallId.get(event.data.callId);
+        if (!subagentCallsByCallId.has(event.data.callId) && unstarted !== undefined) {
+          const created = ensureSubagentCall(event.data.callId, unstarted.name);
+          created.taskId = event.data.taskId;
+          created.turnIndex = unstarted.turnIndex;
+        }
         const call = subagentCallsByCallId.get(event.data.callId);
         if (call?.status !== "working" || call.taskId !== event.data.taskId) break;
         call.output = event.data.status === "failed" ? event.data.error : event.data.output;
@@ -203,6 +220,19 @@ export function deriveRunFacts(
     failureCode,
   };
 }
+
+/**
+ * Every agent tool (declared, remote, or built-in `agent`) shares one input
+ * contract: a `message`, plus optional `agentId` and `outputSchema`.
+ */
+function isAgentToolInput(input: JsonObject): boolean {
+  return (
+    typeof input.message === "string" &&
+    Object.keys(input).every((key) => AGENT_TOOL_INPUT_KEYS.has(key))
+  );
+}
+
+const AGENT_TOOL_INPUT_KEYS = new Set(["agentId", "message", "outputSchema"]);
 
 /**
  * Returns empty derived facts, used when a case produced no events

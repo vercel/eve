@@ -117,10 +117,16 @@ export async function compileToolEntry(
             : { ...entry.definition.behavior, shape }
           : {
               availability: [],
-              handling:
-                entry.definition.detach === undefined
-                  ? { kind: "workflow-tool", workflowId }
-                  : { detach: entry.definition.detach, kind: "workflow-tool", workflowId },
+              handling: {
+                ...(entry.definition.detach === undefined
+                  ? {}
+                  : { detach: entry.definition.detach }),
+                kind: "workflow-tool",
+                ...(entry.definition.timeout === undefined
+                  ? {}
+                  : { timeout: entry.definition.timeout }),
+                workflowId,
+              },
               shape,
             },
       description: entry.definition.description,

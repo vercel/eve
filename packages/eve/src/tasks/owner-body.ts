@@ -1,3 +1,5 @@
+import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+
 import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
@@ -7,15 +9,14 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
-import { readTaskCallbackAlias, taskTimerWakeToArm } from "#tasks/state.js";
-import { armTaskTimerStep } from "#tasks/timer-steps.js";
+import { planTaskTimer, readTaskCallbackAlias } from "#tasks/state.js";
+import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
+import { cancelTasksStep, type TaskCancelSelector } from "#tasks/cancel.js";
 import {
   applyTaskReportStep,
-  cancelTasksStep,
   ensureTaskCallbackAliasStep,
   startAgentTasksStep,
   type AgentTaskCall,
-  type TaskCancelSelector,
   type TaskOwnerUpdate,
 } from "#tasks/owner.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
@@ -156,14 +157,27 @@ export async function applyTaskDeadline(
 }
 
 /**
- * Arms the owner's timer when the task table needs a wake earlier than the
- * armed one. Arming only earlier keeps one live timer in the common case; a
- * timer that fires with nothing due is cleared and the next deadline re-arms.
+ * Keeps the owner's timer in line with the task table. It arms when the
+ * table needs an earlier wake, when a predecessor run armed the timer, or
+ * when the armed timer's signal is overdue, and cancels it once nothing is
+ * due. Arming only earlier keeps one live timer in the common case; a timer
+ * that fires with nothing due is cleared and the next deadline re-arms.
  */
 export async function syncTaskTimer(cursor: SessionStateCursor): Promise<void> {
-  const wakeAt = taskTimerWakeToArm(cursor.sessionState.snapshot.session.state);
-  if (wakeAt === undefined) return;
-  await cursor.apply(await armTaskTimerStep({ sessionState: cursor.sessionState, wakeAt }));
+  const plan = planTaskTimer(cursor.sessionState.snapshot.session.state, {
+    nowMs: Date.now(),
+    // Read only when a timer is armed, so an owner with no deadlines skips it.
+    get ownerRunId() {
+      return getWorkflowMetadata().workflowRunId;
+    },
+  });
+  if (plan.kind === "arm") {
+    await cursor.apply(
+      await armTaskTimerStep({ sessionState: cursor.sessionState, wakeAt: plan.wakeAt }),
+    );
+  } else if (plan.kind === "cancel") {
+    await cursor.apply(await cancelTaskTimerStep({ sessionState: cursor.sessionState }));
+  }
 }
 
 /** Records and claims the remote callback alias before any child can call back on it. */

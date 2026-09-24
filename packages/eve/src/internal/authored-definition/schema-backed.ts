@@ -4,6 +4,7 @@ import {
   type WorkflowToolDetach,
 } from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { normalizeTaskTimeout, type TaskTimeout } from "#shared/task-timeout.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
@@ -43,6 +44,7 @@ type NormalizedAuthoredTool = Readonly<
     readonly behavior?: CompiledToolBehavior;
     readonly detach?: WorkflowToolDetach;
     readonly execute?: ToolExecuteFn;
+    readonly timeout?: TaskTimeout;
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
@@ -125,16 +127,20 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "approval",
       "approvalKey",
       "outputSchema",
+      "timeout",
       "toModelOutput",
     ],
     message,
   );
-  if (record.detach !== undefined && !isWorkflowToolDefinition(value)) {
-    throw new Error(
-      `${message} "detach" is only supported on defineWorkflowTool(); other tools run inside the model step that calls them.`,
-    );
+  for (const key of ["detach", "timeout"] as const) {
+    if (record[key] !== undefined && !isWorkflowToolDefinition(value)) {
+      throw new Error(
+        `${message} "${key}" is only supported on defineWorkflowTool(); other tools run inside the model step that calls them.`,
+      );
+    }
   }
   const detach = normalizeWorkflowToolDetach(record.detach, message);
+  const timeout = normalizeTaskTimeout(record.timeout, message);
   const inputSchema =
     record.inputSchema === undefined
       ? null
@@ -162,6 +168,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (detach !== undefined) {
     definition.detach = detach;
+  }
+  if (timeout !== undefined) {
+    definition.timeout = timeout;
   }
   if (workflowProgram !== undefined) {
     definition.workflowProgram = workflowProgram;

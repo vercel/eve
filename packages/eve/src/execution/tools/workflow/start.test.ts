@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startWorkflowToolRun } from "./start.js";
+import { startWorkflowToolRun, workflowTaskHookToken } from "./start.js";
 import type { WorkflowToolRunInput } from "./types.js";
 import {
   startWorkflowOnCurrentDeployment,
@@ -23,6 +23,7 @@ const input: Omit<WorkflowToolRunInput, "hookToken"> = {
     turn: { id: "turn-1", sequence: 0 },
   },
   stepIndex: 0,
+  taskId: "deploy-abc234",
   toolName: "deploy",
   workflowId: "workflow//test//deploy",
 };
@@ -30,27 +31,22 @@ const input: Omit<WorkflowToolRunInput, "hookToken"> = {
 describe("startWorkflowToolRun", () => {
   afterEach(() => vi.resetAllMocks());
 
-  it("starts repeated calls independently and returns each run's cancellation address", async () => {
+  it("starts the run with a command hook derived from the owner session and task", async () => {
     const start = vi.mocked(startWorkflowOnCurrentDeployment);
-    start
-      .mockResolvedValueOnce({ runId: "run-1" } as never)
-      .mockResolvedValueOnce({ runId: "run-2" } as never);
+    start.mockResolvedValueOnce({ runId: "run-1" } as never);
 
-    const first = await startWorkflowToolRun(input);
-    const second = await startWorkflowToolRun(input);
+    const address = await startWorkflowToolRun(input);
 
-    expect(first.runId).toBe("run-1");
-    expect(second.runId).toBe("run-2");
-    expect(first.hookToken).toBeTruthy();
-    expect(second.hookToken).not.toBe(first.hookToken);
-    for (const [index, address] of [first, second].entries()) {
-      expect(start).toHaveBeenNthCalledWith(index + 1, workflowToolRunWorkflowReference, [
-        { ...input, hookToken: address.hookToken },
-      ]);
-    }
+    expect(address).toEqual({
+      hookToken: "eve:workflow-task:session-1:deploy-abc234",
+      runId: "run-1",
+    });
+    expect(start).toHaveBeenCalledExactlyOnceWith(workflowToolRunWorkflowReference, [
+      { ...input, hookToken: address.hookToken },
+    ]);
   });
 
-  it("uses a new token after an ambiguous start failure", async () => {
+  it("gives a retried start of the same task the same hook, so the duplicate run cannot claim it", async () => {
     const start = vi.mocked(startWorkflowOnCurrentDeployment);
     const failure = new Error("start response lost");
     start.mockRejectedValueOnce(failure).mockResolvedValueOnce({ runId: "retry-run" } as never);
@@ -60,6 +56,8 @@ describe("startWorkflowToolRun", () => {
     const firstInput = start.mock.calls[0]![1][0] as WorkflowToolRunInput;
 
     expect(retried.runId).toBe("retry-run");
-    expect(retried.hookToken).not.toBe(firstInput.hookToken);
+    expect(retried.hookToken).toBe(firstInput.hookToken);
+    expect(workflowTaskHookToken("session-1", "deploy-abc234")).toBe(retried.hookToken);
+    expect(workflowTaskHookToken("session-1", "deploy-def567")).not.toBe(retried.hookToken);
   });
 });

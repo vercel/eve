@@ -1,6 +1,6 @@
 import type { SessionStateMap } from "#harness/types.js";
 import { TASK_RECORD_VERSION, type TaskRecord } from "#tasks/record.js";
-import { TASK_TABLE_STATE_KEY } from "#tasks/table.js";
+import { readTaskTable, TASK_TABLE_STATE_KEY, type TaskTable } from "#tasks/table.js";
 
 /** One agent task record with test defaults: a working foreground call with no child yet. */
 export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
@@ -24,4 +24,9 @@ export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecor
 /** Session state holding the given task records. */
 export function taskTableState(records: readonly TaskRecord[]): SessionStateMap {
   return { [TASK_TABLE_STATE_KEY]: { records } };
+}
+
+/** A task table holding the given records, decoded the way the owner reads it. */
+export function taskTable(records: readonly TaskRecord[]): TaskTable {
+  return readTaskTable(taskTableState(records)).table;
 }

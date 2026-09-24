@@ -306,8 +306,8 @@ async function runSessionLoop(
   };
 
   try {
-    // A successor inherits the task table and its armed timer; it arms one
-    // only if the table needs an earlier wake, such as for an unreadable record.
+    // A successor inherits the task table but re-arms the timer: the one its
+    // predecessor armed may retire with the old deployment.
     await syncTaskTimer(cursor);
     const [actionResult, timerResult] = await Promise.allSettled([
       runInitialAction(),

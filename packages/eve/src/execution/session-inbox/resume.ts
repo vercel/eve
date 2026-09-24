@@ -109,15 +109,20 @@ function logicalToken(address: string | SessionInboxAddress): string {
   return sessionCommandHookToken(address.sessionId);
 }
 
-/** Waits one retry interval when a handoff marker exists; false once the window closes or no marker exists. */
-async function isHandoffInProgress(token: string, deadline: number): Promise<boolean> {
-  if (Date.now() >= deadline) return false;
+/** Whether a releasing owner left a handoff marker: the session is moving, not gone. */
+export async function isSessionHandoffPending(token: string): Promise<boolean> {
   try {
     await getHookByToken(sessionHandoffMarkerToken(token));
+    return true;
   } catch (error) {
     if (HookNotFoundError.is(error)) return false;
     throw error;
   }
+}
+
+/** Waits one retry interval when a handoff marker exists; false once the window closes or no marker exists. */
+async function isHandoffInProgress(token: string, deadline: number): Promise<boolean> {
+  if (Date.now() >= deadline || !(await isSessionHandoffPending(token))) return false;
   await new Promise<void>((resolve) => setTimeout(resolve, HANDOFF_RETRY_INTERVAL_MS));
   return true;
 }

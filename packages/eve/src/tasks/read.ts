@@ -2,7 +2,9 @@ import type { SessionStateMap } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import { readTaskTable, type TaskTable } from "#tasks/table.js";
 
-// Step-side only: the logger imports Node.js built-ins.
+// Import only from step modules, never from code a workflow body runs: the
+// logger imports Node.js built-ins. Workflow bodies read the table with
+// getTaskTable from tasks/state.ts.
 
 const log = createLogger("tasks.owner");
 

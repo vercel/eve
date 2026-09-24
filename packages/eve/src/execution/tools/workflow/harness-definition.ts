@@ -2,12 +2,14 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
+import type { TaskTimeout } from "#shared/task-timeout.js";
 import type { WorkflowToolDetach } from "#tools/workflow-definition.js";
 
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
   readonly detach?: WorkflowToolDetach;
   readonly executeInput?: (input: unknown) => JsonValue;
+  readonly timeout?: TaskTimeout;
   /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
   readonly nodeId?: string;
 
@@ -22,6 +24,7 @@ export function createWorkflowToolHarnessDefinition(
     detach: input.detach,
     executeInput: input.executeInput,
     nodeId: input.nodeId,
+    timeout: input.timeout,
     workflowId: input.workflowId,
   };
   return { ...definition, ...workflow, execute: undefined };
@@ -48,6 +51,7 @@ export function createPreparedWorkflowToolHarnessDefinition(
     },
     detach: tool.task.detach,
     nodeId: tool.task.nodeId,
+    timeout: tool.task.timeout,
     workflowId: tool.task.workflowId,
   };
   return createWorkflowToolHarnessDefinition(input);

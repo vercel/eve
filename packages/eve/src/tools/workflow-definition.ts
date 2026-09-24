@@ -4,6 +4,7 @@ import type {
 } from "#compiled/@standard-schema/spec/index.js";
 import type { Approval } from "#approval/definition.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { normalizeTaskTimeout } from "#shared/task-timeout.js";
 import {
   rejectRemovedExecutionOption,
   stampToolDefinition,
@@ -118,6 +119,13 @@ export interface WorkflowToolDefinition<
    * later as a task result. Defaults to `false`: the call waits.
    */
   detach?: WorkflowToolDetach;
+  /**
+   * Time limit for each call, in milliseconds of active time: time the run
+   * spends waiting on `ctx.ask` or an approval does not count. A call still
+   * working at the limit fails with `TIMED_OUT`, and eve cancels the run.
+   * Defaults to `false`: the session's lifetime is the only limit.
+   */
+  timeout?: number | false;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
@@ -203,6 +211,7 @@ export function defineWorkflowTool<TInput, TOutput>(
 ): WorkflowToolDefinition<TInput, TOutput> {
   rejectRemovedExecutionOption(definition, "defineWorkflowTool");
   normalizeWorkflowToolDetach(definition.detach, "defineWorkflowTool");
+  normalizeTaskTimeout(definition.timeout, "defineWorkflowTool:");
   stampToolDefinition(definition, "defineWorkflowTool");
   return Object.assign(definition, { [WORKFLOW_TOOL_BRAND]: true as const });
 }

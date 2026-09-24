@@ -8,8 +8,10 @@ import type {
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
 import { cancelTasks, settleWorkflowTask } from "#tasks/owner-body.js";
-import { findWorkflowTask, getTaskTable, isWorkingWorkflowTask } from "#tasks/state.js";
+import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import { findWorkflowTask, getTaskTable } from "#tasks/state.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { dismissStaleWorkflowRequestStep } from "#execution/tools/workflow/stale-request-step.js";
 import { workflowToolRunRequestToInputRequestPayload } from "#execution/tools/workflow/owner-inbox.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
@@ -60,8 +62,12 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
+  const task = findWorkflowTask(getTaskTable(cursor.sessionState.snapshot.session), message.from);
+  // A cancelled or orphaned run keeps running until it unwinds; nothing it
+  // asks for reaches the user or starts more work.
+  const taskId = task !== undefined && !isTerminalTaskStatus(task.status) ? task.id : undefined;
   if (message.request.kind === "agent-invoke") {
-    if (!isWorkingWorkflowTask(cursor.sessionState.snapshot.session, message.from)) {
+    if (taskId === undefined) {
       await resumeHookStep(message.replyTo, {
         kind: "runtime-action-result",
         results: [
@@ -89,19 +95,27 @@ async function handleWorkflowToolRunRequest(
   if (message.request.kind === "authorization-request") {
     const request = message.request;
     await deliverWorkflowAuthorization({ ...message, request }, async () => {
+      if (taskId === undefined) {
+        await dismissStaleWorkflowRequestStep(message);
+        return;
+      }
       await cursor.apply(
         await runProxySubagentEventStep({
           hookPayload: request.event,
           sessionWritable: cursor.sessionWritable,
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
+          taskId,
         }),
       );
     });
     return;
   }
+  if (taskId === undefined) {
+    await dismissStaleWorkflowRequestStep(message);
+    return;
+  }
   // The run's task waits on the answer, so its deadline clock stops until then.
-  const task = findWorkflowTask(getTaskTable(cursor.sessionState.snapshot.session), message.from);
   await cursor.apply(
     await runProxySubagentEventStep({
       ...(message.requestCoordinates === undefined
@@ -111,7 +125,7 @@ async function handleWorkflowToolRunRequest(
       sessionWritable: cursor.sessionWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
-      taskId: task?.id,
+      taskId,
     }),
   );
 }

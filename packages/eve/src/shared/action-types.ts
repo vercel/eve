@@ -136,6 +136,7 @@ export const runtimeWorkflowTaskRequestSchema = z
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
     nodeId: z.string().optional(),
+    timeout: z.union([z.number().positive(), z.literal(false)]).optional(),
     toolName: z.string(),
     workflowId: z.string(),
   })

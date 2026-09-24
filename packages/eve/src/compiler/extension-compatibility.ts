@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 59,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 59],
+    current: 60,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 60],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -62,6 +62,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       57: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       58: "Workflow tools accept detach, and background task results arrive as task.result messages.",
+      59: "Workflow tools accept timeout, the time limit for each call.",
     },
   },
   dynamicTool: {
@@ -135,8 +136,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   subagent: {
-    current: 22,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 22],
+    current: 23,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 23],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -146,6 +147,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       19: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       20: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
       21: "Workflow tools accept detach, and background task results arrive as task.result messages.",
+      22: "Agents and remote agents accept timeout, the time limit for each call.",
     },
   },
   connection: {

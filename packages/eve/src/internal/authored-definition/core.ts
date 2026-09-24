@@ -16,6 +16,7 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
+import { normalizeTaskTimeout } from "#shared/task-timeout.js";
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
   type PublicAgentStaticModelDefinition,
@@ -62,6 +63,7 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
+      "timeout",
       "tool",
     ],
     message,
@@ -128,6 +130,11 @@ export function normalizeAgentDefinition(
 
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
+  }
+
+  const timeout = normalizeTaskTimeout(record.timeout, message);
+  if (timeout !== undefined) {
+    definition.timeout = timeout;
   }
 
   return definition as Readonly<NormalizedAgentDefinition>;

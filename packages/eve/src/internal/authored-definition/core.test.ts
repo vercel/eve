@@ -19,6 +19,22 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow(FAILURE_MESSAGE);
   });
 
+  it("normalizes the per-call timeout and names the definition in its error", () => {
+    expect(
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", timeout: 60_000 }, FAILURE_MESSAGE)
+        .timeout,
+    ).toBe(60_000);
+    expect(
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", timeout: false }, FAILURE_MESSAGE)
+        .timeout,
+    ).toBe(false);
+    expect(() =>
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", timeout: "2h" }, FAILURE_MESSAGE),
+    ).toThrow(
+      `${FAILURE_MESSAGE} "timeout" must be a positive number of milliseconds or false, received "2h".`,
+    );
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {

@@ -30,6 +30,8 @@ export interface WorkflowBodyDefinition {
 
   readonly session: SessionContext["session"];
   readonly stepIndex: number;
+  /** The owner's task for this call; the run reports under it. */
+  readonly taskId: string;
   readonly toolName: string;
   readonly workflowId: string;
 }
@@ -106,6 +108,7 @@ export function createWorkflowBodyRef(
     runId: input.runId ?? getWorkflowMetadata().workflowRunId,
     sequence: input.session.turn.sequence,
     stepIndex: input.stepIndex,
+    taskId: input.taskId,
     toolName: input.toolName,
     turnId: input.session.turn.id,
   };

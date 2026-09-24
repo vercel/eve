@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { taskTable } from "#internal/testing/task-records.js";
 import type { TaskMessage } from "#tasks/protocol.js";
 import { decodeTaskRecord } from "#tasks/record.js";
 import {
@@ -21,7 +22,7 @@ const NOW = "2026-09-24T14:02:00.000Z";
 const child = { commandToken: "hook_1", kind: "workflow", runId: "run_1" } as const;
 
 function started(
-  table: TaskTable = { records: [] },
+  table: TaskTable = taskTable([]),
   overrides: Partial<Parameters<typeof startTask>[1]> = {},
 ) {
   const result = startTask(table, {
@@ -265,8 +266,9 @@ describe("cancelTask", () => {
     const task = started();
     const cancelled = cancelTask(task.table, task.record.id, NOW);
     expect(cancelled.effects).toEqual([]);
+    // A workflow run gets its 30-second cleanup window plus a 5-second margin.
     expect(cancelled.table.records[0]).toMatchObject({
-      cancelConfirmBy: "2026-09-24T14:02:30.000Z",
+      cancelConfirmBy: "2026-09-24T14:02:35.000Z",
       delivered: true,
       lastStatus: "Cancelled.",
       pendingCommands: [{ kind: "cancel" }],
@@ -346,8 +348,10 @@ describe("cancelTask", () => {
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
     ]);
     expect(evaluateTaskDeadlines(cancelled.table, NOW).effects).toEqual([]);
-    const due = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:30.000Z");
-    expect(due.effects).toEqual([expect.objectContaining({ child, kind: "hard-stop" })]);
+    // The run's own cleanup window has not run out yet.
+    expect(evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:30.000Z").effects).toEqual([]);
+    const due = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:35.000Z");
+    expect(due.effects).toEqual([expect.objectContaining({ child, kind: "unconfirmed" })]);
     // The stopped run takes no more work, so the record no longer names it.
     expect(due.table.records[0]).not.toHaveProperty("child");
     expect(due.table.records[0]).not.toHaveProperty("cancelConfirmBy");
@@ -368,8 +372,8 @@ describe("cancelTask", () => {
       NOW,
     ).table;
     const cancelled = cancelTask(withChild, task.record.id, NOW);
-    const due = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:30.000Z");
-    expect(due.effects).toEqual([]);
+    const due = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:35.000Z");
+    expect(due.effects).toEqual([{ kind: "unconfirmed", record: due.table.records[0] }]);
     expect(due.table.records[0]).toMatchObject({ child: remote });
     expect(due.table.records[0]).not.toHaveProperty("cancelConfirmBy");
     expect(nextTaskWakeAt(due.table)).toBeUndefined();
@@ -377,17 +381,47 @@ describe("cancelTask", () => {
 });
 
 describe("deadlines", () => {
-  it("asks for one reconciliation read when a working task is due, then times it out", () => {
+  it("times out a due working task and asks its child to stop", () => {
     const task = started(undefined, { timeoutMs: 1_000 });
-    expect(nextTaskWakeAt(task.table)).toBe("2026-09-24T14:02:01.000Z");
-    const due = evaluateTaskDeadlines(task.table, "2026-09-24T14:02:01.000Z");
-    expect(due.effects).toEqual([expect.objectContaining({ kind: "reconcile" })]);
-    const timedOut = timeOutTask(due.table, task.record.id, "2026-09-24T14:02:01.000Z");
-    expect(timedOut.effects[0]).toMatchObject({
-      kind: "settled",
-      outcome: { error: { code: "TIMED_OUT" }, status: "failed" },
+    const withChild = applyTaskMessage(
+      task.table,
+      { child, generation: 1, kind: "task.started", taskId: task.record.id },
+      NOW,
+    ).table;
+    expect(nextTaskWakeAt(withChild)).toBe("2026-09-24T14:02:01.000Z");
+    const due = evaluateTaskDeadlines(withChild, "2026-09-24T14:02:01.000Z");
+    expect(due.effects).toEqual([
+      expect.objectContaining({
+        kind: "settled",
+        outcome: {
+          error: {
+            code: "TIMED_OUT",
+            message: "The task did not finish within its time limit and was stopped.",
+          },
+          status: "failed",
+        },
+      }),
+      expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
+    ]);
+    expect(due.table.records[0]).toMatchObject({
+      cancelConfirmBy: "2026-09-24T14:02:36.000Z",
+      status: "failed",
     });
-    expect(timedOut.table.records[0]?.status).toBe("failed");
+    // The timeout already settled it; a repeated evaluation does nothing more.
+    expect(evaluateTaskDeadlines(due.table, "2026-09-24T14:02:02.000Z").effects).toEqual([]);
+    expect(timeOutTask(due.table, task.record.id, NOW).effects).toEqual([]);
+  });
+
+  it("gives an agent the plain 30-second confirmation window", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    expect(cancelTask(agent.table, agent.record.id, NOW).table.records[0]?.cancelConfirmBy).toBe(
+      "2026-09-24T14:02:30.000Z",
+    );
+  });
+
+  it("treats a limit past the last representable date as no limit", () => {
+    expect(started(undefined, { timeoutMs: 1e20 }).record.deadlineAt).toBeUndefined();
+    expect(started(undefined, { timeoutMs: false }).record.deadlineAt).toBeUndefined();
   });
 });
 
@@ -410,7 +444,7 @@ describe("persistence", () => {
       { id: "old-aaaaaa", name: "old", reason: "unsupported version 0" },
       { reason: "not an object" },
     ]);
-    expect(writeTaskTable(state, { records: [] })).toBeUndefined();
+    expect(writeTaskTable(state, taskTable([]))).toBeUndefined();
   });
 
   it("decodes one record without validating others", () => {
@@ -449,7 +483,7 @@ describe("persistence", () => {
         NOW,
       ).table;
     }
-    table = { records: table.records.map((record) => ({ ...record, delivered: true })) };
+    table = taskTable(table.records.map((record) => ({ ...record, delivered: true })));
     const pruned = pruneTaskTable(table);
     expect(pruned.records.map((record) => record.kind)).toEqual(["agent"]);
     expect(idleAgents(pruned)).toHaveLength(1);

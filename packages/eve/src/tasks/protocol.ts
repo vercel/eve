@@ -87,7 +87,10 @@ export type TaskMessage =
   | {
       /** Signals that a deadline or cancellation confirmation window may have passed. */
       readonly kind: "task.deadline";
-      /** The owner run that armed the timer. A later owner still honors it: every signal is re-evaluated. */
+      /**
+       * The owner run that armed the timer. With `wakeAt`, it identifies the
+       * armed timer's own signal; any other signal is still re-evaluated.
+       */
       readonly ownerRunId: string;
       /** The wake time the timer was armed for. */
       readonly wakeAt: string;

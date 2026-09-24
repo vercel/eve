@@ -19,14 +19,14 @@ import {
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { cancelTasksStep } from "#tasks/cancel.js";
 import {
   applyTaskReport,
-  cancelTasksStep,
   ensureTaskCallbackAliasStep,
   startAgentTasks,
   type AgentTaskCall,
@@ -38,7 +38,7 @@ import {
   readTaskCallbackAlias,
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
-import { cancelTask } from "#tasks/table.js";
+import { cancelTask, evaluateTaskDeadlines, pruneTaskTable } from "#tasks/table.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
@@ -167,6 +167,46 @@ describe("startAgentTasks", () => {
         taskId: record?.id,
       }),
     );
+  });
+
+  it("gives each call its target's authored timeout, or the 2-hour default", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+    const graph = (timeout: number | false | undefined) => ({
+      nodesByNodeId: new Map([["subagents/research", { agent: { config: { timeout } } }]]),
+    });
+    const deadline = async (timeout: number | false | undefined) => {
+      Object.assign(bundle, { graph: graph(timeout) });
+      try {
+        return records((await start([modelCall()])).sessionState)[0]?.deadlineAt;
+      } finally {
+        Reflect.deleteProperty(bundle, "graph");
+      }
+    };
+
+    await expect(deadline(undefined)).resolves.toBe("2026-09-24T16:00:00.000Z");
+    await expect(deadline(60_000)).resolves.toBe("2026-09-24T14:01:00.000Z");
+    await expect(deadline(false)).resolves.toBeUndefined();
+  });
+
+  it("gives a remote agent call the remote definition's timeout", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({
+      kind: "started",
+      remote: {
+        callbackBaseUrl: REMOTE_CHILD.callbackBaseUrl,
+        sessionId: REMOTE_CHILD.sessionId,
+        url: REMOTE_CHILD.url,
+      },
+    } as never);
+    const remote = bundle.subagentRegistry.subagentsByNodeId.get("subagents/billing.ts")!;
+    Object.assign(remote.definition, { timeout: 5_000 });
+    try {
+      const update = await start([modelCall({ target: "billing" })], [], {
+        [TASK_CALLBACK_ALIAS_STATE_KEY]: CALLBACK_ALIAS,
+      });
+      expect(records(update.sessionState)[0]?.deadlineAt).toBe("2026-09-24T14:00:05.000Z");
+    } finally {
+      Reflect.deleteProperty(remote.definition, "timeout");
+    }
   });
 
   it("records the waiting turn from the pending batch after the live turn cleared", async () => {
@@ -343,7 +383,7 @@ describe("startAgentTasks", () => {
 
   it("refuses to continue an agent whose child never started", async () => {
     const { table } = cancelTask(
-      { records: [createTaskRecord({ callId: "call-0" })] },
+      taskTable([createTaskRecord({ callId: "call-0" })]),
       "research-abc234",
       NOW,
     );
@@ -472,7 +512,7 @@ describe("applyTaskReport", () => {
   });
 
   it("sends the held cancel when a cancelled task's child starts", async () => {
-    const { table } = cancelTask({ records: [createTaskRecord()] }, "research-abc234", NOW);
+    const { table } = cancelTask(taskTable([createTaskRecord()]), "research-abc234", NOW);
 
     const update = await applyTaskReport({
       now: NOW,
@@ -492,6 +532,54 @@ describe("applyTaskReport", () => {
     const [record] = records(update.sessionState);
     expect(record).toMatchObject({ child: LOCAL_CHILD, status: "cancelled" });
     expect(record?.pendingCommands).toBeUndefined();
+  });
+
+  it("cancels a child whose task was cancelled and pruned before it reported task.started", async () => {
+    // Alice's turn starts a research agent, and she cancels it before the child boots.
+    const cancelled = cancelTask(taskTable([createTaskRecord()]), "research-abc234", NOW);
+    expect(cancelled.table.records[0]?.pendingCommands).toEqual([{ kind: "cancel" }]);
+    // The confirmation window passes with no child to stop, and the record is pruned.
+    const expired = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:00:31.000Z");
+    expect(expired.effects).toEqual([expect.objectContaining({ kind: "unconfirmed" })]);
+    expect(expired.effects[0]).not.toHaveProperty("child");
+    expect(pruneTaskTable(expired.table).records).toEqual([]);
+
+    // The child boots late and reports to an owner that no longer knows its task.
+    const update = await applyTaskReport({
+      now: "2026-09-24T14:01:00.000Z",
+      payload: {
+        callId: "call-1",
+        child: { continuationToken: "child-token", sessionId: "child-session" },
+        kind: "task.started",
+      },
+      serializedContext: {},
+      sessionState: ownerState(pruneTaskTable(expired.table).records),
+    });
+
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "child-session",
+    });
+    expect(update).toMatchObject({ events: [], replies: [], results: [] });
+    expect(records(update.sessionState)).toEqual([]);
+  });
+
+  it("ignores a repeated task.started from a child the owner already adopted", async () => {
+    const record = createTaskRecord({ child: LOCAL_CHILD });
+
+    const update = await applyTaskReport({
+      now: NOW,
+      payload: {
+        callId: "call-1",
+        child: { continuationToken: "child-token", sessionId: "child-session" },
+        kind: "task.started",
+      },
+      serializedContext: {},
+      sessionState: ownerState([record]),
+    });
+
+    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+    expect(update.events).toEqual([]);
+    expect(records(update.sessionState)).toEqual([record]);
   });
 
   it.each(["parked", "terminal"] as const)(
@@ -740,14 +828,12 @@ describe("applyTaskReport", () => {
 
   it("counts a cancelled child's confirmation without reporting it", async () => {
     const { table } = cancelTask(
-      {
-        records: [
-          createTaskRecord({
-            child: LOCAL_CHILD,
-            workflowCaller: { replyTo: "reply", runId: "run-1" },
-          }),
-        ],
-      },
+      taskTable([
+        createTaskRecord({
+          child: LOCAL_CHILD,
+          workflowCaller: { replyTo: "reply", runId: "run-1" },
+        }),
+      ]),
       "research-abc234",
       NOW,
     );

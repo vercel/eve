@@ -105,6 +105,7 @@ describe("createSessionInbox", () => {
         runId: "tool-run",
         sequence: 0,
         stepIndex: 0,
+        taskId: "work-abc234",
         toolName: "work",
         turnId: "turn-1",
       },

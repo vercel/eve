@@ -119,7 +119,7 @@ function taskStarted(
       callId,
       child: {
         sessionId: `child_${callId}`,
-        streamPath: `/eve/v1/children/${callId}/stream`,
+        streamPath: `/eve/v1/session/child_${callId}/stream`,
       },
       kind: "agent",
       mode: "foreground",
@@ -191,9 +191,9 @@ describe("SubagentPump.settleCancelledTurn", () => {
     const backgroundB = pushableChildStream();
     const foregroundB = pushableChildStream();
     const streams = new Map([
-      ["/eve/v1/children/background-a/stream", backgroundA],
-      ["/eve/v1/children/background-b/stream", backgroundB],
-      ["/eve/v1/children/foreground-b/stream", foregroundB],
+      ["/eve/v1/session/child_background-a/stream", backgroundA],
+      ["/eve/v1/session/child_background-b/stream", backgroundB],
+      ["/eve/v1/session/child_foreground-b/stream", foregroundB],
     ]);
     const requests = serveChildStreams(({ path, signal }) => {
       const child = streams.get(path);
@@ -418,9 +418,11 @@ describe("SubagentPump child stream transport", () => {
     const { pump, view } = createPump({ onToolCompleted });
     const first = taskStarted("call-1");
     first.data.child.sessionId = "conversation-child";
+    first.data.child.streamPath = "/eve/v1/session/conversation-child/stream";
     first.data.name = "self-modification__agent";
     const second = taskStarted("call-2", "turn-2");
     second.data.child.sessionId = "conversation-child";
+    second.data.child.streamPath = "/eve/v1/session/conversation-child/stream";
     second.data.name = "self-modification__agent";
 
     pump.begin(first, "parent");
@@ -430,7 +432,10 @@ describe("SubagentPump child stream transport", () => {
     pump.begin(second, "parent");
     await vi.waitFor(() => expect(onToolCompleted).toHaveBeenCalledOnce());
 
-    expect(requests[1]).toMatchObject({ path: "/eve/v1/children/call-2/stream", startIndex: 1 });
+    expect(requests[1]).toMatchObject({
+      path: "/eve/v1/session/conversation-child/stream",
+      startIndex: 1,
+    });
     expect(onToolCompleted).toHaveBeenCalledWith("self-modification__agent", "registry_add", {
       status: "needs-terminal",
       address: "channel/slack",
@@ -447,8 +452,10 @@ describe("SubagentPump child stream transport", () => {
     const { pump, view } = createPump();
     const first = taskStarted("call-1");
     first.data.child.sessionId = "conversation-child";
+    first.data.child.streamPath = "/eve/v1/session/conversation-child/stream";
     const second = taskStarted("call-2", "turn-2");
     second.data.child.sessionId = "conversation-child";
+    second.data.child.streamPath = "/eve/v1/session/conversation-child/stream";
 
     pump.begin(first, "parent");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -464,7 +471,10 @@ describe("SubagentPump child stream transport", () => {
         expect.objectContaining({ callId: "call-2", reasoning: "second turn" }),
       ),
     );
-    expect(requests[1]).toMatchObject({ path: "/eve/v1/children/call-2/stream", startIndex: 1 });
+    expect(requests[1]).toMatchObject({
+      path: "/eve/v1/session/conversation-child/stream",
+      startIndex: 1,
+    });
   });
 
   it("leaves connection authorization events to the parent runner", async () => {
@@ -529,8 +539,8 @@ describe("SubagentPump child stream transport", () => {
     );
 
     expect(requests.map(({ path, startIndex }) => ({ path, startIndex }))).toEqual([
-      { path: "/eve/v1/children/call-1/stream", startIndex: 0 },
-      { path: "/eve/v1/children/call-1/stream", startIndex: 1 },
+      { path: "/eve/v1/session/child_call-1/stream", startIndex: 0 },
+      { path: "/eve/v1/session/child_call-1/stream", startIndex: 1 },
     ]);
     expect(view.upsertStep).toHaveBeenLastCalledWith(
       expect.objectContaining({ reasoning: "looked up the forecast" }),
@@ -569,7 +579,8 @@ describe("SubagentPump child stream transport", () => {
     const requests = serveChildStreams(durableChild([boundaryEvent(0)]));
     const { pump, view } = createPump({ host: "https://parent.example" });
     const called = taskStarted("remote-call");
-    called.data.child.streamPath = "/eve/v1/session/parent/subagents/remote-call/child/stream";
+    called.data.child.streamPath =
+      "/eve/v1/session/parent/subagents/remote-call/child_remote-call/stream";
     called.data.child.remote = { url: "https://remote.example/private" };
 
     pump.begin(called, "parent");

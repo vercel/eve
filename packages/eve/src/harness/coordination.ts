@@ -308,6 +308,7 @@ export function createCoordinationRequestFromToolCall(input: {
       executeInput: definition.executeInput?.(inputObject),
       input: inputObject,
       kind: "workflow-task",
+      timeout: definition.timeout,
       toolName: input.toolCall.toolName,
       workflowId: definition.workflowId,
     };

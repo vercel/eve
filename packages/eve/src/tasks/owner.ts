@@ -29,7 +29,7 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { settledEvents, taskSettledEvent, taskStartedEvent } from "#tasks/events.js";
+import { settledEvents, taskStartedEvent } from "#tasks/events.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeAgentDispatchRequest,
@@ -44,6 +44,8 @@ import {
   AGENT_UNREACHABLE,
   SUBAGENT_EXECUTION_FAILED,
 } from "#subagents/agent-handle-errors.js";
+import { renderAgentBusy, renderAgentUnreachable } from "#tasks/render.js";
+import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
@@ -54,7 +56,12 @@ import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
 import { isTerminalTaskStatus, type ChildAddress } from "#tasks/protocol.js";
 import { createFailedResult, toTaskError, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
-import { deliverToChild, runCommands, type CommandEffect } from "#tasks/transport.js";
+import {
+  cancelOrphanedChild,
+  deliverToChild,
+  runCommands,
+  type CommandEffect,
+} from "#tasks/transport.js";
 import {
   ownerInboxHookToken,
   readTaskCallbackAlias,
@@ -67,8 +74,6 @@ import { readTasks } from "#tasks/read.js";
 import { encodeTaskCreator, holdTaskResult } from "#tasks/results.js";
 import {
   applyTaskMessage,
-  cancelTask,
-  DEFAULT_AGENT_TIMEOUT_MS,
   findTask,
   markTaskDelivered,
   startTask,
@@ -237,7 +242,7 @@ export async function startAgentTasks(input: {
       nodeId: action.nodeId,
       now: input.now,
       ownerId: session.sessionId,
-      timeoutMs: DEFAULT_AGENT_TIMEOUT_MS,
+      timeoutMs: resolveAgentTaskTimeout({ action, bundle: prepared.bundle, ctx }),
       turnId,
       workflowCaller: call.workflowCaller,
     });
@@ -248,10 +253,7 @@ export async function startAgentTasks(input: {
       continue;
     }
     if (started.kind === "steered") {
-      fail(call, action, {
-        code: AGENT_BUSY,
-        message: `Agent "${started.record.id}" is still working on an earlier call. Wait for its result before giving it more work.`,
-      });
+      fail(call, action, { code: AGENT_BUSY, message: renderAgentBusy(started.record.id) });
       continue;
     }
     const { record } = started;
@@ -281,10 +283,7 @@ export async function startAgentTasks(input: {
     let failure: JsonValue | undefined;
     if (entry.kind === "resume") {
       if (record.child === undefined) {
-        failure = {
-          code: AGENT_UNREACHABLE,
-          message: `Agent "${record.id}" can no longer be given more work. Omit agentId to start a new agent.`,
-        };
+        failure = { code: AGENT_UNREACHABLE, message: renderAgentUnreachable(record.id, "ended") };
       } else {
         const delivered = await deliverToChild({
           action,
@@ -406,10 +405,20 @@ export async function applyTaskReport(input: {
 
   if (input.payload.kind === "task.started") {
     // A cancelled task still adopts its child, so the held cancel reaches it.
-    const startedCallId = input.payload.callId;
-    const record = readTasks(session).records.find(
+    const { callId: startedCallId, child: reported } = input.payload;
+    const tasks = readTasks(session);
+    const record = tasks.records.find(
       (candidate) => candidate.callId === startedCallId && candidate.child === undefined,
     );
+    const duplicate = tasks.records.some(
+      (candidate) =>
+        candidate.child?.kind === "local" && candidate.child.sessionId === reported.sessionId,
+    );
+    if (record === undefined && !duplicate) {
+      // The task stopped and was pruned before its child reported, so the
+      // held cancel is gone; the child must not run unsupervised.
+      await cancelOrphanedChild({ callId: startedCallId, sessionId: reported.sessionId });
+    }
     if (record !== undefined) {
       const child: ChildAddress = { kind: "local", ...input.payload.child };
       const adopted = adoptChild(readTasks(session), record, child, input.now);
@@ -520,67 +529,6 @@ export async function applyTaskReport(input: {
             session,
             state: input.sessionState,
           }),
-  };
-}
-
-/** Which working tasks {@link cancelTasksStep} cancels. */
-export type TaskCancelSelector =
-  /** The waited tasks of the turn the session is running or parked in. */
-  | { readonly kind: "active-turn" }
-  /** Every working task: the session ends, or its delegated caller cancels it. */
-  | { readonly kind: "all" }
-  | { readonly kind: "workflow-run"; readonly runId: string };
-
-/**
- * Records cancellation for every working task the selector picks, reports
- * each as settled, and asks each started child to stop. It never waits for
- * the child to confirm, and the confirmation reports nothing.
- */
-export async function cancelTasksStep(input: {
-  readonly selector: TaskCancelSelector;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<TaskOwnerUpdate> {
-  "use step";
-
-  const durable = readDurableSession(input.sessionState);
-  const initial = readTasks(durable);
-  let table = initial;
-  const now = new Date().toISOString();
-  const commands: CommandEffect[] = [];
-  const events: UnstampedMessageStreamEvent[] = [];
-  const turnId =
-    getPendingCoordinationBatch(durable.state)?.event.turnId ??
-    activeTurnId(input.sessionState.emissionState);
-  // A background run's own agent calls belong to that run, not to any turn.
-  const backgroundRuns = new Set(
-    initial.records.flatMap((record) =>
-      record.mode === "background" && record.child?.kind === "workflow" ? [record.child.runId] : [],
-    ),
-  );
-  for (const record of initial.records) {
-    const selected =
-      input.selector.kind === "all" ||
-      (input.selector.kind === "active-turn"
-        ? record.turnId === turnId &&
-          record.mode === "foreground" &&
-          !backgroundRuns.has(record.workflowCaller?.runId ?? "")
-        : record.workflowCaller?.runId === input.selector.runId);
-    if (!selected || isTerminalTaskStatus(record.status)) continue;
-    const cancelled = cancelTask(table, record.id, now);
-    table = cancelled.table;
-    commands.push(...commandEffects(cancelled.effects));
-    events.push(taskSettledEvent({ outcome: { status: "cancelled" }, record }));
-  }
-  const update = { events, replies: [], results: [], serializedContext: input.serializedContext };
-  if (table === initial) return { ...update, sessionState: input.sessionState };
-  await runCommands(commands, await readContext(input.serializedContext));
-  return {
-    ...update,
-    sessionState: replaceDurableSessionSnapshot({
-      session: setTaskTable(durable, table),
-      state: input.sessionState,
-    }),
   };
 }
 

@@ -18,6 +18,8 @@ export default defineEval({
 
     const omitted = await selected.session.send("Call omitted-marker exactly once.");
 
+    // An advertised tool shows up as a requested call even when its task never starts.
+    omitted.notCalledTool("omitted-marker");
     omitted.notEvent("task.started", { data: { name: "omitted-marker" } });
     omitted.noFailedActions();
   },

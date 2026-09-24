@@ -118,29 +118,38 @@
  *             delivery policies, cohort notifications, the
  *             `execution: "background"` tool option, or the old
  *             `#execution/tasks` runtime.
- *   rule 46 — No timer-based waiting loops in `"use step"` modules under
- *             `src/execution/`, `src/tasks/`, or `src/subagents/`: no
- *             `setTimeout`, `sleep`, or `delay` call inside a loop. Workflow
- *             bodies orchestrate and steps only perform side effects; a step
- *             that polls or backs off on a timer holds a function invocation
- *             open and hides a race (a durable wait belongs in a workflow body,
- *             a deadline in the owner's task timer).
+ *   rule 46 — No timer-based waiting in `src/execution/`, `src/tasks/`, or
+ *             `src/subagents/` (sandbox bindings excepted): no `setTimeout`
+ *             or `setInterval` call, including `globalThis.setTimeout` and
+ *             `timers.setTimeout`, and no `sleep` or `delay` call inside a
+ *             loop outside a workflow body. Workflow bodies orchestrate and
+ *             steps only perform side effects; code that polls or backs off
+ *             on a timer holds a function invocation open and hides a race
+ *             (a durable wait belongs in a workflow body, a deadline in the
+ *             owner's task timer). A short allowlist names the functions that
+ *             legitimately back off, each with its reason.
  *   rule 47 — Only `src/tasks/table.ts` constructs task records, and only
  *             `src/tasks/table.ts` and `src/tasks/state.ts` write the owner's
- *             `eve.taskTable` state key. The table is the single writer of the
- *             owner's task records; a second writer reintroduces the split
- *             stores the task kernel removed.
+ *             `eve.taskTable` state key. `TaskTable` is branded, so only the
+ *             table's transitions produce one; no other module may cast to
+ *             it. The table is the single writer of the owner's task records;
+ *             a second writer reintroduces the split stores the task kernel
+ *             removed.
  *   rule 48 — One `TaskMessage` union. Object types with
  *             `kind: "task.started" | "task.settled" | "task.input" |
  *             "task.deadline"` are declared only in `src/tasks/protocol.ts`,
- *             and no template string encodes a task ID together with its
- *             generation. Identity travels as typed fields, never as a string
- *             that code must parse.
+ *             and no template string, `+` concatenation, or
+ *             `JSON.stringify([...])` combines a task ID (`taskId` or `.id`)
+ *             with a generation. Identity travels as typed fields, never as
+ *             a string that code must parse.
  *   rule 49 — Model-facing task text lives only in `src/tasks/render.ts`. No
  *             other eve source string literal contains "in the background",
- *             "<task_result", or "[Tasks]". One module owns every string the
- *             model reads about tasks, so the contract can be tuned in one
- *             place.
+ *             "<task_result", or "[Tasks]", and no string literal under
+ *             `src/tasks/`, `src/subagents/`, or
+ *             `src/execution/tools/subagent/` starts with `Agent "` or
+ *             mentions `agentId`, `task_cancel`, or a time limit. One module
+ *             owns every string the model reads about tasks, so the contract
+ *             can be tuned in one place.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -418,13 +427,29 @@ function hasDirective(node, directive) {
 }
 
 const RULE46_DIRS = ["execution/", "tasks/", "subagents/"].map((dir) => `${EVE_SRC}${dir}`);
-const RULE46_TIMER_CALLEES = new Set(["setTimeout", "sleep", "delay"]);
-// `file#function` entries. `waitForHookRelease` serves the session reset
-// ingress path, which runs in a request handler rather than a step; its file
-// also defines the handoff start step.
+// Sandbox bindings supervise OS processes and containers inside one tool
+// call; their timers bound process I/O and never wait on another run.
+const RULE46_EXCLUDED_DIRS = [`${EVE_SRC}execution/sandbox/`];
+const RULE46_TIMER_CALLEES = new Set(["setTimeout", "setInterval"]);
+const RULE46_SLEEP_CALLEES = new Set(["sleep", "delay"]);
+// `file#function` entries that legitimately back off on a timer.
 const RULE46_ALLOWED_FUNCTIONS = new Set([
+  // The session reset request handler waits for the old owner to release its
+  // inbox before answering; it runs in an HTTP request, not a step.
   "packages/eve/src/execution/workflow-runtime.ts#waitForHookRelease",
+  // A delivery that lands mid-handoff waits up to 5 s for the successor to
+  // claim the inbox; channel ingress calls it from request handlers, which
+  // have no step retry to fall back on.
+  "packages/eve/src/execution/session-inbox/resume.ts#isHandoffInProgress",
 ]);
+
+function calleeName(expression) {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.name)) {
+    return expression.name.text;
+  }
+  return undefined;
+}
 
 /**
  * @param {string} posix
@@ -432,8 +457,13 @@ const RULE46_ALLOWED_FUNCTIONS = new Set([
  * @param {Violation[]} violations
  */
 function checkRule46(posix, source, violations) {
-  if (!RULE46_DIRS.some((dir) => posix.startsWith(dir)) || !isProductionEveSource(posix)) return;
-  if (!source.includes('"use step"')) return;
+  if (
+    !RULE46_DIRS.some((dir) => posix.startsWith(dir)) ||
+    RULE46_EXCLUDED_DIRS.some((dir) => posix.startsWith(dir)) ||
+    !isProductionEveSource(posix)
+  ) {
+    return;
+  }
   const sourceFile = parseTs(posix, source);
   const visit = (node, scope) => {
     let next = scope;
@@ -444,19 +474,21 @@ function checkRule46(posix, source, violations) {
     } else if (ts.isIterationStatement(node, false)) {
       next = { ...scope, loop: true };
     } else if (
-      scope.loop &&
       !scope.workflow &&
       ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      RULE46_TIMER_CALLEES.has(node.expression.text) &&
       !RULE46_ALLOWED_FUNCTIONS.has(`${posix}#${scope.name ?? ""}`)
     ) {
-      violations.push({
-        rule: 46,
-        file: posix,
-        line: lineOf(sourceFile, node),
-        message: `waits on \`${node.expression.text}\` inside a loop in a "use step" module. Steps perform side effects once; they never poll or back off on a timer. Move a durable wait into a workflow body, express a deadline through the owner's task timer, or let Workflow retry the step.`,
-      });
+      const callee = calleeName(node.expression);
+      const timer = callee !== undefined && RULE46_TIMER_CALLEES.has(callee);
+      const sleepInLoop = scope.loop && callee !== undefined && RULE46_SLEEP_CALLEES.has(callee);
+      if (timer || sleepInLoop) {
+        violations.push({
+          rule: 46,
+          file: posix,
+          line: lineOf(sourceFile, node),
+          message: `waits on \`${callee}\`${timer ? "" : " inside a loop"}. Execution, task, and subagent code never polls or backs off on a timer: move a durable wait into a workflow body, express a deadline through the owner's task timer, or let Workflow retry the step. If the backoff is unavoidable, add the function to RULE46_ALLOWED_FUNCTIONS with its reason.`,
+        });
+      }
     }
     ts.forEachChild(node, (child) => visit(child, next));
   };
@@ -481,6 +513,15 @@ function checkRule47(posix, lines, violations) {
         line: idx + 1,
         message:
           "constructs a task record outside src/tasks/table.ts. Records change only through the table's transitions (startTask, applyTaskMessage, cancelTask, ...); add a transition there instead.",
+      });
+    }
+    if (posix !== `${EVE_SRC}tasks/table.ts` && /\bas\s+TaskTable\b/.test(line)) {
+      violations.push({
+        rule: 47,
+        file: posix,
+        line: idx + 1,
+        message:
+          "casts to TaskTable outside src/tasks/table.ts. A table comes only from the table's transitions (startTask, applyTaskMessage, cancelTask, ...), so no other code writes records into one.",
       });
     }
     if (
@@ -531,15 +572,66 @@ function declaringTypeName(node) {
   return undefined;
 }
 
-function mentions(expression, pattern) {
+function mentions(expression, test) {
   let found = false;
   const visit = (node) => {
     if (found) return;
-    if (ts.isIdentifier(node) && pattern.test(node.text)) found = true;
+    if (ts.isIdentifier(node) && test(node.text)) found = true;
     else ts.forEachChild(node, visit);
   };
   visit(expression);
   return found;
+}
+
+// `taskId`, `taskIds`, or a property named `id`, such as `record.id`.
+const isTaskIdName = (name) => name === "id" || /taskId/i.test(name);
+const isGenerationName = (name) => /generation/i.test(name);
+
+/** Whether separate parts of one string-building expression name a task ID and a generation. */
+function encodesTaskKey(parts) {
+  return (
+    parts.some((part) => mentions(part, isTaskIdName)) &&
+    parts.some((part) => mentions(part, isGenerationName))
+  );
+}
+
+/** Operands of a `+` chain that includes a string literal or template. */
+function stringConcatenationParts(node) {
+  if (!ts.isBinaryExpression(node) || node.operatorToken.kind !== ts.SyntaxKind.PlusToken) {
+    return undefined;
+  }
+  // Only the outermost `+` of a chain reports.
+  if (
+    ts.isBinaryExpression(node.parent) &&
+    node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    return undefined;
+  }
+  const parts = [];
+  const collect = (part) => {
+    if (ts.isBinaryExpression(part) && part.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      collect(part.left);
+      collect(part.right);
+    } else {
+      parts.push(part);
+    }
+  };
+  collect(node);
+  return parts.some((part) => ts.isStringLiteralLike(part) || ts.isTemplateExpression(part))
+    ? parts
+    : undefined;
+}
+
+function isJsonStringifyOfArray(node) {
+  return (
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) &&
+    node.expression.expression.text === "JSON" &&
+    node.expression.name.text === "stringify" &&
+    node.arguments.length > 0 &&
+    ts.isArrayLiteralExpression(node.arguments[0])
+  );
 }
 
 /**
@@ -569,10 +661,12 @@ function checkRule48(posix, sourceFile, violations) {
         message: `declares a \`${node.type.literal.text}\` message outside src/tasks/protocol.ts. Every task message belongs to the one TaskMessage union; reference it with Extract<TaskMessage, ...> instead.`,
       });
     }
+    const concatenation = stringConcatenationParts(node);
     if (
-      ts.isTemplateExpression(node) &&
-      node.templateSpans.some((span) => mentions(span.expression, /taskId/i)) &&
-      node.templateSpans.some((span) => mentions(span.expression, /generation/i))
+      (ts.isTemplateExpression(node) &&
+        encodesTaskKey(node.templateSpans.map((span) => span.expression))) ||
+      (concatenation !== undefined && encodesTaskKey(concatenation)) ||
+      (isJsonStringifyOfArray(node) && encodesTaskKey(node.arguments[0].elements))
     ) {
       violations.push({
         rule: 48,
@@ -588,6 +682,11 @@ function checkRule48(posix, sourceFile, violations) {
 }
 
 const RULE49_TASK_TEXT_RE = /in the background|<task_result|\[Tasks\]/i;
+// Delegation modules also must not phrase agent errors themselves.
+const RULE49_AGENT_TEXT_RE = /^Agent "|\bagentId\b|\btask_cancel\b|\btime limit\b/;
+const RULE49_AGENT_TEXT_DIRS = ["tasks/", "subagents/", "execution/tools/subagent/"].map(
+  (dir) => `${EVE_SRC}${dir}`,
+);
 const RULE49_RENDER = `${EVE_SRC}tasks/render.ts`;
 // CLI and setup copy is read by people at a terminal, never by the model.
 const RULE49_EXCLUDED_PREFIXES = [`${EVE_SRC}cli/`, `${EVE_SRC}setup/`];
@@ -601,6 +700,7 @@ function checkRule49(posix, sourceFile, violations) {
   if (posix === RULE49_RENDER || RULE49_EXCLUDED_PREFIXES.some((dir) => posix.startsWith(dir))) {
     return;
   }
+  const agentText = RULE49_AGENT_TEXT_DIRS.some((dir) => posix.startsWith(dir));
   const visit = (node) => {
     if (
       (ts.isStringLiteral(node) ||
@@ -608,7 +708,7 @@ function checkRule49(posix, sourceFile, violations) {
         ts.isTemplateHead(node) ||
         ts.isTemplateMiddle(node) ||
         ts.isTemplateTail(node)) &&
-      RULE49_TASK_TEXT_RE.test(node.text)
+      (RULE49_TASK_TEXT_RE.test(node.text) || (agentText && RULE49_AGENT_TEXT_RE.test(node.text)))
     ) {
       violations.push({
         rule: 49,

@@ -24,6 +24,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   "use workflow";
 
   const owner = createBlockingWorkflow(input);
+  if (!(await owner.claim())) return;
   const definition = input;
   const { signal } = owner;
   let commandsOpen = true;

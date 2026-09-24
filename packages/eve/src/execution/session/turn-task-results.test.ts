@@ -27,6 +27,7 @@ const OUTCOME: SessionInboxPayload = {
     runId: "run-1",
     sequence: 0,
     stepIndex: 0,
+    taskId: "remind-abc234",
     toolName: "remind",
     turnId: "turn_0",
   },

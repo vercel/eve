@@ -11,7 +11,7 @@ import {
 } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderBackgroundReceipt, renderTooManyBackgroundTasks } from "#tasks/render.js";
 import { readPendingTaskResults, readTaskCreator } from "#tasks/results.js";
@@ -42,6 +42,7 @@ const FROM = {
   runId: "run-1",
   sequence: 3,
   stepIndex: 1,
+  taskId: "deploy-abc234",
   toolName: "deploy",
   turnId: "turn-1",
 };
@@ -104,6 +105,25 @@ describe("startWorkflowTask", () => {
         type: "task.started",
       },
     ]);
+  });
+
+  it("gives the task the tool's authored timeout as its deadline", async () => {
+    const startRun = async () => ({ hookToken: "control-hook", runId: "run-1" });
+    const deadline = async (timeout: number | false) =>
+      getTaskTable(
+        (
+          await startWorkflowTask({
+            now: NOW,
+            request: { ...REQUEST, timeout },
+            session: PARENT,
+            startRun,
+            turnId: "turn-1",
+          })
+        ).session,
+      ).records[0]?.deadlineAt;
+
+    await expect(deadline(60_000)).resolves.toBe(new Date(Date.parse(NOW) + 60_000).toISOString());
+    await expect(deadline(false)).resolves.toBeUndefined();
   });
 
   it("starts no second run for a replayed call", async () => {
@@ -373,7 +393,7 @@ describe("settleWorkflowTask for a background task", () => {
   });
 
   it("never holds a result for a background task the owner cancelled", () => {
-    const cancelled = cancelTask({ records: [BACKGROUND] }, BACKGROUND.id, NOW).table.records;
+    const cancelled = cancelTask(taskTable([BACKGROUND]), BACKGROUND.id, NOW).table.records;
 
     const update = settleWorkflowTask(
       settle(ownerState(taskTableState(cancelled)), { output: "late", status: "completed" }),
@@ -461,7 +481,7 @@ describe("settleWorkflowTask", () => {
   });
 
   it("treats the outcome of a call the owner cancelled as confirmation only", () => {
-    const cancelled = cancelTask({ records: [WORKING] }, WORKING.id, NOW).table.records;
+    const cancelled = cancelTask(taskTable([WORKING]), WORKING.id, NOW).table.records;
 
     const update = settleWorkflowTask(
       settle(ownerState(taskTableState(cancelled)), { reason: "stopped", status: "cancelled" }),
@@ -473,8 +493,19 @@ describe("settleWorkflowTask", () => {
     expect(records(update.sessionState)).toEqual([]);
   });
 
+  it("settles from the run that holds the task's hook, even when a retried start recorded another", () => {
+    // The recorded run is a duplicate that exited; the first run claimed the hook and reports.
+    const state = ownerState(taskTableState([{ ...WORKING, child: { ...RUN, runId: "run-dup" } }]));
+
+    const update = settleWorkflowTask(settle(state, { output: "done", status: "completed" }));
+
+    expect(update.results).toEqual([
+      { callId: "call-1", kind: "tool-result", output: "done", toolName: "deploy" },
+    ]);
+  });
+
   it.each([
-    ["another run", { runId: "run-2" }],
+    ["another task", { taskId: "deploy-def567" }],
     ["another turn", { turnId: "turn-2" }],
     ["another call", { callId: "call-2" }],
     ["another tool", { toolName: "rollback" }],

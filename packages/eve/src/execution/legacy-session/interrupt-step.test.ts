@@ -3,7 +3,7 @@ import { EntityConflictError } from "#compiled/@workflow/errors/index.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { importConversation } from "./snapshot.js";
 import type { PreparedLegacySession } from "./prepare-step.js";
-import { isWorkflowTaskResult } from "#tasks/state.js";
+import { getTaskTable } from "#tasks/state.js";
 const mocks = vi.hoisted(() => ({ cancel: vi.fn(), children: vi.fn(), settle: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: mocks.cancel,
@@ -58,12 +58,7 @@ describe("legacy pending work", () => {
     expect(result.sessionState.snapshot.session.state).not.toHaveProperty(
       "eve.runtime.workflowToolRuns",
     );
-    expect(
-      isWorkflowTaskResult(result.sessionState.snapshot.session, {
-        callId: "call",
-        toolName: "tool",
-      }),
-    ).toBe(false);
+    expect(getTaskTable(result.sessionState.snapshot.session).records).toEqual([]);
     expect(mocks.settle).not.toHaveBeenCalled();
   });
   it("discovers both pre-registry formats during conversation import", async () => {

@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import {
+  findWorkflowTask,
   getTaskTable,
-  isWorkflowTaskResult,
-  isWorkingWorkflowTask,
+  planTaskTimer,
   readTaskCallbackAlias,
   readTaskTimer,
   setTaskTable,
   TASK_CALLBACK_ALIAS_PREFIX,
   TASK_CALLBACK_ALIAS_STATE_KEY,
-  taskTimerWakeToArm,
-  WAKE_NOW,
   writeTaskTimer,
 } from "#tasks/state.js";
 
@@ -40,7 +38,7 @@ describe("setTaskTable", () => {
 
     const session = setTaskTable(
       { state: undefined },
-      { records: [working, idleAgent, neverStarted, awaitingConfirmation] },
+      taskTable([working, idleAgent, neverStarted, awaitingConfirmation]),
     );
 
     expect(getTaskTable(session).records).toEqual([working, idleAgent, awaitingConfirmation]);
@@ -62,7 +60,7 @@ describe("readTaskCallbackAlias", () => {
 
 describe("workflow task lookups", () => {
   const run = { commandToken: "control", kind: "workflow" as const, runId: "run-1" };
-  const from = { callId: "call-1", runId: "run-1", toolName: "deploy", turnId: "turn-1" };
+  const from = { callId: "call-1", taskId: "deploy-aaaaaa", toolName: "deploy", turnId: "turn-1" };
   const working = createTaskRecord({
     child: run,
     id: "deploy-aaaaaa",
@@ -70,76 +68,108 @@ describe("workflow task lookups", () => {
     name: "deploy",
   });
 
-  it("finds the working task only for its own run, call, turn, and tool", () => {
-    const session = { state: taskTableState([working]) };
+  it("finds the task only for its own task, call, turn, and tool", () => {
+    const table = taskTable([working]);
 
-    expect(isWorkingWorkflowTask(session, from)).toBe(true);
-    expect(isWorkingWorkflowTask(session, { ...from, runId: "run-2" })).toBe(false);
-    expect(isWorkingWorkflowTask(session, { ...from, callId: "call-2" })).toBe(false);
-    expect(isWorkingWorkflowTask(session, { ...from, turnId: "turn-2" })).toBe(false);
-    expect(isWorkingWorkflowTask(session, { ...from, toolName: "rollback" })).toBe(false);
+    expect(findWorkflowTask(table, from)).toEqual(working);
+    expect(findWorkflowTask(table, { ...from, taskId: "deploy-bbbbbb" })).toBeUndefined();
+    expect(findWorkflowTask(table, { ...from, callId: "call-2" })).toBeUndefined();
+    expect(findWorkflowTask(table, { ...from, turnId: "turn-2" })).toBeUndefined();
+    expect(findWorkflowTask(table, { ...from, toolName: "rollback" })).toBeUndefined();
   });
 
-  it("does not treat a finished or cancelled task as working", () => {
+  it("matches any run of the task: only the run holding its command hook reports", () => {
+    // A retried start recorded the duplicate run; the first run claimed the hook.
+    const table = taskTable([{ ...working, child: { ...run, runId: "run-duplicate" } }]);
+
+    expect(findWorkflowTask(table, from)?.id).toBe("deploy-aaaaaa");
+  });
+
+  it("keeps matching a stopped task until its run confirms, and not after", () => {
     const cancelled = {
       ...working,
       cancelConfirmBy: "2026-09-24T14:00:30.000Z",
       status: "cancelled" as const,
     };
 
-    expect(isWorkingWorkflowTask({ state: taskTableState([cancelled]) }, from)).toBe(false);
+    expect(findWorkflowTask(taskTable([cancelled]), from)?.status).toBe("cancelled");
     expect(
-      isWorkingWorkflowTask({ state: taskTableState([{ ...working, status: "completed" }]) }, from),
-    ).toBe(false);
-  });
-
-  it("accepts an inbox tool result only for exactly one working task with that call and name", () => {
-    const result = { callId: "call-1", toolName: "deploy" };
-    const otherTurn = { ...working, id: "deploy-bbbbbb", turnId: "turn-0" };
-
-    expect(isWorkflowTaskResult({ state: taskTableState([working]) }, result)).toBe(true);
-    expect(
-      isWorkflowTaskResult(
-        { state: taskTableState([working]) },
-        { ...result, toolName: "rollback" },
-      ),
-    ).toBe(false);
-    expect(isWorkflowTaskResult({ state: taskTableState([working, otherTurn]) }, result)).toBe(
-      false,
-    );
-    expect(
-      isWorkflowTaskResult({ state: taskTableState([{ ...working, kind: "agent" }]) }, result),
-    ).toBe(false);
-    expect(isWorkflowTaskResult({ state: undefined }, result)).toBe(false);
+      findWorkflowTask(taskTable([{ ...working, status: "completed" as const }]), from),
+    ).toBeUndefined();
   });
 });
 
 describe("task timer state", () => {
   const DEADLINE = "2026-09-24T14:00:00.000Z";
+  const BEFORE = Date.parse("2026-09-24T12:00:00.000Z");
+  const current = { nowMs: BEFORE, ownerRunId: "owner-1" };
+  const armedAt = (wakeAt: string, ownerRunId = "owner-1") => ({
+    ownerRunId,
+    runId: "timer-1",
+    wakeAt,
+  });
 
   it("round-trips the armed timer and removes the key when cleared", () => {
-    const armed = { runId: "timer-1", wakeAt: DEADLINE };
+    const armed = armedAt(DEADLINE);
     const state = writeTaskTimer({ other: 1 }, armed);
     expect(readTaskTimer(state)).toEqual(armed);
     expect(writeTaskTimer(state, undefined)).toEqual({ other: 1 });
-    expect(
-      readTaskTimer({ "eve.taskTimer": { runId: "timer-1", wakeAt: "soon" } }),
-    ).toBeUndefined();
+    expect(readTaskTimer({ "eve.taskTimer": { ...armed, wakeAt: "soon" } })).toBeUndefined();
+    // A timer recorded without its owner run is re-armed.
+    expect(readTaskTimer({ "eve.taskTimer": { runId: "timer-1", wakeAt: DEADLINE } })).toBe(
+      undefined,
+    );
   });
 
-  it("asks for a wake only when the table needs one earlier than the armed timer", () => {
+  it("arms only when the table needs a wake earlier than this owner's timer", () => {
     const table = taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]);
-    expect(taskTimerWakeToArm(table)).toBe(DEADLINE);
+    expect(planTaskTimer(table, current)).toEqual({ kind: "arm", wakeAt: DEADLINE });
     expect(
-      taskTimerWakeToArm(writeTaskTimer(table, { runId: "t", wakeAt: "2026-09-24T13:00:00.000Z" })),
-    ).toBeUndefined();
+      planTaskTimer(writeTaskTimer(table, armedAt("2026-09-24T13:00:00.000Z")), current),
+    ).toEqual({ kind: "keep" });
     expect(
-      taskTimerWakeToArm(writeTaskTimer(table, { runId: "t", wakeAt: "2026-09-24T15:00:00.000Z" })),
-    ).toBe(DEADLINE);
-    expect(taskTimerWakeToArm(taskTableState([createTaskRecord()]))).toBeUndefined();
+      planTaskTimer(writeTaskTimer(table, armedAt("2026-09-24T15:00:00.000Z")), current),
+    ).toEqual({ kind: "arm", wakeAt: DEADLINE });
+    expect(planTaskTimer(taskTableState([createTaskRecord()]), current)).toEqual({
+      kind: "keep",
+    });
+  });
+
+  it("re-arms a timer another owner run armed", () => {
+    const table = taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]);
+    const inherited = writeTaskTimer(table, armedAt("2026-09-24T13:00:00.000Z", "owner-0"));
+
+    expect(planTaskTimer(inherited, current)).toEqual({ kind: "arm", wakeAt: DEADLINE });
+  });
+
+  it("treats a timer overdue past the grace period as lost and arms for now", () => {
+    const table = writeTaskTimer(
+      taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
+      armedAt(DEADLINE),
+    );
+    const withinGrace = { ...current, nowMs: Date.parse(DEADLINE) + 59_000 };
+    const overdue = { ...current, nowMs: Date.parse(DEADLINE) + 61_000 };
+
+    expect(planTaskTimer(table, withinGrace)).toEqual({ kind: "keep" });
+    expect(planTaskTimer(table, overdue)).toEqual({
+      kind: "arm",
+      wakeAt: new Date(overdue.nowMs).toISOString(),
+    });
+  });
+
+  it("cancels the armed timer once nothing is due", () => {
+    const settled = writeTaskTimer(
+      taskTableState([createTaskRecord({ status: "completed" })]),
+      armedAt(DEADLINE),
+    );
+
+    expect(planTaskTimer(settled, current)).toEqual({ kind: "cancel" });
   });
 
   it("wakes at once for an unreadable record so the next write removes it", () => {
-    expect(taskTimerWakeToArm({ "eve.taskTable": { records: [{ v: 0 }] } })).toBe(WAKE_NOW);
+    expect(planTaskTimer({ "eve.taskTable": { records: [{ v: 0 }] } }, current)).toEqual({
+      kind: "arm",
+      wakeAt: new Date(BEFORE).toISOString(),
+    });
   });
 });

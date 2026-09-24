@@ -43,10 +43,12 @@ import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks
 const log = createLogger("tasks.workflow");
 
 /**
- * Starts one workflow tool call as a task. The record is committed before
- * the run starts, so the task has its identity first; a replayed call whose
- * record exists starts nothing. A start failure settles the task
- * `START_FAILED` and returns the call's error result at once.
+ * Starts one workflow tool call as a task. The task's identity is derived
+ * before the run starts, and the run claims a command hook derived from it:
+ * a replayed call whose record exists starts nothing, and a start retried
+ * after the run began starts a duplicate that exits without running the
+ * body. A start failure settles the task `START_FAILED` and returns the
+ * call's error result at once.
  *
  * A `detach: true` call starts in the background and resolves at once with
  * a receipt; its result is delivered later as a task result. Over the
@@ -100,6 +102,8 @@ export async function startWorkflowTask<
     name: request.toolName,
     now,
     ownerId: session.sessionId,
+    // Workflow tools have no default limit beyond the session lifetime.
+    timeoutMs: request.timeout,
     turnId: input.turnId,
   });
   // The replayed call's run already started; its outcome settles this record.

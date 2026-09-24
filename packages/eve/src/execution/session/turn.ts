@@ -35,7 +35,6 @@ import {
   syncTaskTimer,
 } from "#tasks/owner-body.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
-import { isWorkflowTaskResult } from "#tasks/state.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -224,17 +223,9 @@ export class SessionExecution {
 
       const next = await input.turn.nextRuntimeEvent();
       if (next === "cancelled") return next;
-      const snapshot = this.input.cursor.sessionState.snapshot.session;
-      const accepted = next.trusted
-        ? next.results
-        : next.results.filter(
-            (result) => result.kind === "tool-result" && isWorkflowTaskResult(snapshot, result),
-          );
-      if (accepted.length > 0) {
-        const acceptedAtMs = Date.now();
-        results.push(...accepted);
-        for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
-      }
+      const acceptedAtMs = Date.now();
+      results.push(...next.results);
+      for (const result of next.results) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
     }
   }
 }
@@ -242,9 +233,8 @@ export class SessionExecution {
 type RuntimeEvent =
   | {
       readonly kind: "runtime-action-result";
+      /** Produced by the owner's own task table, never read from the inbox as is. */
       readonly results: readonly RuntimeActionResult[];
-      /** Produced by the owner's own task table rather than read from the inbox. */
-      readonly trusted?: boolean;
     }
   | "cancelled";
 
@@ -371,14 +361,11 @@ class ActiveTurn {
         this.admitted.add(admitted.admission.sequence);
         return;
       case "runtime-action-result": {
+        // Only a child's report settles a task; the owner derives the call's result.
         const childResults = admitted.payload.results.filter(
           (result): result is RuntimeSubagentChildResult =>
             result.kind === "subagent-result" && result.origin === "child",
         );
-        this.runtimeResults.push({
-          kind: "runtime-action-result",
-          results: admitted.payload.results.filter((result) => result.kind === "tool-result"),
-        });
         if (childResults.length > 0) {
           await this.applyTaskReport({
             kind: "runtime-action-result",
@@ -396,11 +383,7 @@ class ActiveTurn {
           message: admitted.message,
         });
         if (result !== undefined) {
-          this.runtimeResults.push({
-            kind: "runtime-action-result",
-            results: [result],
-            trusted: true,
-          });
+          this.runtimeResults.push({ kind: "runtime-action-result", results: [result] });
         }
         return;
       }
@@ -430,7 +413,7 @@ class ActiveTurn {
   /** Results the owner produced from its own task table, such as a timeout. */
   private acceptOwnResults(results: readonly RuntimeActionResult[]): void {
     if (results.length > 0) {
-      this.runtimeResults.push({ kind: "runtime-action-result", results, trusted: true });
+      this.runtimeResults.push({ kind: "runtime-action-result", results });
     }
   }
 

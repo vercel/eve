@@ -34,6 +34,7 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
     runId: "run-1",
     sequence: input.session.turn.sequence,
     stepIndex: input.stepIndex,
+    taskId: "task-abc234",
     toolName: input.toolName,
     turnId: input.session.turn.id,
   }),
@@ -56,6 +57,7 @@ const input = {
     turn: { id: "turn-1", sequence: 0 },
   },
   stepIndex: 0,
+  taskId: "worker-abc234",
   toolName: "worker",
   workflowId: "workflow//eve//worker",
 };
@@ -77,6 +79,7 @@ it("emits every persisted report before the terminal outcome", async () => {
       runId: "run-1",
       sequence: 0,
       stepIndex: 0,
+      taskId: "worker-abc234",
       toolName: "worker",
       turnId: "turn-1",
     },
@@ -190,6 +193,7 @@ it("preserves the pending inbox read across cancellation and drains the report b
       runId: "run-1",
       sequence: 0,
       stepIndex: 0,
+      taskId: "task-abc234",
       toolName: input.toolName,
       turnId: "turn-1",
     },
@@ -221,11 +225,12 @@ it("preserves the pending inbox read across cancellation and drains the report b
   );
 });
 
-function setControl(controller: AbortController) {
+function setControl(controller: AbortController, claimed = true) {
   const { signal } = controller;
   mocks.control.mockReturnValue({
     kind: "turn",
     signal,
+    claim: vi.fn(async () => claimed),
     commands: createChannelReader(
       "control",
       (async function* () {
@@ -245,6 +250,16 @@ function setControl(controller: AbortController) {
   });
 }
 
+it("exits without running the body or reporting when another run of the task holds its hook", async () => {
+  setControl(new AbortController(), false);
+
+  await workflowToolRunWorkflow(input);
+
+  expect(mocks.openWorkflowToolRunOwnerInbox).not.toHaveBeenCalled();
+  expect(mocks.executeWorkflowBody).not.toHaveBeenCalled();
+  expect(mocks.deliver).not.toHaveBeenCalled();
+});
+
 it("applies cancellation buffered during the last report delivery before publishing completion", async () => {
   const controller = new AbortController();
   const cancel = Promise.withResolvers<void>();
@@ -263,6 +278,7 @@ it("applies cancellation buffered during the last report delivery before publish
       runId: "run-1",
       sequence: 0,
       stepIndex: 0,
+      taskId: "task-abc234",
       toolName: input.toolName,
       turnId: "turn-1",
     },
@@ -276,6 +292,7 @@ it("applies cancellation buffered during the last report delivery before publish
     }
   });
   mocks.control.mockReturnValue({
+    claim: async () => true,
     commands,
     signal: controller.signal,
     handleMessage: deliver,
@@ -310,6 +327,7 @@ it("applies cancellation buffered during the last report delivery before publish
 it("keeps waiting for the body after the control hook closes", async () => {
   mocks.control.mockReturnValue({
     kind: "turn",
+    claim: async () => true,
     signal: new AbortController().signal,
     commands: createChannelReader("control", (async function* () {})()),
     handleCommand: vi.fn(),

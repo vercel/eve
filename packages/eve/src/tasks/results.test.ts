@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderTasksNote } from "#tasks/render.js";
@@ -115,12 +115,10 @@ describe("background task results", () => {
 
   it("holds detach group members until every member settled", () => {
     const records = detachTasks(
-      {
-        records: [
-          background("sre-g1", ALICE, { mode: "foreground" }),
-          background("d0-g2", ALICE, { mode: "foreground" }),
-        ],
-      },
+      taskTable([
+        background("sre-g1", ALICE, { mode: "foreground" }),
+        background("d0-g2", ALICE, { mode: "foreground" }),
+      ]),
       ["sre-g1", "d0-g2"],
       "steer-1",
     ).records;
@@ -154,14 +152,14 @@ describe("background task results", () => {
 
   it("counts working and input_required background tasks toward the cap", () => {
     expect(
-      workingBackgroundTaskIds({
-        records: [
+      workingBackgroundTaskIds(
+        taskTable([
           background("a-1", ALICE),
           background("b-1", ALICE, { status: "input_required" }),
           background("c-1", ALICE, { status: "completed" }),
           background("d-1", ALICE, { mode: "foreground" }),
-        ],
-      }),
+        ]),
+      ),
     ).toEqual(["a-1", "b-1"]);
   });
 });

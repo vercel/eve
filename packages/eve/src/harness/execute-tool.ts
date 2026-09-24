@@ -4,6 +4,7 @@ import type { Approval } from "#approval/definition.js";
 import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
+import type { TaskTimeout } from "#shared/task-timeout.js";
 import type { WorkflowToolDetach } from "#tools/workflow-definition.js";
 
 /**
@@ -17,6 +18,8 @@ export interface HarnessToolDefinition {
   readonly description: string;
   /** Workflow tools only: `true` returns a receipt instead of waiting for the run. */
   readonly detach?: WorkflowToolDetach;
+  /** Workflow tools only: the time limit for each call. */
+  readonly timeout?: TaskTimeout;
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;

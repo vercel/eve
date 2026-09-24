@@ -481,6 +481,74 @@ describe("deriveRunFacts", () => {
     expect(facts.subagentCalls).toEqual([]);
   });
 
+  it("records an agent call that failed or was cancelled before its child started", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      actionsRequested([
+        { callId: "c1", input: { message: "Find sources." }, toolName: "research" },
+        { callId: "c2", input: { agentId: null, message: "Draft it." }, toolName: "writer" },
+      ]),
+      {
+        type: "task.settled",
+        data: {
+          callId: "c1",
+          error: { code: "SUBAGENT_START_FAILED", message: "The child could not start." },
+          status: "failed",
+          taskId: "research-c1",
+        },
+      },
+      {
+        type: "task.settled",
+        data: { callId: "c2", status: "cancelled", taskId: "writer-c2" },
+      },
+      actionResult({
+        callId: "c1",
+        isError: true,
+        output: { code: "SUBAGENT_START_FAILED", message: "The child could not start." },
+        toolName: "research",
+      }),
+    ]);
+
+    expect(facts.subagentCalls).toEqual([
+      expect.objectContaining({
+        callId: "c1",
+        name: "research",
+        output: { code: "SUBAGENT_START_FAILED", message: "The child could not start." },
+        status: "failed",
+        taskId: "research-c1",
+        turnIndex: 0,
+      }),
+      expect.objectContaining({
+        callId: "c2",
+        name: "writer",
+        status: "cancelled",
+        taskId: "writer-c2",
+      }),
+    ]);
+  });
+
+  it("keeps a workflow tool that failed to start a tool call", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      actionsRequested([{ callId: "c1", input: { service: "api" }, toolName: "deploy" }]),
+      {
+        type: "task.settled",
+        data: {
+          callId: "c1",
+          error: { code: "START_FAILED", message: "The queue is unavailable." },
+          status: "failed",
+          taskId: "deploy-c1",
+        },
+      },
+      actionResult({ callId: "c1", isError: true, output: "unavailable", toolName: "deploy" }),
+    ]);
+
+    expect(facts.subagentCalls).toEqual([]);
+    expect(facts.toolCalls).toEqual([
+      expect.objectContaining({ name: "deploy", status: "failed" }),
+    ]);
+  });
+
   it("derives failed subagent calls from result-only events", () => {
     const facts = derive([
       turnStarted("t1", 0),

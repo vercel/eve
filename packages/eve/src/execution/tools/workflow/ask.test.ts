@@ -18,6 +18,7 @@ describe("ask", () => {
         runId: "run",
         sequence: 1,
         stepIndex: 0,
+        taskId: "ask_question-abc234",
         toolName: "ask_question",
         turnId: "turn",
       },

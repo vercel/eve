@@ -1,4 +1,5 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
+import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createChannelReader,
   type ChannelReader,
@@ -14,6 +15,12 @@ import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 export interface BlockingWorkflowOwner {
   readonly commands: ChannelReader<"control", WorkflowToolRunControlMessage>;
   readonly signal: AbortSignal;
+  /**
+   * Claims the task's command hook. `false` means another run of the same
+   * task holds it: this run is a duplicate start and must exit without
+   * running the body or reporting.
+   */
+  claim(): Promise<boolean>;
   handleCommand(message: WorkflowToolRunControlMessage): void;
   handleMessage(message: WorkflowToolRunMessage): Promise<void>;
 }
@@ -25,6 +32,15 @@ export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWor
   return {
     commands: createChannelReader("control", hook),
     signal: controller.signal,
+    async claim() {
+      try {
+        await claimHookOwnership(hook);
+        return true;
+      } catch (error) {
+        if (isHookConflictError(error)) return false;
+        throw error;
+      }
+    },
     handleCommand(message: WorkflowToolRunControlMessage) {
       if (isWorkflowToolRunControlMessage(message))
         controller.abort(new WorkflowToolRunCancelledError(message.reason));

@@ -222,6 +222,7 @@ function resolveHarnessToolDefinition(input: {
       }),
       detach: input.tool.task.detach,
       nodeId: input.tool.task.nodeId,
+      timeout: input.tool.task.timeout,
       workflowId: input.tool.task.workflowId,
     });
   }

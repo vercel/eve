@@ -9,6 +9,7 @@ import {
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
+import { normalizeTaskTimeout, type TaskTimeout } from "#shared/task-timeout.js";
 import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 export interface DynamicRemoteAgentConfig {
@@ -17,6 +18,7 @@ export interface DynamicRemoteAgentConfig {
   readonly forwardPrincipal?: boolean;
   readonly outputSchema?: JsonObject;
   readonly path: string;
+  readonly timeout?: TaskTimeout;
   readonly tool?: boolean;
   readonly url: string;
 }
@@ -37,6 +39,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
       "kind",
       "outputSchema",
       "path",
+      "timeout",
       "tool",
       "url",
     ],
@@ -64,6 +67,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     forwardPrincipal?: boolean;
     outputSchema?: JsonObject;
     path: string;
+    timeout?: TaskTimeout;
     tool?: boolean;
     url: string;
   } = {
@@ -80,6 +84,10 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
   }
   if (record.outputSchema !== undefined) {
     config.outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource);
+  }
+  const timeout = normalizeTaskTimeout(record.timeout, message);
+  if (timeout !== undefined) {
+    config.timeout = timeout;
   }
   if (record.tool !== undefined) {
     config.tool = expectBoolean(record.tool, message);
