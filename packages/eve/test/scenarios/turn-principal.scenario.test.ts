@@ -247,7 +247,7 @@ describe("the principal check", () => {
           (events) =>
             lastReply(events).startsWith("Refund:") && events.at(-1)?.type === "session.waiting",
         );
-        // The answer resolved the task_wait inside Alice's turn, not a later result turn.
+        // The answer resolved the task_wait inside Alice's turn.
         expect(lastReply(answered)).toMatch(/^Refund: <task_result [^>]*status="completed">/u);
         expect(lastReply(answered)).toMatch(/"decision":\s*"approve"/u);
         expect(JSON.stringify(answered)).not.toContain("Unexpected:");

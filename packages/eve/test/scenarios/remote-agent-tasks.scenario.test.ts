@@ -48,7 +48,7 @@ const AGENT_ID = /<agent id="([^"]+)" name="billing"/u;
 const RECEIPT = /^(?:Started task|Sent your message to agent) ([\\w-]+)[.,]/u;
 
 // One call per user message, keyed by its id: a [Tasks] note may follow the result.
-// A plan that waits reads its result with task_wait; the refund's arrives in a result turn.
+// A plan that waits reads its result with task_wait; the refund's arrives in its held turn.
 const PLANS = {
   "Refund order 42 through billing.": { id: "refund-call", name: "billing", input: () => ({ message: "Refund order 42." }) },
   "Ask billing for the refund status.": {
@@ -238,8 +238,8 @@ export default defineTool({
         const first = await response.result();
         expect(lastReply(first.events)).toMatch(/^Started: billing-/u);
 
-        // The remote tool's approval reaches the parent's client after the turn
-        // that started the task ended, attributed to the task.
+        // The remote tool's approval reaches the parent's client while the turn
+        // that started the task holds on it, attributed to the task.
         const asked = await followUntil(session, (events) => requestCount(events) === 1);
         const started = asked.find((event) => event.type === "task.started");
         const taskId = started?.type === "task.started" ? started.data.taskId : undefined;
@@ -259,7 +259,7 @@ export default defineTool({
         await session.respond([
           { optionId: question.options[0]!.id, requestId: question.requestId },
         ]);
-        // The result arrives in a result turn.
+        // The result arrives in the same held turn.
         const delivered = await followUntil(session, (events) =>
           events.some(
             (event, index) =>

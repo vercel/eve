@@ -25,7 +25,7 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
     "eve.runtime.pendingCoordinationBatch",
     "eve.runtime.deferredStepInput",
     "eve.harness.pendingWorkflowInterrupt",
-    // Background results waiting for delivery.
+    // Task results waiting for delivery in their turn.
     TASK_RESULTS_STATE_KEY,
   ];
   if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;

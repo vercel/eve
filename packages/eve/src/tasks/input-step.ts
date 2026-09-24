@@ -12,14 +12,11 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { createSessionEventSink } from "#execution/session/event-sink.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import {
-  emitTurnEpilogue,
-  getHarnessEmissionState,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
+import { emitTurnHeld, getHarnessEmissionState } from "#harness/emission.js";
 import { getPendingInputRequestIds } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
+import { createSessionWaitingEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import {
@@ -156,19 +153,16 @@ async function publishTaskInput(
       let next = scoped;
       for (const { event, taskId } of events) {
         await emit(withTaskId(event, taskId));
-        // A question or sign-in ends a conversation turn's stream, as the session's own do.
+        // A question or sign-in shows a conversation's waiting boundary, as
+        // the session's own do. An open turn stays open under its ID: it waits
+        // or holds on the task that asked.
         if (
           mode === "conversation" &&
           (event.type === "input.requested" || event.type.startsWith("authorization."))
         ) {
-          const emission = await emitTurnEpilogue(emit, getHarnessEmissionState(next.state), mode);
-          const asked =
-            event.type === "input.requested" &&
-            event.data.requests.some(({ kind }) => kind !== "session-limit");
-          next = setHarnessEmissionState(
-            next,
-            asked ? { ...emission, endedByTaskInput: true } : emission,
-          );
+          const emission = getHarnessEmissionState(next.state);
+          if (emission.turnId === "") await emit(createSessionWaitingEvent());
+          else await emitTurnHeld(emit, emission);
         }
         next = recordTaskInput(next, event, taskId, now);
       }

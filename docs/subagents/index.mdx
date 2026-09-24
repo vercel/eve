@@ -19,10 +19,10 @@ call fails with `AGENT_SESSION_ENDED` and reports the usage accumulated since th
 answer. This applies to root-agent copies, declared local subagents, and remote subagents. The
 subagent session remains available for later calls.
 
-A subagent answers only when its session is quiescent. If the subagent calls a workflow tool
-defined with `detach: true`, its turn can end while that task still works; the parent's call stays
-open until the task reports, and the call's result is the reply the subagent gives in the result
-turn that delivers the task's result. An interim reply never settles the call.
+A subagent answers only after the tasks its turn started have settled. If the subagent calls a
+workflow tool defined with `detach: true` and ends its turn while that task still works, eve holds
+the turn; the parent's call stays open, and its result is the reply the subagent gives after the
+task's result arrives. An interim reply never settles the call.
 
 ## Steering while a call waits
 
@@ -57,8 +57,8 @@ Agent researcher-7k2m9q is working in the background. Its result will arrive in 
 
 Clients read the structured receipt on `action.result`: `output` is `{ status: "working", taskId }`,
 and `task.started` reports `mode: "background"`. The agent's answer arrives later in its own
-`task.result` message: an idle session starts a result turn, and a result waits for a turn from the
-principal whose call started the agent. A background call's result is never held back for other
+`task.result` message, in the turn that started it: that turn cannot end while the agent works, so
+eve holds it and delivers the answer there. A background call's result is never held back for other
 calls. Until its result arrives, the agent appears in the `<tasks>` block of the `[Tasks]` note. A
 background agent call counts toward the 10 working background tasks a session holds, and a call over
 the limit does not start and fails with `TOO_MANY_BACKGROUND_TASKS`. Passing the `agentId` of an

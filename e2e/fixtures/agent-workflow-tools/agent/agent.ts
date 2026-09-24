@@ -12,8 +12,9 @@ function text(value: unknown): string {
 }
 
 /**
- * Detached task flows, one `BG-*-START` directive per session. A result turn
- * echoes its `<task_result>` message, and each flow starts its tools once.
+ * Detached task flows, one `BG-*-START` directive per session. A held turn
+ * echoes the `<task_result>` message it receives, and each flow starts its
+ * tools once.
  */
 function respondBackground(request: MockModelRequest): MockModelResponse | string | undefined {
   const last = request.lastUserMessage ?? "";

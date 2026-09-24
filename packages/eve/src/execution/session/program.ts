@@ -1,11 +1,15 @@
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import {
   bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
+  reportRefusedCallerReplyStep,
   resolveInitialTurnCallerStep,
+  type SettledTurnNotification,
 } from "#tasks/child.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
@@ -16,7 +20,7 @@ import {
   type NextTurnInstruction,
 } from "#execution/session/next-input.js";
 import { cancelTasks, closeTaskOwnerInbox, syncTaskTimer } from "#tasks/owner-body.js";
-import { hasPendingDetachedWork } from "#tasks/results.js";
+import { workingTaskIds } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
   readAdmittedOperations,
@@ -27,7 +31,11 @@ import { SessionExecution, sessionPrincipal } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
-import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
+import {
+  finalizeSession,
+  type FinalizedSession,
+  type SessionTerminalOutcome,
+} from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
@@ -135,20 +143,33 @@ export async function runPreparedSession(
     await closeTaskOwnerInbox(cursor, inbox);
     // Session end cancels every working task; nothing is delivered afterwards.
     await cancelTasks(cursor, { kind: "all" });
-    result = await finalizeSession(loop.outcome, {
+    const finalized = await finalizeSession(loop.outcome, {
       caller: progress.caller,
       cursor,
       mode: boot.mode,
       sessionWritable: boot.sessionWritable,
     });
+    result = finalized.result;
+    await replyTerminal(finalized, { caller: progress.caller, cursor, sessionId: boot.sessionId });
     progress.terminalEmitted = true;
     return result;
   } catch (error) {
     if (!progress.terminalEmitted) {
-      await finalizeSession(
+      try {
+        // A failed session ends its tasks too, so its caller's reply follows them.
+        await cancelTasks(cursor, { kind: "all" });
+      } catch {
+        // Best effort: the failure is already being reported.
+      }
+      const finalized = await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
         { caller: progress.caller, cursor, mode: boot.mode, sessionWritable: boot.sessionWritable },
       );
+      await replyTerminal(finalized, {
+        caller: progress.caller,
+        cursor,
+        sessionId: boot.sessionId,
+      });
     }
     throw createSafeOuterWorkflowError();
   } finally {
@@ -174,19 +195,73 @@ export async function failSession(input: {
   } catch {
     // Best effort: when resolution fails again there is no reachable caller to notify.
   }
-  await finalizeSession(
+  const cursor = { serializedContext: input.serializedContext, sessionState: input.sessionState };
+  const finalized = await finalizeSession(
     { error: input.error, kind: "failed" },
-    {
-      caller,
-      cursor: {
-        serializedContext: input.serializedContext,
-        sessionState: input.sessionState,
-      },
-      mode: input.mode,
-      sessionWritable: input.sessionWritable,
-    },
+    { caller, cursor, mode: input.mode, sessionWritable: input.sessionWritable },
   );
+  await replyTerminal(finalized, { caller, cursor, sessionId: input.sessionId });
   throw createSafeOuterWorkflowError();
+}
+
+/** What a delegated caller learns: its turn's answer, or that the call was cancelled. */
+type CallerReply =
+  | {
+      readonly kind: "settled";
+      readonly lifecycle: AgentTurnOutcome["kind"];
+      readonly settled: SettledTurnNotification;
+    }
+  | { readonly kind: "cancelled"; readonly usage?: TokenUsage };
+
+interface CallerReplyTarget {
+  readonly caller: TurnCaller | undefined;
+  readonly cursor: {
+    readonly serializedContext: Record<string, unknown>;
+    readonly sessionState: DurableSessionState | undefined;
+  };
+  readonly sessionId: string;
+}
+
+/**
+ * The one place this session settles a delegated caller (guard rule 50). A
+ * reply follows the settlement of its turn's tasks (the turn rule), so a
+ * reply while tasks the turn started still work is a bug: it is refused and
+ * reported instead of settling the caller early.
+ */
+export async function replyToCaller(
+  target: CallerReplyTarget & { readonly reply: CallerReply },
+): Promise<void> {
+  const { caller, reply, sessionId } = target;
+  if (caller === undefined) return;
+  const working = workingTaskIds(
+    { state: target.cursor.sessionState?.snapshot.session.state },
+    sessionPrincipal(target.cursor.serializedContext),
+  );
+  if (working.length > 0) {
+    await reportRefusedCallerReplyStep({ callId: caller.callId, sessionId, taskIds: working });
+    return;
+  }
+  if (reply.kind === "cancelled") {
+    await notifyCancelledTaskCallerStep(
+      reply.usage === undefined ? { caller, sessionId } : { caller, sessionId, usage: reply.usage },
+    );
+    return;
+  }
+  await notifyTurnCallerStep({
+    caller,
+    lifecycle: reply.lifecycle,
+    sessionId,
+    settled: reply.settled,
+  });
+}
+
+/** Sends the parked caller the terminal answer a finished session owes it. */
+async function replyTerminal(finalized: FinalizedSession, target: CallerReplyTarget) {
+  if (finalized.callerReply === undefined) return;
+  await replyToCaller({
+    ...target,
+    reply: { kind: "settled", lifecycle: "terminal", settled: finalized.callerReply },
+  });
 }
 
 async function reportResultToAnchor(
@@ -244,20 +319,13 @@ async function runSessionLoop(
       await flushUnsentCallerEvents(cursor);
       const next = await nextTurnDelivery({
         cursor,
-        // A task-mode run takes no follow-up input while it waits for an
-        // authorization or for its background tasks to report.
-        deferDeliveries:
-          boot.mode === "task" &&
-          (expectedAttemptIds.size > 0 ||
-            hasPendingDetachedWork(cursor.sessionState.snapshot.session.state)),
+        // A task-mode run takes no follow-up input while it waits for an authorization.
+        deferDeliveries: boot.mode === "task" && expectedAttemptIds.size > 0,
         expectedAttemptIds,
         inbox,
-        // A held caller, or a task-mode run waiting on its background tasks,
-        // is still owed the last turn's result, so a cancel stops that work.
-        ownsParkedWork: () =>
-          progress.caller !== undefined ||
-          (boot.mode === "task" &&
-            hasPendingDetachedWork(cursor.sessionState.snapshot.session.state)),
+        // A caller whose turn parked on an approval is still owed its
+        // result, so a cancel settles the caller.
+        ownsParkedWork: () => progress.caller !== undefined,
         queue,
       });
       if (next.kind !== "workflow") return next;
@@ -281,7 +349,7 @@ async function runSessionLoop(
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
     // The owner steers the call this session is answering, including in the
-    // first turn, whose input carries no caller, and in result turns.
+    // first turn, whose input carries no caller.
     return await execution.runTurn(payload, caller?.callId);
   };
   const runDeliveredTurn = async (
@@ -305,10 +373,6 @@ async function runSessionLoop(
     await cursor.apply(settled);
     return settled;
   };
-  const runResultTurn = async (
-    next: Extract<NextTurnInstruction, { kind: "task-results" }>,
-  ): Promise<TurnOutcome> =>
-    await runTurn({ taskResults: next.creator === undefined ? {} : { creator: next.creator } });
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
       const next = await nextParkedActivity(new Set());
@@ -320,8 +384,6 @@ async function runSessionLoop(
         case "clear":
         case "compact":
           continue;
-        case "task-results":
-          return { action: await runResultTurn(next), kind: "action" };
         case "turn":
           return await runDeliveredTurn(next);
         case "cancel-turn":
@@ -360,22 +422,20 @@ async function runSessionLoop(
 
       if (action.cancelled === true) {
         // The turn already cancelled every working task.
-        const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
-        if (progress.caller !== undefined) queue.discardSteering(progress.caller.callId);
+        const caller = progress.caller;
+        if (caller !== undefined) queue.discardSteering(caller.callId);
         const settled = await settleCancelledTurn();
         // An expired session ends now, and its caller learns the session ended.
         if (action.expired === true) return { kind: "terminal", outcome: { kind: "expired" } };
         progress.caller = undefined;
-        await notifyCancelledTaskCallerStep(
-          settled.usage === undefined
-            ? cancelledCaller
-            : { ...cancelledCaller, usage: settled.usage },
-        );
+        await replyToCaller({
+          caller,
+          cursor,
+          reply: { kind: "cancelled", usage: settled.usage },
+          sessionId: boot.sessionId,
+        });
       } else if (
         action.settled !== undefined &&
-        // A delegated call settles only when this session is quiescent: the
-        // caller waits for the result turn that reports the background work.
-        !hasPendingDetachedWork(cursor.sessionState.snapshot.session.state) &&
         // A message the owner sent this working agent as its turn ended joins
         // the same call, so the reply that settles it has seen the message.
         // One that arrives after the reply starts the call's next turn.
@@ -389,20 +449,24 @@ async function runSessionLoop(
       ) {
         if (progress.caller !== undefined) {
           const steers = queue.takeSteerCount(progress.caller.callId);
-          await notifyTurnCallerStep({
+          await replyToCaller({
             caller: progress.caller,
-            lifecycle: "parked",
-            sessionId: boot.sessionId,
-            settled: {
-              ...action.settled,
-              ...reportOrdering(
-                steers,
-                answerOrder(
-                  getHarnessEmissionState(cursor.sessionState.snapshot.session.state).sequence,
-                  "parked",
+            cursor,
+            reply: {
+              kind: "settled",
+              lifecycle: "parked",
+              settled: {
+                ...action.settled,
+                ...reportOrdering(
+                  steers,
+                  answerOrder(
+                    getHarnessEmissionState(cursor.sessionState.snapshot.session.state).sequence,
+                    "parked",
+                  ),
                 ),
-              ),
+              },
             },
+            sessionId: boot.sessionId,
           });
         }
         progress.caller = undefined;
@@ -427,14 +491,11 @@ async function runSessionLoop(
         case "compact":
           action = await runTurn({ control: next.kind });
           continue;
-        case "task-results":
-          action = await runResultTurn(next);
-          continue;
         case "cancel-turn":
         case "cancel-parked": {
           const caller = progress.caller;
           // Only a turn parked mid-way has an open turn to settle; a turn that
-          // ended while its caller waits for background work already did.
+          // ended while its caller's steering message waited already did.
           const turnOpen =
             next.kind === "cancel-turn" ||
             hasOpenTurnWork(cursor.sessionState.snapshot.session.state);
@@ -443,11 +504,12 @@ async function runSessionLoop(
           const usage = turnOpen ? (await settleCancelledTurn()).usage : action.settled?.usage;
           progress.caller = undefined;
           // The caller learns the call was cancelled; the prior turn is never reported.
-          await notifyCancelledTaskCallerStep(
-            usage === undefined
-              ? { caller, sessionId: boot.sessionId }
-              : { caller, sessionId: boot.sessionId, usage },
-          );
+          await replyToCaller({
+            caller,
+            cursor,
+            reply: { kind: "cancelled", usage },
+            sessionId: boot.sessionId,
+          });
           action = { ...action, settled: undefined };
           continue;
         }

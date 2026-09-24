@@ -10,21 +10,17 @@ import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import type { JsonObject } from "#shared/json.js";
 import { hasOwnPendingInput } from "#tasks/input.js";
 import { applyTaskDeadline, applyTaskReport, cancelTasks } from "#tasks/owner-body.js";
-import { nextTaskResultTurn } from "#tasks/results.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] }
-  /** Held background results start a result turn that runs as their creator. */
-  | { readonly kind: "task-results"; readonly creator?: JsonObject }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   /** A descendant's declined session-limit prompt stops this session's parked turn. */
   | { readonly kind: "cancel-turn" }
-  /** A cancel reached a parked session that still owes a result for its last turn. */
+  /** A cancel reached a parked session that still owes its caller a result. */
   | { readonly kind: "cancel-parked" }
   | TurnSelection;
 
@@ -33,17 +29,16 @@ export type NextTurnInstruction =
  * authorization challenge is open, its callbacks collect in the queue and
  * resume the challenge once every expected attempt has reported; ordinary
  * deliveries keep starting turns in the meantime. Fully routed descendant
- * deliveries leave nothing for the parent, so the wait continues.
- *
- * Background results never coalesce with deliveries: once queued input is
- * handled and no turn is open, each creator's held results start their own
- * result turn.
+ * deliveries leave nothing for the parent, so the wait continues. Task
+ * results never start a turn: each is delivered inside the turn that started
+ * its task, which holds until it arrives.
  *
  * No turn runs while parked, so a cancel stops the working tasks it names:
  * every one, or with a `turnId`, only those that turn started, so a cancel
  * sent for an older turn never stops newer work. When `ownsParkedWork` holds,
- * the session still owes its delegated caller, or a task-mode run its result,
- * and the owner cancels that work and settles the caller instead.
+ * the session still owes its delegated caller a result, such as for a turn
+ * parked on an approval, and the owner cancels that work and settles the
+ * caller instead.
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
@@ -70,13 +65,6 @@ export async function nextTurnDelivery(input: {
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;
-    }
-    // A turn parked mid-way (on a question or approval) is still open; its
-    // results wait for its next tool-step boundary or its end.
-    const state = cursor.sessionState.snapshot.session.state;
-    if (cursor.sessionState.emissionState.turnId === "" && !hasOpenTurnWork(state)) {
-      const resultTurn = nextTaskResultTurn(state);
-      if (resultTurn !== undefined) return { kind: "task-results", ...resultTurn };
     }
 
     // A delivery may already be in the pump queue by the time the owner exits

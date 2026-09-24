@@ -147,7 +147,7 @@ const waiting = (overrides: Partial<TaskRecord> = {}) =>
   });
 
 describe("surfaceTaskInputStep", () => {
-  it("surfaces a child's question with the task's ID, ends the turn's stream, and stops the clock", async () => {
+  it("surfaces a child's question with the task's ID, shows a waiting boundary, and stops the clock", async () => {
     const seen: unknown[] = [];
     setup({
       kind: "test",
@@ -185,12 +185,12 @@ describe("surfaceTaskInputStep", () => {
     });
     expect(ctx.require(ChannelKey).state).toEqual({ pending: ["q-1"] });
     expect(result.sessionState.continuationToken).toBe("http:question-thread");
-    // Cancelling the turn now must not end its stream a second time.
-    expect(result.sessionState.emissionState).toMatchObject({ endedByTaskInput: true, turnId: "" });
+    // The boundary keeps the turn open: it resumes, or is cancelled, under the same ID.
+    expect(result.sessionState.emissionState).toMatchObject({ sequence: 3, turnId: "turn_3" });
     expect(result.refused).toEqual([]);
   });
 
-  it("leaves a turn a session-limit prompt ended open to the boundary its decline streams", async () => {
+  it("keeps a turn a session-limit prompt paused open for the boundary its decline streams", async () => {
     setup();
     const limit = { ...QUESTION, kind: "session-limit" as const, requestId: "limit-1" };
 
@@ -200,8 +200,29 @@ describe("surfaceTaskInputStep", () => {
     });
 
     expect(published().map((event) => event.type)).toContain("session.waiting");
+    expect(result.sessionState.emissionState.turnId).toBe("turn_3");
+  });
+
+  it("shows only a waiting boundary for a question that arrives between turns", async () => {
+    setup();
+    const open = ownerState([createTaskRecord()]);
+    const emission = { ...open.emissionState, sequence: 4, turnId: "" };
+    const { session } = open.snapshot;
+    const state = {
+      ...open,
+      emissionState: emission,
+      snapshot: {
+        session: { ...session, state: { ...session.state, "eve.harness.emission": emission } },
+      },
+    };
+
+    const result = await surface(state, {
+      data: { ...COORDINATES, requests: [QUESTION] },
+      type: "input.requested",
+    });
+
+    expect(published().map((event) => event.type)).toEqual(["input.requested", "session.waiting"]);
     expect(result.sessionState.emissionState.turnId).toBe("");
-    expect(result.sessionState.emissionState).not.toHaveProperty("endedByTaskInput");
   });
 
   it("returns the requested IDs it refused because they are pending elsewhere", async () => {
@@ -243,7 +264,7 @@ describe("surfaceTaskInputStep", () => {
     expect(published()).toEqual([]);
   });
 
-  it("attributes sign-in and approval events to the task; only sign-in ends the turn's stream", async () => {
+  it("attributes sign-in and approval events to the task; only sign-in shows a waiting boundary", async () => {
     setup();
     const state = ownerState([createTaskRecord()]);
     const required = {
@@ -274,8 +295,8 @@ describe("surfaceTaskInputStep", () => {
     expect(events[3]).toMatchObject({ data: { requestId: "a-1", taskId: TASK_ID } });
     // Neither records a request: a sign-in does not stop the task's clock.
     expect(record(afterSignIn.sessionState)).not.toHaveProperty("input");
-    // A cancel after a sign-in still streams its own boundary.
-    expect(afterSignIn.sessionState.emissionState).not.toHaveProperty("endedByTaskInput");
+    // The turn stays open under its ID.
+    expect(afterSignIn.sessionState.emissionState.turnId).toBe("turn_3");
   });
 });
 

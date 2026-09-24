@@ -173,15 +173,15 @@ with `detach: true`, an agent call made with
 a waited call that [detaches](./tasks#detach-a-waited-call). The call returns a receipt, and the
 turn continues without waiting. When a background task finishes, eve holds its result in durable
 session state and delivers it as typed session input, not as a channel message. The model reads one
-`task.result` message per delivery, with a `<task_result>` block for each result. An idle session
-starts a result turn for it, and a result never appears in another principal's turn. Until its
-result reaches history, a background task stays listed in the `[Tasks]` note, including after
-compaction or a context clear.
+`task.result` message per delivery, with a `<task_result>` block for each result. A turn cannot
+end while tasks it started are working: eve holds it and calls the model again as their results
+arrive. No result starts a turn of its own, and a result never appears in another principal's turn.
+Until its result reaches history, a background task stays listed in the `[Tasks]` note, including
+after compaction or a context clear.
 
-A session is quiescent when it is idle and no background result is outstanding. A delegated
-subagent answers its caller only when quiescent, and a task-mode run ends only when quiescent, so
-each returns the reply it gives after seeing its background results. Ending a session cancels
-every working task, and eve delivers nothing afterward. See
+Because every turn waits for its tasks, a delegated subagent answers its caller, and a task-mode
+run ends, with the reply it gives after seeing its tasks' results. Ending a session cancels every
+working task, and eve delivers nothing afterward. See
 [How results arrive](./tasks#how-results-arrive) for every delivery rule.
 
 ## Subagents

@@ -48,10 +48,11 @@ import {
   startPendingAgentTasks,
 } from "#tasks/owner-body.js";
 import { hasPendingTaskInput } from "#tasks/input.js";
+import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import { getTaskTable } from "#tasks/state.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import type { TaskWaitRegistration } from "#tasks/wait.js";
 import { DISMISSED_CALL_GRACE_MS, WaitTimers } from "#tasks/wait-timers.js";
-import { hasPendingDetachedWork, readTaskCreator } from "#tasks/results.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -148,6 +149,13 @@ export class SessionExecution {
         };
       }
 
+      if (result.action === "park" && result.heldTaskIds !== undefined) {
+        const woke = await this.holdTurn(turn, result.heldTaskIds);
+        if (woke === "cancelled") return await this.finishCancelledTurn(turn);
+        nextStepInput = woke.delivery === undefined ? undefined : { delivery: woke.delivery };
+        continue;
+      }
+
       if (pendingCallIds !== undefined && result.action === "park") {
         const dispatched = await dispatchCoordinationStep({
           action: result.action,
@@ -180,18 +188,15 @@ export class SessionExecution {
       }
 
       if (result.action === "park") {
-        // A failed turn stops the work it started before it reports, so a
-        // task-mode run never waits on tasks it just cancelled.
+        // A failed turn stops the tasks that held it before it reports, so
+        // no reply leaves work running.
         if (result.settled?.isError === true) {
-          await cancelTasks(cursor, { kind: "turn", turnId: turn.turnId });
+          await cancelTasks(cursor, { kind: "held", principal: turn.principal });
         }
         const canPark =
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
-          this.input.mode === "conversation" ||
-          // A task-mode run waits for its detached tasks, then a result turn ends it.
-          (result.settled !== undefined &&
-            hasPendingDetachedWork(cursor.sessionState.snapshot.session.state));
+          this.input.mode === "conversation";
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
@@ -212,6 +217,37 @@ export class SessionExecution {
       cursor: this.input.cursor,
       message,
     });
+  }
+
+  /**
+   * Holds a turn the model tried to end while `taskIds` work (the turn
+   * rule), and owns the inbox meanwhile. It returns as soon as any of them
+   * settles, with every result that settled with it, so a task waiting on a
+   * person never delays the others, or when the turn's own principal steers
+   * it; the next model step receives the results, then the steering. A
+   * cancel, reset, or the session's expiry ends the hold as a cancelled turn.
+   */
+  private async holdTurn(
+    turn: ActiveTurn,
+    taskIds: readonly string[],
+  ): Promise<{ readonly delivery?: DeliverHookPayload } | "cancelled"> {
+    const settled = () => {
+      const { records } = getTaskTable(this.input.cursor.sessionState.snapshot.session);
+      return taskIds.some((taskId) => {
+        const record = records.find(({ id }) => id === taskId);
+        return record === undefined || isTerminalTaskStatus(record.status);
+      });
+    };
+    while (true) {
+      const next = await turn.nextRuntimeEvent({ until: settled });
+      if (next === "cancelled") return next;
+      // No call is pending while a turn holds, so an owner-produced result has no taker.
+      if (next.kind === "runtime-action-result" || next.kind === "timeout") continue;
+      if (next.kind === "until") await turn.admitBoundary();
+      const delivery = await turn.takeSteering();
+      if (turn.signal.aborted) return "cancelled";
+      return delivery === undefined ? {} : { delivery };
+    }
   }
 
   /**
@@ -298,6 +334,7 @@ export class SessionExecution {
         );
         continue;
       }
+      if (next.kind !== "steer") continue;
       for (const callId of next.dismissedCallIds) {
         if (dismissed.has(callId) || !unresolved().includes(callId)) continue;
         dismissed.add(callId);
@@ -325,7 +362,12 @@ interface RuntimeResultEvent {
   readonly results: readonly RuntimeActionResult[];
 }
 
-type RuntimeEvent = RuntimeResultEvent | WaitInterruption | "cancelled";
+/** The wait's `until` condition holds, such as a held task having settled. */
+interface UntilEvent {
+  readonly kind: "until";
+}
+
+type RuntimeEvent = RuntimeResultEvent | WaitInterruption | UntilEvent | "cancelled";
 
 /**
  * Admission policy, cancellation, and steering for one active turn.
@@ -366,6 +408,11 @@ class ActiveTurn {
   /** Whether the session expired during the turn; it ends once the turn does. */
   get expired(): boolean {
     return this.stopReason === "expired";
+  }
+
+  /** The principal the turn acts for; only it steers the turn. */
+  get principal(): SessionAuthContext | null {
+    return this.turn.principal;
   }
 
   private readonly signalSteering = (payload: SessionInboxPayload): void => {
@@ -433,15 +480,16 @@ class ActiveTurn {
    * Next runtime result, admitting inbox traffic while waiting. A steering
    * message that remains after routing interrupts the wait once; results the
    * owner already produced come first. `timer` interrupts the wait unless an
-   * inbox payload was accepted first.
+   * inbox payload was accepted first, and `until` ends it once it holds.
    */
   async nextRuntimeEvent(
-    options: { readonly timer?: Promise<string> } = {},
+    options: { readonly timer?: Promise<string>; readonly until?: () => boolean } = {},
   ): Promise<RuntimeEvent> {
     while (true) {
       if (this.signal.aborted) return "cancelled";
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
+      if (options.until?.() === true) return { kind: "until" };
       // Deliveries admitted at the step boundary may answer a question first.
       await this.routeAdmittedToChildren();
       if (this.signal.aborted) return "cancelled";
@@ -608,16 +656,15 @@ class ActiveTurn {
 type StopReason = "cancelled" | "expired";
 
 /**
- * The principal a turn acts for, as `turnStep` decides it: a result turn's
- * creator, else the auth of the delivery that starts it, else the session's
- * current principal. A person's answer to a request the session waits on
- * never changes its principal (see `readAnswerer`).
+ * The principal a turn acts for, as `turnStep` decides it: the auth of the
+ * delivery that starts it, else the session's current principal. A person's
+ * answer to a request the session waits on never changes its principal (see
+ * `readAnswerer`).
  */
 function turnPrincipal(
   payload: TurnStepPayload | undefined,
   cursor: SessionStateCursor,
 ): SessionAuthContext | null {
-  if (payload?.taskResults !== undefined) return readTaskCreator(payload.taskResults.creator).auth;
   const delivery = payload?.delivery;
   const { serializedContext } = cursor;
   const context = {

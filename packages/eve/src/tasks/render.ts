@@ -211,7 +211,7 @@ export function renderWaitTimedOut(
   record: Pick<TaskRecord, "id" | "status">,
   waitedMs: number,
 ): string {
-  return `Stopped waiting after ${formatDuration(waitedMs)}; ${describeOpenTask(record)}. Its result arrives in a later message; wait again only if you need it now.`;
+  return `Stopped waiting after ${formatDuration(waitedMs)}; ${describeOpenTask(record)}. Its result arrives in a later message before your turn ends; wait again only if you need it now.`;
 }
 
 /** Result of a `task_wait` that a new message ended. */
@@ -268,7 +268,8 @@ export function renderTasksInstruction(options: { readonly agents: boolean }): s
   const sentences = [
     `${starts}; the task keeps working while you continue.`,
     "When the user needs the answer to continue, wait for it with task_wait. Start independent tasks first, then wait on them in the same step, one task_wait per task.",
-    "A result you don't wait for arrives later in a <task_result> message.",
+    "A result you don't wait for arrives in a <task_result> message.",
+    "You cannot end your turn while tasks you started are working; eve waits for them and gives you their results.",
     `A new message interrupts your waits but not your tasks: decide whether it changes the work, then ${choices}.`,
     "Never use sleep to wait for a task.",
   ];
@@ -288,9 +289,10 @@ export function renderTooManyTasks(ids: readonly string[], limit: number): strin
   return `${limit} tasks are already working (${ids.join(", ")}). Wait for one with task_wait or stop one with task_cancel, then try again.`;
 }
 
-/** Framework continuation for a result turn that ended without a reply. */
-export const RESULT_TURN_REPLY_PROMPT =
-  "You received the task results above but did not reply. Reply to the user about them now, in one line if they no longer matter.";
+/** Tool result for a `final_output` call made while tasks the turn started are working. */
+export function renderFinalOutputWhileTasksWork(taskIds: readonly string[]): string {
+  return `You can't give your final output while tasks you started are working (${taskIds.join(", ")}). Wait for them with task_wait or stop them with task_cancel, then call final_output again.`;
+}
 
 /** Error message for a delegated call whose agent session ended before it replied. */
 export const AGENT_SESSION_ENDED_MESSAGE = "The agent's session ended before it replied.";

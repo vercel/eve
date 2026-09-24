@@ -12,8 +12,9 @@ const REQUEST = [
 
 /**
  * Work the user does not need to wait on is not waited on: the writer's call
- * returns a receipt, the first turn ends with a short reply, and a later
- * result turn reports the draft without polling or delegating again.
+ * returns a receipt, the turn shows a short reply at its waiting boundary and
+ * holds, and the same turn reports the draft without polling or delegating
+ * again once the writer finishes.
  */
 export default defineEval({
   description:

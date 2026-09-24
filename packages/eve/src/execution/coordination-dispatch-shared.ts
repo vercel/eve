@@ -5,7 +5,6 @@ import type { ActivityObserverConfig } from "#channel/types.js";
 import { type ChannelAdapter, type ChannelAdapterContext } from "#channel/adapter.js";
 import {
   ActivityObserverKey,
-  ActivityRootTurnIdKey,
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
@@ -68,7 +67,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
-  /** Who starts these tasks; a detached task's result turn runs as this creator. */
+  /** Who starts these tasks; only this principal can wait on, cancel, or continue them. */
   readonly creator: TaskCreator;
   readonly inheritedConversation: Parameters<
     typeof buildSubagentRunInput
@@ -204,7 +203,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
-    creator: resolveTaskCreator(ctx),
+    creator: { auth: ctx.get(AuthKey) ?? null },
     inheritedConversation: ctx.get(ConversationContextKey),
     fanoutSize: input.fanoutSize ?? batch.localFanoutSize ?? 0,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
@@ -221,14 +220,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     session,
     workflowAgents: resolveWorkflowAgentMetadata(ctx),
   };
-}
-
-function resolveTaskCreator(ctx: ContextContainer): TaskCreator {
-  const auth = ctx.get(AuthKey) ?? null;
-  const activityRootTurnId = ctx.has(ActivityObserverKey)
-    ? ctx.get(ActivityRootTurnIdKey)
-    : undefined;
-  return activityRootTurnId === undefined ? { auth } : { activityRootTurnId, auth };
 }
 
 function resolvePreparedActivity(

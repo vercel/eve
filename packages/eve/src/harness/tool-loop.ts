@@ -71,14 +71,10 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveTasksAnnouncement } from "#tasks/render.js";
-import { hasPendingDetachedWork } from "#tasks/results.js";
 import { resolveTasksInstruction, withoutTaskTools } from "#tasks/surface.js";
 import { getTaskTable } from "#tasks/state.js";
-import {
-  createResultTurnReplyPrompt,
-  needsResultTurnReply,
-  takeTaskResultMessage,
-} from "#harness/task-results.js";
+import { takeTaskResultMessage } from "#harness/task-results.js";
+import { holdTurnOnTasks } from "#harness/held-turn.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -109,7 +105,6 @@ import {
   emitRecoverableFailedTurn,
   emitStepStarted,
   emitStreamContent,
-  emitTurnCompleted,
   emitTurnEpilogue,
   emitTurnPreamble,
   getHarnessEmissionState,
@@ -487,9 +482,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     stepInstrumentation?: InstrumentationStepScope<HarnessSession>,
   ): Promise<StepResult> {
     let session = initialSession;
-    // Background results are delivered in a result turn's first step, or at a
-    // tool-step boundary inside a turn, never at the start of a user turn.
-    const resultTurn = input?.taskResults === true;
+    // Task results are delivered at a step boundary inside their turn, never
+    // at the start of a turn.
     const withinTurn = !isHarnessBetweenTurns(initialSession);
     const prepareHistory = createHistoryViewPreparer({
       previous: config.historyView,
@@ -1030,10 +1024,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
-    if (
-      emit &&
-      (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput) || resultTurn)
-    ) {
+    if (emit && (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput))) {
       if (store !== undefined) {
         prepareDynamicInstructionPreamble(
           store,
@@ -1113,10 +1104,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    // Deliver held background results as one message after any tool results,
-    // never between an approval response and its tool call. Marking the
-    // records delivered first drops them from the note below.
-    if ((resultTurn || withinTurn) && !hasUnansweredToolCall(messages)) {
+    // Deliver held task results as one message after any tool results, never
+    // between an approval response and its tool call. Marking the records
+    // delivered first drops them from the note below.
+    if (withinTurn && !hasUnansweredToolCall(messages)) {
       const delivery = await takeTaskResultMessage({
         principal: store?.get(AuthKey) ?? null,
         session,
@@ -2887,6 +2878,7 @@ async function handleStepResult(input: {
   // A `final_output` call is terminal even when the model emits it alongside
   // executing tools: continuing the loop would leave the no-execute call as a
   // dangling tool_use the next provider call rejects, and drop the result.
+  // Only working tasks refuse it, with an error result (`holdTurnOnTasks`).
   const calledFinalOutput =
     nextSession.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
 
@@ -2904,26 +2896,20 @@ async function handleStepResult(input: {
     return { next: runStep, session: nextSession };
   }
 
-  // A result turn must reply: ask once, then accept whatever comes.
-  if (
-    stepOutput === null &&
-    nextSession.outputSchema === undefined &&
-    needsResultTurnReply(updatedHistory)
-  ) {
-    nextSession = {
-      ...nextSession,
-      history: [...updatedHistory, createResultTurnReplyPrompt()],
-    };
-    if (emit) {
-      emissionState = advanceStep(emissionState);
-      nextSession = setHarnessEmissionState(nextSession, emissionState);
-    }
-    return { next: runStep, session: nextSession };
-  }
+  const held = await holdTurnOnTasks({
+    emissionState,
+    emit,
+    finalOutputCallId: calledFinalOutput
+      ? (result.toolCalls ?? []).find((call) => call.toolName === FINAL_OUTPUT_TOOL_NAME)
+          ?.toolCallId
+      : undefined,
+    runStep,
+    session: nextSession,
+  });
+  if (held !== undefined) return held;
 
   if (config.mode === "task") {
     return finishTaskTurn({
-      awaitingTasks: hasPendingDetachedWork(nextSession.state),
       emissionState,
       emit,
       history: promptMessages,
@@ -3005,8 +2991,6 @@ async function emitStructuredResult(
  * structured value — or the plain assistant text — is the run's output.
  */
 async function finishTaskTurn(input: {
-  /** Background work is still out: the run waits for it instead of completing. */
-  readonly awaitingTasks: boolean;
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly HarnessModelMessage[];
@@ -3018,17 +3002,6 @@ async function finishTaskTurn(input: {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
   session = clearTurnClientContextState(session);
-
-  // A task-mode run ends only when quiescent. The result turn that delivers
-  // the outstanding results produces the run's output, and the schema stays
-  // on the session for it.
-  if (input.awaitingTasks) {
-    if (emit) {
-      emissionState = await emitTurnCompleted(emit, emissionState);
-      session = setHarnessEmissionState(session, emissionState);
-    }
-    return { next: null, session, settledTurn: { output: stepOutput ?? "" } };
-  }
 
   if (schema === undefined) {
     if (emit) {

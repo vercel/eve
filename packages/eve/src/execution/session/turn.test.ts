@@ -928,6 +928,123 @@ describe("SessionExecution turn checkpoints", () => {
     ).resolves.toMatchObject({ kind: "done" });
   });
 
+  it("holds a turn the model ended while its tasks work and calls the model again once one settles", async () => {
+    // Alice's turn started two lookups; the first to settle wakes it.
+    const working = withTasks(state(""), [lookup("lookup-a"), lookup("lookup-b")]);
+    const oneSettled = withTasks(state(""), [
+      lookup("lookup-a", { status: "completed" }),
+      lookup("lookup-b"),
+    ]);
+    const inbox = holdInbox([DEADLINE]);
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(oneSettled));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a", "lookup-b"]))
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        serializedContext: {},
+        sessionState: oneSettled,
+        settled: { output: "The first lookup is in." },
+      });
+
+    await expect(
+      createExecution({ inbox, sessionState: working }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "park", settled: { output: "The first lookup is in." } });
+
+    expect(turnStep).toHaveBeenCalledTimes(2);
+    // No message steered the turn: the next step only picks up the settled result.
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toBeUndefined();
+    expect(inbox.next).toHaveBeenCalledTimes(1);
+  });
+
+  it("wakes a held turn when its own principal steers it", async () => {
+    const working = withTasks(state(""), [lookup("lookup-a")]);
+    const steering: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "Also check the EMEA numbers." }],
+    };
+    const inbox = holdInbox([steering]);
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a"]))
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState: working,
+      });
+
+    await expect(
+      createExecution({ inbox, sessionState: working }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({ delivery: steering });
+  });
+
+  it.each([
+    ["a cancel", { kind: "cancel" } as const, { cancelled: true, kind: "park" }],
+    [
+      "the session's expiry",
+      { kind: "session-timeout", ownerRunId: "owner-1" } as const,
+      { cancelled: true, expired: true, kind: "park" },
+    ],
+  ])("ends a held turn on %s and cancels its tasks", async (_label, stop, outcome) => {
+    const working = withTasks(state(""), [lookup("lookup-a")]);
+    let interrupt: (payload: SessionInboxPayload) => void = () => {};
+    const inbox = holdInbox([stop], (payload) => {
+      if (payload.kind === "cancel") interrupt(payload);
+    });
+    inbox.onInterrupt = (handler) => {
+      interrupt = handler;
+      return () => {};
+    };
+    vi.mocked(cancelTasksStep).mockClear();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a"]));
+
+    await expect(
+      createExecution({ inbox, sessionState: working }).runTurn(undefined),
+    ).resolves.toEqual(outcome);
+
+    expect(turnStep).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
+      { kind: "all" },
+    ]);
+  });
+
+  it("cancels the held tasks when the turn fails after a hold", async () => {
+    const working = withTasks(state(""), [lookup("lookup-a"), lookup("lookup-b")]);
+    const oneSettled = withTasks(state(""), [
+      lookup("lookup-a", { status: "completed" }),
+      lookup("lookup-b"),
+    ]);
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(oneSettled));
+    vi.mocked(cancelTasksStep).mockClear();
+    const settled = { errorCode: "MODEL_CALL_FAILED", isError: true, output: "No." };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a", "lookup-b"]))
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        serializedContext: {},
+        sessionState: oneSettled,
+        settled,
+      });
+
+    await expect(
+      createExecution({ inbox: holdInbox([DEADLINE]), sessionState: working }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "park", settled });
+
+    expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ selector: { kind: "held", principal: null } }),
+    );
+  });
+
   it("cancels the working tasks a failed turn started before it reports", async () => {
     const sessionState = withWorkingTask(state(""));
     const inbox: SessionInbox = {
@@ -957,7 +1074,7 @@ describe("SessionExecution turn checkpoints", () => {
     ).resolves.toMatchObject({ kind: "park", settled });
 
     expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ selector: { kind: "turn", turnId: "turn_0" } }),
+      expect.objectContaining({ selector: { kind: "held", principal: null } }),
     );
   });
 
@@ -992,7 +1109,7 @@ describe("SessionExecution turn checkpoints", () => {
       createExecution({ inbox, mode: "task", sessionState }).runTurn(undefined),
     ).rejects.toThrow("Task mode cannot wait for follow-up input");
     expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ selector: { kind: "turn", turnId: "turn_0" } }),
+      expect.objectContaining({ selector: { kind: "held", principal: null } }),
     );
   });
 
@@ -1160,4 +1277,61 @@ function ownerUpdate(
   results: readonly RuntimeToolResultActionResult[] = [],
 ) {
   return { events: [], replies: [], results, serializedContext: {}, sessionState };
+}
+
+const DEADLINE = {
+  kind: "task.deadline" as const,
+  ownerRunId: "owner-1",
+  wakeAt: "2026-09-24T14:00:00.000Z",
+};
+
+/** A detached lookup Alice's anonymous turn started. */
+function lookup(id: string, overrides: Parameters<typeof createTaskRecord>[0] = {}) {
+  return createTaskRecord({ id, kind: "workflow", mode: "detached", name: "lookup", ...overrides });
+}
+
+function withTasks(
+  sessionState: DurableSessionState,
+  records: Parameters<typeof taskTableState>[0],
+): DurableSessionState {
+  const { session } = sessionState.snapshot;
+  return {
+    ...sessionState,
+    snapshot: { session: { ...session, state: { ...session.state, ...taskTableState(records) } } },
+  };
+}
+
+/** A step whose model ended the turn while `taskIds` work. */
+function held(sessionState: DurableSessionState, taskIds: readonly string[]) {
+  return {
+    action: "park" as const,
+    hasPendingAuthorization: false,
+    hasPendingInputBatch: false,
+    heldTaskIds: taskIds,
+    serializedContext: {},
+    sessionState,
+  };
+}
+
+/** An inbox that yields `payloads` one at a time while a turn holds, then never again. */
+function holdInbox(
+  payloads: SessionInboxPayload[],
+  onNext: (payload: SessionInboxPayload) => void = () => {},
+): SessionInbox {
+  return {
+    claimedTokens: [],
+    claimSessionHook: vi.fn(),
+    claimSessionHooks: vi.fn(),
+    drain: vi.fn(() => []),
+    hasPending: vi.fn(() => false),
+    next: vi.fn(async () => {
+      const payload = payloads.shift();
+      if (payload === undefined) return await new Promise<never>(() => {});
+      onNext(payload);
+      return payload;
+    }),
+    onDelivery: vi.fn(() => () => {}),
+    onInterrupt: vi.fn(() => () => {}),
+    restore: vi.fn(),
+  };
 }

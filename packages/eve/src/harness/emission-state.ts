@@ -9,12 +9,6 @@ import { clearTurnClientContextState } from "#harness/turn-client-context.js";
  */
 export interface HarnessEmissionState {
   readonly assistantOutputStarted?: boolean;
-  /**
-   * A task's request ended the last turn's stream, so cancelling that turn
-   * streams no second boundary. Not set for a sign-in or a session-limit
-   * prompt, whose decline cancels the turn while the sender waits for one.
-   */
-  readonly endedByTaskInput?: true;
   readonly sessionStarted: boolean;
   readonly sequence: number;
   readonly stepIndex: number;

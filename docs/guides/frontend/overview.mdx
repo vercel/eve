@@ -189,7 +189,7 @@ await agent.send([
 ]);
 ```
 
-Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it.
+Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. A turn [held on its tasks](../../concepts/tasks#how-results-arrive) can produce several assistant messages with the same `metadata.turnId`; each one its waiting boundary closed carries `metadata.closed: true`. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it.
 
 To steer an active turn with a follow-up, send the message with `turnPolicy: "steer"`. Before answer output or local tool execution begins, eve interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output. The hook stays attached through completion:
 

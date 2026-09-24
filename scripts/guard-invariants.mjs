@@ -147,6 +147,12 @@
  *             mentions `agentId`, `task_cancel`, or a time limit. One module
  *             owns every string the model reads about tasks, so the contract
  *             can be tuned in one place.
+ *   rule 50 — One reply site for a delegated caller. Only `replyToCaller`
+ *             in `src/execution/session/program.ts` calls
+ *             `notifyTurnCallerStep` or `notifyCancelledTaskCallerStep`. It
+ *             asserts that the turn has no working tasks before it settles
+ *             the caller, so every reply, a subagent's included, follows the
+ *             settlement of its turn's tasks (the turn rule).
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -249,6 +255,7 @@ function isTsLike(relPath) {
  *   rule47: Violation[];
  *   rule48: Violation[];
  *   rule49: Violation[];
+ *   rule50: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -286,6 +293,7 @@ async function scanRepo(state) {
       const sourceFile = parseTs(posix, content);
       checkRule48(posix, sourceFile, state.rule48);
       checkRule49(posix, sourceFile, state.rule49);
+      checkRule50(posix, sourceFile, state.rule50);
     }
   }
 }
@@ -722,6 +730,38 @@ function checkRule49(posix, sourceFile, violations) {
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+const RULE50_NOTIFY_CALLEES = new Set(["notifyTurnCallerStep", "notifyCancelledTaskCallerStep"]);
+const RULE50_REPLY_SITE = `${EVE_SRC}execution/session/program.ts#replyToCaller`;
+
+/**
+ * @param {string} posix
+ * @param {import("typescript").SourceFile} sourceFile
+ * @param {Violation[]} violations
+ */
+function checkRule50(posix, sourceFile, violations) {
+  const visit = (node, functionName) => {
+    let name = functionName;
+    if (ts.isFunctionDeclaration(node) && node.name !== undefined) name = node.name.text;
+    if (ts.isCallExpression(node)) {
+      const callee = calleeName(node.expression);
+      if (
+        callee !== undefined &&
+        RULE50_NOTIFY_CALLEES.has(callee) &&
+        `${posix}#${name ?? ""}` !== RULE50_REPLY_SITE
+      ) {
+        violations.push({
+          rule: 50,
+          file: posix,
+          line: lineOf(sourceFile, node),
+          message: `calls \`${callee}\` outside \`replyToCaller\` in src/execution/session/program.ts. A delegated caller is settled in one place, which refuses to reply while the turn has working tasks; route the settlement through replyToCaller.`,
+        });
+      }
+    }
+    ts.forEachChild(node, (child) => visit(child, name));
+  };
+  visit(sourceFile, undefined);
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1865,6 +1905,7 @@ async function main() {
     rule47: /** @type {Violation[]} */ ([]),
     rule48: /** @type {Violation[]} */ ([]),
     rule49: /** @type {Violation[]} */ ([]),
+    rule50: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1979,8 +2020,14 @@ async function main() {
     violations.push({ rule: 44, ...issue });
   }
 
-  // Rules 46–49
-  violations.push(...state.rule46, ...state.rule47, ...state.rule48, ...state.rule49);
+  // Rules 46–50
+  violations.push(
+    ...state.rule46,
+    ...state.rule47,
+    ...state.rule48,
+    ...state.rule49,
+    ...state.rule50,
+  );
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

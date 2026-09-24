@@ -76,9 +76,9 @@ function cursorFor(inbox: SessionInbox, sessionState: DurableSessionState) {
   });
 }
 
-describe("result turns", () => {
-  it("start as the creator when the session is idle", async () => {
-    const inbox = inboxOf([]);
+describe("held task results in a parked session", () => {
+  it("never start a turn: an idle session keeps waiting for input", async () => {
+    const inbox = inboxOf([{ kind: "send", payload: { message: "Bob asks a question." } }]);
 
     const next = await nextTurnDelivery({
       cursor: cursorFor(inbox, heldResultState({})),
@@ -86,10 +86,13 @@ describe("result turns", () => {
       queue: new SessionInputQueue(),
     });
 
-    expect(next).toEqual({ creator: encodeTaskCreator({ auth: ALICE }), kind: "task-results" });
+    expect(next).toMatchObject({
+      delivery: { payloads: [{ message: "Bob asks a question." }] },
+      kind: "turn",
+    });
   });
 
-  it("follow queued deliveries instead of coalescing with them", async () => {
+  it("never coalesce with queued deliveries", async () => {
     const inbox = inboxOf([]);
     const queue = new SessionInputQueue();
     queue.enqueueDelivery({ kind: "deliver", payloads: [{ message: "Also check the deploy." }] });
@@ -100,27 +103,11 @@ describe("result turns", () => {
       queue,
     });
 
-    expect(next).toMatchObject({
-      delivery: { payloads: [{ message: "Also check the deploy." }] },
-      kind: "turn",
-    });
-  });
-
-  it.each([
-    ["an open turn", { turnId: "turn_3" }],
-    [
-      "a turn parked on a question",
-      { extraState: { "eve.runtime.pendingInputBatches": [{ requests: [] }] } },
-    ],
-  ])("wait while %s can still deliver them at a tool-step boundary", async (_label, input) => {
-    const inbox = inboxOf([{ kind: "send", payload: { message: "Bob asks a question." } }]);
-
-    const next = await nextTurnDelivery({
-      cursor: cursorFor(inbox, heldResultState(input)),
-      inbox,
-      queue: new SessionInputQueue(),
-    });
-
-    expect(next).toMatchObject({ kind: "turn" });
+    expect(next).toEqual(
+      expect.objectContaining({
+        delivery: { kind: "deliver", payloads: [{ message: "Also check the deploy." }] },
+        kind: "turn",
+      }),
+    );
   });
 });

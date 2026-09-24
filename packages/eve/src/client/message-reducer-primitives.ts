@@ -52,7 +52,8 @@ export function removeStreamingToolPartsForTurn(
   data: EveMessageData,
   turnId: string,
 ): EveMessageData {
-  const index = data.messages.findIndex(
+  // A turn that resumed after a waiting boundary streams into its latest message.
+  const index = data.messages.findLastIndex(
     (message) => message.role === "assistant" && message.metadata?.turnId === turnId,
   );
   const message = data.messages[index];

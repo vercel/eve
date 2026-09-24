@@ -230,28 +230,9 @@ export async function emitTurnEpilogue(
   state: HarnessEmissionState,
   mode: RunMode,
 ): Promise<HarnessEmissionState> {
-  const next = await emitTurnCompleted(emitFn, state);
-  if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
-  } else {
-    await emitFn(createSessionCompletedEvent());
-  }
-  return next;
-}
-
-/**
- * Emits only `turn.completed`, for a task-mode turn whose run continues
- * until its background tasks report. Returns the between-turns state.
- */
-export async function emitTurnCompleted(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-): Promise<HarnessEmissionState> {
+  await emitFn(createTurnCompletedEvent({ sequence: state.sequence, turnId: state.turnId }));
   await emitFn(
-    createTurnCompletedEvent({
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
+    mode === "conversation" ? createSessionWaitingEvent() : createSessionCompletedEvent(),
   );
   return {
     sessionStarted: state.sessionStarted,
@@ -259,6 +240,23 @@ export async function emitTurnCompleted(
     stepIndex: 0,
     turnId: "",
   };
+}
+
+/**
+ * Emits a waiting boundary, `turn.completed` then `session.waiting`, that
+ * keeps the turn open: an interactive turn held on its tasks, or one whose
+ * task asked a person. The turn ID stays, so the turn resumes under it
+ * (`emitTurnPreamble` re-enters an open turn) and one turn ID can close more
+ * than once. A turn cancelled after such a boundary ends with `turn.cancelled`
+ * for the same ID.
+ */
+export async function emitTurnHeld(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+): Promise<HarnessEmissionState> {
+  await emitFn(createTurnCompletedEvent({ sequence: state.sequence, turnId: state.turnId }));
+  await emitFn(createSessionWaitingEvent());
+  return state;
 }
 
 /**

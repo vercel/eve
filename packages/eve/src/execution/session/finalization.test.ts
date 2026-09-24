@@ -3,7 +3,6 @@ import { finalizeSession } from "#execution/session/finalization.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import { notifyTurnCallerStep } from "#tasks/child.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn(),
@@ -15,10 +14,6 @@ vi.mock("#execution/terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn(),
 }));
 vi.mock("#subagents/remote/callback-step.js", () => ({ fireSessionCallbackStep: vi.fn() }));
-vi.mock("#tasks/child.js", async (importOriginal) => ({
-  ...(await importOriginal()),
-  notifyTurnCallerStep: vi.fn(),
-}));
 
 function withUsage(session: HarnessSession, inputTokens: number): HarnessSession {
   const totals = {
@@ -59,14 +54,14 @@ describe("session finalization with an unsettled caller", () => {
     { code: { errorCode: "AGENT_SESSION_ENDED" }, outcome: { kind: "expired" as const } },
     { code: {}, outcome: { error: new Error("Owner failed"), kind: "failed" as const } },
   ])(
-    "reports terminal failure and only unreported usage when the owner is $outcome.kind",
+    "owes the caller a terminal failure and only unreported usage when the owner is $outcome.kind",
     async ({ code, outcome }) => {
       const caller = {
         callId: "delegate",
         subagentName: "detector",
         replyTo: { kind: "hook" as const, token: "parent" },
       };
-      const result = await finalizeSession(outcome, {
+      const { callerReply, result } = await finalizeSession(outcome, {
         caller,
         cursor: { serializedContext: {}, sessionState: sessionAwaitingCallerNotification() },
         mode: "conversation",
@@ -78,24 +73,20 @@ describe("session finalization with an unsettled caller", () => {
         usageDelta: { inputTokens: 150 },
       });
       expect(result.output).not.toBe("");
-      expect(notifyTurnCallerStep).toHaveBeenCalledExactlyOnceWith({
-        caller,
-        lifecycle: "terminal",
-        sessionId: "detector",
-        settled: {
-          ...code,
-          // A terminal report sorts after the parked answer at the same turn sequence.
-          answer: 1,
-          isError: true,
-          output: result.output,
-          usage: expect.objectContaining({ inputTokens: 150 }),
-        },
+      // The session program sends it from its one reply site.
+      expect(callerReply).toEqual({
+        ...code,
+        // A terminal report sorts after the parked answer at the same turn sequence.
+        answer: 1,
+        isError: true,
+        output: result.output,
+        usage: expect.objectContaining({ inputTokens: 150 }),
       });
     },
   );
 
-  it("does not notify again when an already settled conversation expires", async () => {
-    const result = await finalizeSession(
+  it("owes nothing when an already settled conversation expires", async () => {
+    const finalized = await finalizeSession(
       { kind: "expired" },
       {
         caller: undefined,
@@ -104,7 +95,6 @@ describe("session finalization with an unsettled caller", () => {
         sessionWritable: new WritableStream(),
       },
     );
-    expect(result).toMatchObject({ isError: false, output: "" });
-    expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+    expect(finalized).toEqual({ result: expect.objectContaining({ isError: false, output: "" }) });
   });
 });

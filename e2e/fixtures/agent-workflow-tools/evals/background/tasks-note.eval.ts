@@ -4,13 +4,13 @@ import { satisfies } from "eve/evals/expect";
 import { receiptTaskIds } from "./helpers";
 
 /**
- * Alice's reminder starts as a detached task. While it is still working, her
- * follow-up turn sees it in the `[Tasks]` note, and the note is still there
- * after the session compacts.
+ * Alice's reminder starts as a detached task, so her turn holds on it. Her
+ * follow-up joins the held turn and sees the working reminder in the
+ * `[Tasks]` note. A compaction request waits for the turn to end, so the
+ * note after compaction is covered where a turn compacts while it holds.
  */
 export default defineEval({
-  description:
-    "A follow-up turn sees working tasks in the [Tasks] note, including after compaction.",
+  description: "A follow-up in a held turn sees its working task in the [Tasks] note.",
   timeoutMs: 180_000,
   async test(t) {
     const first = await t.send(
@@ -30,25 +30,6 @@ export default defineEval({
     const followUp = await first.session.send("Alice is checking on her reminders. BG-NOTE-CHECK");
     followUp.expectOk();
     followUp.messageIncludes(listed);
-
-    const compaction = t.target.watchTurn(first.sessionId, {
-      startIndex: followUp.session.state.streamIndex,
-    });
-    const compacted = await t.target.fetch(
-      `/eve/v1/session/${encodeURIComponent(first.sessionId)}/compact`,
-      { body: "{}", headers: { "content-type": "application/json" }, method: "POST" },
-    );
-    await t.require(
-      compacted.status,
-      satisfies((status: number) => status === 202, "the session accepts compaction"),
-    );
-    const summary = await compaction.result();
-    summary.event("compaction.completed", { count: 1 });
-
-    const afterCompaction = await first.session.send(
-      "Alice is checking on her reminders again. BG-NOTE-CHECK",
-    );
-    afterCompaction.expectOk();
-    afterCompaction.messageIncludes(listed);
+    followUp.notEvent("turn.started");
   },
 });

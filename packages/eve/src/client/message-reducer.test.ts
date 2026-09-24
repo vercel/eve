@@ -19,6 +19,7 @@ import {
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  createTurnCompletedEvent,
   createTurnFailedEvent,
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -37,6 +38,81 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("gives each assistant message of a held turn its own entry across repeated boundaries", () => {
+    // Alice's turn holds on a lookup: an interim answer, her follow-up in the
+    // same turn, then the result and the final answer, all under turn_0.
+    const reducer = defaultMessageReducer();
+    const turn = { sequence: 0, turnId: "turn_0" };
+    const answer = (message: string, stepIndex: number) =>
+      createMessageCompletedEvent({ ...turn, finishReason: "stop", message, stepIndex });
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageReceivedEvent({ ...turn, message: "What were Q3 sales?" }),
+      answer("I started a lookup.", 0),
+      createTurnCompletedEvent(turn),
+      createMessageReceivedEvent({ ...turn, message: "Any news?" }),
+      answer("Still working on it.", 1),
+      createTurnCompletedEvent(turn),
+      createMessageReceivedEvent({ ...turn, message: "<task_result/>", taskIds: ["lookup-1"] }),
+      answer("Q3 sales were $4.2M.", 2),
+      createTurnCompletedEvent(turn),
+    ]);
+
+    expect(
+      data.messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        status: message.metadata?.status,
+        text: message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+      })),
+    ).toEqual([
+      expect.objectContaining({ role: "user", text: ["What were Q3 sales?"] }),
+      {
+        id: "turn_0:assistant",
+        role: "assistant",
+        status: "complete",
+        text: ["I started a lookup."],
+      },
+      expect.objectContaining({ role: "user", text: ["Any news?"] }),
+      {
+        id: "turn_0:assistant:1",
+        role: "assistant",
+        status: "complete",
+        text: ["Still working on it."],
+      },
+      {
+        id: "turn_0:assistant:2",
+        role: "assistant",
+        status: "complete",
+        text: ["Q3 sales were $4.2M."],
+      },
+    ]);
+  });
+
+  it("ends a held turn cancelled after its waiting boundary without an empty message", () => {
+    const reducer = defaultMessageReducer();
+    const turn = { sequence: 0, turnId: "turn_0" };
+    const held = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageCompletedEvent({ ...turn, message: "I started a lookup.", stepIndex: 0 }),
+      createTurnCompletedEvent(turn),
+    ]);
+
+    // turn.completed then turn.cancelled for the same turn ID.
+    expect(reduceServerEvents(reducer, held, [createTurnCancelledEvent(turn)])).toEqual(held);
+
+    const partial = reduceServerEvents(reducer, held, [
+      createMessageAppendedEvent({ ...turn, messageDelta: "Checking", stepIndex: 1 }),
+      createTurnCancelledEvent(turn),
+    ]);
+    expect(partial.messages).toHaveLength(2);
+    expect(partial.messages[1]).toMatchObject({
+      id: "turn_0:assistant:1",
+      metadata: { status: "complete" },
+      parts: expect.arrayContaining([
+        { state: "done", stepIndex: 1, text: "Checking", type: "text" },
+      ]),
+    });
+  });
+
   it("accumulates message and reasoning deltas without a start marker", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [
@@ -1209,6 +1285,7 @@ describe("defaultMessageReducer", () => {
       {
         id: "turn_1:assistant",
         metadata: {
+          closed: true,
           status: "complete",
           turnId: "turn_1",
         },

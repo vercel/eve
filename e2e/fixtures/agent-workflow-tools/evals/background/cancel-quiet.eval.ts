@@ -5,12 +5,13 @@ import { receiptTaskIds, taskResultDeliveries } from "./helpers";
 
 /**
  * Alice sets a reminder, which starts as a detached task and returns a
- * receipt at once. She then changes her mind, the model stops it with
- * task_cancel, and the cancelled reminder never wakes the model: the next
- * turn after the reminder's time is Alice's own follow-up.
+ * receipt at once, so the turn holds. She then changes her mind, the model
+ * stops it with task_cancel in the same turn, which then ends, and the
+ * cancelled reminder never reports: the next turn after the reminder's time
+ * is Alice's own follow-up.
  */
 export default defineEval({
-  description: "A task cancelled with task_cancel never starts a result turn.",
+  description: "A task cancelled with task_cancel never reports a result.",
   timeoutMs: 120_000,
   async test(t) {
     const started = await t.send(
@@ -45,7 +46,7 @@ export default defineEval({
     followUp.expectOk();
     followUp.messageIncludes("BG-IDLE-REPLY");
 
-    // The first turn after the cancel is Alice's follow-up, not a result turn.
+    // The first turn after the cancel is Alice's follow-up; no result ever arrives.
     const next = await t.target.watchTurn(stopped.sessionId, { startIndex: afterCancel }).result();
     next.messageIncludes("BG-IDLE-REPLY");
     t.check(

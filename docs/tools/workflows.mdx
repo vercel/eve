@@ -584,15 +584,15 @@ Reminder: stand-up at 10
 
 The block body is the definition's `toModelOutput(output)` when it has one, and the output
 otherwise. A failed task carries `status="failed"`, a `code` attribute, and the error message.
-An idle session starts a result turn for the result, a running turn from the principal whose call
-started the task receives it at its next tool step, and a result never appears in another
-principal's turn. Until the result arrives, the task is listed in the `[Tasks]` note. See
+The turn that started the task receives the result at its next tool step, or when the model tries
+to end the turn: a turn cannot end while tasks it started are working, so eve holds it until they
+settle. No result starts a turn of its own, and a result never appears in another principal's turn. Until the result arrives, the task is listed in the `[Tasks]` note. See
 [How results arrive](/docs/concepts/tasks#how-results-arrive) for every delivery rule.
 
 A session holds at most 10 working background tasks, and a `detach: true` call over that limit does
 not start: it fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background run still publish
-`action.partial` for the originating call and never wake the model. Cancelling a turn does not
-cancel the background tasks it started. The model stops a background task with
+`action.partial` for the originating call and never wake the model. Cancelling a turn also
+cancels the background tasks that are working. The model stops a background task with
 [`task_cancel`](/docs/concepts/built-in-tools#task_cancel), and application code with
 `session.cancel({ taskId })`; the run then unwinds as described in
 [Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). See

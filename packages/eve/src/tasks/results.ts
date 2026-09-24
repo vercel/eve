@@ -1,23 +1,22 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
-import type { TaskKind, TaskOutcome } from "#tasks/protocol.js";
+import { isTerminalTaskStatus, type TaskKind, type TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { isReportedLoss, markTaskDelivered, readTaskTable } from "#tasks/table.js";
+import { markTaskDelivered } from "#tasks/table.js";
 
 // Detached results no wait took are held in session state from settlement
-// until a model step delivers them as one `task.result` message. Read by the
-// session workflow body, so this module must not import Node.js built-ins.
+// until a model step of their own turn delivers them as one `task.result`
+// message. Read by the session workflow body, so this module must not import
+// Node.js built-ins.
 
 /** Session state key holding detached results that have not reached history. */
 export const TASK_RESULTS_STATE_KEY = "eve.taskResults";
 
-/** Who started a task, captured at start. A result turn runs as this creator. */
+/** Who started a task, captured at start. */
 export interface TaskCreator {
   readonly auth: SessionAuthContext | null;
-  /** The originating turn's activity root; a result turn's activity attaches to it. */
-  readonly activityRootTurnId?: string;
 }
 
 /** One settled detached result waiting for delivery. */
@@ -31,23 +30,12 @@ export interface PendingTaskResult {
 }
 
 export function encodeTaskCreator(creator: TaskCreator): JsonObject {
-  const value: { auth: JsonObject | null; activityRootTurnId?: string } = {
-    auth: creator.auth === null ? null : encodeAuth(creator.auth),
-  };
-  if (creator.activityRootTurnId !== undefined) {
-    value.activityRootTurnId = creator.activityRootTurnId;
-  }
-  return value;
+  return { auth: creator.auth === null ? null : encodeAuth(creator.auth) };
 }
 
 /** Decodes a stored creator; anything unreadable is the anonymous creator. */
 export function readTaskCreator(value: JsonObject | undefined): TaskCreator {
-  const root = value?.activityRootTurnId;
-  const creator: { auth: SessionAuthContext | null; activityRootTurnId?: string } = {
-    auth: decodeAuth(value?.auth),
-  };
-  if (typeof root === "string" && root.length > 0) creator.activityRootTurnId = root;
-  return creator;
+  return { auth: decodeAuth(value?.auth) };
 }
 
 /**
@@ -103,28 +91,12 @@ export function holdTaskResult<T extends { readonly state?: SessionStateMap }>(
   return writePending(session, [...pending, entry]);
 }
 
-/** Whether any held result was created by `principal`. */
-export function hasDeliverableTaskResults(
-  state: SessionStateMap | undefined,
-  principal: SessionAuthContext | null,
-): boolean {
-  return readPendingTaskResults(state).some((entry) =>
-    sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal),
-  );
-}
-
-/** The creator whose results start the next result turn, when any result is held. */
-export function nextTaskResultTurn(
-  state: SessionStateMap | undefined,
-): { readonly creator?: JsonObject } | undefined {
-  const [first] = readPendingTaskResults(state);
-  if (first === undefined) return undefined;
-  return first.creator === undefined ? {} : { creator: first.creator };
-}
-
 /**
- * Takes every held result whose creator is `principal`, so they share one
- * message, and marks their records delivered.
+ * Takes the held results `principal` created, so they share one message, and
+ * marks their records delivered. Only a turn's own principal steers it and
+ * no turn ends while its tasks work (D20, the turn rule), so every held
+ * result belongs to the running turn; the principal check keeps a result out
+ * of another principal's turn even so.
  */
 export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
   session: T,
@@ -170,16 +142,41 @@ export function takeTaskResult<T extends { readonly state?: SessionStateMap }>(
 }
 
 /**
- * Whether detached work remains whose result has not reached history. A
- * session with such work is not quiescent: a delegated caller or a task-mode
- * run waits for it.
+ * The detached generations `principal` started that are still working and
+ * that no workflow tool body awaits. Under the turn rule these are exactly
+ * the running turn's tasks. A turn resumed after its own approval runs under
+ * a new turn ID, so tasks are matched by their creator, not by the turn ID
+ * they started under.
  */
-export function hasPendingDetachedWork(state: SessionStateMap | undefined): boolean {
-  if (readPendingTaskResults(state).length > 0) return true;
-  const { lost, table } = readTaskTable(state);
-  // An unreadable record is reported as a result before the session is quiescent.
-  if (lost.some(isReportedLoss)) return true;
-  return table.records.some((record) => record.mode === "detached" && !record.delivered);
+export function workingTaskIds(
+  session: { readonly state?: SessionStateMap },
+  principal: SessionAuthContext | null,
+): readonly string[] {
+  return getTaskTable(session)
+    .records.filter(
+      (record) =>
+        record.mode === "detached" &&
+        record.workflowCaller === undefined &&
+        !isTerminalTaskStatus(record.status) &&
+        sameTaskPrincipal(readTaskCreator(record.creator).auth, principal),
+    )
+    .map(({ id }) => id);
+}
+
+/**
+ * The tasks that keep a turn of `principal` open (the turn rule): its
+ * working tasks, and those whose held result has not reached history yet.
+ */
+export function heldTaskIds(
+  session: { readonly state?: SessionStateMap },
+  principal: SessionAuthContext | null,
+): readonly string[] {
+  const undelivered = readPendingTaskResults(session.state).filter((entry) =>
+    sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal),
+  );
+  return [
+    ...new Set([...workingTaskIds(session, principal), ...undelivered.map(({ taskId }) => taskId)]),
+  ];
 }
 
 function writePending<T extends { readonly state?: SessionStateMap }>(

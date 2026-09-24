@@ -7,8 +7,8 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
 // task_wait end to end over detached agent calls: a settled result, a
-// timeout whose result arrives later, a wait a steering message interrupts,
-// and two waits in one step.
+// timeout whose result arrives later in the same held turn, a wait a steering
+// message interrupts, and two waits in one step.
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -142,8 +142,8 @@ function followTurn(
   return { finished, reached: reached.promise };
 }
 
-/** Collects the session stream through the next result turn that delivers task results. */
-async function nextResultTurn(session: ClientSession): Promise<MessageStreamEvent[]> {
+/** Collects the session stream through the step that delivers task results and the turn's end. */
+async function nextTaskResults(session: ClientSession): Promise<MessageStreamEvent[]> {
   return await collectUntil(session.stream(), (events) => {
     const delivered = events.findIndex(
       (event) => event.type === "message.received" && event.data.kind === "task.result",
@@ -227,7 +227,8 @@ describe("task_wait", () => {
         expect(taskResultMessages(followUp.events)).toBe(0);
         expect(lastReply(followUp.events)).toBe("Seen task_result blocks: tool=1 user=0");
 
-        // 2. Timed out: the wait ends, the task keeps working, and its result arrives once later.
+        // 2. Timed out: the wait ends, the task keeps working, and the turn holds until its
+        // result arrives once.
         const sre = await client.sessions.create({ message: "Research sre briefly." });
         const timed = await sre.response.result();
         const [sreTask] = researcherTaskIds(timed.events);
@@ -235,7 +236,7 @@ describe("task_wait", () => {
         expect(outputOf(timed.events, sreWait)).toEqual({ status: "timed_out", taskId: sreTask });
         expect(lastReply(timed.events)).toContain("Waited: Stopped waiting after");
         expect(lastReply(timed.events)).toContain(`${sreTask} is still working.`);
-        const late = await nextResultTurn(sre.session);
+        const late = await nextTaskResults(sre.session);
         expect(taskResultMessages(late)).toBe(1);
         expect(lastReply(late)).toContain(`Late: <task_result id="${sreTask}"`);
         expect(lastReply(late)).toContain("Found sre healthy.");
@@ -260,7 +261,7 @@ describe("task_wait", () => {
             (event) => event.type === "task.settled" && event.data.status === "cancelled",
           ),
         ).toBe(false);
-        const plainLate = await nextResultTurn(plain.session);
+        const plainLate = await nextTaskResults(plain.session);
         expect(lastReply(plainLate)).toContain("Found plain healthy.");
 
         // 4. Fan-in: two waits in one step; the step ends once both results are in.

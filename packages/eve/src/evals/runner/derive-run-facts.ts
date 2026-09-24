@@ -110,6 +110,8 @@ export function deriveRunFacts(
   for (const event of events) {
     switch (event.type) {
       case "turn.started": {
+        // A turn that resumes after a waiting boundary keeps its ID and emits
+        // no second `turn.started`, so it stays one turn here.
         turnIndex += 1;
         break;
       }

@@ -2,6 +2,8 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  emitTurnEpilogue,
+  emitTurnHeld,
   emitTurnPreamble,
   emitStreamContent,
   getHarnessEmissionState,
@@ -188,6 +190,37 @@ describe("emitTurnPreamble", () => {
     expect(events.slice(0, 2)).toEqual([
       { data: { trace }, type: "session.started" },
       { data: { sequence: 0, trace, turnId: "turn_0" }, type: "turn.started" },
+    ]);
+  });
+});
+
+describe("emitTurnHeld", () => {
+  it("shows a waiting boundary but keeps the turn open, so it resumes under the same ID", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+    };
+    const open = { sequence: 2, sessionStarted: true, stepIndex: 3, turnId: "turn_2" };
+
+    const held = await emitTurnHeld(emit, open);
+    expect(held).toEqual(open);
+    expect(events).toEqual([
+      { data: { sequence: 2, turnId: "turn_2" }, type: "turn.completed" },
+      expect.objectContaining({ type: "session.waiting" }),
+    ]);
+
+    // A message or result re-enters the open turn: no second turn.started.
+    const resumed = await emitTurnPreamble(emit, { message: "Any update?" }, held, []);
+    expect(resumed).toMatchObject({ sequence: 2, stepIndex: 3, turnId: "turn_2" });
+    expect(events.slice(2).map((event) => event.type)).toEqual(["message.received"]);
+    expect(events.at(-1)).toMatchObject({ data: { turnId: "turn_2" } });
+
+    // The turn's final boundary closes it and moves to the next turn ID.
+    const ended = await emitTurnEpilogue(emit, resumed, "conversation");
+    expect(ended).toMatchObject({ sequence: 3, stepIndex: 0, turnId: "" });
+    expect(events.slice(-2)).toEqual([
+      { data: { sequence: 2, turnId: "turn_2" }, type: "turn.completed" },
+      expect.objectContaining({ type: "session.waiting" }),
     ]);
   });
 });

@@ -927,14 +927,14 @@ describe("EveTUIRunner idle session follow", () => {
     expect(renderIdleStream).not.toHaveBeenCalled();
   });
 
-  it("renders background completion after two quiet minutes without another user message", async () => {
+  it("renders a held turn's final answer after two quiet minutes without another user message", async () => {
     vi.useFakeTimers();
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();
     const idleEvents: AgentTUIStreamEvent[] = [];
+    // The held turn resumes under its ID after its waiting boundary, with no second turn.started.
     const wakeEvents = [
-      { type: "turn.started", data: { sequence: 1, turnId: "wake-turn" } },
-      // The result turn's input is eve-authored and never shown as a user message.
+      // Task results are eve-authored input and never shown as a user message.
       {
         type: "message.received",
         data: {
@@ -943,12 +943,12 @@ describe("EveTUIRunner idle session follow", () => {
             '<task_result id="review-q4x1ze" name="review" status="completed">\nReady\n</task_result>',
           sequence: 1,
           taskIds: ["review-q4x1ze"],
-          turnId: "wake-turn",
+          turnId: "turn_1",
         },
       },
       {
         type: "step.started",
-        data: { modelId: "test-model", sequence: 1, stepIndex: 0, turnId: "wake-turn" },
+        data: { modelId: "test-model", sequence: 1, stepIndex: 2, turnId: "turn_1" },
       },
       {
         type: "message.completed",
@@ -956,11 +956,11 @@ describe("EveTUIRunner idle session follow", () => {
           finishReason: "stop",
           message: "Alice's background review is ready for Bob.",
           sequence: 1,
-          stepIndex: 0,
-          turnId: "wake-turn",
+          stepIndex: 2,
+          turnId: "turn_1",
         },
       },
-      { type: "turn.completed", data: { sequence: 1, turnId: "wake-turn" } },
+      { type: "turn.completed", data: { sequence: 1, turnId: "turn_1" } },
       { type: "session.waiting", data: { wait: "next-user-message" } },
     ].map((event, index) => stampTestEvent(event as UnstampedMessageStreamEvent, index));
     let connections = 0;
@@ -1002,11 +1002,11 @@ describe("EveTUIRunner idle session follow", () => {
     try {
       await vi.advanceTimersByTimeAsync(130_000);
       expect(connections).toBeGreaterThanOrEqual(8);
-      expect(idleEvents).toContainEqual({ type: "turn-start", turnId: "wake-turn" });
+      expect(idleEvents.some((event) => event.type === "turn-start")).toBe(false);
       expect(idleEvents).toContainEqual({ type: "step-start", modelId: "test-model" });
       expect(idleEvents).toContainEqual({
         type: "assistant-complete",
-        id: "text:wake-turn:0",
+        id: "text:turn_1:2",
         text: "Alice's background review is ready for Bob.",
       });
       expect(JSON.stringify(idleEvents)).not.toContain("task_result");

@@ -169,11 +169,6 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
-  /**
-   * Starts a result turn: the step delivers the pending background results
-   * of the turn's principal. Internal to the execution/harness boundary.
-   */
-  readonly taskResults?: true;
 }
 
 /**
@@ -225,6 +220,12 @@ export interface StepResult {
    * across the park boundary so a delegated parent can be notified.
    */
   readonly settledTurn?: SettledTurn;
+  /**
+   * The model ended the turn while these tasks it started work, so the turn
+   * holds (`next` is `null`) until one of them settles or a message steers
+   * it, and then the model is called again.
+   */
+  readonly heldTaskIds?: readonly string[];
 }
 
 /**

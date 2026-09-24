@@ -249,7 +249,7 @@ The result lists each ID once:
 { "cancelled": ["remind-q4x1ze"], "alreadyFinished": ["digest-9pw2kx"], "unknown": [] }
 ```
 
-- `cancelled` lists tasks that were working in the background. eve records each one as cancelled at once, emits `task.settled` with `status: "cancelled"`, and asks its run or agent to stop without waiting. A cancelled task never reports back, so it never starts a result turn.
+- `cancelled` lists tasks that were working in the background. eve records each one as cancelled at once, emits `task.settled` with `status: "cancelled"`, and asks its run or agent to stop without waiting. A cancelled task never reports back, and a turn held on it continues without its result.
 - `alreadyFinished` lists tasks that settled before the call. Their results are still delivered.
 - `unknown` lists IDs that name no background task, including a call the current turn is still waiting on. Cancel the turn to stop such a call.
 

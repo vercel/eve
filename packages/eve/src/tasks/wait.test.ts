@@ -301,7 +301,7 @@ describe("applyTaskWaitCall", () => {
     const applied = apply(waiting([asking], [call]), call);
 
     expect(applied.result?.modelOutput).toBe(
-      "Stopped waiting after 0 ms; lookup-q4x1ze is waiting on a person. Its result arrives in a later message; wait again only if you need it now.",
+      "Stopped waiting after 0 ms; lookup-q4x1ze is waiting on a person. Its result arrives in a later message before your turn ends; wait again only if you need it now.",
     );
   });
 

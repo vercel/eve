@@ -8,7 +8,6 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -99,23 +98,5 @@ describe("background results inside an active turn", () => {
     await execution(inboxDraining([[OUTCOME]]), sessionState, "conversation").runTurn(undefined);
 
     expect(order).toEqual(["step-1", "outcome", "step-2"]);
-  });
-
-  it("lets a task-mode run park while its background tasks are outstanding", async () => {
-    const working = createTaskRecord({ kind: "workflow", mode: "detached", name: "remind" });
-    const sessionState = ownerState(taskTableState([working]));
-    const settled = { output: "Started the reminder." };
-    vi.mocked(turnStep).mockResolvedValueOnce({
-      action: "park",
-      hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
-      serializedContext: {},
-      sessionState,
-      settled,
-    });
-
-    await expect(
-      execution(inboxDraining([]), sessionState, "task").runTurn(undefined),
-    ).resolves.toMatchObject({ kind: "park", settled });
   });
 });

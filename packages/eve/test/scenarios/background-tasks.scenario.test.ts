@@ -50,7 +50,7 @@ async function collectFor(
 
 describe("detached tasks", () => {
   it(
-    "stops detached tasks through task_cancel and an idle session.cancel() without a later result",
+    "stops detached tasks through task_cancel and a held turn's session.cancel() without a later result",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -95,7 +95,7 @@ export default defineAgent({
         const { session, response } = await client.sessions.create({
           message: "Please set my stand-up and lunch reminders.",
         });
-        // Both calls start detached and return receipts, so the turn ends at once.
+        // Both calls start detached and return receipts; the turn holds on them.
         const first = (await response.result()).events;
         const starts = first.flatMap((event) =>
           event.type === "task.started" ? [event.data] : [],
@@ -132,7 +132,7 @@ export default defineAgent({
           "Cancel result:",
         );
 
-        // No turn runs, so the cancel stops the working task that remains.
+        // The cancel ends the held turn and stops the task that remains.
         await expect(session.cancel()).resolves.toEqual({
           sessionId: session.state.sessionId,
           status: "accepted",
@@ -147,6 +147,15 @@ export default defineAgent({
           }),
         );
         expect(later.filter((event) => event.type === "task.settled")).toHaveLength(1);
+        const turnStarted = first.find((event) => event.type === "turn.started");
+        expect(later).toContainEqual(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              turnId: turnStarted?.type === "turn.started" ? turnStarted.data.turnId : undefined,
+            }),
+            type: "turn.cancelled",
+          }),
+        );
         expect(later.some((event) => event.type === "message.received")).toBe(false);
         expect(later.some((event) => event.type === "turn.started")).toBe(false);
       } finally {

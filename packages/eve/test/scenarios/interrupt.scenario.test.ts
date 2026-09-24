@@ -64,8 +64,8 @@ function followTurn(
   return { finished, reached: reached.promise };
 }
 
-/** Collects the session stream through the next result turn that delivers task results. */
-async function nextResultTurn(session: ClientSession): Promise<MessageStreamEvent[]> {
+/** Collects the session stream through the step that delivers task results and the turn's end. */
+async function nextTaskResults(session: ClientSession): Promise<MessageStreamEvent[]> {
   return await collectUntil(session.stream(), (events) => {
     const delivered = events.findIndex(
       (event) => event.type === "message.received" && event.data.kind === "task.result",
@@ -211,7 +211,7 @@ export default defineWorkflowTool({
         expect(started?.type === "task.started" ? started.data.mode : undefined).toBe("detached");
         expect(lastReply(first.events)).toContain(`Started task ${taskId}.`);
 
-        // The detached run asks on its own; the question outlives the turn that started it.
+        // The detached run asks on its own while the turn that started it holds.
         const asked = await collectUntil(session.stream({ startIndex: 0 }), (events) =>
           events.some((event) => event.type === "input.requested"),
         );
@@ -229,7 +229,7 @@ export default defineWorkflowTool({
         ).toBe(false);
 
         await session.respond([{ optionId: "approve", requestId: requestId! }]);
-        const later = await nextResultTurn(session);
+        const later = await nextTaskResults(session);
         const received = later.find(
           (event) => event.type === "message.received" && event.data.kind === "task.result",
         );

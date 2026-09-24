@@ -87,12 +87,7 @@ import {
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
-import {
-  buildRuntimeIdentity,
-  createExecutionNodeStep,
-  createNodeHarnessTools,
-} from "#execution/node-step.js";
-import { takeTaskResultMessage } from "#harness/task-results.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -106,7 +101,6 @@ import {
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
 import * as activityCohort from "#execution/activity-cohort.js";
-import { hasDeliverableTaskResults, readTaskCreator } from "#tasks/results.js";
 
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -193,23 +187,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
-  const resultTurn = input.input?.taskResults;
-  const resultCreator = resultTurn === undefined ? undefined : readTaskCreator(resultTurn.creator);
-  if (resultCreator !== undefined) {
-    // Nothing is left to deliver for this creator, so no turn starts.
-    if (!hasDeliverableTaskResults(initialSession.state, resultCreator.auth)) {
-      return {
-        action: "park",
-        ...derivePendingState(initialSession),
-        serializedContext: input.serializedContext,
-        sessionState: input.sessionState,
-      };
-    }
-    // A result turn runs with the auth of the call that started its tasks,
-    // and no channel delivery started it.
-    ctx.set(AuthKey, resultCreator.auth);
-    ctx.set(TurnDeliveryIdsKey, []);
-  }
   const history = createExecutionHistoryView(initialSession);
   const instrumentation = bindSessionInstrumentation({
     agentName: effectiveAgent.turnAgent.id,
@@ -346,13 +323,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         ctx.set(RuntimeActionSettlementTimesKey, runtimeResults.acceptedAtMsByCallId);
       }
       resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
-    }
-    if (resultCreator !== undefined) {
-      resolved = { ...resolved, taskResults: true };
-      activityCohort.updateActivityRootForTaskResults({
-        ctx,
-        rootTurnId: resultCreator.activityRootTurnId,
-      });
     }
 
     activityCohort.updateActivityRootForDelivery({
@@ -591,12 +561,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         beforeBatchContext: input.serializedContext,
         checkpoint: completedModelCall,
         ctx,
-        // Like a cancelled turn's user message, a cancelled result turn keeps
-        // its results in history, so they do not start another result turn.
-        initialSession:
-          resultCreator === undefined || completedModelCall !== undefined
-            ? initialSession
-            : await keepTaskResults(initialSession, resultCreator.auth, effectiveNode),
+        initialSession,
         stepInput: resolved,
       });
     }
@@ -613,20 +578,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   } finally {
     sink.release();
   }
-}
-
-async function keepTaskResults(
-  session: HarnessSession,
-  principal: Parameters<typeof takeTaskResultMessage>[0]["principal"],
-  node: CompiledBundle["graph"]["root"],
-): Promise<HarnessSession> {
-  const delivery = await takeTaskResultMessage({
-    principal,
-    session,
-    tools: createNodeHarnessTools({ node }),
-  });
-  if (delivery === undefined) return session;
-  return { ...delivery.session, history: [...delivery.session.history, delivery.message] };
 }
 
 /** Publishes one turn event, then runs memory, hooks, and model preparation for it. */

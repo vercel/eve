@@ -11,7 +11,7 @@ import { AGENT_SESSION_ENDED_MESSAGE } from "#tasks/render.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import { fireSessionCallbackStep } from "#subagents/remote/callback-step.js";
-import { notifyTurnCallerStep } from "#tasks/child.js";
+import type { SettledTurnNotification } from "#tasks/child.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { answerOrder } from "#tasks/protocol.js";
 
@@ -31,15 +31,22 @@ export interface SessionFinalizationContext {
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
+/** How a session ended, and the terminal answer its parked caller is owed, if any. */
+export interface FinalizedSession {
+  readonly result: WorkflowEntryResult;
+  /** Sent by the session program's one reply site, `replyToCaller`. */
+  readonly callerReply?: SettledTurnNotification;
+}
+
 /**
  * Terminates descendants, emits the terminal protocol event when the turn has
- * not already done so, then settles whoever is waiting on this session: the
- * task callback in task mode, or the parked caller.
+ * not already done so, then settles the task callback in task mode, or
+ * returns the answer the parked caller is owed.
  */
 export async function finalizeSession(
   outcome: SessionTerminalOutcome,
   context: SessionFinalizationContext,
-): Promise<WorkflowEntryResult> {
+): Promise<FinalizedSession> {
   const { serializedContext, sessionState } = context.cursor;
   if (sessionState !== undefined) {
     await terminateChildSessionsStep({ serializedContext, sessionState });
@@ -59,6 +66,7 @@ export async function finalizeSession(
   }
 
   const settled = settledResult(outcome, context);
+  let callerReply: SettledTurnNotification | undefined;
   if (context.mode === "task") {
     await fireSessionCallbackStep({
       error: settled.isError ? settled.output : undefined,
@@ -87,26 +95,23 @@ export async function finalizeSession(
     }
     if (settled.isError) notification.isError = true;
     if (settled.errorCode !== undefined) notification.errorCode = settled.errorCode;
-    await notifyTurnCallerStep({
-      caller: context.caller,
-      lifecycle: "terminal",
-      sessionId: sessionState?.sessionId ?? (serializedContext["eve.sessionId"] as string),
-      settled: notification,
-    });
+    callerReply = notification;
   }
-  return outcome.kind === "done"
-    ? {
-        isError: outcome.action.isError,
-        output: outcome.action.output,
-        usage: outcome.action.usage,
-        usageDelta: outcome.action.usageDelta,
-      }
-    : {
-        isError: settled.isError,
-        output: settled.output,
-        usage: settled.sessionUsage,
-        usageDelta: settled.turnUsage,
-      };
+  const result: WorkflowEntryResult =
+    outcome.kind === "done"
+      ? {
+          isError: outcome.action.isError,
+          output: outcome.action.output,
+          usage: outcome.action.usage,
+          usageDelta: outcome.action.usageDelta,
+        }
+      : {
+          isError: settled.isError,
+          output: settled.output,
+          usage: settled.sessionUsage,
+          usageDelta: settled.turnUsage,
+        };
+  return callerReply === undefined ? { result } : { callerReply, result };
 }
 
 function settledResult(

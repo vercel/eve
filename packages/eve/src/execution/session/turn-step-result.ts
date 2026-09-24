@@ -5,7 +5,6 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { hasPendingDetachedWork } from "#tasks/results.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
@@ -43,18 +42,12 @@ export function resolveSessionStepResult(
   if (stepResult.next === null) {
     const pending = derivePendingState(stepResult.session);
     if (stepResult.settledTurn !== undefined) {
-      const taken = takeSessionUsageDelta(stepResult.session);
-      const { delta } = taken;
-      // A caller held for background work is settled by a later turn; leaving
-      // the usage unreported folds this turn's spend into that settlement.
-      const reportedSession = hasPendingDetachedWork(stepResult.session.state)
-        ? stepResult.session
-        : taken.session;
+      const { delta, session } = takeSessionUsageDelta(stepResult.session);
       return {
         action: "park",
         ...pending,
         serializedContext: nextSerializedContext,
-        sessionState: createDurableSessionState({ session: reportedSession }),
+        sessionState: createDurableSessionState({ session }),
         settled: {
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
@@ -66,12 +59,15 @@ export function resolveSessionStepResult(
       };
     }
 
-    return {
-      action: "park",
+    const parked = {
+      action: "park" as const,
       ...pending,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
     };
+    return stepResult.heldTaskIds === undefined
+      ? parked
+      : { ...parked, heldTaskIds: stepResult.heldTaskIds };
   }
 
   return {

@@ -48,7 +48,7 @@ const REMOTE_TOKEN = "task-stream-fixtures-token";
 /** Published fixtures, in manifest order. */
 const FIXTURE_NAMES = [
   "agent-call-wait",
-  "agent-call-result-turn",
+  "agent-call-held-turn",
   "task-cancel",
   "agent-timed-out",
   "remote-agent-input-request",
@@ -401,7 +401,7 @@ export default defineRemoteAgent({
     };
   });
 
-  fixture("agent-call-result-turn", async (client) => {
+  fixture("agent-call-held-turn", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.background });
     await response.result();
     const events = await recordUntilReply(session, REPLIES.background);
@@ -410,7 +410,7 @@ export default defineRemoteAgent({
     ]);
     return {
       description:
-        "An agent call the model does not wait on: the call returns a receipt, the turn ends, and the answer arrives later as a task.result input that starts a result turn. The child's task.started can land before or after the first turn ends.",
+        "An agent call the model does not wait on: the call returns a receipt and the model ends its turn, so eve holds the turn. The interactive turn shows turn.completed and session.waiting but stays open; the answer arrives as a task.result input in the same turn, which closes under the same turn ID again. The child's task.started can land before or after the waiting boundary.",
       events,
       sessionId: session.state.sessionId,
     };
@@ -426,7 +426,7 @@ export default defineRemoteAgent({
     ]);
     return {
       description:
-        'A workflow tool call that returned a receipt, then stopped by the model with task_cancel in a later turn: the task_cancel result is { status: "cancelled" }, task.settled reports cancelled, and no result is ever delivered.',
+        'A workflow tool call that returned a receipt, then stopped by the model with task_cancel after a follow-up message joined the held turn: the task_cancel result is { status: "cancelled" }, task.settled reports cancelled, no result is ever delivered, and the turn ends once nothing works.',
       events,
       sessionId: session.state.sessionId,
     };

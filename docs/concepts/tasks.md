@@ -90,19 +90,21 @@ A workflow tool's block body is the definition's `toModelOutput(output)` when it
 
 The model reads every task result under one truncation limit, whether its call waited or ran in the background: a `<task_result>` block body and a waited call's tool result are each cut at 50 KB or 2,000 lines, with a final `[truncated]` line where the cut falls, and a line longer than 2,000 characters is cut with ` [truncated]`. A waited call's structured output that fits stays structured; one past the limit reaches the model as its truncated JSON text. `action.result`, `task.settled`, and `ctx.agent` still carry the full output, with one exception: a remote agent's result that eve [recovers at the call's deadline](#time-limits) after its callback was lost. The remote session keeps each result for that read with any output larger than 50 KB already cut to the same limit, so such an output arrives everywhere as its truncated text, including structured output.
 
-Each result belongs to the principal whose call started the task. Two principals match when their authenticator, principal type, and principal ID match. eve delivers results by these rules:
+Each result belongs to the principal whose call started the task. Two principals match when their authenticator, principal type, and principal ID match. A turn cannot end while tasks it started are working, so every result arrives in the turn that started its task:
 
-- **Idle session.** The result starts a result turn, and the model replies to it.
-- **Running turn from the same principal.** The result is added at the turn's next tool step, where the model is called again. If the turn is already finishing, it ends normally and a result turn follows, so each turn produces one reply.
-- **Running turn from a different principal.** The result waits for its own result turn. A result never appears in another principal's turn.
-- **Turn waiting on a person.** While a turn waits on an approval or a question, no result turn starts, whoever the result belongs to. Results wait until the request is answered or the turn ends.
-- **Several results.** Results from the same principal that are ready together share one message and one result turn. Apart from [detach groups](#on-a-steering-message), eve never holds one result back for another.
+- **At a tool step.** A result that settles while the turn works is added at the turn's next tool step, where the model is called again.
+- **In a wait.** A `task_wait` call on the task returns the result as its tool result.
+- **When the model ends the turn.** If tasks the turn started are still working, eve holds the turn instead of ending it. As soon as any of them settles, eve calls the model again with the result, and the check repeats. A message from the same principal also resumes a held turn and is answered in it.
+- **Turn waiting on a person.** While a turn waits on an approval or a question, results wait until the request is answered and the turn continues.
+- **Several results.** Results that settle together share one message. Apart from [detach groups](#on-a-steering-message), eve never holds one result back for another.
 
-A result turn runs with the auth of the call that started the task, and its activity attaches to the originating turn. A result turn must produce a reply: if the model ends one without replying, eve asks it once more and accepts whatever it returns.
+No result starts a turn of its own, so an idle session never wakes for one, and a result never appears in another principal's turn.
+
+In an interactive root session, a held turn shows a waiting boundary: the stream carries `turn.completed` and `session.waiting`, but the turn stays open, and its later events, including another `turn.completed`, carry the same `turnId` with no new `turn.started`. Cancelling a held turn ends it with `turn.cancelled` for that ID. A subagent's turn, a task-mode run, and a turn that a schedule started hold without a boundary, so each produces one reply. When a turn requested an output schema, the model cannot give its structured result while tasks the turn started are working: it waits for them or cancels them first.
 
 On the session stream, a delivery appears as `message.received` with `data.kind: "task.result"` and `data.taskIds`. It is not a user message. The default client reducer, the dev TUI, and the built-in channels do not render it as one, and custom renderers should skip it too.
 
-A subagent's session and a task-mode run finish only after every background result has reached history. A subagent answers its caller with the reply it gives after seeing its results, and a task-mode run returns the output of the result turn that delivers the last result. A task that eve [cancels](#cancel-tasks) delivers no result and never starts a result turn.
+A subagent answers its caller, and a task-mode run returns, only after the tasks its turn started have settled, with the reply it gives after seeing their results. A task that eve [cancels](#cancel-tasks) delivers no result.
 
 ### The `[Tasks]` note
 
@@ -236,7 +238,7 @@ Each eve release ships recorded task streams in the package, so you can replay r
 | File                                | Covers                                                                                    |
 | ----------------------------------- | ----------------------------------------------------------------------------------------- |
 | `agent-call-wait.ndjson`            | An agent call that returns a receipt, then its result through `task_wait`                 |
-| `agent-call-result-turn.ndjson`     | An agent call that returns a receipt, then its result in a result turn                    |
+| `agent-call-held-turn.ndjson`       | An agent call that returns a receipt, then its result in the same, held turn              |
 | `task-cancel.ndjson`                | A workflow tool task stopped with `task_cancel`                                           |
 | `agent-timed-out.ndjson`            | An agent call waited on with `task_wait` that fails with `TIMED_OUT`                      |
 | `remote-agent-input-request.ndjson` | A remote agent call whose approval appears as `input.requested`, then as `input.resolved` |

@@ -43,8 +43,6 @@ import { defineState } from "#public/definitions/state.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { getTaskTable } from "#tasks/state.js";
-import { encodeTaskCreator, holdTaskResult, readPendingTaskResults } from "#tasks/results.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep as runTurnStep } from "#execution/session/turn-step.js";
@@ -1595,57 +1593,6 @@ describe("turnStep", () => {
         role: "user",
       },
     ]);
-  });
-
-  it("keeps a cancelled result turn's results in history instead of redelivering them", async () => {
-    const record = createTaskRecord({
-      creator: encodeTaskCreator({ auth: null }),
-      id: "remind-q4x1ze",
-      kind: "workflow",
-      mode: "detached",
-      name: "remind",
-      status: "completed",
-    });
-    const session = holdTaskResult(createStubSession({ state: taskTableState([record]) }), record, {
-      output: "Stand-up at 10.",
-      status: "completed",
-    });
-    installSessionStoreMocks([session]);
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource: {},
-      graph: {
-        nodesByNodeId: new Map(),
-        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
-      },
-      moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent: TestTurnAgent,
-    } as never);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (): Promise<StepResult> => {
-        throw new TurnCancelledError();
-      };
-    });
-
-    const result = await runTurnStep({
-      input: { taskResults: {} },
-      sessionWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(result).toMatchObject({ action: "cancelled" });
-    const cancelled = result.sessionState.snapshot.session;
-    expect(cancelled.history).toEqual([
-      expect.objectContaining({ kind: "task.result", role: "user" }),
-    ]);
-    expect(readPendingTaskResults(cancelled.state)).toEqual([]);
   });
 
   it("rejects task completion while input requests remain pending", async () => {

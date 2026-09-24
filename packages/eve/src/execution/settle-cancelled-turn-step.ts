@@ -16,11 +16,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
-import {
-  getHarnessEmissionState,
-  isHarnessBetweenTurns,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
@@ -73,46 +69,41 @@ export async function settleCancelledTurnStep(input: {
     sessionId: session.sessionId,
   });
 
+  // A turn that showed a waiting boundary while it stayed open (it held on
+  // its tasks, or a task asked a person) ends here with `turn.cancelled` for
+  // the same turn ID, after that `turn.completed`.
   let emissionState = getHarnessEmissionState(durableSession.state);
-  // A task's request already streamed this turn's waiting boundary when it
-  // surfaced (clearing the turn id); re-emitting would fabricate a turn id
-  // and duplicate the boundary.
-  const alreadyEpilogued =
-    isHarnessBetweenTurns(session) && emissionState.endedByTaskInput === true;
-
-  if (!alreadyEpilogued) {
-    const writer = input.sessionWritable.getWriter();
-    try {
-      const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-          const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-          setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-          // Stamp once: the persisted chunk and the hooks must agree on the id.
-          const stamped = stampMessageStreamEvent(transformed, ctx.get(TurnDeliveryIdsKey));
-          await writer.write(encodeMessageStreamEvent(stamped));
-          void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
-          await dispatchStreamEventHooks({
-            ctx,
-            event: stamped,
-            registry: bundle.hookRegistry,
-          });
-        };
-        const emit =
-          instrumentation?.createHandleEvent({
-            handleEvent: baseEmit,
-            turnId: activeTurnId(emissionState),
-          }) ?? baseEmit;
-        return {
-          result: await emitCancelledTurn(emit, emissionState),
-          session: enrichedSession,
-        };
-      });
-      emissionState = scoped.result;
-      session = scoped.session;
-    } finally {
-      await instrumentation?.flush();
-      writer.releaseLock();
-    }
+  const writer = input.sessionWritable.getWriter();
+  try {
+    const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
+      const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
+        const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
+        setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+        // Stamp once: the persisted chunk and the hooks must agree on the id.
+        const stamped = stampMessageStreamEvent(transformed, ctx.get(TurnDeliveryIdsKey));
+        await writer.write(encodeMessageStreamEvent(stamped));
+        void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
+        await dispatchStreamEventHooks({
+          ctx,
+          event: stamped,
+          registry: bundle.hookRegistry,
+        });
+      };
+      const emit =
+        instrumentation?.createHandleEvent({
+          handleEvent: baseEmit,
+          turnId: activeTurnId(emissionState),
+        }) ?? baseEmit;
+      return {
+        result: await emitCancelledTurn(emit, emissionState),
+        session: enrichedSession,
+      };
+    });
+    emissionState = scoped.result;
+    session = scoped.session;
+  } finally {
+    await instrumentation?.flush();
+    writer.releaseLock();
   }
 
   // `clearPendingSessionLimitPrompt`: cancellation settles with the step's

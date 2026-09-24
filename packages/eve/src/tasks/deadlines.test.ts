@@ -884,7 +884,7 @@ describe("applyTaskDeadlines", () => {
         type: "task.settled",
       },
     ]);
-    // Its creator's next result turn tells the model the work is lost.
+    // The turn it belongs to tells the model the work is lost at its next step.
     expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([
       {
         creator: { auth },

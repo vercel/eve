@@ -24,7 +24,7 @@ async function collectUntil(
       const next = await Promise.race([
         iterator.next(),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Timed out waiting for the result turn.")), remaining),
+          setTimeout(() => reject(new Error("Timed out waiting for the task result.")), remaining),
         ),
       ]);
       if (next.done) break;
@@ -38,7 +38,7 @@ async function collectUntil(
 
 describe("detached agent calls", () => {
   it(
-    "returns a receipt, steers the working agent with agentId, and reports one result later",
+    "returns a receipt, steers the working agent with agentId, and reports one result in the held turn",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -107,7 +107,8 @@ export default defineWorkflowTool({
         });
         const first = await response.result();
 
-        // The turn does not wait, so the child's task.started may land after it ends.
+        // The model does not wait: the turn holds, showing its waiting boundary, and the
+        // child's task.started may land after that boundary.
         const receipt = first.events.find((event) => event.type === "action.result");
         expect(receipt?.data.result).toMatchObject({
           output: { status: "working", taskId: expect.stringMatching(/^writer-/u) },
@@ -160,6 +161,12 @@ export default defineWorkflowTool({
         const received = later.filter((event) => event.type === "message.received");
         expect(received).toHaveLength(1);
         expect(received[0]?.data).toMatchObject({ kind: "task.result", taskIds: [taskId] });
+        // One held turn throughout: the follow-up and the result joined it.
+        expect(
+          [...first.events, ...second.events, ...later].filter(
+            (event) => event.type === "turn.started",
+          ),
+        ).toHaveLength(1);
         // One generation: the steering message started nothing new.
         const starts = [...first.events, ...second.events, ...later].flatMap((event) =>
           event.type === "task.started" ? [event.data] : [],

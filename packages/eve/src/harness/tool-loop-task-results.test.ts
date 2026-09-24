@@ -3,19 +3,18 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, ModeKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "#evals/mock-model.js";
-import { setHarnessEmissionState } from "#harness/emission-state.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
+  renderFinalOutputWhileTasksWork,
   renderTasksInstruction,
-  RESULT_TURN_REPLY_PROMPT,
   TASKS_NOTE_LABEL,
 } from "#tasks/render.js";
 
@@ -109,6 +108,8 @@ function sessionWithResult(input: {
 
 async function runStep(input: {
   readonly auth: SessionAuthContext | null;
+  /** An interactive root session, which shows a held turn's waiting boundary. */
+  readonly interactive?: boolean;
   readonly mode?: "conversation" | "task";
   readonly respond: MockModelResponder;
   readonly session: HarnessSession;
@@ -131,6 +132,7 @@ async function runStep(input: {
   });
   const ctx = new ContextContainer();
   if (input.auth !== null) ctx.set(AuthKey, input.auth);
+  if (input.interactive === true) ctx.set(ModeKey, "conversation");
   let session = input.session;
   let stepInput = input.stepInput;
   // Follow internal continuations until the turn settles.
@@ -155,13 +157,48 @@ function lastUserText(request: MockModelRequest): string | undefined {
   return request.messages.findLast((message) => message.role === "user")?.text;
 }
 
+/** A detached `remind` task Alice's turn started that is still working. */
+function workingRemind(overrides: Parameters<typeof createTaskRecord>[0] = {}) {
+  return createTaskRecord({
+    creator: encodeTaskCreator({ auth: ALICE }),
+    id: "remind-q4x1ze",
+    kind: "workflow",
+    mode: "detached",
+    name: "remind",
+    turnId: "turn_0",
+    ...overrides,
+  });
+}
+
+/** Alice's open turn, after the model started the tasks in `records`. */
+function openTurn(
+  records: Parameters<typeof taskTableState>[0],
+  outputSchema?: HarnessSession["outputSchema"],
+): HarnessSession {
+  const session: HarnessSession = setHarnessEmissionState(
+    {
+      ...sessionWithResult({ creator: ALICE }),
+      history: [createUserMessage("user", "Remind me about stand-up.")],
+      state: taskTableState(records),
+    },
+    { sequence: 0, sessionStarted: true, stepIndex: 1, turnId: "turn_0" },
+  );
+  return outputSchema === undefined ? session : { ...session, outputSchema };
+}
+
 describe("detached result delivery in the tool loop", () => {
-  it("starts a result turn with one task.result message rendered through toModelOutput", async () => {
+  it("delivers held results inside their turn as one task.result message rendered through toModelOutput", async () => {
     const { events, requests, session } = await runStep({
       auth: ALICE,
       respond: () => "Alice, your reminder: stand-up at 10.",
-      session: sessionWithResult({ creator: ALICE }),
-      stepInput: { taskResults: true },
+      session: sessionWithResult({
+        creator: ALICE,
+        history: [
+          createUserMessage("user", "Remind me about stand-up."),
+          { content: "I set the reminder.", role: "assistant" },
+        ],
+        turnId: "turn_0",
+      }),
     });
 
     expect(lastUserText(requests[0]!)).toBe(
@@ -175,7 +212,8 @@ describe("detached result delivery in the tool loop", () => {
       data: expect.objectContaining({ kind: "task.result", taskIds: ["remind-q4x1ze"] }),
       type: "message.received",
     });
-    expect(events.map((event) => event.type)).toContain("turn.started");
+    // The held turn resumes under its ID.
+    expect(events.map((event) => event.type)).not.toContain("turn.started");
     // Delivered: the result is no longer held and the record is gone from the table.
     expect(readPendingTaskResults(session.state)).toEqual([]);
     expect(getTaskTable(session).records).toEqual([]);
@@ -235,50 +273,98 @@ describe("detached result delivery in the tool loop", () => {
     ).toBe(true);
   });
 
-  it("asks once for a reply when a result turn ends without one", async () => {
+  it("holds an interactive turn the model ends while its tasks work, keeping the turn ID", async () => {
+    const { events, result, session } = await runStep({
+      auth: ALICE,
+      interactive: true,
+      respond: () => "I set the reminder; I'll tell you when it fires.",
+      session: openTurn([workingRemind()]),
+    });
+
+    expect(result.next).toBeNull();
+    expect(result.heldTaskIds).toEqual(["remind-q4x1ze"]);
+    expect(result.settledTurn).toBeUndefined();
+    // The waiting boundary keeps the turn open under the same ID.
+    expect(events.map((event) => event.type).slice(-2)).toEqual([
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(events.at(-2)).toMatchObject({ data: { turnId: "turn_0" } });
+    expect(getHarnessEmissionState(session.state)).toMatchObject({
+      sequence: 0,
+      stepIndex: 2,
+      turnId: "turn_0",
+    });
+  });
+
+  it.each([
+    ["a child or scheduled conversation turn", "conversation" as const],
+    ["a task-mode run", "task" as const],
+  ])("holds %s without a waiting boundary", async (_label, mode) => {
+    const { events, result } = await runStep({
+      auth: ALICE,
+      mode,
+      respond: () => "Started the reminder.",
+      session: openTurn([workingRemind()]),
+    });
+
+    expect(result.next).toBeNull();
+    expect(result.heldTaskIds).toEqual(["remind-q4x1ze"]);
+    const types = events.map((event) => event.type);
+    expect(types).not.toContain("turn.completed");
+    expect(types).not.toContain("session.waiting");
+    expect(types).not.toContain("session.completed");
+  });
+
+  it("ends the turn when only attached calls, workflow-owned agents, or another principal's tasks work", async () => {
+    const { result } = await runStep({
+      auth: ALICE,
+      respond: () => "Done.",
+      session: openTurn([
+        workingRemind({ id: "remind-attach", mode: "attached" }),
+        workingRemind({
+          id: "remind-owned",
+          workflowCaller: { replyTo: "hook", runId: "run-1" },
+        }),
+        workingRemind({ creator: encodeTaskCreator({ auth: BOB }), id: "remind-bob" }),
+        workingRemind({ delivered: true, id: "remind-done", status: "completed" }),
+      ]),
+    });
+
+    expect(result.heldTaskIds).toBeUndefined();
+    expect(result.settledTurn?.output).toBe("Done.");
+  });
+
+  it("answers final_output with an error naming the working tasks, so the model waits first", async () => {
     const { requests, result } = await runStep({
-      auth: null,
+      auth: ALICE,
       respond: (request) =>
-        lastUserText(request) === RESULT_TURN_REPLY_PROMPT
-          ? "Your reminder fired: stand-up at 10."
-          : EMPTY_DELIVERY_SENTINEL,
-      session: sessionWithResult({ creator: null }),
-      stepInput: { taskResults: true },
+        request.toolResults.some((toolResult) => toolResult.name === "final_output")
+          ? {
+              toolCalls: [
+                { id: "call-wait", input: { taskId: "remind-q4x1ze" }, name: "task_wait" },
+              ],
+            }
+          : { toolCalls: [{ id: "call-final", input: { note: "done" }, name: "final_output" }] },
+      session: openTurn([workingRemind()], { type: "object" }),
+      tools: [REMIND, TASK_WAIT],
     });
 
     expect(requests).toHaveLength(2);
-    expect(result.settledTurn?.output).toBe("Your reminder fired: stand-up at 10.");
-  });
-
-  it("keeps a task-mode run open until its detached tasks report", async () => {
-    const working = createTaskRecord({
-      id: "remind-q4x1ze",
-      kind: "workflow",
-      mode: "detached",
-      name: "remind",
-    });
-    const awaiting = await runStep({
-      auth: null,
-      mode: "task",
-      respond: () => "Started the reminder.",
-      session: { ...sessionWithResult({ creator: null }), state: taskTableState([working]) },
-      stepInput: { message: "Set the reminder." },
-    });
-
-    expect(awaiting.result.next).toBeNull();
-    expect(awaiting.result.settledTurn?.output).toBe("Started the reminder.");
-    expect(awaiting.events.map((event) => event.type)).toContain("turn.completed");
-    expect(awaiting.events.map((event) => event.type)).not.toContain("session.completed");
-
-    const finished = await runStep({
-      auth: null,
-      mode: "task",
-      respond: () => "The reminder fired.",
-      session: sessionWithResult({ creator: null }),
-      stepInput: { taskResults: true },
-    });
-    expect(finished.result.next).toEqual({ done: true, output: "The reminder fired." });
-    expect(finished.events.map((event) => event.type)).toContain("session.completed");
+    expect(requests[1]!.toolResults).toEqual([
+      expect.objectContaining({
+        id: "call-final",
+        isError: true,
+        name: "final_output",
+        output: renderFinalOutputWhileTasksWork(["remind-q4x1ze"]),
+      }),
+    ]);
+    // The model's task_wait goes to the owner; no final output was taken.
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toBeUndefined();
+    expect(getPendingCoordinationBatch(result.session.state)?.tasks).toEqual([
+      expect.objectContaining({ callId: "call-wait", toolName: "task_wait" }),
+    ]);
   });
 
   it("includes the tasks block in a session with a workflow tool that is not attached", async () => {

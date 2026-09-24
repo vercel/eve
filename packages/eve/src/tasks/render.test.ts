@@ -7,6 +7,7 @@ import {
   renderStartReceipt,
   renderSteeringReceipt,
   renderTaskResults,
+  renderFinalOutputWhileTasksWork,
   renderTasksInstruction,
   renderTasksNote,
   renderTimedOut,
@@ -207,6 +208,14 @@ describe("renderTasksNote", () => {
   });
 });
 
+describe("renderFinalOutputWhileTasksWork", () => {
+  it("names the working tasks and what to do before calling final_output again", () => {
+    expect(renderFinalOutputWhileTasksWork(["lookup-a1b2c3", "researcher-7k2m9q"])).toBe(
+      "You can't give your final output while tasks you started are working (lookup-a1b2c3, researcher-7k2m9q). Wait for them with task_wait or stop them with task_cancel, then call final_output again.",
+    );
+  });
+});
+
 describe("renderTasksInstruction", () => {
   it("describes detached tasks, task_wait, results, and interruptions in one block", () => {
     for (const agents of [true, false]) {
@@ -218,6 +227,10 @@ describe("renderTasksInstruction", () => {
       expect(block).toContain("A new message interrupts your waits but not your tasks");
       expect(block).toContain("task_cancel");
       expect(block).toContain("Never use sleep to wait for a task.");
+      expect(block).toContain(
+        "You cannot end your turn while tasks you started are working; eve waits for them and gives you their results.",
+      );
+      expect(block).not.toContain("later");
       expect(block.split("[Tasks] note").length - 1).toBe(agents ? 2 : 1);
     }
   });

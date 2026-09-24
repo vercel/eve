@@ -18,6 +18,7 @@ import { findCallerTask } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { taskToolErrorResult } from "#tasks/receipts.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { heldTaskIds } from "#tasks/results.js";
 import {
   renderInterruptedCall,
   TASK_CANCEL_INVALID_INPUT_MESSAGE,
@@ -40,8 +41,10 @@ import { endTaskWaits, takeLiveWait } from "#tasks/wait.js";
 export type TaskCancelSelector =
   /** Every working task: `session.cancel()`, a cancelled turn, or the session's end. */
   | { readonly kind: "all" }
-  /** The working tasks one turn started: that turn failed, or a cancel named it after it ended. */
+  /** The working tasks one turn started: a cancel named that turn after it ended. */
   | { readonly kind: "turn"; readonly turnId: string }
+  /** The tasks that hold a principal's turn open (see `heldTaskIds`): that turn failed. */
+  | { readonly kind: "held"; readonly principal: SessionAuthContext | null }
   /** The agent calls a workflow run awaits, once that run ends. */
   | { readonly kind: "workflow-run"; readonly runId: string };
 
@@ -68,7 +71,7 @@ export async function cancelTasksStep(input: {
 
   const durable = readDurableSession(input.sessionState);
   const initial = getTaskTable(durable);
-  const selected = initial.records.filter(selectTasks(input.selector));
+  const selected = initial.records.filter(selectTasks(input.selector, durable));
   const cancelled = cancelRecords(initial, selected, new Date().toISOString());
   if (cancelled.table === initial) {
     return {
@@ -266,12 +269,19 @@ function applyCancelled<T extends Session>(
   return { results, session: next };
 }
 
-function selectTasks(selector: TaskCancelSelector): (record: TaskRecord) => boolean {
+function selectTasks(
+  selector: TaskCancelSelector,
+  session: Session,
+): (record: TaskRecord) => boolean {
   switch (selector.kind) {
     case "all":
       return () => true;
     case "turn":
       return (record) => record.turnId === selector.turnId;
+    case "held": {
+      const held = new Set(heldTaskIds(session, selector.principal));
+      return (record) => held.has(record.id);
+    }
     case "workflow-run":
       return (record) => record.workflowCaller?.runId === selector.runId;
   }

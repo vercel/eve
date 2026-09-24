@@ -91,14 +91,11 @@ describe("settleCancelledTurnStep", () => {
     });
   });
 
-  it.each([
-    ["no second boundary once a task's request ended", { endedByTaskInput: true as const }, []],
-    ["a boundary when nothing else ended", {}, ["turn.cancelled", "session.waiting"]],
-  ])("streams %s the cancelled turn's stream", async (_label, flag, expected) => {
-    // Alice's background notes task asked mid-turn, which ended the turn's stream.
+  it("ends a turn that showed a waiting boundary with turn.cancelled for the same turn ID", async () => {
+    // Alice's turn held on her notes task, so its waiting boundary kept the turn open.
     const runtime = await createTestRuntime({ agent: { name: "settle-cancel-handles" } });
-    const between = { sequence: 4, sessionStarted: true, stepIndex: 0, turnId: "", ...flag };
-    const session = setHarnessEmissionState(createCancelledTurnSession(), between);
+    const held = { sequence: 4, sessionStarted: true, stepIndex: 2, turnId: "turn_4" };
+    const session = setHarnessEmissionState(createCancelledTurnSession(), held);
     const chunks: string[] = [];
 
     await runtime.run(async () => {
@@ -110,8 +107,12 @@ describe("settleCancelledTurnStep", () => {
         sessionState: createDurableSessionState({ session }),
       });
 
-      expect(chunks.map((chunk) => (JSON.parse(chunk) as { type: string }).type)).toEqual(expected);
-      expect(result.sessionState.emissionState.turnId).toBe("");
+      const events = chunks.map(
+        (chunk) => JSON.parse(chunk) as { type: string; data: { turnId?: string } },
+      );
+      expect(events.map((event) => event.type)).toEqual(["turn.cancelled", "session.waiting"]);
+      expect(events[0]?.data.turnId).toBe("turn_4");
+      expect(result.sessionState.emissionState).toMatchObject({ sequence: 5, turnId: "" });
     });
   });
 });

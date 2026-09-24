@@ -34,7 +34,7 @@ export interface TaskRecord {
   readonly child?: ChildAddress;
   /** ISO time the current generation started. */
   readonly startedAt: string;
-  /** Auth and dynamic selections captured at start, replayed for result turns. */
+  /** The principal that started the task; only it can wait on, cancel, or continue it. */
   readonly creator?: JsonObject;
   /** ISO time the current generation times out. Absent means only the session lifetime bounds it. */
   readonly deadlineAt?: string;

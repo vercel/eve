@@ -33,9 +33,10 @@ export function taskResultDeliveries(events: SessionEvents): readonly (readonly 
 }
 
 /**
- * Waits for the session's next turn after `turn`, such as the result turn
- * that delivers a detached agent's answer. Events the turn already
- * published are replayed from the session cursor.
+ * Waits for the session's next turn segment after `turn`: the rest of a
+ * held turn, which delivers a detached agent's answer after the turn's
+ * waiting boundary, or the next turn. Events the turn already published are
+ * replayed from the session cursor.
  */
 export async function watchNextTurn(t: EveEvalContext, turn: EveEvalTurn): Promise<EveEvalTurn> {
   return await t.target

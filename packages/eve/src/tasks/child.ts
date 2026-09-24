@@ -135,6 +135,32 @@ export async function notifyCancelledTaskCallerStep(input: {
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
 }
 
+/**
+ * Reports a caller settlement the session refused because tasks its turn
+ * started were still working: a reply must follow its turn's tasks, so this
+ * is a bug in the turn rule, not a state the caller can recover from. Tests
+ * and development fail the run so the bug surfaces; production logs it and
+ * leaves the caller unsettled.
+ */
+export async function reportRefusedCallerReplyStep(input: {
+  readonly callId: string;
+  readonly sessionId: string;
+  readonly taskIds: readonly string[];
+}): Promise<void> {
+  "use step";
+
+  log.error("refused to settle a delegated caller while its turn has working tasks", {
+    callId: input.callId,
+    sessionId: input.sessionId,
+    taskIds: [...input.taskIds],
+  });
+  if (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development") {
+    throw new Error(
+      `Refused to settle caller ${input.callId} of session ${input.sessionId} while tasks ${input.taskIds.join(", ")} are working.`,
+    );
+  }
+}
+
 function createSettledTurnResult(input: {
   readonly caller: TurnCaller;
   readonly lifecycle: AgentTurnOutcome["kind"];

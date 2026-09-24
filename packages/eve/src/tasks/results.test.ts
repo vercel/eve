@@ -8,14 +8,13 @@ import type { TaskRecord } from "#tasks/record.js";
 import { renderTasksNote } from "#tasks/render.js";
 import {
   encodeTaskCreator,
-  hasDeliverableTaskResults,
-  hasPendingDetachedWork,
+  heldTaskIds,
   holdTaskResult,
-  nextTaskResultTurn,
   readPendingTaskResults,
   readTaskCreator,
   sameTaskPrincipal,
   takeTaskResults,
+  workingTaskIds,
 } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, workingDetachedTaskIds } from "#tasks/table.js";
@@ -66,7 +65,7 @@ describe("detached task results", () => {
 
     expect(readPendingTaskResults(twice.state)).toHaveLength(1);
     expect(renderTasksNote(getTaskTable(twice).records)).toContain('id="remind-a1"');
-    expect(hasPendingDetachedWork(twice.state)).toBe(true);
+    expect(heldTaskIds(twice, ALICE)).toEqual(["remind-a1"]);
   });
 
   it("delivers a creator's results together and marks them delivered", () => {
@@ -94,44 +93,34 @@ describe("detached task results", () => {
     const session = settleAll([background("remind-b1", BOB)], ["remind-b1"]);
 
     expect(takeTaskResults(session, ALICE).results).toEqual([]);
-    expect(hasDeliverableTaskResults(session.state, ALICE)).toBe(false);
-    expect(hasDeliverableTaskResults(session.state, BOB)).toBe(true);
     expect(takeTaskResults(session, null).results).toEqual([]);
+    expect(takeTaskResults(session, BOB).results.map((result) => result.taskId)).toEqual([
+      "remind-b1",
+    ]);
   });
 
-  it("starts the next result turn as the creator of the oldest deliverable result", () => {
-    const session = settleAll(
-      [background("remind-b1", BOB), background("remind-a1", ALICE)],
-      ["remind-b1", "remind-a1"],
-    );
+  it("holds a turn on its principal's working detached tasks and undelivered results", () => {
+    const records = [
+      background("a-1", ALICE),
+      background("b-1", ALICE, { kind: "agent", status: "input_required" }),
+      background("c-1", ALICE, { status: "completed" }),
+      background("d-1", ALICE, { mode: "attached" }),
+      background("e-1", ALICE, { workflowCaller: { replyTo: "hook", runId: "run-1" } }),
+      background("f-1", BOB),
+      background("g-1", ALICE, { delivered: true, status: "cancelled" }),
+    ];
+    const session = { state: taskTableState(records) };
 
-    expect(readTaskCreator(nextTaskResultTurn(session.state)?.creator).auth).toEqual(BOB);
-    expect(nextTaskResultTurn(takeTaskResults(session, BOB).session.state)).toEqual({
-      creator: encodeTaskCreator({ auth: ALICE }),
-    });
-  });
+    expect(workingTaskIds(session, ALICE)).toEqual(["a-1", "b-1"]);
+    expect(heldTaskIds(session, ALICE)).toEqual(["a-1", "b-1"]);
+    expect(heldTaskIds(session, BOB)).toEqual(["f-1"]);
+    expect(heldTaskIds(session, null)).toEqual([]);
 
-  it("treats an unreadable record as outstanding until it is reported", () => {
-    const lost = { "eve.taskTable": { records: [{ id: "x-1", name: "x", v: 0 }] } };
-    expect(hasPendingDetachedWork(lost)).toBe(true);
-    const delivered = {
-      "eve.taskTable": { records: [{ delivered: true, id: "x-1", name: "x", v: 0 }] },
-    };
-    expect(hasPendingDetachedWork(delivered)).toBe(false);
-  });
-
-  it("treats a session as quiescent only when no detached result is outstanding", () => {
-    const working = background("remind-a1", ALICE);
-    expect(hasPendingDetachedWork(taskTableState([working]))).toBe(true);
-    expect(
-      hasPendingDetachedWork(taskTableState([{ ...working, mode: "attached" as const }])),
-    ).toBe(false);
-    const cancelled = { ...working, delivered: true, status: "cancelled" as const };
-    expect(hasPendingDetachedWork(taskTableState([cancelled]))).toBe(false);
-
-    const settled = settleAll([working], ["remind-a1"]);
-    expect(hasPendingDetachedWork(settled.state)).toBe(true);
-    expect(hasPendingDetachedWork(takeTaskResults(settled, ALICE).session.state)).toBe(false);
+    // A settled result holds the turn until a model step delivers it.
+    const settled = settleAll([background("remind-a1", ALICE)], ["remind-a1"]);
+    expect(workingTaskIds(settled, ALICE)).toEqual([]);
+    expect(heldTaskIds(settled, ALICE)).toEqual(["remind-a1"]);
+    expect(heldTaskIds(takeTaskResults(settled, ALICE).session, ALICE)).toEqual([]);
   });
 
   it("counts working and input_required detached generations toward the cap", () => {
@@ -160,7 +149,7 @@ describe("task principals", () => {
   });
 
   it("round-trips a creator and reads an unreadable one as anonymous", () => {
-    const creator = { activityRootTurnId: "turn_2", auth: ALICE };
+    const creator = { auth: ALICE };
     expect(readTaskCreator(encodeTaskCreator(creator))).toEqual(creator);
     expect(readTaskCreator({ auth: { principalId: 7 } })).toEqual({ auth: null });
     expect(readTaskCreator(undefined)).toEqual({ auth: null });

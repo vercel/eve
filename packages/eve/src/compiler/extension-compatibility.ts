@@ -108,8 +108,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 39,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 34, 35, 36, 39],
+    current: 40,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 34, 35, 36, 40],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -128,6 +128,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       33: "Workflow tools accept detach, and background task results arrive as task.result messages.",
       37: "P6 stage 2: task.started mode is attached | detached and task.detached is removed; stage 6 consolidates branch-only epochs",
       38: "P6 stage 3: Session.cancel takes no task options and cancels the turn and every working task; stage 6 consolidates branch-only epochs",
+      39: "P6 stage 4: result turns are removed, so StepInput no longer carries the internal taskResults flag; stage 6 consolidates branch-only epochs",
     },
   },
   schedule: {

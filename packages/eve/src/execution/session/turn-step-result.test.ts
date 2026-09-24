@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession, SettledTurn } from "#harness/types.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 
 function session(): HarnessSession {
   return {
@@ -53,16 +52,20 @@ describe("delegated turn completion", () => {
     });
   });
 
-  it("folds a turn's usage into the later settlement while background work is out", () => {
-    const working = createTaskRecord({ kind: "workflow", mode: "detached", name: "remind" });
-    const current = withUsage({ ...session(), state: taskTableState([working]) }, 100);
-    const settled = endTurn(current, { output: "Started the reminder." });
+  it("holds a turn with its held task IDs and leaves its usage for the one settlement", () => {
+    const current = withUsage(session(), 100);
+    const held = resolveSessionStepResult(
+      { heldTaskIds: ["remind-q4x1ze"], next: null, session: current },
+      {},
+      "conversation",
+    );
 
-    expect(settled).toMatchObject({ action: "park", settled: { usage: { inputTokens: 100 } } });
-    // The caller is not answered yet, so the next settlement still reports this spend.
+    expect(held).toMatchObject({ action: "park", heldTaskIds: ["remind-q4x1ze"] });
+    expect(held).not.toHaveProperty("settled");
+    // The caller is answered once, when the turn ends, with the whole turn's spend.
     expect(
-      takeSessionUsageDelta({ ...current, state: settled.sessionState.snapshot.session.state })
-        .delta.inputTokens,
+      takeSessionUsageDelta({ ...current, state: held.sessionState.snapshot.session.state }).delta
+        .inputTokens,
     ).toBe(100);
   });
 
