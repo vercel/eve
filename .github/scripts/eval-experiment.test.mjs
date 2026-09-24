@@ -51,8 +51,9 @@ test("notification is PR-only, separately permissioned and does not execute PR c
   assert.ok(notify);
   assert.match(notify, /github\.event_name == 'pull_request'/u);
   assert.match(notify, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/u);
-  assert.match(notify, /issues: write/u);
-  assert.doesNotMatch(before, /issues: write/u);
+  assert.match(notify, /pull-requests: write/u);
+  assert.doesNotMatch(before, /(?:issues|pull-requests): write/u);
+  assert.doesNotMatch(notify, /issues: write/u);
   assert.doesNotMatch(notify, /actions\/checkout|node scripts\/eval-experiments/u);
   assert.match(notify, /eve-eval-experiment-run-\$\{context\.runId\}/u);
   assert.match(notify, /pr\.data\.head\.sha !== process\.env\.EXPERIMENT_SHA/u);

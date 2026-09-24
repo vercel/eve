@@ -180,8 +180,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
-      issues: write
-      pull-requests: read
+      # PR conversation comments need PR write access, even through the issues API.
+      pull-requests: write
     steps:
       - name: Download experiment report
         id: report
