@@ -83,6 +83,13 @@ Pass `taskDeliveryPolicy` to `send(...)` to choose how the session reports backg
 - `"auto"` (default for new channel sessions): ready results can invoke the parent while other tasks continue. The parent reports results that are useful independently and stays silent when a useful answer needs unfinished work.
 - `"cohort"`: wait for overlapping tasks to settle, then deliver their terminal outcomes together.
 
+Add `-silent` to either policy (`"auto-silent"` or `"cohort-silent"`) when an
+activity card already shows that work started. On a turn that launches background
+tasks, eve then asks the model to skip a redundant acknowledgement if there is
+no substantive answer or clarification to send. Result timing and reporting
+follow the corresponding `"auto"` or `"cohort"` policy. Other turns, approvals,
+child sessions, and structured outputs retain their response contracts.
+
 ```ts title="agent/channels/reports.ts"
 import { defineChannel, POST } from "eve/channels";
 import { localDev, routeAuth } from "eve/channels/auth";

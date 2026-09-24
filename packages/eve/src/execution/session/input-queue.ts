@@ -242,7 +242,12 @@ export class SessionInputQueue {
       if (entry.kind === "authorization" || deferDeliveries) return false;
       if (this.isCancelledDelivery(entry.delivery)) return false;
       const cohort = terminalCohort(entry.delivery, tasks);
-      return taskDeliveryPolicy === "auto" || cohort === undefined || !pendingCohorts.has(cohort);
+      return (
+        taskDeliveryPolicy === "auto" ||
+        taskDeliveryPolicy === "auto-silent" ||
+        cohort === undefined ||
+        !pendingCohorts.has(cohort)
+      );
     });
   }
 

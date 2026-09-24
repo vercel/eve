@@ -195,8 +195,8 @@ export interface DeliverPayload {
   readonly [key: string]: unknown;
 }
 
-/** Controls background task wake timing and whether partial results require a report. */
-export type TaskDeliveryPolicy = "cohort" | "auto";
+/** Controls background task result timing and whether launches need an acknowledgement. */
+export type TaskDeliveryPolicy = "cohort" | "auto" | "cohort-silent" | "auto-silent";
 
 /** Controls how a channel message interacts with an active turn. */
 export type TurnPolicy = "steer" | "queue";

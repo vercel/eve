@@ -40,7 +40,10 @@ export interface ReportingRun {
   session: EveEvalSession;
 }
 
-export async function startWarehouseLookups(t: EveEvalContext): Promise<ReportingRun> {
+export async function startWarehouseLookups(
+  t: EveEvalContext,
+  taskDeliveryPolicy: "cohort" | "cohort-silent" = "cohort",
+): Promise<ReportingRun> {
   const modelId = e2eModel();
   if (typeof modelId !== "string") throw new Error("Warehouse reporting requires a real CI model.");
   const started = await t.send(
@@ -50,28 +53,32 @@ export async function startWarehouseLookups(t: EveEvalContext): Promise<Reportin
 2. check=second: Find the inventory item for the second entry using the inventory lookup tool (probe), and share the item it returns.
 3. check=third: Assign a third background assistant with agent, just like the first two entries. Ask that assistant to use warehouse_lookup; the workflow contacts the warehouse specialist and returns its item.
 
-Once all three assignments are accepted, let Alice know the checks are underway. When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`,
-    { taskDeliveryPolicy: "cohort" },
+${taskDeliveryPolicy === "cohort" ? "Once all three assignments are accepted, let Alice know the checks are underway." : "Alice can follow the assignments in the activity card."} When all three results are ready, reply directly from the returned items without further tool calls or task-list updates. Bob needs only three checklist entries, with each item listed once and no separate summary.`,
+    { taskDeliveryPolicy },
   );
   started.expectOk();
   started.calledSubagent("agent", { status: "working", count: TASK_COUNT });
   started.notCalledTool("probe");
   started.notCalledTool("warehouse_lookup");
   assertModel(started, modelId);
-  await t.require(
-    started,
-    satisfies(hasPostReceiptAcknowledgement, "acknowledgement follows all three task receipts"),
-  );
-  await t.require(
-    started.message,
-    satisfies(
-      (message) =>
-        typeof message === "string" &&
-        message.trim().length > 0 &&
-        Object.values(RESULTS).every((result) => !message.toLowerCase().includes(result)),
-      "the initiating turn acknowledges work without claiming inventory results",
-    ),
-  );
+  if (taskDeliveryPolicy === "cohort-silent") {
+    await t.require(started.message, equals(undefined));
+  } else {
+    await t.require(
+      started,
+      satisfies(hasPostReceiptAcknowledgement, "acknowledgement follows all three task receipts"),
+    );
+    await t.require(
+      started.message,
+      satisfies(
+        (message) =>
+          typeof message === "string" &&
+          message.trim().length > 0 &&
+          Object.values(RESULTS).every((result) => !message.toLowerCase().includes(result)),
+        "the initiating turn acknowledges work without claiming inventory results",
+      ),
+    );
+  }
 
   const receipts = taskReceipts(started.events);
   const actions = started.events.flatMap((event) =>

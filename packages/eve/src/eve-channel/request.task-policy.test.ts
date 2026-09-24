@@ -3,7 +3,7 @@ import { parseCreateBody, parseSessionMessageBody } from "#eve-channel/request.j
 
 describe("task delivery policy on HTTP sends", () => {
   it.each([parseCreateBody, parseSessionMessageBody])("validates policy at %s", async (parse) => {
-    for (const taskDeliveryPolicy of ["auto", "cohort"] as const) {
+    for (const taskDeliveryPolicy of ["auto", "cohort", "auto-silent", "cohort-silent"] as const) {
       expect(parse({ message: "Prepare reports", taskDeliveryPolicy })).toMatchObject({
         taskDeliveryPolicy,
       });

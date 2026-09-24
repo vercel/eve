@@ -26,19 +26,19 @@ import type { ScheduleDefinition } from "#public/schedules/index.js";
 it("exposes task delivery policy on sends, not channel or schedule definitions", () => {
   expectTypeOf<ChannelSendOptions>()
     .toHaveProperty("taskDeliveryPolicy")
-    .toEqualTypeOf<"auto" | "cohort" | undefined>();
+    .toEqualTypeOf<"auto" | "cohort" | "auto-silent" | "cohort-silent" | undefined>();
   expectTypeOf<SessionSendOptions>()
     .toHaveProperty("taskDeliveryPolicy")
-    .toEqualTypeOf<"auto" | "cohort" | undefined>();
+    .toEqualTypeOf<"auto" | "cohort" | "auto-silent" | "cohort-silent" | undefined>();
   expectTypeOf<ChatSdkSendOptions>()
     .toHaveProperty("taskDeliveryPolicy")
-    .toEqualTypeOf<"auto" | "cohort" | undefined>();
+    .toEqualTypeOf<"auto" | "cohort" | "auto-silent" | "cohort-silent" | undefined>();
   expectTypeOf<SlackSendOptions>()
     .toHaveProperty("taskDeliveryPolicy")
-    .toEqualTypeOf<"auto" | "cohort" | undefined>();
+    .toEqualTypeOf<"auto" | "cohort" | "auto-silent" | "cohort-silent" | undefined>();
   expectTypeOf<SlackEventSendOptions>()
     .toHaveProperty("taskDeliveryPolicy")
-    .toEqualTypeOf<"auto" | "cohort" | undefined>();
+    .toEqualTypeOf<"auto" | "cohort" | "auto-silent" | "cohort-silent" | undefined>();
   expectTypeOf<Parameters<typeof defineChannel>[0]>().not.toHaveProperty("taskDeliveryPolicy");
   expectTypeOf<Parameters<typeof chatSdkChannel>[0]>().not.toHaveProperty("taskDeliveryPolicy");
   expectTypeOf<Parameters<typeof discordChannel>[0]>().not.toHaveProperty("taskDeliveryPolicy");

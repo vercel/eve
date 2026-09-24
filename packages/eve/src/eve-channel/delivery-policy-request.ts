@@ -6,9 +6,18 @@ export function parseTaskDeliveryPolicyField(
   message: string | UserContent | undefined,
 ): TaskDeliveryPolicy | undefined | Response {
   if (value === undefined) return undefined;
-  if (value !== "auto" && value !== "cohort") {
+  if (
+    value !== "auto" &&
+    value !== "cohort" &&
+    value !== "auto-silent" &&
+    value !== "cohort-silent"
+  ) {
     return Response.json(
-      { error: "Expected 'taskDeliveryPolicy' to be either 'auto' or 'cohort'.", ok: false },
+      {
+        error:
+          "Expected 'taskDeliveryPolicy' to be 'auto', 'cohort', 'auto-silent', or 'cohort-silent'.",
+        ok: false,
+      },
       { status: 400 },
     );
   }

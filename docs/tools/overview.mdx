@@ -153,7 +153,9 @@ Background tools are a normal execution mode and need no root-agent flag. Built-
 and remote subagents use this task lifecycle automatically.
 
 After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
-cohort and instructs the model to acknowledge that the work started without waiting for results.
+cohort and, by default, instructs the model to acknowledge that the work started without waiting for results.
+Use `taskDeliveryPolicy: "auto-silent"` or `"cohort-silent"` when an activity card
+already shows the launch. See [Background task results](/docs/channels/overview#background-task-results).
 [Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
 launches keep conditional delivery and send no acknowledgement.
 Channel sessions default to `taskDeliveryPolicy: "auto"`: ready results can invoke
