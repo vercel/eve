@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Allow tests beside agent definitions by excluding `*.test.*`, `*.spec.*`, and `__tests__/` from automatic discovery.
+Ignore JavaScript and TypeScript `*.test.*`/`*.spec.*` modules and `__tests__/` directories during agent discovery.

@@ -27,14 +27,14 @@ export async function emitExtensionDistribution(input: {
   readonly stagedOutDir: string;
   readonly transactionRoot: string;
 }): Promise<readonly string[]> {
-  const skillPackageRoots = collectSkillPackageRoots(input.manifest).map((root) =>
+  const resourceRoots = collectExtensionResourceRoots(input.manifest).map((root) =>
     relative(input.sourceRoot, root).replaceAll("\\", "/"),
   );
-  const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot, skillPackageRoots);
+  const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot, resourceRoots);
   const moduleFiles = sourceFiles.filter(
     (file) =>
       isAuthoredModule(file.logicalPath) &&
-      !skillPackageRoots.some((root) => file.logicalPath.startsWith(`${root}/`)),
+      !resourceRoots.some((root) => file.logicalPath.startsWith(`${root}/`)),
   );
   await copyDistributionDataFiles({
     files: sourceFiles,
@@ -80,12 +80,13 @@ export async function emitExtensionDistribution(input: {
   return emitted.imports;
 }
 
-function collectSkillPackageRoots(manifest: AgentSourceManifest): string[] {
+function collectExtensionResourceRoots(manifest: AgentSourceManifest): string[] {
   return [
+    ...manifest.sandboxWorkspaces.map((workspace) => workspace.sourcePath),
     ...manifest.skills.flatMap((skill) =>
       skill.sourceKind === "skill-package" ? [skill.rootPath] : [],
     ),
-    ...manifest.subagents.flatMap((subagent) => collectSkillPackageRoots(subagent.manifest)),
+    ...manifest.subagents.flatMap((subagent) => collectExtensionResourceRoots(subagent.manifest)),
   ];
 }
 

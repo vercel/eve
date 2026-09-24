@@ -66,8 +66,9 @@ Paths below are relative to the agent directory. Root agents can use every path;
 
 ## Colocated tests
 
-eve ignores `*.test.*`, `*.spec.*`, and `__tests__/` during automatic discovery
-and when choosing extension runtime entries.
+eve ignores JavaScript and TypeScript modules named `*.test.*` or `*.spec.*`,
+along with `__tests__/` directories, during automatic discovery and when choosing
+extension runtime entries.
 
 ```text
 agent/tools/

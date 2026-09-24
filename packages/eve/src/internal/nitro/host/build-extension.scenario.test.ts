@@ -70,7 +70,9 @@ describe("extension build output", () => {
       const root = await createExtensionPackage();
       if (!hasTsConfig) await rm(join(root, "tsconfig.json"));
       const files = {
-        "tools/crm_search.test.ts": 'throw new Error("test executed"); export {};',
+        "tools/crm_search.test.ts": hasTsConfig
+          ? 'throw new Error("test executed"); export {};'
+          : 'describe("crm", () => { it("works", () => { expect(1).toBe(1); }); });',
         "lib/client.spec.ts": 'throw new Error("spec executed"); export {};',
         "lib/state.test.ts":
           'import { defineState } from "eve/context"; export const state = defineState("test", () => 0);',
@@ -93,7 +95,8 @@ describe("extension build output", () => {
         join("tools", "crm_search.mjs"),
       ]);
       expect(emitted).toContain(join("skills", "checks", "scripts", "check.test.ts"));
-      expect(emitted).toContain(join("tools", "crm_search.test.d.ts"));
+      expect(emitted.includes(join("tools", "crm_search.test.d.ts"))).toBe(hasTsConfig);
+      expect(emitted.includes(join("tools", "__tests__", "setup.d.ts"))).toBe(hasTsConfig);
       const manifestPath = join(outDir, "extension", "_manifest.json");
       expect(
         parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath)
@@ -121,8 +124,9 @@ describe("extension build output", () => {
     );
   });
 
-  it("retains explicitly imported test modules as runtime dependencies", async () => {
+  it("retains explicitly imported test modules without a tsconfig", async () => {
     const root = await createExtensionPackage();
+    await rm(join(root, "tsconfig.json"));
     await mkdir(join(root, "extension", "lib", "__tests__"), { recursive: true });
     await writeFile(
       join(root, "extension", "lib", "__tests__", "value.ts"),
@@ -144,6 +148,9 @@ describe("extension build output", () => {
       value: "imported value",
       hasState: true,
     });
+    expect(
+      await readFile(join(outDir, "extension", "lib", "__tests__", "value.d.ts"), "utf8"),
+    ).toContain("imported value");
     const manifestPath = join(outDir, "extension", "_manifest.json");
     expect(
       parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath)
@@ -479,6 +486,27 @@ export default defineHook({ events: { "turn.started": async () => {
     await expect(
       readFile(join(outDir, "extension", "skills", "triage", "scripts", "check.mjs"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("preserves test files inside subagent sandbox workspaces", async () => {
+    const root = await createExtensionPackage();
+    const subagentRoot = join(root, "extension", "subagents", "researcher");
+    const workspaceFiles = {
+      "check.test.js": 'describe("workspace", () => {});',
+      "__tests__/fixture.json": '{"value":"workspace fixture"}',
+    };
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      const filePath = join(subagentRoot, "sandbox", "workspace", path);
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, content);
+    }
+    await writeFile(join(subagentRoot, "agent.ts"), 'export default { description: "Research." };');
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const workspace = join(outDir, "extension", "subagents", "researcher", "sandbox", "workspace");
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      await expect(readFile(join(workspace, path), "utf8")).resolves.toBe(content);
+    }
   });
 
   it("sanitizes kebab-case tool names into valid export bindings", async () => {
