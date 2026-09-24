@@ -268,7 +268,7 @@ function resolveMessageAgainstQuestions(input: {
     ([requestId, route]) => route.kind === "question" && input.routable(requestId, route),
   );
   const questions = pending.flatMap(([requestId, route]) => {
-    const question = route.answerHook?.question;
+    const question = route.answerHook?.question ?? route.question;
     return question !== undefined ? [{ requestId, ...question }] : [];
   });
   if (questions.length === 0) return none;

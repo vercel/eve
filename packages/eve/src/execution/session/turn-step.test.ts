@@ -825,6 +825,7 @@ describe("recordTaskInputRequestStep", () => {
       childContinuationToken: "eve:workflow-tool-run-answer:run-1:0",
       childRequestId: "request-1",
       kind: "question",
+      question: {},
       taskId: "task-1",
     });
     expect(result).toMatchObject({

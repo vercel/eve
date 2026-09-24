@@ -2,12 +2,28 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
+const APPROVAL_MARKER = "PROXIED-ASK-APPROVED-6R9K";
 const COLLISION_MARKER = "MIXED-PARK-COMPLETE-7K2M";
 const STOCK_PRICE = "178.92";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
   const prompt = request.messages.map((entry) => entry.text).join("\n");
+  if (message.includes("Call the approval-child subagent exactly once")) {
+    return request.toolResults.some((result) => result.name === "approval-child")
+      ? "The approval child is waiting."
+      : {
+          toolCalls: [
+            {
+              input: { message: "Ask whether to deploy, then wait for the answer." },
+              name: "approval-child",
+            },
+          ],
+        };
+  }
+  if (prompt.includes("Background task reporting") && prompt.includes(APPROVAL_MARKER)) {
+    return APPROVAL_MARKER;
+  }
   if (message.includes("Call the stock-price subagent exactly once")) {
     return request.toolResults.some((result) => result.name === "stock-price")
       ? "The stock price is being fetched."
