@@ -3469,9 +3469,15 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
 
+    const authorizationCompletionNote = "Authorization for statuspage completed.";
     expect(observedPendingAuth).toBeUndefined();
     expect(observedStepInput).toEqual(
-      inputKind === "current" ? { message: `thread=unset; user=${turnInput.message}` } : undefined,
+      inputKind === "current"
+        ? {
+            context: [authorizationCompletionNote],
+            message: `thread=unset; user=${turnInput.message}`,
+          }
+        : { context: [authorizationCompletionNote] },
     );
     expect(result).toMatchObject({
       action: "park",
@@ -3490,13 +3496,22 @@ describe("turnStep", () => {
       });
     }
     expect(persistedSession?.history).toContain(hidden);
+    const authorizationCompletionInput = {
+      content: authorizationCompletionNote,
+      kind: "context.instruction" as const,
+      role: "user" as const,
+    };
     const expectedInput =
       inputKind === "none"
-        ? []
+        ? [authorizationCompletionInput]
         : inputKind === "current"
-          ? [{ content: `thread=unset; user=${turnInput.message}`, kind: "user", role: "user" }]
+          ? [
+              authorizationCompletionInput,
+              { content: `thread=unset; user=${turnInput.message}`, kind: "user", role: "user" },
+            ]
           : [
               { content: "Current context", kind: "context.instruction", role: "user" },
+              authorizationCompletionInput,
               { content: "Alice follows up after signing in.", kind: "user", role: "user" },
             ];
     expect(toolHandler).toHaveBeenCalledOnce();

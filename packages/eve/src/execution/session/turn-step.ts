@@ -299,6 +299,15 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
     }
+    if (completedAuths !== undefined) {
+      resolved = {
+        ...resolved,
+        context: [
+          ...(resolved?.context ?? []),
+          ...completedAuths.map(({ result }) => `Authorization for ${result.name} completed.`),
+        ],
+      };
+    }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);
     if (ignoredActiveDelivery) {
