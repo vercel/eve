@@ -12,6 +12,7 @@ import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { bindExtensionMountConfigs } from "#runtime/extension-mount-configs.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
@@ -80,6 +81,7 @@ export async function resolveRuntimeAgentGraph(
   input: ResolveRuntimeAgentGraphInput,
 ): Promise<ResolvedAgentGraphBundle> {
   validateCompiledModuleMap(input.manifest, input.moduleMap);
+  bindExtensionMountConfigs(input.manifest, input.moduleMap);
   const nodesByNodeId = new Map<string, ResolvedAgentGraphBundle["root"]>();
   const childNodeIdsByParentNodeId = createChildNodeIdsByParentNodeId(input.manifest);
   const subagentNodesById = new Map(
