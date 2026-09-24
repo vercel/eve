@@ -182,7 +182,7 @@ export default defineAgent({
         });
         return messages.some((message) => message.includes(MODEL_CHOICE_SCENARIO))
           ? { model: "openai/gpt-5.4-mini", modelContextWindowTokens: 1_000_000 }
-          : undefined;
+          : { model: defaultModel, modelContextWindowTokens };
       },
       "step.started": (_event, ctx) => {
         const messages = ctx.messages.flatMap((message) => {
