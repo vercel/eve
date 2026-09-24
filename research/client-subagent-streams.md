@@ -15,7 +15,7 @@ that the child belongs to the session, resolves the remote agent's authored
 `auth` and `headers`, and relays the child's stream. No public client API reads
 that path. Frontends that want live remote activity must reimplement NDJSON
 parsing, stream-version normalization, lease control, and cursor reconnection,
-all of which are internal to `eve/client`. The dev TUI does exactly this with
+all of which are internal to `eve/client`. The dev TUI did exactly this with
 private helpers.
 
 ## API
@@ -58,7 +58,10 @@ authorization.
 ## Implementation
 
 `followStreamIterable` takes a stream route path instead of a session ID, so
-session streams and child streams share one reconnecting reader.
+session streams and child streams share one reconnecting reader. The dev TUI
+follows children through `streamSubagent()` too, with unbounded idle and open
+retries because a child parked for approval can stay silent until the TUI
+aborts it.
 
 ## Alternatives
 
