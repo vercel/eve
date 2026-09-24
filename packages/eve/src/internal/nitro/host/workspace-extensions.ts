@@ -198,21 +198,25 @@ async function resolveWorkspaceExtension(input: {
     mount: input.mount.mountRef,
     namespace: input.mount.namespace,
   });
-  if (located.location?.authoredSourceRoot === undefined) {
+  const location = located.location;
+  if (location?.authoredSourceRoot === undefined) {
     return undefined;
   }
 
-  const packageRoot = await realpath(located.location.packageRoot).catch(() => undefined);
+  const packageRoot = await realpath(location.packageRoot).catch(() => undefined);
   if (packageRoot === undefined || !isAuthoredSourcePath(packageRoot, input.workspaceSourceRoot)) {
     return undefined;
   }
 
-  const config = await tryReadExtensionBuildConfig(packageRoot);
-  if (config === null) {
+  // A package without its declared source directory ships a prebuilt
+  // distribution; there is nothing to build, so its producer config is not
+  // validated.
+  const sourceStat = await stat(location.authoredSourceRoot).catch(() => undefined);
+  if (sourceStat?.isDirectory() !== true) {
     return undefined;
   }
-  const sourceStat = await stat(config.sourceRoot).catch(() => undefined);
-  if (sourceStat?.isDirectory() !== true) {
+  const config = await tryReadExtensionBuildConfig(packageRoot);
+  if (config === null) {
     return undefined;
   }
   const buildConfigPaths = [

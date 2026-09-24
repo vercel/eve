@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
 
 export default defineEval({
   description:
@@ -19,7 +18,16 @@ export default defineEval({
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    t.check(completed.message, includes(/blocked[^\n]*true/iu));
+
+    // Real models paraphrase the child's report, so assert on the tool result
+    // inside the child session rather than on the parent's final message.
+    const called = [...turn.events, ...completed.events].find(
+      (event) => event.type === "subagent.called" && event.data.name === "deny-all",
+    );
+    if (called?.type !== "subagent.called") throw new Error("deny-all was not delegated.");
+    const child = await t.target.watchTurn(called.data.childSessionId).result();
+    child.expectOk();
+    child.calledTool("verify-typed-sandbox", { output: { blocked: true }, status: "completed" });
   },
 });
 
