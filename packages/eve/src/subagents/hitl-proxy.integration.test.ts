@@ -321,7 +321,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
 
   it("in task mode, skips the `turn.completed` + `session.waiting` boundary so scheduled chains do not fake a wait", async () => {
     // Scheduled-task roots must not emit `session.waiting` — a proxied
-    // HITL there signals an impending `SUBAGENT_EXECUTION_FAILED`, not
+    // HITL there signals an impending `EXECUTION_FAILED`, not
     // a client-facing park. This test pins the mode-gating in place
     // so a refactor cannot re-introduce the boundary pair for task
     // mode.

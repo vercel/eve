@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { failEmptyResult, toTaskOutcome } from "#tasks/outcome.js";
+import { createTaskRecord } from "#internal/testing/task-records.js";
+import { failEmptyResult, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
 
 const USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 3, outputTokens: 0 };
 
@@ -34,5 +35,24 @@ describe("failEmptyResult", () => {
   it("keeps an answer with text and a structured result, which an output schema asks for", () => {
     expect(failEmptyResult(answer("Found it."))).toEqual(answer("Found it."));
     expect(failEmptyResult(answer({}))).toEqual(answer({}));
+  });
+});
+
+describe("toToolResult", () => {
+  it("gives a cancelled agent call an error result without a code, like a cancelled workflow tool", () => {
+    const cancelled: RuntimeSubagentChildResult = {
+      ...answer("The agent invocation was cancelled."),
+      isError: true,
+      outcome: { kind: "parked", result: { kind: "cancelled" }, usageDelta: USAGE },
+    };
+
+    expect(toTaskOutcome(cancelled)).toEqual({ status: "cancelled" });
+    expect(toToolResult(createTaskRecord(), cancelled, { status: "cancelled" })).toEqual({
+      callId: "call-1",
+      isError: true,
+      kind: "tool-result",
+      output: "The agent invocation was cancelled.",
+      toolName: "research",
+    });
   });
 });

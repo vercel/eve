@@ -567,7 +567,7 @@ describe("deriveRunFacts", () => {
         type: "task.settled",
         data: {
           callId: "c1",
-          error: { code: "SUBAGENT_START_FAILED", message: "The child could not start." },
+          error: { code: "START_FAILED", message: "The child could not start." },
           status: "failed",
           taskId: "research-c1",
         },
@@ -579,7 +579,7 @@ describe("deriveRunFacts", () => {
       actionResult({
         callId: "c1",
         isError: true,
-        output: { code: "SUBAGENT_START_FAILED", message: "The child could not start." },
+        output: { code: "START_FAILED", message: "The child could not start." },
         toolName: "research",
       }),
     ]);
@@ -588,7 +588,7 @@ describe("deriveRunFacts", () => {
       expect.objectContaining({
         callId: "c1",
         name: "research",
-        output: { code: "SUBAGENT_START_FAILED", message: "The child could not start." },
+        output: { code: "START_FAILED", message: "The child could not start." },
         status: "failed",
         taskId: "research-c1",
         turnIndex: 0,

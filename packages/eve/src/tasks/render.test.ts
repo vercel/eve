@@ -10,8 +10,10 @@ import {
   renderSleepEndedEarly,
   renderTaskResults,
   renderTasksNote,
+  renderTimedOut,
   renderTooManyBackgroundTasks,
   resolveTasksAnnouncement,
+  truncateTaskResult,
 } from "#tasks/render.js";
 
 function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
@@ -86,6 +88,52 @@ describe("renderTaskResults", () => {
     expect(text.split("\n").length).toBeLessThan(2100);
     expect(text).toContain("line 0");
     expect(text).not.toContain("line 2999");
+    expect(text).toContain("line 1999\n[truncated]\n</task_result>");
+  });
+});
+
+describe("truncateTaskResult", () => {
+  it("keeps a result within 50 KB and 2,000 lines as it is", () => {
+    expect(truncateTaskResult("Found three sources.")).toBe("Found three sources.");
+  });
+
+  it("marks a result cut at 2,000 lines or 50 KB", () => {
+    const lines = truncateTaskResult(Array.from({ length: 2500 }, () => "x").join("\n"));
+    expect(lines.split("\n")).toHaveLength(2001);
+    expect(lines.endsWith("\n[truncated]")).toBe(true);
+
+    const bytes = truncateTaskResult(
+      Array.from({ length: 100 }, () => "y".repeat(1000)).join("\n"),
+    );
+    expect(Buffer.byteLength(bytes)).toBeLessThanOrEqual(50 * 1024 + "\n[truncated]".length);
+    expect(bytes.endsWith("\n[truncated]")).toBe(true);
+  });
+
+  it("cuts a line longer than 2,000 characters", () => {
+    expect(truncateTaskResult("z".repeat(2500))).toBe(`${"z".repeat(2000)} [truncated]`);
+  });
+});
+
+describe("renderTimedOut", () => {
+  it("names the time limit the call ran out of", () => {
+    expect(renderTimedOut("agent", 2 * 60 * 60_000)).toBe(
+      "The agent did not finish within 2 h and was stopped.",
+    );
+    expect(renderTimedOut("workflow", 90 * 60_000)).toBe(
+      "The task did not finish within 1 h 30 min and was stopped.",
+    );
+    expect(renderTimedOut("workflow", 2_000)).toBe(
+      "The task did not finish within 2 s and was stopped.",
+    );
+    expect(renderTimedOut("agent", 250)).toBe(
+      "The agent did not finish within 250 ms and was stopped.",
+    );
+  });
+
+  it("falls back to the time limit for a record stored without one", () => {
+    expect(renderTimedOut("agent", undefined)).toBe(
+      "The agent did not finish within its time limit and was stopped.",
+    );
   });
 });
 

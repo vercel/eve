@@ -3,12 +3,9 @@ import {
   replaceDurableSessionSnapshot,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { isInactiveTimeoutTarget } from "#execution/session/timeout-steps.js";
-import { resolveHookOwnerRunId, resolveSessionOwnerRunId } from "#execution/workflow-runtime.js";
 import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { createLogger, logError } from "#internal/logging.js";
-import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
+import { createLogger } from "#internal/logging.js";
 import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { settledEvents } from "#tasks/events.js";
@@ -28,10 +25,10 @@ import {
   isReportedLoss,
   markTaskDelivered,
   readTaskTable,
-  type TaskEffect,
 } from "#tasks/table.js";
+import { hardStopTaskChild } from "#tasks/timer-steps.js";
 import { runCommands } from "#tasks/transport.js";
-import { reconcileDueRemoteTasks } from "#tasks/reconcile.js";
+import { reconcileDueTasks } from "#tasks/reconcile.js";
 import {
   flushAgentInvocationTraces,
   invocationError,
@@ -39,10 +36,9 @@ import {
 } from "#tracing/agent-invocation-terminal.js";
 
 // Owner-side handling of the timer's `task.deadline` signal: reconcile due
-// remote tasks with one read, time out the rest, and hard-stop children that
-// did not confirm a stop in time. Nothing here waits on a child.
-
-const HARD_STOP_REASON = "The task did not stop within its cancellation window.";
+// remote and workflow tasks with one read each, time out the rest, and
+// hard-stop children that did not confirm a stop in time. Nothing here waits
+// on a child.
 
 const log = createLogger("tasks.deadlines");
 
@@ -77,7 +73,7 @@ export async function applyTaskDeadlines(input: {
       : Date.parse(input.now);
   const now = new Date(nowMs).toISOString();
 
-  const reconciled = await reconcileDueRemoteTasks({ ...input, now });
+  const reconciled = await reconcileDueTasks({ ...input, now });
   let session = readDurableSession(reconciled.sessionState);
   const evaluated = evaluateTaskDeadlines(getTaskTable(session), now);
   let table = evaluated.table;
@@ -90,7 +86,7 @@ export async function applyTaskDeadlines(input: {
     if (effect.kind === "unconfirmed") {
       const { child, record } = effect;
       if (child !== undefined) {
-        const runId = await hardStop(child, record);
+        const runId = await hardStopTaskChild(child, record.id);
         // The stopped run can no longer take an answer.
         session = clearProxyInputRequestsWhere(session, (route) =>
           child.kind === "local"
@@ -203,35 +199,6 @@ function reportLostTasks(
     });
   }
   return { events, held };
-}
-
-/**
- * Terminates the child's current run. A local child may have handed off to
- * a successor run, so the run that owns its stable inbox is stopped; a
- * duplicate workflow run never ran the body, so the run that owns the
- * command hook is stopped. Returns the run it stopped.
- */
-async function hardStop(
-  child: NonNullable<Extract<TaskEffect, { kind: "unconfirmed" }>["child"]>,
-  record: TaskRecord,
-): Promise<string> {
-  let runId = child.kind === "local" ? child.sessionId : child.runId;
-  try {
-    runId =
-      child.kind === "local"
-        ? await resolveSessionOwnerRunId(child.sessionId)
-        : ((await resolveHookOwnerRunId(child.commandToken)) ?? child.runId);
-    await cancelRun(await getWorld(), runId, { cancelReason: HARD_STOP_REASON });
-  } catch (error) {
-    if (!isInactiveTimeoutTarget(error)) {
-      logError(log, "failed to hard-stop a task child", error, {
-        childKind: child.kind,
-        runId,
-        taskId: record.id,
-      });
-    }
-  }
-  return runId;
 }
 
 /** Ends the agent invocation span of the record's generation; later settlements are no-ops. */

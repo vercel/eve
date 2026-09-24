@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
@@ -10,17 +10,21 @@ const COMPILED_BUNDLE = {
 };
 
 const {
+  armChildHardStopMock,
   cancelRunMock,
+  cancelWorkflowToolRunMock,
   deserializeContextMock,
   getWorldMock,
+  requestWorkflowSessionEndMock,
   resetRemoteAgentSessionMock,
   resolveRemoteAgentStreamHeadersMock,
-  resolveSessionOwnerRunIdMock,
 } = vi.hoisted(() => ({
-  resolveSessionOwnerRunIdMock: vi.fn(),
+  armChildHardStopMock: vi.fn(),
   cancelRunMock: vi.fn(),
+  cancelWorkflowToolRunMock: vi.fn(),
   deserializeContextMock: vi.fn(),
   getWorldMock: vi.fn(),
+  requestWorkflowSessionEndMock: vi.fn(),
   resetRemoteAgentSessionMock: vi.fn(),
   resolveRemoteAgentStreamHeadersMock: vi.fn(),
 }));
@@ -37,8 +41,17 @@ vi.mock("#internal/workflow/runtime.js", () => ({
   getWorld: getWorldMock,
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({
-  resolveSessionOwnerRunId: resolveSessionOwnerRunIdMock,
+  requestWorkflowSessionEnd: requestWorkflowSessionEndMock,
 }));
+vi.mock("#execution/tools/workflow/cancel.js", () => ({
+  cancelWorkflowToolRun: cancelWorkflowToolRunMock,
+}));
+vi.mock("#tasks/timer-steps.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  armChildHardStop: armChildHardStopMock,
+}));
+
+const NOW = "2026-09-24T14:00:00.000Z";
 
 const remoteChild = {
   callbackBaseUrl: "https://parent.example.com",
@@ -50,45 +63,71 @@ const remoteChild = {
 describe("terminateChildSessionsStep", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers({ now: new Date(NOW), toFake: ["Date"] });
+    armChildHardStopMock.mockResolvedValue(undefined);
     cancelRunMock.mockResolvedValue(undefined);
+    cancelWorkflowToolRunMock.mockResolvedValue(undefined);
     deserializeContextMock.mockResolvedValue({ require: vi.fn().mockReturnValue(COMPILED_BUNDLE) });
     getWorldMock.mockResolvedValue("world");
+    requestWorkflowSessionEndMock.mockResolvedValue(undefined);
     resetRemoteAgentSessionMock.mockResolvedValue({ ok: true, status: "no_active_session" });
     resolveRemoteAgentStreamHeadersMock.mockResolvedValue({ authorization: "Bearer fresh" });
-    resolveSessionOwnerRunIdMock.mockImplementation(async (sessionId: string) => sessionId);
   });
 
-  it("stops the run that owns a local child's inbox after the child handed off", async () => {
-    resolveSessionOwnerRunIdMock.mockResolvedValue("session-idle-successor");
-
-    await terminateChildSessionsStep({
-      sessionState: makeSessionState([
-        localRecord({ id: "research-bbbbbb", sessionId: "session-idle", status: "completed" }),
-      ]),
-    });
-
-    expect(resolveSessionOwnerRunIdMock).toHaveBeenCalledExactlyOnceWith("session-idle");
-    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-idle-successor", {
-      cancelReason: "Parent session ended",
-    });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it("stops working and idle local children", async () => {
-    await terminateChildSessionsStep({
-      sessionState: makeSessionState([
-        localRecord({ id: "research-aaaaaa", sessionId: "session-working" }),
-        localRecord({ id: "research-bbbbbb", sessionId: "session-idle", status: "completed" }),
-      ]),
+  it("asks working and idle local children to end, and hard-stops them only after 30 seconds", async () => {
+    const working = localRecord({ id: "research-aaaaaa", sessionId: "session-working" });
+    const idle = localRecord({
+      id: "research-bbbbbb",
+      sessionId: "session-idle",
+      status: "completed",
     });
 
-    expect(cancelRunMock).toHaveBeenCalledTimes(2);
-    expect(cancelRunMock).toHaveBeenNthCalledWith(1, "world", "session-working", {
-      cancelReason: "Parent session ended",
-    });
-    expect(cancelRunMock).toHaveBeenNthCalledWith(2, "world", "session-idle", {
-      cancelReason: "Parent session ended",
+    await terminateChildSessionsStep({ sessionState: makeSessionState([working, idle]) });
+
+    // Each child ends its own session, so it stops its own tasks and children.
+    expect(requestWorkflowSessionEndMock.mock.calls).toEqual([
+      [{ reason: "Parent session ended", sessionId: "session-working" }],
+      [{ reason: "Parent session ended", sessionId: "session-idle" }],
+    ]);
+    expect(cancelRunMock).not.toHaveBeenCalled();
+    expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith({
+      ownerSessionId: "parent-session",
+      targets: [working.child, idle.child],
+      wakeAt: "2026-09-24T14:00:30.000Z",
     });
     expect(deserializeContextMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels a working workflow run and hard-stops each run that still owes a stop", async () => {
+    const working = workflowRecord({ id: "deploy-aaaaaa", runId: "run-working" });
+    const cancelled = {
+      ...workflowRecord({ id: "deploy-bbbbbb", runId: "run-cancelled", status: "cancelled" }),
+      cancelConfirmBy: "2026-09-24T14:00:20.000Z",
+      delivered: true,
+    };
+    const finished = {
+      ...workflowRecord({ id: "deploy-cccccc", runId: "run-finished", status: "completed" }),
+      delivered: true,
+    };
+
+    await terminateChildSessionsStep({
+      sessionState: makeSessionState([working, cancelled, finished]),
+    });
+
+    expect(cancelWorkflowToolRunMock).toHaveBeenCalledExactlyOnceWith(
+      { hookToken: "run-working:command", runId: "run-working" },
+      "Parent session ended",
+    );
+    // A run gets its full cleanup window plus a margin, as for a cancel.
+    expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith({
+      ownerSessionId: "parent-session",
+      targets: [working.child, cancelled.child],
+      wakeAt: "2026-09-24T14:00:35.000Z",
+    });
   });
 
   it("resets a remote child with its creation-time credential resolver", async () => {
@@ -114,9 +153,14 @@ describe("terminateChildSessionsStep", () => {
       remote: { name: "research", url: "https://remote.example.com" },
       sessionId: "session-remote",
     });
-    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
-      cancelReason: "Parent session ended",
+    expect(requestWorkflowSessionEndMock).toHaveBeenCalledExactlyOnceWith({
+      reason: "Parent session ended",
+      sessionId: "session-local",
     });
+    // The remote child stops where it runs; only the local one is hard-stopped.
+    expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ targets: [expect.objectContaining({ kind: "local" })] }),
+    );
   });
 
   it("does not invent credentials for a remote child created without a resolver", async () => {
@@ -131,6 +175,7 @@ describe("terminateChildSessionsStep", () => {
       remote: { name: "research", url: "https://remote.example.com" },
       sessionId: "session-remote",
     });
+    expect(armChildHardStopMock).not.toHaveBeenCalled();
   });
 
   it("requires serialized context to retire a remote child", async () => {
@@ -174,15 +219,16 @@ describe("terminateChildSessionsStep", () => {
       ]),
     });
 
-    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-started", {
-      cancelReason: "Parent session ended",
+    expect(requestWorkflowSessionEndMock).toHaveBeenCalledExactlyOnceWith({
+      reason: "Parent session ended",
+      sessionId: "session-started",
     });
   });
 
-  it("continues terminating children after one termination fails", async () => {
+  it("keeps ending children after one request fails, and still arms the hard stop", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    cancelRunMock
-      .mockRejectedValueOnce(new Error("termination unavailable"))
+    requestWorkflowSessionEndMock
+      .mockRejectedValueOnce(new Error("inbox unavailable"))
       .mockResolvedValueOnce(undefined);
 
     try {
@@ -195,16 +241,38 @@ describe("terminateChildSessionsStep", () => {
         }),
       ).resolves.toBeUndefined();
 
-      expect(cancelRunMock).toHaveBeenCalledTimes(2);
+      expect(requestWorkflowSessionEndMock).toHaveBeenCalledTimes(2);
       expect(errorSpy).toHaveBeenCalledWith(
-        "[eve:execution.terminate-child-sessions] failed to terminate child session",
+        "[eve:execution.terminate-child-sessions] failed to end a child",
         expect.objectContaining({ childKind: "local", taskId: "research-aaaaaa" }),
+      );
+      expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          targets: [
+            expect.objectContaining({ sessionId: "session-1" }),
+            expect.objectContaining({ sessionId: "session-2" }),
+          ],
+        }),
       );
     } finally {
       errorSpy.mockRestore();
     }
   });
 });
+
+function workflowRecord(input: {
+  readonly id: string;
+  readonly runId: string;
+  readonly status?: TaskRecord["status"];
+}): TaskRecord {
+  return createTaskRecord({
+    child: { commandToken: `${input.runId}:command`, kind: "workflow", runId: input.runId },
+    id: input.id,
+    kind: "workflow",
+    name: "deploy",
+    status: input.status ?? "working",
+  });
+}
 
 function localRecord(input: {
   readonly id: string;

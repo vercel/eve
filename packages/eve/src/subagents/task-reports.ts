@@ -1,6 +1,7 @@
-import { MAX_OUTPUT_BYTES, truncateHead } from "#execution/sandbox/truncate-output.js";
+import { MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 import { getRun } from "#internal/workflow/runtime.js";
 import type { JsonValue } from "#shared/json.js";
+import { truncateTaskResult } from "#tasks/render.js";
 
 // A delegated session keeps the latest result it reported to a remote caller
 // for each call, in a stream of its own run apart from its public event
@@ -102,7 +103,7 @@ function capReport(report: Record<string, unknown>): Record<string, unknown> {
   if (output === undefined) return report;
   const text = typeof output === "string" ? output : JSON.stringify(output, null, 2);
   if (encoder.encode(text).byteLength <= MAX_OUTPUT_BYTES) return report;
-  return { ...report, output: truncateHead(text).output };
+  return { ...report, output: truncateTaskResult(text) };
 }
 
 async function reportNamespace(callId: string): Promise<string> {

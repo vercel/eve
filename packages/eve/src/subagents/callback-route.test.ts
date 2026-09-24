@@ -4,7 +4,10 @@ import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { isSessionHandoffPending } from "#execution/session-inbox/resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
+import {
+  handleSessionCallbackRequest,
+  projectSessionCallbackResult,
+} from "#subagents/callback-route.js";
 import { ownerInboxHookToken, TASK_CALLBACK_ALIAS_PREFIX } from "#tasks/state.js";
 
 const resumeHookMock = vi.fn();
@@ -312,10 +315,25 @@ describe("session callback route", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
+  it("fails a session.failed callback that carries no error with EXECUTION_FAILED", () => {
+    expect(
+      projectSessionCallbackResult({
+        callId: "call-1",
+        kind: "session.failed",
+        sessionId: "remote-session",
+        subagentName: "research",
+        taskProtocol: 1,
+      }),
+    ).toMatchObject({
+      isError: true,
+      output: { code: "EXECUTION_FAILED", message: "Remote agent failed." },
+    });
+  });
+
   it("synthesizes a terminal failed outcome for session.failed", async () => {
     resumeHookMock.mockResolvedValue(undefined);
 
-    const error = { code: "REMOTE_AGENT_FAILED", message: "remote crashed" };
+    const error = { code: "EXECUTION_FAILED", message: "remote crashed" };
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
@@ -559,7 +577,7 @@ describe("session callback route", () => {
     resumeHookMock.mockResolvedValue(undefined);
 
     const error = {
-      code: "SUBAGENT_EXECUTION_FAILED",
+      code: "EXECUTION_FAILED",
       message: "remote failed",
     };
     const outcome = {

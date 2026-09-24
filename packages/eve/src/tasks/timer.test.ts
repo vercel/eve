@@ -6,6 +6,7 @@ import { taskTimerWorkflowReference } from "#execution/workflow-runtime.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { readTaskTimer, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
 import {
+  armChildHardStop,
   armTaskTimerStep,
   cancelTaskTimerStep,
   signalTaskDeadlineStep,
@@ -70,6 +71,30 @@ describe("taskTimerWorkflow", () => {
       wakeAt: WAKE_AT,
     });
   });
+
+  it("hard-stops an ended owner's children at its wake time instead of signalling the owner", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    vi.mocked(sleep).mockResolvedValue(undefined);
+    // No run owns either child's hook any more, so each child's own run is stopped.
+    getHookMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
+    getWorldMock.mockResolvedValue("world");
+
+    await taskTimerWorkflow({
+      hardStop: [
+        { continuationToken: "child-token", kind: "local", sessionId: "child-session" },
+        { commandToken: "command-1", kind: "workflow", runId: "run-1" },
+      ],
+      ownerRunId: "owner-run",
+      token: TOKEN,
+      wakeAt: WAKE_AT,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(new Date(WAKE_AT));
+    expect(cancelRunMock.mock.calls.map((call) => call[1])).toEqual(["child-session", "run-1"]);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("task timer steps", () => {
@@ -108,6 +133,22 @@ describe("task timer steps", () => {
       runId: "timer-2",
       wakeAt: WAKE_AT,
     });
+  });
+
+  it("arms a hard stop for an ending owner's children on this deployment", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    startMock.mockResolvedValue({ runId: "timer-3" });
+    const targets = [
+      { continuationToken: "child-token", kind: "local" as const, sessionId: "child-session" },
+    ];
+
+    await armChildHardStop({ ownerSessionId: "parent", targets, wakeAt: WAKE_AT });
+
+    expect(startMock).toHaveBeenCalledWith(
+      taskTimerWorkflowReference,
+      [{ hardStop: targets, ownerRunId: "owner-run", token: TOKEN, wakeAt: WAKE_AT }],
+      { deploymentId: "dpl_current" },
+    );
   });
 
   it("cancels the armed timer and clears it once nothing is due", async () => {

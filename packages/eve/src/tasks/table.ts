@@ -270,6 +270,8 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     deadlineMs === undefined || deadlineMs > MAX_DATE_MS
       ? undefined
       : new Date(deadlineMs).toISOString();
+  const timeoutMs =
+    deadlineAt === undefined || typeof input.timeoutMs !== "number" ? undefined : input.timeoutMs;
 
   if (input.agentId !== undefined) {
     const agent = findTask(table, input.agentId);
@@ -316,6 +318,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
       startedAt: input.now,
       status: "working",
       steers: undefined,
+      timeoutMs,
       turnId: input.turnId,
       workflowCaller: input.workflowCaller,
     });
@@ -342,6 +345,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     nodeId: input.nodeId,
     startedAt: input.now,
     status: "working",
+    timeoutMs,
     turnId: input.turnId,
     v: TASK_RECORD_VERSION,
     workflowCaller: input.workflowCaller,
@@ -498,7 +502,7 @@ export function timeOutTask(table: TaskTable, taskId: string, now: string): Task
   const record = findTask(table, taskId);
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
   const outcome: TaskOutcome = {
-    error: { code: "TIMED_OUT", message: renderTimedOut(record.kind) },
+    error: { code: "TIMED_OUT", message: renderTimedOut(record.kind, record.timeoutMs) },
     status: "failed",
   };
   const timedOut = withoutUndefined({
@@ -596,9 +600,17 @@ export function detachTasks(
   return next;
 }
 
+/** Removes records whose children the owner has already ended. */
+export function removeTasks(table: TaskTable, taskIds: ReadonlySet<string>): TaskTable {
+  const records = table.records.filter((record) => !taskIds.has(record.id));
+  return records.length === table.records.length ? table : toTable(records);
+}
+
 /**
  * Drops finished workflow tasks whose results reached history, and agents
- * whose session can no longer be continued. Idle agents stay listed.
+ * whose session can no longer be continued. Idle agents stay listed. No
+ * window is kept for late duplicates: every report names the call it
+ * answers, so one that matches no record is dropped and settles nothing.
  */
 export function pruneTaskTable(table: TaskTable): TaskTable {
   const records = table.records.filter((record) => {

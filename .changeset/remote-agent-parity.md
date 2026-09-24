@@ -16,8 +16,6 @@ Follow-up messages on `POST /eve/v1/session/:sessionId` and `Session.send()` acc
 
 Calling an agent another caller started, whether working or idle, now fails with `AGENT_OTHER_PRINCIPAL`. Other callers include another user, a schedule, and an app principal.
 
-A local or remote agent that cannot produce its `outputSchema` result now fails with `OUTPUT_SCHEMA_NOT_FULFILLED` instead of `SUBAGENT_EXECUTION_FAILED`. An agent that finishes without a reply fails with `EMPTY_RESULT`.
-
 Proxied `approval.candidate` and `approval.settled` events now carry the child's `taskId`. An approval settled when a turn resumes now carries that turn's ID instead of an empty `turnId`.
 
 Upgrading: run the calling agent and every remote agent it calls on releases with the same task protocol version. A deployment reports its version in the `x-eve-task-protocol` header of `GET /eve/v1/health` and in the new `taskProtocol` field of accepted create and message responses. Create, message, and answer requests, and every callback, carry the version. A caller reads the remote's version before it creates a session there, so a call to an older remote fails at once with `START_FAILED` and runs nothing on it. A current remote refuses an older caller, and a current caller refuses a callback from another version, with `409 TASK_PROTOCOL_MISMATCH`.

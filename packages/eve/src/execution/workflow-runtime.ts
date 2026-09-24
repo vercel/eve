@@ -465,6 +465,25 @@ export async function requestWorkflowTurnCancellation(
   return await dispatchWorkflowCommand({ sessionId: input.sessionId }, command);
 }
 
+/**
+ * Asks a session to end, as `reset` does, without waiting for it to release
+ * its inbox: it cancels its turn and its own tasks, ends its children, and
+ * settles its caller. A session that already ended is left alone.
+ */
+export async function requestWorkflowSessionEnd(input: {
+  readonly reason: string;
+  readonly sessionId: string;
+}): Promise<void> {
+  try {
+    await resumeSessionInbox(
+      { sessionId: input.sessionId },
+      { kind: "reset", reason: input.reason },
+    );
+  } catch (error) {
+    if (!isInactiveCommandTarget(error)) throw error;
+  }
+}
+
 function isInactiveCommandTarget(error: unknown): boolean {
   if (error instanceof AcceptedSessionIdentityError) return false;
   if (HookNotFoundError.is(error)) return true;

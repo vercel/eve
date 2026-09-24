@@ -169,7 +169,7 @@ describe("fireSessionCallbackStep", () => {
       body: JSON.stringify({
         callId: "call-1",
         error: {
-          code: "SESSION_FAILED",
+          code: "EXECUTION_FAILED",
           message: "remote exploded",
         },
         kind: "session.failed",

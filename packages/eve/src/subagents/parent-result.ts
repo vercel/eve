@@ -5,7 +5,7 @@
  * step-proxy transform.
  */
 
-import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
+import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -65,7 +65,7 @@ export function createDelegatedSubagentErrorResult(
   }
 
   const output = {
-    code: SUBAGENT_EXECUTION_FAILED,
+    code: EXECUTION_FAILED,
     message: toErrorMessage(error),
   };
   return {

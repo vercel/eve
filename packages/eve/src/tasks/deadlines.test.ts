@@ -18,6 +18,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { applyTaskDeadlines } from "#tasks/deadlines.js";
+import { applyTaskReport } from "#tasks/owner.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { STATE_LOST_MESSAGE } from "#tasks/render.js";
@@ -252,7 +253,7 @@ describe("applyTaskDeadlines", () => {
     ]);
   });
 
-  it("times out a due workflow task like an agent, without reading the run's status", async () => {
+  describe("reconciling a workflow task at its deadline", () => {
     const working = createTaskRecord({
       child: WORKFLOW_CHILD,
       deadlineAt: DEADLINE,
@@ -260,21 +261,161 @@ describe("applyTaskDeadlines", () => {
       kind: "workflow",
       name: "deploy",
     });
+    const run = (status: string, returnValue?: unknown) =>
+      ({ returnValue: Promise.resolve(returnValue), status: Promise.resolve(status) }) as never;
 
-    const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+    it("times out a task whose run is still working, like an agent", async () => {
+      vi.mocked(getRun).mockReturnValue(run("running"));
 
-    expect(update.results[0]?.output).toEqual({
-      code: "TIMED_OUT",
-      message: "The task did not finish within its time limit and was stopped.",
+      const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+
+      // One read of the run decides; a working run is not read again.
+      expect(getRun).toHaveBeenCalledExactlyOnceWith("run-1");
+      expect(update.results[0]?.output).toEqual({
+        code: "TIMED_OUT",
+        message: "The task did not finish within its time limit and was stopped.",
+      });
+      expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
+        { hookToken: "command-1", runId: "run-1" },
+        expect.any(String),
+      );
+      // The run gets its full 30-second cleanup window plus a margin before a hard stop.
+      expect(records(update.sessionState)[0]?.cancelConfirmBy).toBe("2026-09-24T14:00:40.000Z");
+      expect(recordNestedAgentInvocationTerminal).not.toHaveBeenCalled();
     });
-    expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
-      { hookToken: "command-1", runId: "run-1" },
-      expect.any(String),
-    );
-    expect(getRun).not.toHaveBeenCalled();
-    // The run gets its full 30-second cleanup window plus a margin before a hard stop.
-    expect(records(update.sessionState)[0]?.cancelConfirmBy).toBe("2026-09-24T14:00:40.000Z");
-    expect(recordNestedAgentInvocationTerminal).not.toHaveBeenCalled();
+
+    it("settles the task with the outcome its finished run returned, instead of timing out", async () => {
+      vi.mocked(getRun).mockReturnValue(
+        run("completed", {
+          from: {
+            callId: "call-1",
+            input: {},
+            runId: "run-1",
+            sequence: 0,
+            stepIndex: 0,
+            taskId: "deploy-abc234",
+            toolName: "deploy",
+            turnId: "turn-1",
+          },
+          result: { output: { deployed: true }, status: "completed" },
+        }),
+      );
+
+      const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+
+      expect(update.results).toEqual([
+        { callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" },
+      ]);
+      expect(update.events).toEqual([
+        {
+          data: {
+            callId: "call-1",
+            output: { deployed: true },
+            status: "completed",
+            taskId: "deploy-abc234",
+          },
+          type: "task.settled",
+        },
+      ]);
+      expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
+      // Delivered to the waiting call, the finished workflow task is pruned.
+      expect(records(update.sessionState)).toEqual([]);
+    });
+
+    it("fails the task when its run failed before it reported", async () => {
+      vi.mocked(getRun).mockReturnValue(run("failed"));
+
+      const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+
+      expect(update.results[0]).toMatchObject({
+        isError: true,
+        output: {
+          code: "EXECUTION_FAILED",
+          message: "The workflow tool run failed before it reported its result.",
+        },
+      });
+      expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
+    });
+
+    it("times out a task whose run returned nothing, such as a duplicate start", async () => {
+      vi.mocked(getRun).mockReturnValue(run("completed", undefined));
+
+      const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+
+      expect(update.results[0]?.output).toMatchObject({ code: "TIMED_OUT" });
+    });
+
+    it("reads nothing for a workflow task that is not due", async () => {
+      await applyTaskDeadlines(input([working], { now: STARTED }));
+
+      expect(getRun).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("a local child's result racing its deadline", () => {
+    const working = createTaskRecord({
+      child: LOCAL_CHILD,
+      deadlineAt: DEADLINE,
+      startedAt: STARTED,
+    });
+    const result: ChildTaskReport = {
+      callId: "call-1",
+      kind: "subagent-result",
+      origin: "child",
+      outcome: {
+        kind: "parked",
+        result: { kind: "succeeded", output: "Found three sources." },
+        usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 2, outputTokens: 2 },
+      },
+      output: "Found three sources.",
+      subagentName: "research",
+    };
+    const applyResult = async (sessionState: DurableSessionState) =>
+      await applyTaskReport({
+        now: AFTER_DEADLINE,
+        payload: { kind: "runtime-action-result", results: [result] },
+        serializedContext: {},
+        sessionState,
+      });
+    const settledEvents = (...updates: { readonly events: readonly { type: string }[] }[]) =>
+      updates.flatMap((update) => update.events.filter((event) => event.type === "task.settled"));
+
+    it("keeps a result that arrived before the deadline signal, even past the deadline", async () => {
+      const reported = await applyResult(input([working], { now: AFTER_DEADLINE }).sessionState);
+      const deadline = await applyTaskDeadlines({
+        ...input([], { now: AFTER_DEADLINE }),
+        sessionState: reported.sessionState,
+      });
+
+      expect(reported.results).toEqual([
+        expect.objectContaining({ callId: "call-1", output: "Found three sources." }),
+      ]);
+      expect(settledEvents(reported, deadline)).toEqual([
+        expect.objectContaining({ data: expect.objectContaining({ status: "completed" }) }),
+      ]);
+      expect(deadline).toMatchObject({ events: [], replies: [], results: [] });
+      expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+    });
+
+    it("drops a result that arrived after the deadline timed the task out", async () => {
+      const deadline = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+      const reported = await applyResult(deadline.sessionState);
+
+      expect(settledEvents(deadline, reported)).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            error: expect.objectContaining({ code: "TIMED_OUT" }),
+            status: "failed",
+          }),
+        }),
+      ]);
+      // The late result only confirms the child stopped.
+      expect(reported).toMatchObject({ events: [], replies: [], results: [] });
+      expect(records(reported.sessionState)).toEqual([
+        expect.objectContaining({ status: "failed" }),
+      ]);
+      expect(records(reported.sessionState)[0]).not.toHaveProperty("cancelConfirmBy");
+    });
   });
 
   it("clears the fired timer so the owner re-arms for the next deadline", async () => {

@@ -98,7 +98,11 @@ it("emits every persisted report before the terminal outcome", async () => {
     ),
   });
 
-  await workflowToolRunWorkflow(input);
+  // The run returns the outcome it reported, for the owner's deadline to read.
+  await expect(workflowToolRunWorkflow(input)).resolves.toEqual({
+    from: expect.objectContaining({ callId: "call-1" }),
+    result: { output: "done", status: "completed" },
+  });
   expect(mocks.deliver).toHaveBeenNthCalledWith(1, "parent", report, { ifPresent: false });
   expect(mocks.deliver).toHaveBeenNthCalledWith(
     2,

@@ -1,6 +1,7 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 
-import { signalTaskDeadlineStep } from "#tasks/timer-steps.js";
+import type { HardStopTarget } from "#tasks/timer-steps.js";
+import { hardStopTaskChildrenStep, signalTaskDeadlineStep } from "#tasks/timer-steps.js";
 
 // One sleeper run per owner. It signals the owner's stable inbox, and every
 // signal is re-evaluated against the task table, so a stale or duplicate
@@ -13,12 +14,22 @@ export interface TaskTimerWorkflowInput {
   /** The owner's stable session inbox. */
   readonly token: string;
   readonly wakeAt: string;
+  /**
+   * Set when the owner session ended: the children it asked to stop, to
+   * hard-stop at `wakeAt` if they are still running. The ended owner is not
+   * signalled.
+   */
+  readonly hardStop?: readonly HardStopTarget[];
 }
 
-/** Sleeps until the owner's next task deadline, then signals the owner. */
+/** Sleeps until the owner's next task deadline, then signals the owner or hard-stops its children. */
 export async function taskTimerWorkflow(input: TaskTimerWorkflowInput): Promise<void> {
   "use workflow";
 
   await sleep(new Date(input.wakeAt));
+  if (input.hardStop !== undefined) {
+    await hardStopTaskChildrenStep(input.hardStop);
+    return;
+  }
   await signalTaskDeadlineStep(input);
 }

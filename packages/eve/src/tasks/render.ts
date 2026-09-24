@@ -68,7 +68,17 @@ export function renderSleepEndedEarly(waitedMs: number): string {
   return `The sleep ended early after ${formatDuration(waitedMs)} because a new message arrived.`;
 }
 
-/** One `<task_result>` block per result; foreground and background share one truncation limit. */
+/**
+ * Truncates a task result the model reads, whether its call waited or ran in
+ * the background: 50 KB and 2,000 lines, with `[truncated]` marking the cut.
+ * A line longer than 2,000 characters is cut the same way.
+ */
+export function truncateTaskResult(text: string): string {
+  const truncated = truncateHead(text);
+  return truncated.truncated ? `${truncated.output}\n[truncated]` : truncated.output;
+}
+
+/** One `<task_result>` block per result, truncated like a waited call's result. */
 export function renderTaskResults(
   results: readonly {
     readonly record: Pick<TaskRecord, "id" | "name">;
@@ -81,7 +91,7 @@ export function renderTaskResults(
       const code =
         outcome.status === "failed" ? ` code="${escapeAttribute(outcome.error.code)}"` : "";
       const text = body ?? renderOutcomeBody(outcome);
-      return `<task_result id="${escapeAttribute(record.id)}" name="${escapeAttribute(record.name)}" status="${outcome.status}"${code}>\n${escapeResultBody(truncateHead(text).output)}\n</task_result>`;
+      return `<task_result id="${escapeAttribute(record.id)}" name="${escapeAttribute(record.name)}" status="${outcome.status}"${code}>\n${escapeResultBody(truncateTaskResult(text))}\n</task_result>`;
     })
     .join("\n");
 }
@@ -183,7 +193,7 @@ export interface TaskCancelOutput {
 }
 
 export const TASK_CANCEL_DESCRIPTION =
-  "Stop background agents or tasks by id. A stopped one never reports back. One that already finished is listed in alreadyFinished, and its result is still delivered. A stopped agent stays available: pass its agentId to give it new work.";
+  "Stop background agents or tasks by id. A stopped one never reports back. One that already finished is listed in alreadyFinished, and its result is still delivered. A stopped agent usually stays available: pass its agentId to give it new work.";
 
 /** Description of the `taskIds` input of `task_cancel`. */
 export const TASK_CANCEL_IDS_DESCRIPTION =
@@ -236,13 +246,21 @@ export const AGENT_SESSION_ENDED_MESSAGE = "The agent's session ended before it 
 /** Error message for an agent call the owner cancelled. */
 export const AGENT_CALL_CANCELLED_MESSAGE = "The agent invocation was cancelled.";
 
+/** Error message for a workflow tool run that failed before it could report its result. */
+export const WORKFLOW_RUN_ENDED_WITHOUT_RESULT_MESSAGE =
+  "The workflow tool run failed before it reported its result.";
+
 /** `STATE_LOST` error message for a task whose stored record eve could not read. */
 export const STATE_LOST_MESSAGE =
   "eve could not read this task's saved state, so its result is lost. Start it again if it is still needed.";
 
-/** `TIMED_OUT` error message for a call still working at its time limit. */
-export function renderTimedOut(kind: TaskKind): string {
-  return `The ${noun(kind)} did not finish within its time limit and was stopped.`;
+/**
+ * `TIMED_OUT` error message for a call still working at its time limit. A
+ * record from before eve stored the limit names no duration.
+ */
+export function renderTimedOut(kind: TaskKind, timeoutMs: number | undefined): string {
+  const limit = timeoutMs === undefined ? "its time limit" : formatDuration(timeoutMs);
+  return `The ${noun(kind)} did not finish within ${limit} and was stopped.`;
 }
 
 /** `UNKNOWN_AGENT` error message for an `agentId` that names nothing in the session. */
@@ -389,11 +407,17 @@ function formatMinute(iso: string): string {
 }
 
 function formatDuration(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (ms < 1000) return `${Math.max(0, Math.round(ms))} ms`;
+  const seconds = Math.round(ms / 1000);
   if (seconds < 60) return `${seconds} s`;
   const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+  if (minutes < 60) {
+    const rest = seconds % 60;
+    return rest === 0 ? `${minutes} min` : `${minutes} min ${rest} s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
 }
 
 function escapeAttribute(value: string): string {

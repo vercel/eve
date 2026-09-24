@@ -100,14 +100,14 @@ describe("workflow-tool task outcomes", () => {
         from,
         result: {
           error: {
-            code: "SUBAGENT_EXECUTION_FAILED",
+            code: "EXECUTION_FAILED",
             message: "child crashed",
           },
           status: "failed",
         },
       }),
     ).toEqual({
-      code: "SUBAGENT_EXECUTION_FAILED",
+      code: "EXECUTION_FAILED",
       message: "child crashed",
     });
   });

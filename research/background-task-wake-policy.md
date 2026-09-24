@@ -1,10 +1,12 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
-status: implemented
-last_updated: "2026-09-19"
+status: superseded
+last_updated: "2026-09-24"
 ---
 
 # Background task delivery policy
+
+Superseded by the background tasks rewrite (`eve-background-tasks-rewrite.md`, kept outside this repository); the shipped behavior is described in [Tasks](../docs/concepts/tasks.md). The design below records a previous model, not current guidance.
 
 Message sends choose when background results are reported; task execution and
 session completion remain independent of that choice.

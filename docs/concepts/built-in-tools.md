@@ -253,7 +253,7 @@ The result lists each ID once:
 - `alreadyFinished` lists tasks that settled before the call. Their results are still delivered.
 - `unknown` lists IDs that name no background task, including a call the current turn is still waiting on. Cancel the turn to stop such a call.
 
-A cancelled agent stays available: pass its ID as `agentId` to give it new work. See [Cancel tasks](./tasks#cancel-tasks) for the other ways a task stops.
+A cancelled agent usually stays available: pass its ID as `agentId` to give it new work. If a local agent has not stopped 30 seconds after the cancel, eve terminates its session, and a later call with its ID fails with `UNKNOWN_AGENT`. See [Cancel tasks](./tasks#cancel-tasks) for the other ways a task stops.
 
 In a session several people share, `task_cancel` can stop any background task in the session, whichever principal's turn started it, as [`session.cancel({ taskId })`](./sessions-runs-and-streaming#cancel-the-in-flight-turn) can. Access to a session includes the right to cancel its tasks.
 

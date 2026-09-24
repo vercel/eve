@@ -6,7 +6,10 @@ import {
   executeWorkflowBody,
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
-import type { WorkflowToolRunOutcome } from "#execution/tools/workflow/messages.js";
+import type {
+  WorkflowToolRunOutcome,
+  WorkflowToolRunOutcomeMessage,
+} from "#execution/tools/workflow/messages.js";
 import {
   createChannelReader,
   raceChannelReads,
@@ -19,12 +22,18 @@ import {
 import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner-blocking.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 
-/** Owns command intake, body execution, and settlement for one turn-owned tool call. */
-export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Promise<void> {
+/**
+ * Owns command intake, body execution, and settlement for one turn-owned tool
+ * call. The run returns the outcome it reported, so the owner's deadline can
+ * read it once if the report never arrived; a duplicate start returns nothing.
+ */
+export async function workflowToolRunWorkflow(
+  input: WorkflowToolRunInput,
+): Promise<WorkflowToolRunOutcomeMessage | undefined> {
   "use workflow";
 
   const owner = createBlockingWorkflow(input);
-  if (!(await owner.claim())) return;
+  if (!(await owner.claim())) return undefined;
   const definition = input;
   const { signal } = owner;
   let commandsOpen = true;
@@ -96,7 +105,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
         break;
       }
       if (signal.aborted) break;
-      return;
+      return undefined;
     }
     if (read.channel === "control") {
       owner.handleCommand(read.next.value);
@@ -117,13 +126,13 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       reason: signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
     };
   }
-  if (outcome !== undefined) {
-    await owner.handleMessage({
-      from: createWorkflowBodyRef(definition),
-      kind: "outcome",
-      result: outcome,
-    });
-  }
+  if (outcome === undefined) return undefined;
+  const message: WorkflowToolRunOutcomeMessage = {
+    from: createWorkflowBodyRef(definition),
+    result: outcome,
+  };
+  await owner.handleMessage({ ...message, kind: "outcome" });
+  return message;
 }
 
 async function* awaitBodyResult(

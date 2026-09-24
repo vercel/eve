@@ -99,7 +99,7 @@ describe("startLocalSubagent", () => {
 
     expect(outcome).toMatchObject({
       kind: "error",
-      result: { callId: "call-1", isError: true, output: { code: "SUBAGENT_START_FAILED" } },
+      result: { callId: "call-1", isError: true, output: { code: "START_FAILED" } },
     });
   });
 

@@ -6,7 +6,6 @@ import type {
 } from "#shared/action-types.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
-import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import type { TaskError, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { AGENT_CALL_CANCELLED_MESSAGE, renderEmptyResult } from "#tasks/render.js";
@@ -74,10 +73,8 @@ export function toToolResult(
     callId: record.callId,
     isError: true,
     kind: "tool-result",
-    output:
-      outcome.status === "failed"
-        ? result.output
-        : { code: SUBAGENT_EXECUTION_FAILED, message: AGENT_CALL_CANCELLED_MESSAGE },
+    // A cancelled call has no error code, like a cancelled workflow tool call.
+    output: outcome.status === "failed" ? result.output : AGENT_CALL_CANCELLED_MESSAGE,
     toolName: record.name,
   };
 }

@@ -554,7 +554,7 @@ describe("deadlines", () => {
         outcome: {
           error: {
             code: "TIMED_OUT",
-            message: "The task did not finish within its time limit and was stopped.",
+            message: "The task did not finish within 1 s and was stopped.",
           },
           status: "failed",
         },

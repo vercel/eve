@@ -1147,7 +1147,7 @@ describe("trace policies", () => {
 
     await hooks.publish({
       error,
-      errorCode: "SUBAGENT_EXECUTION_FAILED",
+      errorCode: "EXECUTION_FAILED",
       idempotencyKey: actionIdempotencyKey(scope.sessionId, scope.turnId, "call-1"),
       outcome: "failed",
       scope: actionScope,
@@ -1156,7 +1156,7 @@ describe("trace policies", () => {
 
     expect(metadataOnly.mock.calls[0]?.[0]).toMatchObject({
       error: undefined,
-      errorCode: "SUBAGENT_EXECUTION_FAILED",
+      errorCode: "EXECUTION_FAILED",
       outcome: "failed",
       type: "action.failed",
     });

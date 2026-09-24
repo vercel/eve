@@ -18,9 +18,45 @@ import type { AgentTaskCall, WorkflowCallerReply } from "#tasks/owner.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderAgentOtherPrincipal } from "#tasks/render.js";
 import { readTaskCreator, sameTaskPrincipal } from "#tasks/results.js";
-import { findTask, type TaskTable } from "#tasks/table.js";
+import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import { findTask, removeTasks, type TaskTable } from "#tasks/table.js";
 
 // How the owner resolves one agent call and the child report that settles it.
+
+/**
+ * Idle agents a session keeps. Each is a child session the model may give
+ * more work. Each time the owner starts agents, it retires the idle agents
+ * past this many, least recently started first, so a long session's records
+ * and child sessions stay bounded. The `[Tasks]` note lists only the 10 most
+ * recent.
+ */
+export const MAX_RETAINED_IDLE_AGENTS = 50;
+
+/**
+ * Removes the idle agents past the {@link MAX_RETAINED_IDLE_AGENTS} most
+ * recently started. The owner ends each retired agent's session; a later
+ * call with its ID fails `UNKNOWN_AGENT`.
+ */
+export function retireIdleAgents(table: TaskTable): {
+  readonly table: TaskTable;
+  readonly retired: readonly TaskRecord[];
+} {
+  const retired = table.records
+    .filter(
+      (record) =>
+        record.kind === "agent" &&
+        record.child !== undefined &&
+        record.delivered &&
+        record.cancelConfirmBy === undefined &&
+        isTerminalTaskStatus(record.status),
+    )
+    .toSorted((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))
+    .slice(MAX_RETAINED_IDLE_AGENTS);
+  return {
+    retired,
+    table: removeTasks(table, new Set(retired.map((record) => record.id))),
+  };
+}
 
 /**
  * Rejects a call that names an agent a different principal started: another

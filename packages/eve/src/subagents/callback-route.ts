@@ -1,7 +1,7 @@
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
-import { REMOTE_AGENT_FAILED } from "#subagents/agent-handle-errors.js";
+import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import type { HookPayload } from "#channel/types.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { isSessionHandoffPending } from "#execution/session-inbox/resume.js";
@@ -203,7 +203,7 @@ export function projectSessionCallbackResult(
     const error: JsonValue =
       payload.error === undefined
         ? {
-            code: REMOTE_AGENT_FAILED,
+            code: EXECUTION_FAILED,
             message: "Remote agent failed.",
           }
         : payload.error;

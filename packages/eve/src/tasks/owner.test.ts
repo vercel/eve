@@ -15,6 +15,7 @@ import { startSubagent } from "#execution/tools/subagent/start.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import {
   createWorkflowRuntime,
+  requestWorkflowSessionEnd,
   requestWorkflowTurnCancellation,
 } from "#execution/workflow-runtime.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
@@ -41,6 +42,7 @@ import {
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
 import { cancelTask, evaluateTaskDeadlines, pruneTaskTable } from "#tasks/table.js";
+import { MAX_RETAINED_IDLE_AGENTS } from "#tasks/owner-calls.js";
 import { renderBackgroundReceipt, renderSteeringReceipt } from "#tasks/render.js";
 import { deliverableTaskResults, encodeTaskCreator } from "#tasks/results.js";
 
@@ -52,6 +54,7 @@ vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: v
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   createWorkflowRuntime: vi.fn(),
+  requestWorkflowSessionEnd: vi.fn(),
   requestWorkflowTurnCancellation: vi.fn(),
 }));
 
@@ -315,7 +318,7 @@ describe("startAgentTasks", () => {
   });
 
   it("returns the start error and keeps no record of an agent that never started", async () => {
-    const output = { code: "SUBAGENT_START_FAILED", message: "The queue is unavailable." };
+    const output = { code: "START_FAILED", message: "The queue is unavailable." };
     vi.mocked(startSubagent).mockResolvedValue({
       kind: "error",
       result: {
@@ -360,7 +363,7 @@ describe("startAgentTasks", () => {
           kind: "subagent-result",
           origin: "dispatch",
           output: {
-            code: "SUBAGENT_EXECUTION_FAILED",
+            code: "EXECUTION_FAILED",
             message: 'Agent target "missing" is not available to this agent.',
           },
           subagentName: "missing",
@@ -522,6 +525,34 @@ describe("explicit background agent calls", () => {
     ]);
     // A local child announces itself when it reports task.started.
     expect(update.events).toEqual([]);
+  });
+
+  it("retires the idle agent that started least recently once too many are idle", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+    const idle = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 1 }, (_, index) =>
+      createTaskRecord({
+        callId: `call-idle-${String(index)}`,
+        child: {
+          continuationToken: `idle-token-${String(index)}`,
+          kind: "local",
+          sessionId: `idle-session-${String(index)}`,
+        },
+        delivered: true,
+        id: `research-idle${String(index).padStart(2, "0")}`,
+        startedAt: new Date(Date.parse(NOW) - (index + 1) * 60_000).toISOString(),
+        status: "completed",
+      }),
+    );
+
+    const update = await start([modelCall()], idle);
+
+    const oldest = idle.at(-1)!;
+    expect(records(update.sessionState).map((record) => record.id)).not.toContain(oldest.id);
+    expect(records(update.sessionState)).toHaveLength(MAX_RETAINED_IDLE_AGENTS + 1);
+    expect(requestWorkflowSessionEnd).toHaveBeenCalledExactlyOnceWith({
+      reason: expect.any(String),
+      sessionId: `idle-session-${String(MAX_RETAINED_IDLE_AGENTS)}`,
+    });
   });
 
   it("holds the background result for its own task.result message, not the tool result", async () => {
@@ -1164,7 +1195,7 @@ describe("applyTaskReport", () => {
   );
 
   it("returns a failed child result as an error and reports the failure", async () => {
-    const error = { code: "SESSION_FAILED", message: "The child failed." };
+    const error = { code: "EXECUTION_FAILED", message: "The child failed." };
 
     const update = await applyTaskReport({
       now: NOW,

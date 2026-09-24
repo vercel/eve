@@ -10,6 +10,7 @@ import type {
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { truncateTaskResult } from "#tasks/render.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type {
   HarnessEmitFn,
@@ -233,7 +234,7 @@ export async function resolvePendingCoordination(input: {
         continue;
       case "subagent-result":
         toolResults.push({
-          output: toToolResultOutput(result),
+          output: truncateTaskResultOutput(toToolResultOutput(result)),
           toolCallId: result.callId,
           toolName: result.subagentName,
           type: "tool-result",
@@ -241,7 +242,9 @@ export async function resolvePendingCoordination(input: {
         continue;
       case "tool-result":
         toolResults.push({
-          output: await projectToolResultOutput(result, input.tools?.get(result.toolName)),
+          output: truncateTaskResultOutput(
+            await projectToolResultOutput(result, input.tools?.get(result.toolName)),
+          ),
           toolCallId: result.callId,
           toolName: result.toolName,
           type: "tool-result",
@@ -372,6 +375,36 @@ async function projectToolResultOutput(
     toolCallId: result.callId,
     toolName: result.toolName,
   });
+}
+
+/**
+ * Every result in a coordination batch is a task's: an agent or workflow tool
+ * call the turn waited on. The model reads it under the same limit as a
+ * background `<task_result>` block; `action.result` keeps the full output.
+ * Structured output that fits is left structured.
+ */
+function truncateTaskResultOutput(output: ToolResultPart["output"]): ToolResultPart["output"] {
+  switch (output.type) {
+    case "text":
+    case "error-text":
+      return { ...output, value: truncateTaskResult(output.value) };
+    case "json":
+    case "error-json": {
+      const text = JSON.stringify(output.value, null, 2) ?? "null";
+      const truncated = truncateTaskResult(text);
+      if (truncated === text) return output;
+      return { type: output.type === "json" ? "text" : "error-text", value: truncated };
+    }
+    case "content":
+      return {
+        ...output,
+        value: output.value.map((part) =>
+          part.type === "text" ? { ...part, text: truncateTaskResult(part.text) } : part,
+        ),
+      };
+    default:
+      return output;
+  }
 }
 
 function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output"] {

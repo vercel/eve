@@ -36,7 +36,7 @@ import type {
 } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { AGENT_UNREACHABLE, SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
+import { AGENT_UNREACHABLE, EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { renderAgentUnreachable } from "#tasks/render.js";
 import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
 import { flushHeldCommands, steerWorkingAgent } from "#tasks/steer.js";
@@ -62,7 +62,12 @@ import {
   toTaskOutcome,
   toToolResult,
 } from "#tasks/outcome.js";
-import { cancelOrphanedChild, deliverToChild, type CommandEffect } from "#tasks/transport.js";
+import {
+  cancelOrphanedChild,
+  deliverToChild,
+  retireIdleAgent,
+  type CommandEffect,
+} from "#tasks/transport.js";
 import {
   clearReportedChildRoutes,
   findReportedTask,
@@ -70,6 +75,7 @@ import {
   readDynamicRemoteAgent,
   rejectOtherPrincipal,
   resolveFailedCall,
+  retireIdleAgents,
 } from "#tasks/owner-calls.js";
 import {
   getTaskTable,
@@ -199,7 +205,7 @@ export async function startAgentTasks(input: {
         call,
       });
     } catch (error) {
-      fail(call, undefined, { code: SUBAGENT_EXECUTION_FAILED, message: toErrorMessage(error) });
+      fail(call, undefined, { code: EXECUTION_FAILED, message: toErrorMessage(error) });
     }
   }
   if (actions.length === 0) {
@@ -424,6 +430,13 @@ export async function startAgentTasks(input: {
       );
     }
     if (background) results.push(backgroundReceiptResult(record, toolName));
+  }
+
+  // New agents are the only way idle agents accumulate, so retiring here bounds them.
+  const retired = retireIdleAgents(getTaskTable(session));
+  if (retired.retired.length > 0) {
+    session = setTaskTable(session, retired.table);
+    await Promise.all(retired.retired.map((record) => retireIdleAgent(record, ctx)));
   }
 
   return {

@@ -3,7 +3,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
+import { START_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -83,7 +83,7 @@ export async function startLocalSubagent(input: {
         kind: "subagent-result",
         origin: "dispatch",
         output: {
-          code: SUBAGENT_START_FAILED,
+          code: START_FAILED,
           message: toErrorMessage(error),
         },
         subagentName: action.subagentName,

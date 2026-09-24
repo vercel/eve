@@ -131,12 +131,12 @@ describe("notifyDelegatedParentStep", () => {
       outcome: {
         kind: "terminal",
         result: {
-          error: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
+          error: { code: "EXECUTION_FAILED", message: "boom" },
           kind: "failed",
         },
         usageDelta: ZERO_USAGE,
       },
-      output: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
+      output: { code: "EXECUTION_FAILED", message: "boom" },
       subagentName: "research",
     };
 
@@ -301,7 +301,7 @@ describe("turn caller notification", () => {
     });
 
     const error = {
-      code: "SUBAGENT_EXECUTION_FAILED",
+      code: "EXECUTION_FAILED",
       message: "The agent could not produce a result matching the requested schema.",
     };
     expect(resumeHookMock).toHaveBeenCalledWith("parent-turn-2", {
@@ -336,7 +336,7 @@ describe("turn caller notification", () => {
       settled: { isError: true, output: new Error("session owner crashed") },
     });
 
-    const error = { code: "SUBAGENT_EXECUTION_FAILED", message: "session owner crashed" };
+    const error = { code: "EXECUTION_FAILED", message: "session owner crashed" };
     expect(resumeHookMock).toHaveBeenCalledWith("parent-turn-3", {
       kind: "runtime-action-result",
       results: [
@@ -444,14 +444,14 @@ describe("turn caller notification", () => {
     expect(body).toEqual({
       callId: "call-remote",
       error: {
-        code: "SUBAGENT_EXECUTION_FAILED",
+        code: "EXECUTION_FAILED",
         message: "remote failed",
       },
       kind: "turn.failed",
       outcome: {
         kind: "terminal",
         result: {
-          error: { code: "SUBAGENT_EXECUTION_FAILED", message: "remote failed" },
+          error: { code: "EXECUTION_FAILED", message: "remote failed" },
           kind: "failed",
         },
         usageDelta: USAGE,

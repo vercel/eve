@@ -33,6 +33,8 @@ export interface TaskRecord {
   readonly detachGroup?: string;
   /** ISO time the current generation times out. Absent means only the session lifetime bounds it. */
   readonly deadlineAt?: string;
+  /** The current generation's time limit in milliseconds of active time, present with `deadlineAt`. */
+  readonly timeoutMs?: number;
   /** Set while the task waits on a human; the deadline clock is stopped. */
   readonly clockStoppedAt?: string;
   /** After cancellation, the owner hard-stops a local child that has not confirmed by then. */
@@ -180,6 +182,13 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
     !isOptionalIsoTime(value.cancelConfirmBy)
   )
     return fail("invalid time");
+  if (
+    value.timeoutMs !== undefined &&
+    (typeof value.timeoutMs !== "number" ||
+      !Number.isFinite(value.timeoutMs) ||
+      value.timeoutMs < 0)
+  )
+    return fail("invalid timeoutMs");
   if (
     value.pendingCommands !== undefined &&
     (!Array.isArray(value.pendingCommands) || !value.pendingCommands.every(isTaskCommand))

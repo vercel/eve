@@ -15,6 +15,7 @@ import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
+import { truncateTaskResult } from "#tasks/render.js";
 
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
 
@@ -509,7 +510,7 @@ describe("resolvePendingCoordination", () => {
             isError: true,
             kind: "subagent-result",
             origin: "dispatch",
-            output: { code: "SUBAGENT_START_FAILED", message: "boom" },
+            output: { code: "START_FAILED", message: "boom" },
             subagentName: "researcher",
           },
         ],
@@ -536,6 +537,78 @@ describe("resolvePendingCoordination", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(events.map((event) => event.type)).toEqual(["action.result"]);
+  });
+
+  it("shows the model a waited task's result under the <task_result> limit, and clients all of it", async () => {
+    const answer = Array.from({ length: 2500 }, (_, index) => `finding ${String(index)}`).join(
+      "\n",
+    );
+    const report = { findings: Array.from({ length: 2500 }, (_, index) => index) };
+    const events: UnstampedMessageStreamEvent[] = [];
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-agent",
+          input: {},
+          kind: "workflow-task",
+          toolName: "researcher",
+          workflowId: "workflow//./agent/tools/researcher//execute",
+        },
+        {
+          callId: "call-report",
+          input: {},
+          kind: "workflow-task",
+          toolName: "report",
+          workflowId: "workflow//./agent/tools/report//execute",
+        },
+        {
+          callId: "call-small",
+          input: {},
+          kind: "workflow-task",
+          toolName: "deploy",
+          workflowId: "workflow//./agent/tools/deploy//execute",
+        },
+      ],
+    });
+
+    const resolved = await resolvePendingCoordination({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          { callId: "call-agent", kind: "tool-result", output: answer, toolName: "researcher" },
+          { callId: "call-report", kind: "tool-result", output: report, toolName: "report" },
+          {
+            callId: "call-small",
+            kind: "tool-result",
+            output: { deployed: true },
+            toolName: "deploy",
+          },
+        ],
+      },
+    });
+
+    const parts = resolved.messages.at(-1)?.content as readonly {
+      readonly output: { readonly type: string; readonly value: unknown };
+    }[];
+    const truncatedAnswer = truncateTaskResult(answer);
+    expect(truncatedAnswer.endsWith("finding 1999\n[truncated]")).toBe(true);
+    expect(parts[0]?.output).toEqual({ type: "text", value: truncatedAnswer });
+    // Structured output past the limit reaches the model as its truncated JSON text.
+    expect(parts[1]?.output).toEqual({
+      type: "text",
+      value: truncateTaskResult(JSON.stringify(report, null, 2)),
+    });
+    // Structured output within the limit stays structured.
+    expect(parts[2]?.output).toEqual({ type: "json", value: { deployed: true } });
+    expect(
+      events.map((event) => event.type === "action.result" && event.data.result.output),
+    ).toEqual([answer, report, { deployed: true }]);
   });
 });
 

@@ -24,7 +24,8 @@ import {
   type SubagentAdapterState,
 } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
+import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
+import { AGENT_CALL_CANCELLED_MESSAGE } from "#tasks/render.js";
 import { createLogger } from "#internal/logging.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -156,10 +157,6 @@ export async function notifyCancelledTaskCallerStep(input: {
 
   if (input.caller === undefined) return;
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
-  const error = {
-    code: SUBAGENT_EXECUTION_FAILED,
-    message: "The agent invocation was cancelled.",
-  };
   const base: RuntimeSubagentChildResult = {
     callId: input.caller.callId,
     isError: true,
@@ -170,7 +167,7 @@ export async function notifyCancelledTaskCallerStep(input: {
       result: { kind: "cancelled" },
       usageDelta,
     },
-    output: error,
+    output: AGENT_CALL_CANCELLED_MESSAGE,
     subagentName: input.caller.subagentName,
   };
   const result = input.usage === undefined ? base : { ...base, usage: input.usage };
@@ -197,7 +194,7 @@ function createSettledTurnResult(input: {
 
   if (input.settled.isError === true) {
     const error = {
-      code: input.settled.errorCode ?? SUBAGENT_EXECUTION_FAILED,
+      code: input.settled.errorCode ?? EXECUTION_FAILED,
       message: toErrorMessage(input.settled.output),
     };
     return {

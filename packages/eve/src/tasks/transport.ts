@@ -4,6 +4,7 @@ import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   createWorkflowRuntime,
+  requestWorkflowSessionEnd,
   requestWorkflowTurnCancellation,
 } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -19,6 +20,7 @@ import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
+  resetRemoteAgentSession,
   resolveRemoteAgentForAction,
 } from "#subagents/remote-dispatch.js";
 import {
@@ -305,6 +307,40 @@ function resolveRemoteChild(record: TaskRecord, ctx: ContextContainer | undefine
     remoteAgentName: record.name,
     registry: bundle.subagentRegistry.subagentsByNodeId,
   });
+}
+
+/**
+ * Ends the session of an idle agent the owner no longer keeps: a local agent
+ * ends as a reset session does, and a remote one through its reset route. A
+ * lost request is logged, never retried; the agent's own session lifetime
+ * still bounds it.
+ */
+export async function retireIdleAgent(
+  record: TaskRecord,
+  ctx: ContextContainer | undefined,
+): Promise<void> {
+  const child = record.child;
+  if (child === undefined || child.kind === "workflow") return;
+  try {
+    if (child.kind === "local") {
+      await requestWorkflowSessionEnd({
+        reason: "The parent retired this idle agent.",
+        sessionId: child.sessionId,
+      });
+      return;
+    }
+    const remote = resolveRemoteChild(record, ctx);
+    if (remote === undefined) return;
+    await resetRemoteAgentSession({
+      remote: { ...remote, url: child.url },
+      sessionId: child.sessionId,
+    });
+  } catch (error) {
+    logError(log, "failed to end a retired idle agent", error, {
+      childKind: child.kind,
+      taskId: record.id,
+    });
+  }
 }
 
 /**

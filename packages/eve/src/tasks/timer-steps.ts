@@ -9,13 +9,21 @@ import { isInactiveTimeoutTarget } from "#execution/session/timeout-steps.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { isSessionHandoffPending, resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
+  resolveHookOwnerRunId,
+  resolveSessionOwnerRunId,
   startWorkflowOnCurrentDeployment,
   taskTimerWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
+import type { ChildAddress } from "#tasks/protocol.js";
 import { readTaskTimer, writeTaskTimer } from "#tasks/state.js";
 import type { TaskTimerWorkflowInput } from "#tasks/timer.js";
+
+/** A child the owner can hard-stop: a local agent session or a workflow tool run. */
+export type HardStopTarget = Extract<ChildAddress, { readonly kind: "local" | "workflow" }>;
+
+const HARD_STOP_REASON = "The task did not stop within its cancellation window.";
 
 // The timer workflow imports this module, so its module scope has no side
 // effects: the logger is created inside the functions that use it.
@@ -94,6 +102,58 @@ export async function signalTaskDeadlineStep(input: TaskTimerWorkflowInput): Pro
       throw error;
     }
   }
+}
+
+/**
+ * Arms a timer for an owner session that is ending: at `wakeAt` it hard-stops
+ * each child still running, because the ended owner can no longer be woken
+ * to do it.
+ */
+export async function armChildHardStop(input: {
+  readonly ownerSessionId: string;
+  readonly targets: readonly HardStopTarget[];
+  readonly wakeAt: string;
+}): Promise<void> {
+  const timerInput: TaskTimerWorkflowInput = {
+    hardStop: input.targets,
+    ownerRunId: getWorkflowMetadata().workflowRunId,
+    token: sessionCommandHookToken(input.ownerSessionId),
+    wakeAt: input.wakeAt,
+  };
+  await startWorkflowOnCurrentDeployment(taskTimerWorkflowReference, [timerInput]);
+}
+
+/** Hard-stops each child that is still running; one that already ended is left alone. */
+export async function hardStopTaskChildrenStep(targets: readonly HardStopTarget[]): Promise<void> {
+  "use step";
+
+  for (const target of targets) await hardStopTaskChild(target);
+}
+
+/**
+ * Terminates the child's current run. A local child may have handed off to
+ * a successor run, so the run that owns its stable inbox is stopped; a
+ * duplicate workflow run never ran the body, so the run that owns the
+ * command hook is stopped. Returns the run it stopped.
+ */
+export async function hardStopTaskChild(child: HardStopTarget, taskId?: string): Promise<string> {
+  let runId = child.kind === "local" ? child.sessionId : child.runId;
+  try {
+    runId =
+      child.kind === "local"
+        ? await resolveSessionOwnerRunId(child.sessionId)
+        : ((await resolveHookOwnerRunId(child.commandToken)) ?? child.runId);
+    await cancelRun(await getWorld(), runId, { cancelReason: HARD_STOP_REASON });
+  } catch (error) {
+    if (!isInactiveTimeoutTarget(error)) {
+      logError(createLogger("tasks.timer"), "failed to hard-stop a task child", error, {
+        childKind: child.kind,
+        runId,
+        taskId,
+      });
+    }
+  }
+  return runId;
 }
 
 /** Best-effort: a timer that keeps running only re-evaluates the table once more. */

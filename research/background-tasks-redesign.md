@@ -1,10 +1,12 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
-status: draft
-last_updated: "2026-09-18"
+status: superseded
+last_updated: "2026-09-24"
 ---
 
 # Background tasks: one workflow runtime
+
+Superseded by the background tasks rewrite (`eve-background-tasks-rewrite.md`, kept outside this repository); the shipped behavior is described in [Tasks](../docs/concepts/tasks.md). The design below records a previous model, not current guidance.
 
 **Prototype result: background work is a session-owned workflow tool run.** Waiting and
 background tools now enter through one durable workflow kind, use one session invocation registry,

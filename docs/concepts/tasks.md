@@ -82,11 +82,13 @@ When a background task finishes, eve holds its outcome in durable session state 
 Reminder: stand-up at 10
 </task_result>
 <task_result id="auditor-2b0c1a" name="auditor" status="failed" code="TIMED_OUT">
-The agent did not finish within its time limit and was stopped.
+The agent did not finish within 2 h and was stopped.
 </task_result>
 ```
 
-A workflow tool's block body is the definition's `toModelOutput(output)` when it has one. Otherwise the body is the output, or the error message for a failed result. Blocks share the tool-result truncation limit: 50 KB and 2,000 lines.
+A workflow tool's block body is the definition's `toModelOutput(output)` when it has one. Otherwise the body is the output, or the error message for a failed result.
+
+The model reads every task result under one truncation limit, whether its call waited or ran in the background: a `<task_result>` block body and a waited call's tool result are each cut at 50 KB or 2,000 lines, with a final `[truncated]` line where the cut falls, and a line longer than 2,000 characters is cut with ` [truncated]`. A waited call's structured output that fits stays structured; one past the limit reaches the model as its truncated JSON text. `action.result`, `task.settled`, and `ctx.agent` still carry the full output.
 
 Each result belongs to the principal whose call started the task. Two principals match when their authenticator, principal type, and principal ID match. eve delivers results by these rules:
 
@@ -119,6 +121,8 @@ The model learns which tasks are still out from the `[Tasks]` note. It is a fram
 
 `<tasks>` lists every background task whose result has not reached history, with its status: `working`, `input_required` while it waits on a person, or its outcome once it finishes. A finished task stays listed while its result waits for its detach group or for its principal's turn. Waited calls are not listed, because the model is not called while it waits on them. `<idle_agents>` lists up to 10 idle agents, most recent first, each with a one-line summary of its last answer. eve adds the note only at a model-step boundary, and a session that never had a background task or an idle agent gets no note.
 
+eve keeps a task's record only as long as it needs it: a workflow tool call's until its result reaches history, and an agent's until the agent's session ends. A report that arrives after its record is gone matches no record and is dropped, like a duplicate. Every report names the call it answers, so a late report can never settle another task. A session keeps at most 50 idle agents: each time it starts an agent, eve ends the sessions of any idle agents beyond the 50 most recently started, and a later call with such an agent's ID fails with `UNKNOWN_AGENT`.
+
 ## Give a working agent more to do
 
 Pass the `agentId` of an agent that is still working to send it a message, such as a correction. The message joins the agent's current call instead of starting a new one, and the call returns a receipt:
@@ -149,7 +153,9 @@ Application code cancels through `session.cancel()` on a [client session](../gui
 
 `taskId` cannot be combined with `tasks` or `turnId`. Any caller with access to a session can cancel any of its tasks, and the model can stop any background task in any principal's turn. Cancelling is deliberately not limited to the principal that started the work, unlike [messaging a working agent](#give-a-working-agent-more-to-do), so anyone in a shared session can stop a task. See [Cancel the in-flight turn](./sessions-runs-and-streaming#cancel-the-in-flight-turn) for the route's statuses and race behavior.
 
-eve also cancels tasks on its own. Ending a session cancels every working task, and eve delivers nothing afterward. When a workflow tool run ends, eve cancels the agent tasks that the run still owns.
+eve also cancels tasks on its own. When a workflow tool run ends, eve cancels the agent tasks that the run still owns.
+
+Ending a session cancels every working task, and eve delivers nothing afterward. Each agent the session started, working or idle, then ends its own session the way a reset session does: it cancels its turn and its own tasks, and ends the agents it started in turn. A remote agent ends through its session-reset route. The ending session does not wait for them. A local agent still running 30 seconds after the session ended, or a workflow run still running after 35 seconds, is stopped outright.
 
 Every cancellation takes effect in the owner at once. eve records the task as cancelled, emits `task.settled` with `status: "cancelled"`, and asks the child to stop without waiting for it. A workflow run observes `ctx.abortSignal`; see [Cancel and clean up](../tools/workflows#cancel-and-clean-up-ctxabortsignal). If a local agent has not stopped 30 seconds after a cancel or a timeout, eve terminates its session. A workflow run that has not ended 35 seconds after a cancel is stopped outright. A cancelled agent that is still reachable stays available for new work through its `agentId`.
 
@@ -165,7 +171,7 @@ Two settings bound a task, and they do different things:
 
 Durations are milliseconds. `timeout: false` removes the limit, but the session's lifetime, `limits.sessionTimeoutMs`, still bounds every task. On the root agent, `timeout` applies to calls of the built-in `agent` tool. The clock stops while the task waits on a question or approval that reached the root session's channel, and resumes once every such request is answered.
 
-A waited call that times out gets the `TIMED_OUT` error as its tool result, a background call delivers it as a failed task result, and `task.settled` reports `failed` with the same error. Before a remote agent call times out, eve reads the remote session's result for that call once, so a lost callback still settles the call with the child's answer. See [Limit a call with `timeout`](../tools/workflows#limit-a-call-with-timeout) and the subagent `timeout` in [What the parent sees](../subagents#what-the-parent-sees).
+A waited call that times out gets the `TIMED_OUT` error as its tool result, a background call delivers it as a failed task result, and `task.settled` reports `failed` with the same error. Before a call times out, eve checks its child once, so a child that finished but whose report was lost still settles the call with its result. For a remote agent, eve reads the remote session's result for that call. For a workflow tool, eve reads the run's status and the outcome the run returned; a run that failed before it reported fails the call with `EXECUTION_FAILED`. A local agent is not read, because it reports through the session's durable inbox, which eve does not hand off to another deployment while any task is working. See [Limit a call with `timeout`](../tools/workflows#limit-a-call-with-timeout) and the subagent `timeout` in [What the parent sees](../subagents#what-the-parent-sees).
 
 ## Background task limit
 
@@ -203,21 +209,18 @@ Follow an agent's own progress by passing its `task.started` event to [`session.
 
 ### Error codes
 
-`task.settled` for a failed task, the waited call's tool result, and a failed `<task_result>` block carry the same `error.code`. Handle unknown codes, because an agent's own failure passes its code through.
+`task.settled` for a failed task, the waited call's tool result, and a failed `<task_result>` block carry the same `error.code`. Handle unknown codes, because an agent's own failure and a workflow tool's thrown error with a `code` pass their code through. A cancelled task has no code: `task.settled` reports `status: "cancelled"`, and a waited call that its child cancelled gets an error result that is only a message.
 
-| Code                          | Meaning                                                                                                                                                   |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `START_FAILED`                | A workflow tool run or a remote agent could not start, including across task protocol versions.                                                           |
-| `SUBAGENT_START_FAILED`       | A local agent's session could not start.                                                                                                                  |
-| `TIMED_OUT`                   | The call was still working at its `timeout`.                                                                                                              |
-| `AGENT_SESSION_ENDED`         | The agent's session expired, reset, or closed before it replied.                                                                                          |
-| `AGENT_UNREACHABLE`           | An idle agent could not be given its next call, or a remote agent could not take an answer because its deployment now uses another task protocol version. |
-| `OUTPUT_SCHEMA_NOT_FULFILLED` | The agent could not produce a result matching the call's `outputSchema`.                                                                                  |
-| `EMPTY_RESULT`                | The agent finished without a reply. A call with an `outputSchema` never fails this way, because its result is structured.                                 |
-| `SUBAGENT_EXECUTION_FAILED`   | A local agent's turn failed; the message says why.                                                                                                        |
-| `REMOTE_AGENT_FAILED`         | A remote agent reported a failure without a code of its own.                                                                                              |
-| `STATE_LOST`                  | eve could not read the task's saved state, such as a task that an earlier eve release left working. The session continues.                                |
-| `EXECUTION_FAILED`            | The task failed with an error that carried no code of its own.                                                                                            |
+| Code                          | Meaning                                                                                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `START_FAILED`                | The child could not start: a local agent's session, a workflow tool run, or a remote agent, including one on another task protocol version.                 |
+| `TIMED_OUT`                   | The call was still working at its `timeout`. The message names the limit, such as `The agent did not finish within 2 h and was stopped.`                    |
+| `AGENT_SESSION_ENDED`         | The agent's session expired, reset, or closed before it replied.                                                                                            |
+| `AGENT_UNREACHABLE`           | An idle agent could not be given its next call, or a remote agent could not take an answer because its deployment now uses another task protocol version.   |
+| `OUTPUT_SCHEMA_NOT_FULFILLED` | The agent could not produce a result matching the call's `outputSchema`.                                                                                    |
+| `EMPTY_RESULT`                | The agent finished without a reply. A call with an `outputSchema` never fails this way, because its result is structured.                                   |
+| `STATE_LOST`                  | eve could not read the task's saved state, such as a task that an earlier eve release left working. The session continues.                                  |
+| `EXECUTION_FAILED`            | The work failed without a code of its own, such as an agent's turn or session, or a workflow tool run that failed before it reported. The message says why. |
 
 ### Test a consumer against recorded streams
 
