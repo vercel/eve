@@ -39,6 +39,8 @@ export interface ProxyInputRequest {
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly kind: InputRequestKind;
+  /** The owner's task whose child asked; its deadline clock stops until the request is resolved. */
+  readonly taskId?: string;
 }
 
 export interface ProxyInputRequestBatch {
@@ -264,18 +266,22 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   const childSessionInbox = "childSessionInbox" in value ? value.childSessionInbox : undefined;
   if (childSessionInbox !== undefined && !isSessionInboxAddress(childSessionInbox))
     return undefined;
+  const taskId = "taskId" in value ? value.taskId : undefined;
+  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) return undefined;
   const request: {
     answerHook?: AnswerHookRoute;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     childSessionInbox?: SessionInboxAddress;
     readonly kind: InputRequestKind;
+    taskId?: string;
   } = {
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
   if (answerHook !== undefined) request.answerHook = answerHook;
   if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
+  if (taskId !== undefined) request.taskId = taskId;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   return request;
 }

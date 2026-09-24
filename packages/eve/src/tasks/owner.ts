@@ -28,8 +28,6 @@ import {
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
-import type { HarnessSession } from "#harness/types.js";
-import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { settledEvents, taskSettledEvent, taskStartedEvent } from "#tasks/events.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -65,19 +63,17 @@ import {
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { readTasks } from "#tasks/read.js";
 import {
   applyTaskMessage,
   cancelTask,
   DEFAULT_AGENT_TIMEOUT_MS,
   findTask,
   markTaskDelivered,
-  readTaskTable,
   startTask,
   type TaskEffect,
   type TaskTable,
 } from "#tasks/table.js";
-
-const log = createLogger("tasks.owner");
 
 /** One agent call: from the model, or from `ctx.agent` inside a workflow tool body. */
 export interface AgentTaskCall {
@@ -585,11 +581,11 @@ function adoptChild(
   return { commands: commandEffects(applied.effects), table: applied.table };
 }
 
-function commandEffects(effects: readonly TaskEffect[]): CommandEffect[] {
+export function commandEffects(effects: readonly TaskEffect[]): CommandEffect[] {
   return effects.filter((effect): effect is CommandEffect => effect.kind === "send");
 }
 
-async function readContext(
+export async function readContext(
   serializedContext: Record<string, unknown>,
 ): Promise<ContextContainer | undefined> {
   try {
@@ -614,19 +610,6 @@ function readDynamicRemoteAgent(input: {
 function readAgentId(action: RuntimeAgentDispatchRequest): string | undefined {
   const value = action.input.agentId;
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-/** Reads the task table and logs records that could not be decoded. */
-export function readTasks(session: Pick<HarnessSession, "state">): TaskTable {
-  const { lost, table } = readTaskTable(session.state);
-  for (const task of lost) {
-    log.warn("dropped an unreadable task record", {
-      reason: task.reason,
-      taskId: task.id,
-      taskName: task.name,
-    });
-  }
-  return table;
 }
 
 /**

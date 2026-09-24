@@ -1,4 +1,5 @@
 import type { JsonObject } from "#shared/json.js";
+import { AGENT_ID_PARAMETER_DESCRIPTION } from "#tasks/render.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export const AGENT_TOOL_NAME = "agent";
@@ -21,8 +22,7 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
   properties: {
     agentId: {
       type: ["string", "null"],
-      description:
-        "The id of an idle agent from the latest [Tasks] note, to give it more work in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
+      description: AGENT_ID_PARAMETER_DESCRIPTION,
     },
     message: {
       type: "string",

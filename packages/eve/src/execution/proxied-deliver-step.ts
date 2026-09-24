@@ -22,6 +22,7 @@ import {
 } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { resumeResolvedTaskClocks } from "#tasks/clock.js";
 
 export type RoutedDeliverResult =
   | {
@@ -144,6 +145,10 @@ export async function routeProxiedDeliverStep(input: {
     retired = true;
   }
 
+  if (retired) {
+    // A task whose surfaced requests are all answered resumes its deadline clock.
+    durableSession = resumeResolvedTaskClocks(durableSession, new Date().toISOString());
+  }
   const context = {
     serializedContext: input.serializedContext ?? {},
     sessionState: retired

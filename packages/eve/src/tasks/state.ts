@@ -5,7 +5,13 @@ import {
 import type { SessionStateMap } from "#harness/types.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { pruneTaskTable, readTaskTable, writeTaskTable, type TaskTable } from "#tasks/table.js";
+import {
+  nextTaskWakeAt,
+  pruneTaskTable,
+  readTaskTable,
+  writeTaskTable,
+  type TaskTable,
+} from "#tasks/table.js";
 
 // Read by the session workflow body, so it must not import Node.js built-ins.
 
@@ -28,6 +34,54 @@ export function setTaskTable<T extends { readonly state?: SessionStateMap }>(
   table: TaskTable,
 ): T {
   return { ...session, state: writeTaskTable(session.state, pruneTaskTable(table)) };
+}
+
+/** Session state key holding the owner's armed deadline timer. */
+export const TASK_TIMER_STATE_KEY = "eve.taskTimer";
+
+/** A wake time already in the past: the timer fires as soon as it starts. */
+export const WAKE_NOW = new Date(0).toISOString();
+
+/** The timer the owner last armed. It may already have fired. */
+export interface ArmedTaskTimer {
+  readonly runId: string;
+  readonly wakeAt: string;
+}
+
+export function readTaskTimer(state: SessionStateMap | undefined): ArmedTaskTimer | undefined {
+  const value = state?.[TASK_TIMER_STATE_KEY];
+  if (typeof value !== "object" || value === null) return undefined;
+  const { runId, wakeAt } = value as { readonly runId?: unknown; readonly wakeAt?: unknown };
+  return typeof runId === "string" &&
+    typeof wakeAt === "string" &&
+    !Number.isNaN(Date.parse(wakeAt))
+    ? { runId, wakeAt }
+    : undefined;
+}
+
+export function writeTaskTimer(
+  state: SessionStateMap | undefined,
+  timer: ArmedTaskTimer | undefined,
+): SessionStateMap | undefined {
+  if (timer !== undefined) return { ...state, [TASK_TIMER_STATE_KEY]: { ...timer } };
+  if (state?.[TASK_TIMER_STATE_KEY] === undefined) return state;
+  const next = { ...state };
+  delete next[TASK_TIMER_STATE_KEY];
+  return Object.keys(next).length === 0 ? undefined : next;
+}
+
+/**
+ * The wake time the owner must arm, or `undefined` when the armed timer
+ * fires no later than the table needs. An unreadable record wakes the owner
+ * at once: the deadline step's write removes it, so it cannot block handoff.
+ */
+export function taskTimerWakeToArm(state: SessionStateMap | undefined): string | undefined {
+  const { lost, table } = readTaskTable(state);
+  const wakeAt = lost.length > 0 ? WAKE_NOW : nextTaskWakeAt(table);
+  if (wakeAt === undefined) return undefined;
+  const armed = readTaskTimer(state);
+  if (armed !== undefined && Date.parse(armed.wakeAt) <= Date.parse(wakeAt)) return undefined;
+  return wakeAt;
 }
 
 /** Session state key holding the owner's remote callback alias. */

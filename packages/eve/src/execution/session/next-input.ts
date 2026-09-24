@@ -10,7 +10,7 @@ import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { applyTaskReport } from "#tasks/owner-body.js";
+import { applyTaskDeadline, applyTaskReport } from "#tasks/owner-body.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
@@ -70,6 +70,10 @@ export async function nextTurnDelivery(input: {
       case "task-report":
         // A child that reports after its turn ended may still owe it a held cancel.
         await applyTaskReport(cursor, admitted.payload);
+        break;
+      case "task-deadline":
+        // An idle owner still hard-stops children that ignored a cancel.
+        await applyTaskDeadline(cursor, admitted.signal);
         break;
       case "runtime-action-result": {
         // Waited results only resolve inside their turn; applying a late one

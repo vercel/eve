@@ -7,6 +7,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
@@ -14,6 +15,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 vi.mock("../route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
+vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren).mockReset();
 });
@@ -173,6 +175,36 @@ describe("nextTurnDelivery", () => {
       handoffEligible: true,
       delivery: { payloads: [{ message: "next turn" }] },
     });
+  });
+
+  it("applies a task deadline while idle and keeps waiting for input", async () => {
+    const signal = {
+      kind: "task.deadline" as const,
+      ownerRunId: "owner-1",
+      wakeAt: "2026-09-24T14:00:00.000Z",
+    };
+    const afterDeadline = createTestSessionState({ sessionId: "ses-after-deadline" });
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValue({
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: {},
+      sessionState: afterDeadline,
+    });
+    const input = batchingInputFor([]);
+    const inbox = createMockInbox([
+      { result: { done: false, value: signal } },
+      messageRead("next turn"),
+    ]);
+
+    await expect(nextTurnDelivery({ ...input, inbox })).resolves.toMatchObject({
+      delivery: { payloads: [{ message: "next turn" }] },
+      kind: "turn",
+    });
+    expect(applyTaskDeadlinesStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ signal }),
+    );
+    expect(input.cursor.sessionState).toBe(afterDeadline);
   });
 
   it("does not hand off the first delivery in a buffered burst", async () => {

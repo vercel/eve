@@ -6,9 +6,13 @@ import {
   isWorkflowTaskResult,
   isWorkingWorkflowTask,
   readTaskCallbackAlias,
+  readTaskTimer,
   setTaskTable,
   TASK_CALLBACK_ALIAS_PREFIX,
   TASK_CALLBACK_ALIAS_STATE_KEY,
+  taskTimerWakeToArm,
+  WAKE_NOW,
+  writeTaskTimer,
 } from "#tasks/state.js";
 
 const localChild = { continuationToken: "child-token", kind: "local" as const, sessionId: "child" };
@@ -107,5 +111,35 @@ describe("workflow task lookups", () => {
       isWorkflowTaskResult({ state: taskTableState([{ ...working, kind: "agent" }]) }, result),
     ).toBe(false);
     expect(isWorkflowTaskResult({ state: undefined }, result)).toBe(false);
+  });
+});
+
+describe("task timer state", () => {
+  const DEADLINE = "2026-09-24T14:00:00.000Z";
+
+  it("round-trips the armed timer and removes the key when cleared", () => {
+    const armed = { runId: "timer-1", wakeAt: DEADLINE };
+    const state = writeTaskTimer({ other: 1 }, armed);
+    expect(readTaskTimer(state)).toEqual(armed);
+    expect(writeTaskTimer(state, undefined)).toEqual({ other: 1 });
+    expect(
+      readTaskTimer({ "eve.taskTimer": { runId: "timer-1", wakeAt: "soon" } }),
+    ).toBeUndefined();
+  });
+
+  it("asks for a wake only when the table needs one earlier than the armed timer", () => {
+    const table = taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]);
+    expect(taskTimerWakeToArm(table)).toBe(DEADLINE);
+    expect(
+      taskTimerWakeToArm(writeTaskTimer(table, { runId: "t", wakeAt: "2026-09-24T13:00:00.000Z" })),
+    ).toBeUndefined();
+    expect(
+      taskTimerWakeToArm(writeTaskTimer(table, { runId: "t", wakeAt: "2026-09-24T15:00:00.000Z" })),
+    ).toBe(DEADLINE);
+    expect(taskTimerWakeToArm(taskTableState([createTaskRecord()]))).toBeUndefined();
+  });
+
+  it("wakes at once for an unreadable record so the next write removes it", () => {
+    expect(taskTimerWakeToArm({ "eve.taskTable": { records: [{ v: 0 }] } })).toBe(WAKE_NOW);
   });
 });

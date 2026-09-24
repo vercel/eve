@@ -4,6 +4,7 @@ import {
 } from "#execution/dynamic-workflow/schema.js";
 import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
 import type { JsonValue } from "#shared/json.js";
+import { WORKFLOW_PROGRAM_AGENT_CONTRACT } from "#tasks/render.js";
 import { defineWorkflowTool, type WorkflowToolDefinition } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -19,15 +20,12 @@ export interface WorkflowToolInput {
 
 export type WorkflowTool = WorkflowToolDefinition<WorkflowToolInput, JsonValue>;
 
-const workflowProgramAgentContract =
-  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an idle agent's id from the conversation's [Tasks] note to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
-
 const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
   type: "object",
   properties: {
     js: {
       type: "string",
-      description: `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
+      description: `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${WORKFLOW_PROGRAM_AGENT_CONTRACT} Return one JSON-serializable value.`,
     },
   },
   required: ["js"],
@@ -39,7 +37,7 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
   const normalized = normalizeWorkflowToolOptions(options);
   const description = [
     "Run an async JavaScript function body that invokes agents and returns one JSON-serializable value.",
-    workflowProgramAgentContract,
+    WORKFLOW_PROGRAM_AGENT_CONTRACT,
     'Supply the body directly, for example: return await ctx.agent("researcher", { message: "Describe the task" });',
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");

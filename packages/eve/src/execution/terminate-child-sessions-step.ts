@@ -7,15 +7,16 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { getTaskTable } from "#tasks/state.js";
+import { getTaskTable, readTaskTimer } from "#tasks/state.js";
+import { cancelTaskTimer } from "#tasks/timer-steps.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
 /**
  * Terminates every child session the owner has an address for when the
- * owner session ends. Local children are stopped; remote children are
- * retired through the authenticated session-reset route. A task whose child
- * never reported its address has nothing to stop.
+ * owner session ends, and its task timer. Local children are stopped; remote
+ * children are retired through the authenticated session-reset route. A task
+ * whose child never reported its address has nothing to stop.
  */
 export async function terminateChildSessionsStep(input: {
   readonly serializedContext?: Record<string, unknown>;
@@ -32,6 +33,9 @@ export async function terminateChildSessionsStep(input: {
     });
     return;
   }
+
+  const timer = readTaskTimer(session.state);
+  if (timer !== undefined) await cancelTaskTimer(timer.runId, "Parent session ended");
 
   const records = getTaskTable(session).records.filter((record) => record.child !== undefined);
   if (records.length === 0) return;

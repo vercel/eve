@@ -14,6 +14,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 
@@ -26,6 +27,7 @@ export type SessionAdmission =
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "task-report"; readonly payload: TaskStartedHookPayload }
+  | { readonly kind: "task-deadline"; readonly signal: TaskDeadlineSignal }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
 /**
@@ -48,6 +50,7 @@ export async function admitSessionInboxPayload(
     return { kind: "consumed" };
   }
   if (value.kind === "task.started") return { kind: "task-report", payload: value };
+  if (value.kind === "task.deadline") return { kind: "task-deadline", signal: value };
   if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
     const task = getTaskTable(input.cursor.sessionState.snapshot.session).records.find(
       (record) =>

@@ -11,6 +11,7 @@ import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import { cancelTasksStep } from "#tasks/owner.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -25,6 +26,7 @@ vi.mock("#execution/session/turn-step.js", () => ({
 vi.mock("#execution/route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
+vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
 vi.mock("#tasks/owner.js", async (importOriginal) => ({
   ...(await importOriginal()),
   cancelTasksStep: vi.fn(
@@ -645,6 +647,66 @@ describe("SessionExecution turn checkpoints", () => {
     expect(execution.cursor.sessionState).toBe(completedState);
     expect(cancelTasksStep).not.toHaveBeenCalled();
     expect(queue.pendingCount).toBe(1);
+  });
+
+  it("resolves a waited call with its timeout when the owner timer fires during the wait", async () => {
+    const sessionState = state("");
+    const signal = {
+      kind: "task.deadline" as const,
+      ownerRunId: "owner-1",
+      wakeAt: "2026-09-24T14:00:00.000Z",
+    };
+    const timedOut = {
+      callId: "agent-call",
+      isError: true,
+      kind: "tool-result" as const,
+      output: { code: "TIMED_OUT", message: "The agent did not finish within its time limit." },
+      toolName: "research",
+    };
+    const runtimePayloads: SessionInboxPayload[] = [signal];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      next: vi.fn(async () => runtimePayloads.shift()),
+      onDelivery: vi.fn(() => () => {}),
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    const execution = createExecution({ inbox, sessionState });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["agent-call"],
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue(ownerUpdate(sessionState));
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValue(ownerUpdate(sessionState, [timedOut]));
+
+    await expect(
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Ask the researcher." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(applyTaskDeadlinesStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ signal }),
+    );
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toMatchObject({
+      runtimeResults: { results: [timedOut] },
+    });
   });
 
   it("routes a descendant answer while waiting for runtime results", async () => {

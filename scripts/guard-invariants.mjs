@@ -118,6 +118,29 @@
  *             delivery policies, cohort notifications, the
  *             `execution: "background"` tool option, or the old
  *             `#execution/tasks` runtime.
+ *   rule 46 — No timer-based waiting loops in `"use step"` modules under
+ *             `src/execution/`, `src/tasks/`, or `src/subagents/`: no
+ *             `setTimeout`, `sleep`, or `delay` call inside a loop. Workflow
+ *             bodies orchestrate and steps only perform side effects; a step
+ *             that polls or backs off on a timer holds a function invocation
+ *             open and hides a race (a durable wait belongs in a workflow body,
+ *             a deadline in the owner's task timer).
+ *   rule 47 — Only `src/tasks/table.ts` constructs task records, and only
+ *             `src/tasks/table.ts` and `src/tasks/state.ts` write the owner's
+ *             `eve.taskTable` state key. The table is the single writer of the
+ *             owner's task records; a second writer reintroduces the split
+ *             stores the task kernel removed.
+ *   rule 48 — One `TaskMessage` union. Object types with
+ *             `kind: "task.started" | "task.settled" | "task.input" |
+ *             "task.deadline"` are declared only in `src/tasks/protocol.ts`,
+ *             and no template string encodes a task ID together with its
+ *             generation. Identity travels as typed fields, never as a string
+ *             that code must parse.
+ *   rule 49 — Model-facing task text lives only in `src/tasks/render.ts`. No
+ *             other eve source string literal contains "in the background",
+ *             "<task_result", or "[Tasks]". One module owns every string the
+ *             model reads about tasks, so the contract can be tuned in one
+ *             place.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -217,6 +240,10 @@ function isTsLike(relPath) {
  *   rule42: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
+ *   rule46: Violation[];
+ *   rule47: Violation[];
+ *   rule48: Violation[];
+ *   rule49: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -249,6 +276,13 @@ async function scanRepo(state) {
     checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
+    checkRule46(posix, content, state.rule46);
+    checkRule47(posix, lines, state.rule47);
+    if (isProductionEveSource(posix)) {
+      const sourceFile = parseTs(posix, content);
+      checkRule48(posix, sourceFile, state.rule48);
+      checkRule49(posix, sourceFile, state.rule49);
+    }
   }
 }
 
@@ -343,6 +377,250 @@ function checkRule44(posix, lines, violations) {
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
   });
+}
+
+// ---------- Rules 46–49: task kernel invariants ----------
+
+const EVE_SRC = "packages/eve/src/";
+const TEST_SOURCE_RE = /\.(?:test|integration\.test|scenario\.test)\.tsx?$/;
+
+/** Production eve source: not a test, and not a shared test fixture. */
+function isProductionEveSource(posix) {
+  return (
+    posix.startsWith(EVE_SRC) &&
+    !TEST_SOURCE_RE.test(posix) &&
+    !posix.startsWith(`${EVE_SRC}internal/testing/`)
+  );
+}
+
+function parseTs(posix, source) {
+  return ts.createSourceFile(
+    posix,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    posix.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+}
+
+function lineOf(sourceFile, node) {
+  return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+}
+
+function hasDirective(node, directive) {
+  const body = node.body;
+  if (body === undefined || !ts.isBlock(body)) return false;
+  for (const statement of body.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) break;
+    if (statement.expression.text === directive) return true;
+  }
+  return false;
+}
+
+const RULE46_DIRS = ["execution/", "tasks/", "subagents/"].map((dir) => `${EVE_SRC}${dir}`);
+const RULE46_TIMER_CALLEES = new Set(["setTimeout", "sleep", "delay"]);
+// `file#function` entries. `waitForHookRelease` serves the session reset
+// ingress path, which runs in a request handler rather than a step; its file
+// also defines the handoff start step.
+const RULE46_ALLOWED_FUNCTIONS = new Set([
+  "packages/eve/src/execution/workflow-runtime.ts#waitForHookRelease",
+]);
+
+/**
+ * @param {string} posix
+ * @param {string} source
+ * @param {Violation[]} violations
+ */
+function checkRule46(posix, source, violations) {
+  if (!RULE46_DIRS.some((dir) => posix.startsWith(dir)) || !isProductionEveSource(posix)) return;
+  if (!source.includes('"use step"')) return;
+  const sourceFile = parseTs(posix, source);
+  const visit = (node, scope) => {
+    let next = scope;
+    if (ts.isFunctionLike(node)) {
+      const name =
+        node.name !== undefined && ts.isIdentifier(node.name) ? node.name.text : scope.name;
+      next = { ...scope, name, workflow: scope.workflow || hasDirective(node, "use workflow") };
+    } else if (ts.isIterationStatement(node, false)) {
+      next = { ...scope, loop: true };
+    } else if (
+      scope.loop &&
+      !scope.workflow &&
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      RULE46_TIMER_CALLEES.has(node.expression.text) &&
+      !RULE46_ALLOWED_FUNCTIONS.has(`${posix}#${scope.name ?? ""}`)
+    ) {
+      violations.push({
+        rule: 46,
+        file: posix,
+        line: lineOf(sourceFile, node),
+        message: `waits on \`${node.expression.text}\` inside a loop in a "use step" module. Steps perform side effects once; they never poll or back off on a timer. Move a durable wait into a workflow body, express a deadline through the owner's task timer, or let Workflow retry the step.`,
+      });
+    }
+    ts.forEachChild(node, (child) => visit(child, next));
+  };
+  visit(sourceFile, { loop: false, name: undefined, workflow: false });
+}
+
+const RULE47_RECORD_WRITERS = new Set([`${EVE_SRC}tasks/table.ts`, `${EVE_SRC}tasks/record.ts`]);
+const RULE47_TABLE_WRITERS = new Set([`${EVE_SRC}tasks/table.ts`, `${EVE_SRC}tasks/state.ts`]);
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule47(posix, lines, violations) {
+  if (!isProductionEveSource(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!RULE47_RECORD_WRITERS.has(posix) && /\bTASK_RECORD_VERSION\b/.test(line)) {
+      violations.push({
+        rule: 47,
+        file: posix,
+        line: idx + 1,
+        message:
+          "constructs a task record outside src/tasks/table.ts. Records change only through the table's transitions (startTask, applyTaskMessage, cancelTask, ...); add a transition there instead.",
+      });
+    }
+    if (
+      !RULE47_TABLE_WRITERS.has(posix) &&
+      (/\b(?:TASK_TABLE_STATE_KEY|writeTaskTable)\b/.test(line) || line.includes('"eve.taskTable"'))
+    ) {
+      violations.push({
+        rule: 47,
+        file: posix,
+        line: idx + 1,
+        message:
+          "touches the eve.taskTable state key directly. Read the table with getTaskTable or readTasks and write it with setTaskTable from src/tasks/state.ts.",
+      });
+    }
+  });
+}
+
+const RULE48_TASK_MESSAGE_KINDS = new Set([
+  "task.started",
+  "task.settled",
+  "task.input",
+  "task.deadline",
+]);
+const RULE48_PROTOCOL = `${EVE_SRC}tasks/protocol.ts`;
+// `file#type` entries. The local child's `task.started` wire report carries
+// its call and session address; the owner converts it into the protocol
+// message, so it is not a second TaskMessage union.
+const RULE48_ALLOWED_DECLARATIONS = new Set([
+  "packages/eve/src/channel/types.ts#TaskStartedHookPayload",
+]);
+
+function isTaskMessageFilter(typeLiteral) {
+  const parent = typeLiteral.parent;
+  return (
+    parent !== undefined &&
+    ts.isTypeReferenceNode(parent) &&
+    ts.isIdentifier(parent.typeName) &&
+    (parent.typeName.text === "Extract" || parent.typeName.text === "Exclude")
+  );
+}
+
+function declaringTypeName(node) {
+  for (let current = node.parent; current !== undefined; current = current.parent) {
+    if (ts.isInterfaceDeclaration(current) || ts.isTypeAliasDeclaration(current)) {
+      return current.name.text;
+    }
+  }
+  return undefined;
+}
+
+function mentions(expression, pattern) {
+  let found = false;
+  const visit = (node) => {
+    if (found) return;
+    if (ts.isIdentifier(node) && pattern.test(node.text)) found = true;
+    else ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return found;
+}
+
+/**
+ * @param {string} posix
+ * @param {import("typescript").SourceFile} sourceFile
+ * @param {Violation[]} violations
+ */
+function checkRule48(posix, sourceFile, violations) {
+  if (posix === RULE48_PROTOCOL) return;
+  const visit = (node) => {
+    if (
+      ts.isPropertySignature(node) &&
+      node.name !== undefined &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "kind" &&
+      node.type !== undefined &&
+      ts.isLiteralTypeNode(node.type) &&
+      ts.isStringLiteral(node.type.literal) &&
+      RULE48_TASK_MESSAGE_KINDS.has(node.type.literal.text) &&
+      !isTaskMessageFilter(node.parent) &&
+      !RULE48_ALLOWED_DECLARATIONS.has(`${posix}#${declaringTypeName(node) ?? ""}`)
+    ) {
+      violations.push({
+        rule: 48,
+        file: posix,
+        line: lineOf(sourceFile, node),
+        message: `declares a \`${node.type.literal.text}\` message outside src/tasks/protocol.ts. Every task message belongs to the one TaskMessage union; reference it with Extract<TaskMessage, ...> instead.`,
+      });
+    }
+    if (
+      ts.isTemplateExpression(node) &&
+      node.templateSpans.some((span) => mentions(span.expression, /taskId/i)) &&
+      node.templateSpans.some((span) => mentions(span.expression, /generation/i))
+    ) {
+      violations.push({
+        rule: 48,
+        file: posix,
+        line: lineOf(sourceFile, node),
+        message:
+          "encodes a task ID and generation in one string. Pass { taskId, generation } as typed fields; idempotency keys come from taskMessageKey in src/tasks/protocol.ts.",
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+}
+
+const RULE49_TASK_TEXT_RE = /in the background|<task_result|\[Tasks\]/i;
+const RULE49_RENDER = `${EVE_SRC}tasks/render.ts`;
+// CLI and setup copy is read by people at a terminal, never by the model.
+const RULE49_EXCLUDED_PREFIXES = [`${EVE_SRC}cli/`, `${EVE_SRC}setup/`];
+
+/**
+ * @param {string} posix
+ * @param {import("typescript").SourceFile} sourceFile
+ * @param {Violation[]} violations
+ */
+function checkRule49(posix, sourceFile, violations) {
+  if (posix === RULE49_RENDER || RULE49_EXCLUDED_PREFIXES.some((dir) => posix.startsWith(dir))) {
+    return;
+  }
+  const visit = (node) => {
+    if (
+      (ts.isStringLiteral(node) ||
+        ts.isNoSubstitutionTemplateLiteral(node) ||
+        ts.isTemplateHead(node) ||
+        ts.isTemplateMiddle(node) ||
+        ts.isTemplateTail(node)) &&
+      RULE49_TASK_TEXT_RE.test(node.text)
+    ) {
+      violations.push({
+        rule: 49,
+        file: posix,
+        line: lineOf(sourceFile, node),
+        message:
+          "contains model-facing task text outside src/tasks/render.ts. Export the string (or a renderer) from src/tasks/render.ts and import it here, so every word the model reads about tasks lives in one module.",
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1483,6 +1761,10 @@ async function main() {
     rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
+    rule46: /** @type {Violation[]} */ ([]),
+    rule47: /** @type {Violation[]} */ ([]),
+    rule48: /** @type {Violation[]} */ ([]),
+    rule49: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1599,6 +1881,9 @@ async function main() {
   for (const issue of await checkRule44SandboxProviders()) {
     violations.push({ rule: 44, ...issue });
   }
+
+  // Rules 46–49
+  violations.push(...state.rule46, ...state.rule47, ...state.rule48, ...state.rule49);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -11,8 +11,9 @@ import {
 } from "#execution/session-inbox/address.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
+import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 
-type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
+type Command = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | TaskDeadlineSignal;
 type Hook = Awaited<ReturnType<typeof getHookByToken>>;
 
 /** Reported as an inactive session so the channel starts a fresh one. */

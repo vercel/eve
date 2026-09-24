@@ -18,6 +18,7 @@ import {
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
+import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { isObject } from "#shared/guards.js";
 
 /** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
@@ -38,7 +39,7 @@ export interface ResumedSessionInboxHook {
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
-  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
+  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload | TaskDeadlineSignal,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalToken(address);
   const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;

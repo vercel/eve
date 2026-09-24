@@ -87,8 +87,14 @@ export type TaskMessage =
   | {
       /** Signals that a deadline or cancellation confirmation window may have passed. */
       readonly kind: "task.deadline";
+      /** The owner run that armed the timer. A later owner still honors it: every signal is re-evaluated. */
       readonly ownerRunId: string;
+      /** The wake time the timer was armed for. */
+      readonly wakeAt: string;
     };
+
+/** The owner timer's signal; it carries no task identity and is re-evaluated against the table. */
+export type TaskDeadlineSignal = Extract<TaskMessage, { readonly kind: "task.deadline" }>;
 
 /** Owner → child. Held on the record until the child reports `task.started`. */
 export type TaskCommand =

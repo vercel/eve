@@ -236,6 +236,8 @@ Channels with activity reporting show the child's tool activity as a child item 
 
 Cancelling the parent turn cancels the child's current turn. Parent-session finalization terminates remaining children.
 
+Each delegated agent call has a time limit of 2 hours of active time. Time the child spends waiting on a question or approval that reaches the root channel does not count. A call still working at the limit fails: the parent's tool call gets an error with code `TIMED_OUT`, `task.settled` reports `failed` with the same error, and eve cancels the child's current turn. The child stays available for another call. If a local child has not stopped 30 seconds after eve cancels it, whether for a timeout or a parent cancel, eve terminates the child's session, and a later call with its `agentId` fails with `UNKNOWN_AGENT`.
+
 Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call by default so completed earlier Workflow steps, tool results, and sandbox work remain available to the child. A declared subagent that opts into [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching) can instead repeat the uncommitted calls and inline tool executions in its current batch. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
 
 ## Agent messaging

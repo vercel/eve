@@ -5,6 +5,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import { deriveTaskId } from "#tasks/ids.js";
 import {
   isTerminalTaskStatus,
+  type ChildAddress,
   type TaskCommand,
   type TaskError,
   type TaskKind,
@@ -65,7 +66,12 @@ export type TaskEffect =
       readonly usage?: TokenUsage;
     }
   | { readonly kind: "reconcile"; readonly record: TaskRecord }
-  | { readonly kind: "hard-stop"; readonly record: TaskRecord };
+  | {
+      /** The run to terminate. The record no longer names it: a stopped run takes no more work. */
+      readonly kind: "hard-stop";
+      readonly record: TaskRecord;
+      readonly child: Extract<ChildAddress, { readonly kind: "local" | "workflow" }>;
+    };
 
 export interface TaskTransition {
   readonly table: TaskTable;
@@ -376,7 +382,7 @@ export function timeOutTask(table: TaskTable, taskId: string, now: string): Task
   const outcome: TaskOutcome = {
     error: {
       code: "TIMED_OUT",
-      message: `The task did not finish within its time limit and was stopped.`,
+      message: `The ${record.kind === "agent" ? "agent" : "task"} did not finish within its time limit and was stopped.`,
     },
     status: "failed",
   };
@@ -410,11 +416,15 @@ export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransi
       continue;
     }
     if (record.cancelConfirmBy !== undefined && Date.parse(record.cancelConfirmBy) <= nowMs) {
-      const confirmed = withoutUndefined({ ...record, cancelConfirmBy: undefined });
+      // A remote child already has the cancel request; there is nothing more to stop.
+      const child = record.child?.kind === "remote" ? undefined : record.child;
+      const confirmed = withoutUndefined({
+        ...record,
+        cancelConfirmBy: undefined,
+        child: child === undefined ? record.child : undefined,
+      });
       next = replace(next, confirmed);
-      if (record.child !== undefined && record.child.kind !== "remote") {
-        effects.push({ kind: "hard-stop", record: confirmed });
-      }
+      if (child !== undefined) effects.push({ child, kind: "hard-stop", record: confirmed });
     }
   }
   return { effects, table: next };

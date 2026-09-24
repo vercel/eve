@@ -8,7 +8,7 @@ import type {
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
 import { cancelTasks, settleWorkflowTask } from "#tasks/owner-body.js";
-import { isWorkingWorkflowTask } from "#tasks/state.js";
+import { findWorkflowTask, getTaskTable, isWorkingWorkflowTask } from "#tasks/state.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { workflowToolRunRequestToInputRequestPayload } from "#execution/tools/workflow/owner-inbox.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -100,6 +100,8 @@ async function handleWorkflowToolRunRequest(
     });
     return;
   }
+  // The run's task waits on the answer, so its deadline clock stops until then.
+  const task = findWorkflowTask(getTaskTable(cursor.sessionState.snapshot.session), message.from);
   await cursor.apply(
     await runProxySubagentEventStep({
       ...(message.requestCoordinates === undefined
@@ -109,6 +111,7 @@ async function handleWorkflowToolRunRequest(
       sessionWritable: cursor.sessionWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
+      taskId: task?.id,
     }),
   );
 }

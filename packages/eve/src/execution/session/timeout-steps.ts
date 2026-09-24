@@ -58,7 +58,8 @@ export async function cancelSessionTimeoutStep(input: { readonly runId: string }
   }
 }
 
-function isInactiveTimeoutTarget(error: unknown): boolean {
+/** Whether a timer's target run or hook is already gone, so the signal or cancel has nothing left to do. */
+export function isInactiveTimeoutTarget(error: unknown): boolean {
   for (const candidate of walkCauseChain(error)) {
     if (
       HookNotFoundError.is(candidate) ||

@@ -347,8 +347,32 @@ describe("cancelTask", () => {
     ]);
     expect(evaluateTaskDeadlines(cancelled.table, NOW).effects).toEqual([]);
     const due = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:30.000Z");
-    expect(due.effects).toEqual([expect.objectContaining({ kind: "hard-stop" })]);
+    expect(due.effects).toEqual([expect.objectContaining({ child, kind: "hard-stop" })]);
+    // The stopped run takes no more work, so the record no longer names it.
+    expect(due.table.records[0]).not.toHaveProperty("child");
+    expect(due.table.records[0]).not.toHaveProperty("cancelConfirmBy");
     expect(evaluateTaskDeadlines(due.table, "2026-09-24T14:05:00.000Z").effects).toEqual([]);
+  });
+
+  it("stops waiting on a remote child without a hard stop", () => {
+    const remote = {
+      callbackBaseUrl: "https://parent.example",
+      kind: "remote",
+      sessionId: "remote-1",
+      url: "https://remote.example",
+    } as const;
+    const task = started();
+    const withChild = applyTaskMessage(
+      task.table,
+      { child: remote, generation: 1, kind: "task.started", taskId: task.record.id },
+      NOW,
+    ).table;
+    const cancelled = cancelTask(withChild, task.record.id, NOW);
+    const due = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:02:30.000Z");
+    expect(due.effects).toEqual([]);
+    expect(due.table.records[0]).toMatchObject({ child: remote });
+    expect(due.table.records[0]).not.toHaveProperty("cancelConfirmBy");
+    expect(nextTaskWakeAt(due.table)).toBeUndefined();
   });
 });
 

@@ -5,19 +5,27 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SessionStateMap } from "#harness/types.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import {
+  applyTaskDeadline,
   cancelTasks,
   cancelTurnDescendants,
   settleWorkflowTask,
   startAgentTasks,
+  syncTaskTimer,
 } from "#tasks/owner-body.js";
 import { cancelTasksStep, ensureTaskCallbackAliasStep, startAgentTasksStep } from "#tasks/owner.js";
-import { TASK_CALLBACK_ALIAS_STATE_KEY } from "#tasks/state.js";
+import { TASK_CALLBACK_ALIAS_STATE_KEY, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
+import { armTaskTimerStep } from "#tasks/timer-steps.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
 vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
   emitSubagentEventStep: vi.fn(),
 }));
+vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
+vi.mock("#tasks/timer-steps.js", () => ({ armTaskTimerStep: vi.fn() }));
 vi.mock("#tasks/owner.js", () => ({
   applyTaskReportStep: vi.fn(),
   cancelTasksStep: vi.fn(),
@@ -174,6 +182,138 @@ describe("settleWorkflowTask", () => {
     );
   });
 });
+
+describe("syncTaskTimer", () => {
+  const DEADLINE = "2026-09-24T14:00:00.000Z";
+
+  beforeEach(() => {
+    vi.mocked(armTaskTimerStep).mockImplementation(async (input) => ({
+      sessionState: stateWith({
+        ...input.sessionState.snapshot.session.state,
+        [TASK_TIMER_STATE_KEY]: { runId: "timer-new", wakeAt: input.wakeAt },
+      }),
+    }));
+  });
+
+  it("arms the timer once an owner update records a deadline", async () => {
+    const cursor = createCursor(
+      createTestSessionState(),
+      vi.fn(async () => {}),
+    );
+    vi.mocked(startAgentTasksStep).mockResolvedValue({
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: {},
+      sessionState: stateWith(taskTableState([createTaskRecord({ deadlineAt: DEADLINE })])),
+    });
+    vi.mocked(ensureTaskCallbackAliasStep).mockResolvedValue({ sessionState: stateWithAlias() });
+
+    await startAgentTasks(cursor, [CALL]);
+
+    expect(armTaskTimerStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ wakeAt: DEADLINE }),
+    );
+    expect(cursor.sessionState.snapshot.session.state?.[TASK_TIMER_STATE_KEY]).toEqual({
+      runId: "timer-new",
+      wakeAt: DEADLINE,
+    });
+  });
+
+  it("keeps an armed timer that fires no later than the next deadline", async () => {
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
+        [TASK_TIMER_STATE_KEY]: { runId: "timer-1", wakeAt: "2026-09-24T13:00:00.000Z" },
+      }),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).not.toHaveBeenCalled();
+  });
+
+  it("re-arms when a deadline is earlier than the armed timer", async () => {
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
+        [TASK_TIMER_STATE_KEY]: { runId: "timer-1", wakeAt: "2026-09-24T15:00:00.000Z" },
+      }),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ wakeAt: DEADLINE }),
+    );
+  });
+
+  it("arms nothing when no task has a deadline", async () => {
+    const cursor = createCursor(
+      stateWith(taskTableState([createTaskRecord()])),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("applyTaskDeadline", () => {
+  it("publishes the timed-out task's event and returns the waiting call's result", async () => {
+    const cursor = createCursor(
+      createTestSessionState(),
+      vi.fn(async () => {}),
+    );
+    const event: UnstampedMessageStreamEvent = {
+      data: {
+        callId: "call-1",
+        error: { code: "TIMED_OUT", message: "Timed out." },
+        status: "failed",
+        taskId: "research-abc234",
+      },
+      type: "task.settled",
+    };
+    const result = {
+      callId: "call-1",
+      isError: true,
+      kind: "tool-result" as const,
+      output: { code: "TIMED_OUT", message: "Timed out." },
+      toolName: "research",
+    };
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValue({
+      events: [event],
+      replies: [],
+      results: [result],
+      serializedContext: {},
+      sessionState: cursor.sessionState,
+    });
+    vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => ({
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    }));
+    const signal = {
+      kind: "task.deadline" as const,
+      ownerRunId: "owner",
+      wakeAt: "2026-09-24T14:00:00.000Z",
+    };
+
+    await expect(applyTaskDeadline(cursor, signal)).resolves.toEqual([result]);
+
+    expect(applyTaskDeadlinesStep).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+    expect(emitSubagentEventStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ event }),
+    );
+  });
+});
+
+function stateWith(state: SessionStateMap): DurableSessionState {
+  const base = createTestSessionState();
+  return { ...base, snapshot: { session: { ...base.snapshot.session, state } } };
+}
 
 function stateWithAlias(): DurableSessionState {
   const state = createTestSessionState();

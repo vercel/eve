@@ -1,6 +1,7 @@
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { syncTaskTimer } from "#tasks/owner-body.js";
 
 export type RoutedTurnSelection =
   | { readonly kind: "cancel-turn" }
@@ -19,6 +20,8 @@ export async function routeSelectedDelivery(
     sessionState: cursor.sessionState,
   });
   await cursor.apply(routed);
+  // An answered request can restart a task's deadline clock.
+  await syncTaskTimer(cursor);
   if (routed.kind === "cancel-turn") return { kind: "cancel-turn" };
   if (routed.remainder === undefined) return { kind: "consumed" };
   return { ...selection, delivery: routed.remainder };

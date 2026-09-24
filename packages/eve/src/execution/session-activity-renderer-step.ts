@@ -38,7 +38,7 @@ export async function renderSessionActivityStep(input: {
           rendererId: renderer.id,
           revision: input.snapshot.revision,
         });
-        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 250));
+        // No backoff: a step never waits on a timer, and the next snapshot renders again.
       }
     }
   }

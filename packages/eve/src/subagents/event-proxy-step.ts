@@ -32,6 +32,7 @@ import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/mes
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { stopTaskClock } from "#tasks/clock.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
@@ -64,6 +65,7 @@ export async function runProxySubagentEventStep(input: {
     ctx,
     durableSession,
     hookPayload: input.hookPayload,
+    now: new Date().toISOString(),
     sessionWritable: input.sessionWritable,
     taskId: input.taskId,
   });
@@ -75,6 +77,8 @@ export async function emitProxiedSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
+  /** When the request reached this owner; it stops the task's deadline clock. */
+  readonly now?: string;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly taskId?: string;
 }): Promise<ProxySubagentEventResult> {
@@ -134,15 +138,26 @@ export async function emitProxiedSubagentEvent(input: {
   setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
   if (proxyEntries !== undefined && input.hookPayload.kind === "subagent-input-request") {
-    const answerHook = input.answerHook;
+    const { answerHook, taskId } = input;
     scopedSession = upsertProxyInputRequests({
-      entries:
-        answerHook === undefined
-          ? proxyEntries
-          : proxyEntries.map(([requestId, route]) => [requestId, { ...route, answerHook }]),
+      entries: proxyEntries.map(([requestId, route]) => {
+        const tagged: { -readonly [K in keyof ProxyInputRequest]: ProxyInputRequest[K] } = {
+          ...route,
+        };
+        if (answerHook !== undefined) tagged.answerHook = answerHook;
+        if (taskId !== undefined) tagged.taskId = taskId;
+        return [requestId, tagged] as const;
+      }),
       forChildContinuationToken: input.hookPayload.childContinuationToken,
       session: scopedSession,
     });
+    if (taskId !== undefined) {
+      scopedSession = stopTaskClock(scopedSession, {
+        now: input.now ?? new Date().toISOString(),
+        requests: input.hookPayload.event.requests,
+        taskId,
+      });
+    }
   }
 
   const nextSession = reconcileSessionContinuationToken(ctx, scopedSession);

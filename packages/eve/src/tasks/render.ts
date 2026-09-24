@@ -151,6 +151,18 @@ export function renderTasksNote(records: readonly TaskRecord[]): string | undefi
   return lines.join("\n");
 }
 
+/** Static system block for agents that can delegate. */
+export const AGENT_MESSAGING_INSTRUCTION =
+  "Agent messaging\nA subagent call runs until the agent answers, and its answer is the tool result. Agents you have already delegated to stay available after they answer. eve adds a note labeled `[Tasks]` to the conversation when that set changes; its `<idle_agents>` block lists each agent's id, name, and a summary of its last answer. The note is added by eve, not written by the user, and never requires a reply. It does not limit which subagent tools you can call: any subagent tool can always be called without `agentId` to start a new agent, including when the note is empty or absent. Pass an idle agent's id as `agentId` to the same subagent tool only to give that agent more work in its existing session.";
+
+/** Description of the `agentId` input on every agent tool. */
+export const AGENT_ID_PARAMETER_DESCRIPTION =
+  "The id of an idle agent from the latest [Tasks] note, to give it more work in the same child session. Omit this field (or pass null or an empty string) to start a new agent.";
+
+/** How a model-written workflow program calls agents with `ctx.agent`. */
+export const WORKFLOW_PROGRAM_AGENT_CONTRACT =
+  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an idle agent's id from the conversation's [Tasks] note to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
+
 /** Output of `task_cancel`. */
 export interface TaskCancelOutput {
   readonly cancelled: readonly string[];

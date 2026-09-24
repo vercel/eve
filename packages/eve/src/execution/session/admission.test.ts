@@ -51,6 +51,18 @@ it("drops a request that matches no working task", async () => {
   expect(runProxySubagentEventStep).not.toHaveBeenCalled();
 });
 
+it("admits the owner timer's signal for the deadline step", async () => {
+  const signal = {
+    kind: "task.deadline" as const,
+    ownerRunId: "previous-owner",
+    wakeAt: "2026-09-24T14:00:00.000Z",
+  };
+
+  await expect(
+    admitSessionInboxPayload(signal, { cursor: createCursor([]), queue: new SessionInputQueue() }),
+  ).resolves.toEqual({ kind: "task-deadline", signal });
+});
+
 function createCursor(records: readonly TaskRecord[]): SessionStateCursor {
   const base = createTestSessionState();
   const sessionState: DurableSessionState = {

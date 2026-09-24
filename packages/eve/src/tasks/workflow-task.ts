@@ -18,8 +18,9 @@ import type {
 import { toError } from "#shared/errors.js";
 import { settledEvents, taskStartedEvent } from "#tasks/events.js";
 import { toTaskError } from "#tasks/outcome.js";
-import { readTasks, type TaskOwnerUpdate } from "#tasks/owner.js";
+import type { TaskOwnerUpdate } from "#tasks/owner.js";
 import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
+import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { findWorkflowTask, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";

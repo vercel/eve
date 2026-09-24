@@ -7,12 +7,10 @@ import type {
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import { formatConnectionsSection } from "#runtime/prompt/connections.js";
+import { AGENT_MESSAGING_INSTRUCTION } from "#tasks/render.js";
 
 const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
-
-const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nA subagent call runs until the agent answers, and its answer is the tool result. Agents you have already delegated to stay available after they answer. eve adds a note labeled `[Tasks]` to the conversation when that set changes; its `<idle_agents>` block lists each agent's id, name, and a summary of its last answer. The note is added by eve, not written by the user, and never requires a reply. It does not limit which subagent tools you can call: any subagent tool can always be called without `agentId` to start a new agent, including when the note is empty or absent. Pass an idle agent's id as `agentId` to the same subagent tool only to give that agent more work in its existing session.";
 
 /**
  * Input for composing the base authored instructions prompt for one

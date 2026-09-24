@@ -120,6 +120,25 @@ describe("terminateChildSessionsStep", () => {
     ).rejects.toThrow("Child finalization requires serialized runtime context.");
   });
 
+  it("cancels the owner's task timer", async () => {
+    const sessionState = makeSessionState([]);
+    await terminateChildSessionsStep({
+      sessionState: {
+        ...sessionState,
+        snapshot: {
+          session: {
+            ...sessionState.snapshot.session,
+            state: { "eve.taskTimer": { runId: "timer-1", wakeAt: "2026-09-24T14:00:00.000Z" } },
+          },
+        },
+      },
+    });
+
+    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "timer-1", {
+      cancelReason: "Parent session ended",
+    });
+  });
+
   it("skips a task whose child never reported its address", async () => {
     await terminateChildSessionsStep({
       sessionState: makeSessionState([

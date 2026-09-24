@@ -27,10 +27,12 @@ import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import {
+  applyTaskDeadline,
   applyTaskOwnerUpdate,
   applyTaskReport,
   cancelTurnDescendants,
   startPendingAgentTasks,
+  syncTaskTimer,
 } from "#tasks/owner-body.js";
 import { isWorkflowTaskResult } from "#tasks/state.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
@@ -398,6 +400,9 @@ class ActiveTurn {
       case "task-report":
         await this.applyTaskReport(admitted.payload);
         return;
+      case "task-deadline":
+        this.acceptOwnResults(await applyTaskDeadline(this.input.cursor, admitted.signal));
+        return;
       case "cancel":
         if (!this.cancelsThisTurn(value)) return;
         this.abort();
@@ -412,7 +417,11 @@ class ActiveTurn {
    * steps, so a held cancel reaches a late-starting child.
    */
   private async applyTaskReport(payload: Parameters<typeof applyTaskReport>[1]): Promise<void> {
-    const results = await applyTaskReport(this.input.cursor, payload);
+    this.acceptOwnResults(await applyTaskReport(this.input.cursor, payload));
+  }
+
+  /** Results the owner produced from its own task table, such as a timeout. */
+  private acceptOwnResults(results: readonly RuntimeActionResult[]): void {
     if (results.length > 0) {
       this.runtimeResults.push({ kind: "runtime-action-result", results, trusted: true });
     }
@@ -435,6 +444,8 @@ class ActiveTurn {
         sessionState: this.input.cursor.sessionState,
       });
       await this.input.cursor.apply(routed);
+      // An answered request can restart a task's deadline clock.
+      await syncTaskTimer(this.input.cursor);
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
         this.admitted.delete(sequence);

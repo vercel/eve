@@ -9,7 +9,7 @@ import {
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
-import { cancelTurnDescendants } from "#tasks/owner-body.js";
+import { cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -292,6 +292,9 @@ async function runSessionLoop(
   };
 
   try {
+    // A successor inherits the task table and its armed timer; it arms one
+    // only if the table needs an earlier wake, such as for an unreadable record.
+    await syncTaskTimer(cursor);
     const [actionResult, timerResult] = await Promise.allSettled([
       runInitialAction(),
       sessionTimeout?.start(),
