@@ -145,26 +145,6 @@ describe("runRegistryFlow", () => {
       },
     });
   });
-  it("passes the install failure output sink through to the registry installer", async () => {
-    const flow = deps();
-    const fake = createFakePrompter();
-    const onInstallFailureOutput = vi.fn();
-
-    await runRegistryFlow({
-      appRoot: "/agent",
-      initialAddress: "connection/linear",
-      prompter: fake.prompter,
-      onInstallFailureOutput,
-      deps: flow,
-    });
-
-    expect(flow.installRegistryItem).toHaveBeenCalledWith(
-      "/agent",
-      "connection/linear",
-      expect.objectContaining({ onInstallFailureOutput }),
-    );
-  });
-
   it("reports an installation failure without another decision prompt", async () => {
     const flow = deps();
     flow.installRegistryItem = vi.fn(async () => {

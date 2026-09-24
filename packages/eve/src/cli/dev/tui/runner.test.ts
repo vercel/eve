@@ -30,6 +30,7 @@ import {
   type AgentTUIRenderer,
   type AgentTUISessionOptions,
   type AgentTUIStreamEvent,
+  type CommandPresentation,
   type PromptCommand,
   type PromptCommandOutcome,
 } from "./runner.js";
@@ -1673,7 +1674,9 @@ describe("EveTUIRunner development session continuity", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (message) => results.push(message),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? "");
+        },
         renderStream: vi.fn(async (result) => {
           for await (const event of result.events) {
             void event;
@@ -1715,7 +1718,9 @@ describe("EveTUIRunner development session continuity", () => {
         name: "Weather Agent",
         renderer: fakeRenderer({
           readPrompt: vi.fn(async () => prompts.shift()),
-          renderCommandResult: (message) => results.push(message),
+          finishCommand: (outcome) => {
+            if (outcome.kind === "result") results.push(outcome.message ?? "");
+          },
           renderStream: vi.fn(async (result) => {
             for await (const event of result.events) {
               void event;
@@ -1733,6 +1738,29 @@ describe("EveTUIRunner development session continuity", () => {
       expect(results).toEqual([]);
     },
   );
+
+  it("keeps /clear in the transcript when clearing fails", async () => {
+    const session = sessionYielding([]);
+    vi.spyOn(session, "clear").mockRejectedValue(new Error("World unavailable"));
+    const outcomes: CommandPresentation[] = [];
+    const prompts: Array<string | undefined> = ["/clear", undefined];
+    await new EveTUIRunner({
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        finishCommand: (outcome) => outcomes.push(outcome),
+      }),
+      session,
+    }).run();
+
+    expect(outcomes).toEqual([
+      {
+        kind: "result",
+        message: "World unavailable",
+        summary: "Couldn't clear the session",
+      },
+    ]);
+  });
 
   it("cancels an active turn without sending a prompt", async () => {
     const session = stubClient().sessions.attach("session_1");
@@ -1757,7 +1785,9 @@ describe("EveTUIRunner development session continuity", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (message) => results.push(message),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? "");
+        },
         renderStream: vi.fn(async (result) => {
           for await (const event of result.events) {
             void event;
@@ -1782,7 +1812,9 @@ describe("EveTUIRunner development session continuity", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (message) => results.push(message),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? "");
+        },
       }),
     });
 
@@ -1795,13 +1827,13 @@ describe("EveTUIRunner development session continuity", () => {
     const session = sessionYielding([]);
     const reset = vi.spyOn(session, "reset").mockRejectedValue(new Error("World unavailable"));
     const resetRenderer = vi.fn();
-    const notices: string[] = [];
+    const outcomes: CommandPresentation[] = [];
     const prompts: Array<string | undefined> = ["/reset", undefined];
     const runner = new EveTUIRunner({
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderNotice: (message) => notices.push(message),
+        finishCommand: (outcome) => outcomes.push(outcome),
         reset: resetRenderer,
       }),
       session,
@@ -1811,7 +1843,9 @@ describe("EveTUIRunner development session continuity", () => {
 
     expect(reset).toHaveBeenCalledOnce();
     expect(resetRenderer).not.toHaveBeenCalled();
-    expect(notices).toEqual(["Couldn't reset the session: World unavailable"]);
+    expect(outcomes).toEqual([
+      { kind: "result", message: "Couldn't reset the session: World unavailable" },
+    ]);
   });
 
   it("resets rather than sending a queued /reset after a turn boundary", async () => {
@@ -2107,7 +2141,7 @@ describe("EveTUIRunner initial input", () => {
       const renderer = fakeRenderer({
         setupFlow: createFakeSetupFlowRenderer(),
         renderCommandInvocation: vi.fn(),
-        renderCommandResult: vi.fn(),
+        finishCommand: vi.fn(),
       });
       const runner = new EveTUIRunner({
         session,
@@ -2129,13 +2163,14 @@ describe("EveTUIRunner initial input", () => {
         expect.objectContaining({ initialDraft: "Hello Alice\n\nstill editing" }),
       );
       expect(renderer.renderCommandInvocation).not.toHaveBeenCalled();
-      expect(renderer.renderCommandResult).toHaveBeenCalledWith(
-        result === "cancelled"
-          ? "Connect a model with /login when you’re ready."
-          : "Could not connect. Retry with /login.",
-        result === "error" ? "error" : undefined,
-        undefined,
-      );
+      expect(renderer.finishCommand).toHaveBeenCalledWith({
+        kind: "result",
+        message:
+          result === "cancelled"
+            ? "Connect a model with /login when you’re ready."
+            : "Could not connect. Retry with /login.",
+        summary: undefined,
+      });
     },
   );
 
@@ -3210,14 +3245,14 @@ describe("EveTUIRunner remote authentication", () => {
         completedMutations: [],
       };
     });
-    const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+    const commandInvocations: Array<string> = [];
 
     await runRemoteAuth({
       client,
       flow,
       resolveDeployment: async () => ({ kind: "not-found" }),
       renderer: {
-        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+        renderCommandInvocation: (text) => commandInvocations.push(text),
       },
     });
 
@@ -3233,7 +3268,7 @@ describe("EveTUIRunner remote authentication", () => {
     async (challenge) => {
       const client = stubClient();
       vi.spyOn(client, "info").mockRejectedValueOnce(challenge).mockResolvedValueOnce(AGENT_INFO);
-      const commandInvocations: Array<{ text: string; status: "failed" | undefined }> = [];
+      const commandInvocations: Array<string> = [];
       const flow = successfulAuth();
       const statuses: string[] = [];
       const renderAgentHeader = vi.fn();
@@ -3242,7 +3277,7 @@ describe("EveTUIRunner remote authentication", () => {
         client,
         flow,
         renderer: {
-          renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+          renderCommandInvocation: (text) => commandInvocations.push(text),
           setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
           renderAgentHeader,
         },
@@ -3326,12 +3361,12 @@ describe("EveTUIRunner remote authentication", () => {
       );
       const setupFlow = idleSetupFlow();
       const readPrompt = vi.fn(async () => undefined);
-      const renderCommandResult = vi.fn();
+      const finishCommand = vi.fn();
       await runRemoteAuth({
         client,
         flow,
         initialInput: "Hello Alice",
-        renderer: { setupFlow, readPrompt, renderCommandResult },
+        renderer: { setupFlow, readPrompt, finishCommand },
       });
       expect(flow).toHaveBeenCalledOnce();
       expect(client.info).toHaveBeenCalledOnce();
@@ -3339,13 +3374,13 @@ describe("EveTUIRunner remote authentication", () => {
       expect(readPrompt).toHaveBeenCalledWith(
         expect.objectContaining({ initialDraft: "Hello Alice" }),
       );
-      if (kind === "cancelled") expect(renderCommandResult).not.toHaveBeenCalled();
+      if (kind === "cancelled") expect(finishCommand).not.toHaveBeenCalled();
       else
-        expect(renderCommandResult).toHaveBeenCalledWith(
-          expect.stringContaining("Check project permissions"),
-          "error",
-          undefined,
-        );
+        expect(finishCommand).toHaveBeenCalledWith({
+          kind: "result",
+          message: expect.stringContaining("Check project permissions"),
+          summary: undefined,
+        });
     },
   );
 
@@ -3357,24 +3392,24 @@ describe("EveTUIRunner remote authentication", () => {
     const flow = successfulAuth([
       { kind: "trusted-sources-updated", targetProjectName: "inbound" },
     ]);
-    const renderCommandResult = vi.fn();
+    const finishCommand = vi.fn();
     const statuses: string[] = [];
     await runRemoteAuth({
       client,
       flow,
       renderer: {
-        renderCommandResult,
+        finishCommand,
         setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
       },
     });
     expect(flow).toHaveBeenCalledOnce();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(statuses.at(-1)).toBe("auth-failed");
-    expect(renderCommandResult).toHaveBeenCalledWith(
-      expect.stringContaining("updated Trusted Sources for inbound"),
-      "error",
-      undefined,
-    );
+    expect(finishCommand).toHaveBeenCalledWith({
+      kind: "result",
+      message: expect.stringContaining("updated Trusted Sources for inbound"),
+      summary: undefined,
+    });
   });
 
   it("aborts remote setup during an idle wait and waits for cleanup before releasing input", async () => {
@@ -4240,7 +4275,7 @@ describe("EveTUIRunner boot setup detection", () => {
   it("releases the composer while /info is still pending and ignores its result after exit", async () => {
     const refreshed = createDeferred<AgentInfoResult>();
     const renderAgentHeader = vi.fn();
-    const renderCommandResult = vi.fn();
+    const finishCommand = vi.fn();
     const renderSetupWarning = vi.fn();
     const readPrompt = vi.fn(async () => undefined);
     const setStartupPhase = vi.fn();
@@ -4249,7 +4284,7 @@ describe("EveTUIRunner boot setup detection", () => {
       bootDetections: [],
       renderer: {
         renderAgentHeader,
-        renderCommandResult,
+        finishCommand,
         renderSetupWarning,
         readPrompt,
         setStartupPhase,
@@ -4258,7 +4293,7 @@ describe("EveTUIRunner boot setup detection", () => {
     const run = runner.run();
     await vi.waitFor(() => expect(readPrompt).toHaveBeenCalledOnce());
     expect(client.info).toHaveBeenCalledTimes(2);
-    expect(renderCommandResult).not.toHaveBeenCalled();
+    expect(finishCommand).not.toHaveBeenCalled();
     expect(renderSetupWarning).not.toHaveBeenCalled();
     expect(setStartupPhase).toHaveBeenLastCalledWith(undefined);
     await run;
@@ -4378,7 +4413,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
   it("drops stale disconnected evidence when the post-setup info refresh fails", async () => {
     const clearSetupWarning = vi.fn();
-    const renderCommandResult = vi.fn();
+    const finishCommand = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
     const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
       info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
@@ -4398,7 +4433,7 @@ describe("EveTUIRunner boot setup detection", () => {
       bootDetections: [{ id: "test", detect }],
       renderer: {
         clearSetupWarning,
-        renderCommandResult,
+        finishCommand,
         renderAgentHeader: (header) => headers.push(header),
       },
     });
@@ -4406,7 +4441,7 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
-    expect(renderCommandResult).not.toHaveBeenCalled();
+    expect(finishCommand).not.toHaveBeenCalled();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect).not.toHaveBeenCalled();
     expect(headers.at(-1)?.info?.agent.model.endpoint).toMatchObject({
@@ -4444,7 +4479,9 @@ describe("EveTUIRunner command outcome rendering", () => {
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
       renderNotice: vi.fn(),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? "");
+      },
       renderStream: vi.fn(async () => {}),
     };
 
@@ -4481,7 +4518,9 @@ describe("EveTUIRunner command outcome rendering", () => {
       name: "Weather Agent",
       renderer: {
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (text) => results.push(text),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? "");
+        },
         renderStream: vi.fn(async () => {}),
       },
       session,
@@ -4507,7 +4546,10 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
-      renderCommandResult: (text, _status, summary) => results.push({ text, summary }),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result")
+          results.push({ text: outcome.message ?? "", summary: outcome.summary });
+      },
       renderStream: vi.fn(async () => {}),
       logDisplayMode: () => "all",
       setLogDisplayMode: (mode) => modes.push(mode),
@@ -4519,6 +4561,7 @@ describe("EveTUIRunner command outcome rendering", () => {
     expect(modes).toEqual(["none", "sandbox"]);
     expect(results).toHaveLength(3);
     expect(results[0]?.summary).toContain("hidden");
+    expect(results[1]?.summary).toBeUndefined();
     expect(results[1]?.text).toContain('Unknown log level "bogus"');
     expect(results[2]?.summary).toContain("sandbox");
     expect(session.send).not.toHaveBeenCalled();
@@ -4531,7 +4574,9 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? "");
+      },
       renderStream: vi.fn(async () => {}),
     };
 
@@ -4551,7 +4596,9 @@ describe("EveTUIRunner command outcome rendering", () => {
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
       renderNotice: (text) => notices.push(text),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? "");
+      },
       renderStream: vi.fn(async () => {}),
     };
 
@@ -4919,7 +4966,7 @@ it("starts onboarding without login history and preserves the input draft", asyn
   const renderer = fakeRenderer({
     setupFlow: createFakeSetupFlowRenderer(),
     renderCommandInvocation: vi.fn(),
-    renderCommandResult: vi.fn(),
+    finishCommand: vi.fn(),
     readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
       order.push("prompt");
       expect(options?.initialDraft).toBe("Hello Alice");
@@ -4939,7 +4986,7 @@ it("starts onboarding without login history and preserves the input draft", asyn
   await runner.run();
   expect(order).toEqual(["login", "prompt"]);
   expect(renderer.renderCommandInvocation).not.toHaveBeenCalled();
-  expect(renderer.renderCommandResult).not.toHaveBeenCalled();
+  expect(renderer.finishCommand).not.toHaveBeenCalled();
 });
 
 it("keeps the result of an explicit login command after onboarding", async () => {
@@ -4947,7 +4994,7 @@ it("keeps the result of an explicit login command after onboarding", async () =>
   const handle = vi.fn(async () => ({ message: "Connected." }));
   const renderer = fakeRenderer({
     setupFlow: createFakeSetupFlowRenderer(),
-    renderCommandResult: vi.fn(),
+    finishCommand: vi.fn(),
     readPrompt: vi.fn(async () => prompts.shift()),
   });
   const runner = new EveTUIRunner({
@@ -4962,9 +5009,9 @@ it("keeps the result of an explicit login command after onboarding", async () =>
   await runner.run();
 
   expect(handle).toHaveBeenCalledTimes(2);
-  expect(renderer.renderCommandResult).toHaveBeenCalledExactlyOnceWith(
-    "Connected.",
-    undefined,
-    undefined,
-  );
+  expect(renderer.finishCommand).toHaveBeenCalledExactlyOnceWith({
+    kind: "result",
+    message: "Connected.",
+    summary: undefined,
+  });
 });

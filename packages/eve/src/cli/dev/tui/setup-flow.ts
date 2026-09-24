@@ -110,8 +110,6 @@ export interface SetupFlowRenderer {
     facts: readonly { label: string; value: string }[];
   }): void;
   renderOutput(text: string): void;
-  /** Records a failed installer's buffered stderr as captured stderr for `/loglevel`. */
-  captureInstallFailureOutput?(stderr: string): void;
   /** Temporarily restores the terminal while a child process inherits stdio. */
   withInheritedStdio<T>(task: () => Promise<T>): Promise<T>;
   /** Gives a setup subprocess exclusive terminal and development-host ownership. */

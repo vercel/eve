@@ -283,9 +283,8 @@ export type AgentTUIRenderer = {
   /** Clears the setup attention line once its issue is resolved. */
   clearSetupWarning?(): void;
   /** Commits the startup `/deploy` invocation to the transcript. */
-  renderCommandInvocation?(text: string, status?: "failed"): void;
-  renderCommandResult?(text: string, status?: CommandResultStatus, summary?: string): void;
-  dismissCommandInvocation?(): void;
+  renderCommandInvocation?(text: string): void;
+  finishCommand?(outcome: CommandPresentation): void;
   choosePromptCommand?(commands: readonly PromptCommandSpec[]): Promise<string | undefined>;
   showInfoPanel?(text: string): Promise<void>;
   readonly setupFlow?: SetupFlowRenderer;
@@ -411,6 +410,11 @@ export interface PromptCommandHandlerContext {
 
 /** How a settled slash command marks its echoed invocation. */
 export type CommandResultStatus = "success" | "error" | "neutral";
+
+/** One atomic transcript decision for an invocation, including no-output commands. */
+export type CommandPresentation =
+  | { kind: "dismiss" }
+  | { kind: "result"; message?: string; summary?: string };
 
 /** What one handled slash command leaves behind for the runner to apply. */
 export interface PromptCommandOutcome {
@@ -847,7 +851,8 @@ export class EveTUIRunner {
     this.#paintSetupAttention();
     this.#renderer.setStartupPhase?.(undefined);
     if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.tone === "error") {
-      this.#renderCommandOutcome(startupOutcome?.message, startupOutcome?.tone);
+      if (startupOutcome?.message !== undefined)
+        this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
 
     while (true) {
@@ -919,13 +924,14 @@ export class EveTUIRunner {
         const command = this.#idleInputResult === undefined ? parsePromptCommand(prompt!) : null;
 
         if (command?.type === "exit") {
+          this.#finishCommand({ kind: "dismiss" });
           this.#lifecycle?.requestStop();
           return;
         }
 
         if (command?.type === "cancel") {
           if (this.#session === undefined) {
-            this.#renderCommandOutcome("", "neutral", "No active turn to cancel");
+            this.#finishCommand({ kind: "result", summary: "No active turn to cancel" });
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -934,11 +940,13 @@ export class EveTUIRunner {
           }
           try {
             const result = await this.#session.cancel();
-            this.#renderCommandOutcome(
-              result.status === "accepted" ? "" : "No active turn to cancel.",
-              result.status === "accepted" ? "success" : "neutral",
-              result.status === "accepted" ? "Cancellation requested" : "No active turn to cancel",
-            );
+            this.#finishCommand({
+              kind: "result",
+              summary:
+                result.status === "accepted"
+                  ? "Cancellation requested"
+                  : "No active turn to cancel",
+            });
             if (result.status === "no_active_turn") {
               pendingInputResponses = undefined;
               followCurrentSession = false;
@@ -947,11 +955,11 @@ export class EveTUIRunner {
               continue;
             }
           } catch (error) {
-            this.#renderCommandOutcome(
-              `Couldn't cancel the turn: ${toErrorMessage(error)}`,
-              "error",
-              "Couldn't cancel the turn",
-            );
+            this.#finishCommand({
+              kind: "result",
+              message: toErrorMessage(error),
+              summary: "Couldn't cancel the turn",
+            });
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -965,13 +973,13 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "reset") {
-          this.#renderer.dismissCommandInvocation?.();
           if (!(await this.#resetCurrentSession())) {
             pendingInputResponses = undefined;
             streamWithoutPrompt = false;
             prompt = undefined;
             continue;
           }
+          this.#finishCommand({ kind: "dismiss" });
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -980,7 +988,7 @@ export class EveTUIRunner {
 
         if (command?.type === "compact") {
           if (this.#session === undefined) {
-            this.#renderCommandOutcome("", "neutral", "No active session to compact");
+            this.#finishCommand({ kind: "result", summary: "No active session to compact" });
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -989,13 +997,13 @@ export class EveTUIRunner {
           }
           try {
             const result = await this.#session.compact();
-            this.#renderCommandOutcome(
-              result.status === "accepted" ? "" : "No active session to compact.",
-              result.status === "accepted" ? "success" : "neutral",
-              result.status === "accepted"
-                ? "Compaction requested"
-                : "No active session to compact",
-            );
+            this.#finishCommand({
+              kind: "result",
+              summary:
+                result.status === "accepted"
+                  ? "Compaction requested"
+                  : "No active session to compact",
+            });
             if (result.status === "no_active_session") {
               pendingInputResponses = undefined;
               followCurrentSession = false;
@@ -1004,11 +1012,11 @@ export class EveTUIRunner {
               continue;
             }
           } catch (error) {
-            this.#renderCommandOutcome(
-              `Couldn't compact the session: ${toErrorMessage(error)}`,
-              "error",
-              "Couldn't compact the session",
-            );
+            this.#finishCommand({
+              kind: "result",
+              message: toErrorMessage(error),
+              summary: "Couldn't compact the session",
+            });
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -1022,9 +1030,8 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "clear") {
-          this.#renderer.dismissCommandInvocation?.();
           if (this.#session === undefined) {
-            this.#renderCommandOutcome("", "neutral", "No active session to clear");
+            this.#finishCommand({ kind: "result", summary: "No active session to clear" });
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -1033,12 +1040,12 @@ export class EveTUIRunner {
           }
           try {
             const result = await this.#session.clear();
-            if (result.status !== "accepted")
-              this.#renderCommandOutcome(
-                "No active session to clear.",
-                "neutral",
-                "No active session to clear",
-              );
+            if (result.status === "accepted") this.#finishCommand({ kind: "dismiss" });
+            else
+              this.#finishCommand({
+                kind: "result",
+                summary: "No active session to clear",
+              });
             if (result.status === "no_active_session") {
               pendingInputResponses = undefined;
               followCurrentSession = false;
@@ -1047,11 +1054,11 @@ export class EveTUIRunner {
               continue;
             }
           } catch (error) {
-            this.#renderCommandOutcome(
-              `Couldn't clear the session: ${toErrorMessage(error)}`,
-              "error",
-              "Couldn't clear the session",
-            );
+            this.#finishCommand({
+              kind: "result",
+              message: toErrorMessage(error),
+              summary: "Couldn't clear the session",
+            });
             pendingInputResponses = undefined;
             followCurrentSession = false;
             streamWithoutPrompt = false;
@@ -1067,12 +1074,16 @@ export class EveTUIRunner {
         // Help renders locally; unlike extension commands it must work even
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
-          const selected = await this.#renderer.choosePromptCommand?.(
-            this.#availablePromptCommands,
-          );
-          if (selected !== undefined) initialDraft = selected;
-          else if (this.#renderer.choosePromptCommand === undefined)
-            this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
+          if (this.#renderer.choosePromptCommand !== undefined) {
+            const selected = await this.#runTransientCommand(() =>
+              this.#renderer.choosePromptCommand!(this.#availablePromptCommands),
+            );
+            if (selected !== undefined) initialDraft = selected;
+          } else
+            this.#finishCommand({
+              kind: "result",
+              message: formatPromptCommandHelp(this.#availablePromptCommands),
+            });
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1080,7 +1091,7 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "info") {
-          await this.#showApplicationInfo();
+          await this.#runTransientCommand(() => this.#showApplicationInfo());
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1094,7 +1105,9 @@ export class EveTUIRunner {
           const error =
             outcome.startsWith("/loglevel is not available") ||
             outcome.startsWith("Unknown log level");
-          this.#renderCommandOutcome(error ? outcome : "", error ? "error" : "success", outcome);
+          this.#finishCommand(
+            error ? { kind: "result", message: outcome } : { kind: "result", summary: outcome },
+          );
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1104,7 +1117,7 @@ export class EveTUIRunner {
         // /traces is renderer-local too: the viewer reads the local spool
         // from disk and owns the screen until the user closes it.
         if (command?.type === "traces") {
-          await this.#openTraceViewer(command.argument);
+          await this.#runTransientCommand(() => this.#openTraceViewer(command.argument));
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1327,7 +1340,10 @@ export class EveTUIRunner {
     try {
       await this.#session.reset();
     } catch (error) {
-      this.#renderer.renderNotice?.(`Couldn't reset the session: ${toErrorMessage(error)}`);
+      this.#finishCommand({
+        kind: "result",
+        message: `Couldn't reset the session: ${toErrorMessage(error)}`,
+      });
       return false;
     }
 
@@ -1778,19 +1794,23 @@ export class EveTUIRunner {
     }
   }
 
-  #renderCommandOutcome(
-    text: string | undefined,
-    status?: CommandResultStatus,
-    summary?: string,
-  ): void {
-    if (this.#renderer.renderCommandResult !== undefined) {
-      if (text !== undefined || status !== undefined || summary !== undefined) {
-        this.#renderer.renderCommandResult(text ?? "", status, summary);
-      }
+  async #runTransientCommand<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } finally {
+      this.#finishCommand({ kind: "dismiss" });
+    }
+  }
+
+  #finishCommand(outcome: CommandPresentation): void {
+    if (this.#renderer.finishCommand !== undefined) {
+      this.#renderer.finishCommand(outcome);
       return;
     }
-    const notice = [summary, text].filter((part) => part !== undefined && part !== "").join("\n");
-    if (notice !== "") this.#renderer.renderNotice?.(notice);
+    if (outcome.kind === "result") {
+      const notice = [outcome.summary, outcome.message].filter(Boolean).join("\n");
+      if (notice !== "") this.#renderer.renderNotice?.(notice);
+    }
   }
 
   async #handleExtensionCommand(
@@ -1875,8 +1895,11 @@ export class EveTUIRunner {
     const suppressTranscript =
       (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
       (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
-    if (!suppressTranscript && input.trigger !== "startup")
-      this.#renderCommandOutcome(outcome?.message, commandResultStatus(outcome), outcome?.summary);
+    if (!suppressTranscript && input.trigger !== "startup") {
+      if (outcome === undefined) this.#finishCommand({ kind: "result" });
+      else
+        this.#finishCommand({ kind: "result", message: outcome.message, summary: outcome.summary });
+    }
     this.#refreshHeaderFromRemoteConnection();
     return outcome;
   }
@@ -1918,7 +1941,10 @@ export class EveTUIRunner {
    */
   async #openTraceViewer(argument: string): Promise<void> {
     if (this.#appRoot === undefined || this.#renderer.traceViewer === undefined) {
-      this.#renderCommandOutcome("/traces is only available in local dev sessions.");
+      this.#finishCommand({
+        kind: "result",
+        message: "/traces is only available in local dev sessions.",
+      });
       return;
     }
     try {
@@ -1936,18 +1962,21 @@ export class EveTUIRunner {
   async #showApplicationInfo(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) {
-      this.#renderCommandOutcome("/info is only available in local dev sessions.");
+      this.#finishCommand({
+        kind: "result",
+        message: "/info is only available in local dev sessions.",
+      });
       return;
     }
     try {
       const info = renderApplicationInfo(await this.#inspectApplication(appRoot));
       if (this.#renderer.showInfoPanel !== undefined) await this.#renderer.showInfoPanel(info);
-      else this.#renderCommandOutcome(info);
+      else this.#finishCommand({ kind: "result", message: info });
     } catch (error) {
-      this.#renderCommandOutcome(
-        `Couldn't inspect the application: ${toErrorMessage(error)}`,
-        "error",
-      );
+      this.#finishCommand({
+        kind: "result",
+        message: `Couldn't inspect the application: ${toErrorMessage(error)}`,
+      });
     }
   }
 
@@ -2840,11 +2869,3 @@ type ConnectionAuthRun = {
   webhookUrl?: string;
   reason?: string;
 };
-
-function commandResultStatus(
-  outcome: PromptCommandOutcome | undefined,
-): CommandResultStatus | undefined {
-  if (outcome?.tone === "error") return "error";
-  if (outcome?.cancelled === true) return "neutral";
-  return outcome?.tone;
-}

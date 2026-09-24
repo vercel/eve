@@ -95,7 +95,7 @@ describe("registryCommandOutcome", () => {
     ).toEqual({
       status: "error",
       summary: "Added 1 of 3 items",
-      message: "✓ Web Chat\n– Slack\n⨯ GitHub\n  Installation failed.",
+      message: "* Added Web Chat\n* Slack not added\n* Couldn't add GitHub\n  Installation failed.",
     });
   });
 });

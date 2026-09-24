@@ -86,7 +86,7 @@ Pass an item address to install it directly:
 /add @acme/analytics
 ```
 
-Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project. If dependency installation fails, the outcome shows a short reason when available. Use `/loglevel all` to inspect the installer's stderr when the package manager returned it. That output is also written to the local diagnostic log.
+Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project. If dependency installation fails, retry the `eve add` command in a terminal for details; raw installer output is not captured in the TUI.
 
 ## Work with the agent
 
@@ -110,7 +110,7 @@ Slash commands wait until the turn ends, except `/cancel`, which cancels directl
 
 ## Logs and traces
 
-By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>` to change the display; bare `/loglevel` reports the current setting. `Ctrl+L` cycles the same modes. `/loglevel all` also reveals buffered installer stderr when `/add` fails and the package manager returns output. Like other captured stderr, that output is written to `.eve/logs/`.
+By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>` to change the display; bare `/loglevel` reports the current setting. `Ctrl+L` cycles the same modes.
 
 Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 

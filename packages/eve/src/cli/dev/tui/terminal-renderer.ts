@@ -12,7 +12,7 @@ import type {
   AgentTUIStreamResult,
   AgentTUIToolApprovalRequest,
   AgentTUIToolApprovalResponse,
-  CommandResultStatus,
+  CommandPresentation,
   ConnectionAuthUpdate,
   SubagentStepUpdate,
   SubagentView,
@@ -24,7 +24,6 @@ import {
   argumentTypeaheadFor,
   argumentTypeaheadLoadingLabel,
   argumentTypeaheadQuery,
-  isArgumentTypeaheadCommand,
   moveArgumentTypeaheadSelection,
   renderArgumentSuggestions,
   selectedArgumentSuggestion,
@@ -45,6 +44,7 @@ import {
 import {
   isPromptControlCommand,
   parsePromptCommand,
+  promptCommandSpec,
   PROMPT_COMMANDS,
   type PromptCommandSpec,
 } from "./prompt-commands.js";
@@ -649,7 +649,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     renderLine: (text, tone) => this.#renderFlowLine(text, tone),
     replaceContent: (content) => this.#replaceFlowContent(content),
     renderOutput: (text) => this.#renderFlowOutput(text),
-    captureInstallFailureOutput: (stderr) => this.#captureInstallFailureOutput(stderr),
     withInheritedStdio: (task) => this.#withInheritedStdio(task),
     withExclusiveTerminal: (task) => this.#withInheritedStdio(task),
     waitForInterrupt: (options) => this.#waitForFlowInterrupt(options),
@@ -867,9 +866,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
-    // A command that settled without reporting an outcome must not hold the
-    // transcript out of scrollback.
-    this.#settleCommandEcho();
     this.#start(options);
     this.#syncBackgroundActivityTicker();
     this.#commitTurnStats();
@@ -1053,16 +1049,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
             this.#argumentTypeahead = undefined;
-            // Recalling a drawer command reopens its drawer, which takes over
-            // ↑/↓ and would trap history navigation at that entry.
-            const submitted = parsePromptCommand(prompt);
-            if (
-              submitted?.type !== "help" &&
-              submitted?.type !== "info" &&
-              (submitted?.type !== "extension" || !isArgumentTypeaheadCommand(submitted.name))
-            ) {
-              this.#promptHistory.add(prompt);
-            }
+            if (promptCommandSpec(prompt)?.spec.history !== "omit") this.#promptHistory.add(prompt);
             this.#inputActive = false;
             this.#stopCaretBlink();
             this.#status = STATUS.processing;
@@ -2002,12 +1989,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /** Echoes a slash-command invocation that was started without prompt input. */
-  renderCommandInvocation(text: string, status?: "failed"): void {
+  renderCommandInvocation(text: string): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     this.#start();
     this.#pushCommandEcho(content);
-    if (status === "failed") this.#settleCommandEcho("error");
     this.#paint();
   }
 
@@ -2097,16 +2083,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #closeTransientPanel(): void {
     this.#transientPanel = undefined;
-    this.#removePendingCommandEcho();
+    this.finishCommand({ kind: "dismiss" });
     this.#consumeKey = undefined;
     this.#transientPanelClose = undefined;
     this.#detachInput();
     this.#paint();
   }
 
-  /** Removes an invocation whose command clears the current view. */
-  dismissCommandInvocation(): void {
-    if (this.#removePendingCommandEcho()) this.#paint();
+  /** Completes the active command's transcript record in one operation. */
+  finishCommand(outcome: CommandPresentation): void {
+    if (outcome.kind === "dismiss") {
+      if (this.#removePendingCommandEcho()) this.#paint();
+      return;
+    }
+    const echo = this.#settleCommandEcho(outcome.summary);
+    if (echo !== undefined) echo.status = "done";
+    const content = outcome.message === undefined ? "" : stripAnsi(outcome.message);
+    if (content.trim().length === 0) {
+      if (echo !== undefined) this.#paint();
+      return;
+    }
+    this.#start();
+    this.#pushBlock({ kind: "result", body: content, live: false });
+    this.#paint();
   }
 
   #removePendingCommandEcho(): boolean {
@@ -2118,47 +2117,22 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Settles the pending command echo with the outcome's status, optionally
-   * replacing the invocation with a summary, then hangs any detail text under
-   * it with the elbow. Without an echo, a successful outcome carries its own
-   * check mark.
-   */
-  renderCommandResult(text: string, status?: CommandResultStatus, summary?: string): void {
-    const content = stripAnsi(text);
-    const echo = this.#settleCommandEcho(status, summary);
-    if (content.trim().length === 0) {
-      if (echo !== undefined) this.#paint();
-      return;
-    }
-    this.#start();
-    this.#pushBlock({
-      kind: "result",
-      body: content,
-      live: false,
-      status: echo === undefined && status === "success" ? "done" : undefined,
-    });
-    this.#paint();
-  }
-
-  /**
    * The echo stays live, and so out of scrollback, until its command settles:
    * its gutter pulses meanwhile, then carries the outcome.
    */
   #pushCommandEcho(body: string): void {
-    this.#settleCommandEcho();
+    if (this.#pendingCommandEcho !== undefined) this.#settleCommandEcho();
     const block: Block = { kind: "command", body, live: true };
     this.#pendingCommandEcho = block;
     this.#pushBlock(block);
   }
 
-  #settleCommandEcho(status?: CommandResultStatus, summary?: string): Block | undefined {
+  #settleCommandEcho(summary?: string): Block | undefined {
     const block = this.#pendingCommandEcho;
     if (block === undefined) return undefined;
     this.#pendingCommandEcho = undefined;
     block.live = false;
     if (summary !== undefined) block.result = stripTerminalControls(summary);
-    if (status === "success") block.status = "done";
-    else if (status !== undefined) block.status = status;
     return block;
   }
 
@@ -3110,17 +3084,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  #captureInstallFailureOutput(stderr: string): void {
-    // shadcn buffers its child stderr instead of writing to process.stderr.
-    // Keep the tail bounded: an installer can emit arbitrarily much output.
-    const maxLength = 32_768;
-    const output =
-      stderr.length > maxLength
-        ? `… earlier installer output omitted\n${stderr.slice(-maxLength)}`
-        : stderr;
-    this.#handleForeignOutput("stderr", output.endsWith("\n") ? output : `${output}\n`, true);
-  }
-
   /** Gives an interactive subprocess a temporary screen, then restores the transcript. */
   async #withInheritedStdio<T>(task: () => Promise<T>): Promise<T> {
     // Setup questions can resolve from the first key in a buffered terminal
@@ -3316,7 +3279,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (closeTransientPanel !== undefined) {
       this.#transientPanelClose = undefined;
       this.#transientPanel = undefined;
-      this.#removePendingCommandEcho();
+      this.finishCommand({ kind: "dismiss" });
       this.#consumeKey = undefined;
       closeTransientPanel();
     }
@@ -3517,7 +3480,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#messageQueue.requestCancellation();
           this.#cancelRequestedByUser = true;
           this.renderCommandInvocation(message.trim());
-          this.renderCommandResult("", "success", "Cancellation requested");
+          this.finishCommand({ kind: "result", summary: "Cancellation requested" });
           this.#requestTurnCancel();
           this.#paint();
           break;
@@ -4930,7 +4893,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  #handleForeignOutput(source: "stdout" | "stderr", text: string, installFailure = false): void {
+  #handleForeignOutput(source: "stdout" | "stderr", text: string): void {
     const combined = (source === "stdout" ? this.#stdoutLogBuffer : this.#stderrLogBuffer) + text;
     if (source === "stdout" && parseDevRebuildLogLine(combined.trimEnd()) !== undefined) {
       this.#stdoutLogBuffer = "";
@@ -4966,15 +4929,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // sandbox and rebuild lines riding stdout — reaches the diagnostic log.
     this.#diagnostics?.append({ source, detail: content });
     if (source === "stdout") this.#handleCapturedStdout(content);
-    else if (installFailure) {
-      this.#pushBlock({
-        kind: "log",
-        title: "stderr",
-        body: content,
-        logVisibility: "all-only",
-        live: true,
-      });
-    } else this.#handleCapturedStderr(content);
+    else this.#handleCapturedStderr(content);
     this.#paint();
   }
 

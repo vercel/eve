@@ -304,7 +304,7 @@ describe("registry commands", () => {
     ]);
   });
 
-  it("reports a bounded package-manager failure reason without exposing stderr in the TUI", async () => {
+  it("does not expose installer credentials in dependency failures", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       { name: "channel/photon-imessage", type: "registry:item" },
@@ -321,36 +321,30 @@ describe("registry commands", () => {
       ),
     );
 
-    const onInstallFailureOutput = vi.fn();
     await runAddCommand(logger, "/project", "channel/photon-imessage", {
       silent: true,
-      onInstallFailureOutput,
     });
 
-    expect(onInstallFailureOutput).toHaveBeenCalledWith("ERR_PNPM_FETCH_404 token=secret");
     expect(logger.errors).toEqual([
-      "Dependency installation failed (Package was not found in the registry (ERR_PNPM_FETCH_404) · exit code 1). Run `/loglevel all` to see the installer error.",
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
     ]);
     expect(logger.errors.join("\n")).not.toContain("secret");
     expect(logger.errors.join("\n")).not.toContain("example.com");
   });
 
-  it("does not echo arbitrary installer output when no safe diagnostic is available", async () => {
+  it("does not echo arbitrary installer output", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([
       { name: "channel/photon-imessage", type: "registry:item" },
     ]);
     addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
 
-    const onInstallFailureOutput = vi.fn();
     await runAddCommand(logger, "/project", "channel/photon-imessage", {
       silent: true,
-      onInstallFailureOutput,
     });
 
-    expect(onInstallFailureOutput).not.toHaveBeenCalled();
     expect(logger.errors).toEqual([
-      "Dependency installation failed; no safe diagnostic was available.",
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
     ]);
   });
 

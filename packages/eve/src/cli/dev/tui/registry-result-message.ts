@@ -30,13 +30,6 @@ export interface RegistryCommandOutcome {
   message: string;
 }
 
-const OUTCOME_MARKER = {
-  installed: "✓",
-  incomplete: "–",
-  failed: "⨯",
-  cancelled: "–",
-} as const;
-
 function outcomeDetails(outcome: RegistrySessionOutcome): string[] {
   switch (outcome.kind) {
     case "installed": {
@@ -98,7 +91,7 @@ export function registryCommandOutcome(
     outcomes.length === 1
       ? outcomeDetails(outcomes[0]!)
       : outcomes.flatMap((outcome) => [
-          `${OUTCOME_MARKER[outcome.kind]} ${outcome.title}`,
+          `* ${registryOutcomeSummary(outcome)}`,
           ...outcomeDetails(outcome).map((line) => `  ${line}`),
         ]);
   lines.push(...notes.map((note) => `⚠ ${note}`));

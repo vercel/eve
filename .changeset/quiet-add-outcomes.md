@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-`eve dev` now shows quieter slash-command outcomes and setup progress, with transient help and info panels and inline `/loglevel` completion.
+`eve dev` now uses a single `*` marker for completed slash commands and excludes picker and drawer commands, including `/loglevel`, from input history. Setup failures keep their invocation visible, and failed registry installs no longer expose installer output in TUI diagnostics.

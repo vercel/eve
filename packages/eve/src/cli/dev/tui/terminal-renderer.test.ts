@@ -1803,7 +1803,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a command outcome under its invocation with the elbow connector", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("/model dismissed.");
+    renderer.finishCommand({ kind: "result", message: "/model dismissed." });
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
@@ -1811,9 +1811,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("strips complete ANSI styles from command outcomes", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult(
-      "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
-    );
+    renderer.finishCommand({
+      kind: "result",
+      message: "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
+    });
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain(
@@ -1825,28 +1826,29 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult(
-      "Registry items added: channel/photon-imessage.\n" +
+    renderer.finishCommand({
+      kind: "result",
+      message:
+        "Registry items added: channel/photon-imessage.\n" +
         "Text your agent: +15550000000\n" +
         "Photon project: https://app.photon.codes/dashboard/project-id",
-      "success",
-    );
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
-    expect(snapshot).toContain("│ Text your agent: +15550000000");
-    expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
-    expect(screen.rawOutput()).toContain("\u001b[90m✓\u001b[39m");
-    expect(screen.rawOutput()).not.toContain("\u001b[2mText your agent");
+    expect(snapshot).toContain("⎿  Registry items added: channel/photon-imessage.");
+    expect(snapshot).toContain("      Text your agent: +15550000000");
+    expect(snapshot).toContain(
+      "      Photon project: https://app.photon.codes/dashboard/project-id",
+    );
   });
 
   it("keeps a single-line successful command result under the elbow", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("Registry items added: connection/linear.", "success");
+    renderer.finishCommand({ kind: "result", message: "Registry items added: connection/linear." });
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
+    expect(screen.snapshot()).toContain("⎿  Registry items added: connection/linear.");
   });
 
   it("pulses a running command's gutter", () => {
@@ -1873,22 +1875,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/model anthropic/claude-opus-4.6 default");
     await renderer.renderIdleStream(streamOf([]));
-    renderer.renderCommandResult("", "success", "Model set to anthropic/claude-opus-4.6 default");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.6 default",
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^✓ Model set to anthropic\/claude-opus-4.6 default$/m);
+    expect(snapshot).toMatch(/^\* Model set to anthropic\/claude-opus-4.6 default$/m);
     expect(snapshot).not.toContain("/model anthropic");
   });
 
   it("replaces a settled command with its dimmed summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add connection/notion");
-    renderer.renderCommandResult("", "success", "Added connection/notion");
+    renderer.finishCommand({ kind: "result", message: "", summary: "Added connection/notion" });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^✓ Added connection\/notion$/m);
+    expect(snapshot).toMatch(/^\* Added connection\/notion$/m);
     expect(snapshot).not.toContain("/add connection/notion");
     expect(snapshot).not.toContain("⎿");
     expect(screen.rawOutput()).toContain("\u001b[2mAdded connection/notion");
@@ -1897,41 +1903,42 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("hangs a settled command's details under its summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add channel/slack");
-    renderer.renderCommandResult(
-      "Finish with `eve add channel/slack --skip-install`",
-      "neutral",
-      "Added channel/slack · setup not finished",
-    );
+    renderer.finishCommand({
+      kind: "result",
+      message: "Finish with `eve add channel/slack --skip-install`",
+      summary: "Added channel/slack · setup not finished",
+    });
     renderer.shutdown();
 
     expect(screen.snapshot()).toMatch(
-      /^─ Added channel\/slack · setup not finished\n {3}⎿ {2}Finish with `eve add channel\/slack --skip-install`$/m,
+      /^\* Added channel\/slack · setup not finished\n {3}⎿ {2}Finish with `eve add channel\/slack --skip-install`$/m,
     );
   });
 
   it("keeps the invocation when a settled command has no summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/deploy");
-    renderer.renderCommandResult("Deployed: https://example.vercel.app", "success");
+    renderer.finishCommand({ kind: "result", message: "Deployed: https://example.vercel.app" });
     renderer.shutdown();
 
     expect(screen.snapshot()).toMatch(
-      /^✓ \/deploy\n {3}⎿ {2}Deployed: https:\/\/example.vercel.app$/m,
+      /^\* \/deploy\n {3}⎿ {2}Deployed: https:\/\/example.vercel.app$/m,
     );
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/deploy", "failed");
-    renderer.renderCommandResult(
-      "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
+    renderer.renderCommandInvocation("/deploy");
+    renderer.finishCommand({
+      kind: "result",
+      message:
+        "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
-      "error",
-    );
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^⨯ \/deploy$/m);
+    expect(snapshot).toMatch(/^\* \/deploy$/m);
     expect(snapshot).toContain("⎿  Authentication was refreshed");
     expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
     expect(snapshot).not.toContain("· Authentication was refreshed");
@@ -2227,7 +2234,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await vi.waitFor(() => {
       expect(cancel).toHaveBeenCalledOnce();
-      expect(screen.snapshot()).toContain("✓ Cancellation requested");
+      expect(screen.snapshot()).toContain("* Cancellation requested");
       expect(screen.snapshot()).not.toContain("/cancel");
       expect(screen.snapshot()).toContain("Cancelling turn…");
     });
@@ -3355,38 +3362,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     process.stdout.write("server listening on 3000\n");
     expect(append).toHaveBeenCalledWith({ source: "stdout", detail: "server listening on 3000" });
-    renderer.shutdown();
-  });
-
-  it("captures buffered registry installer stderr in diagnostics and reveals it with /loglevel all", () => {
-    const screen = new MockScreen({ columns: 100, rows: 30 });
-    const input = new MockUserInput();
-    const stub = stubDiagnostics();
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: false,
-      logs: "stderr",
-      unicode: true,
-      diagnostics: stub.diagnostics,
-    });
-    renderer.renderCommandInvocation("/add channel/photon-imessage");
-    renderer.setupFlow.begin("");
-    const detail = "ERR_PNPM_FETCH_404 package missing\n  package manager detail";
-    renderer.setupFlow.captureInstallFailureOutput?.(detail);
-    renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.renderCommandResult(
-      "Run `/loglevel all` to see the installer error.",
-      "error",
-      "Couldn't add channel/photon-imessage",
-    );
-
-    expect(stub.append).toHaveBeenCalledWith({ source: "stderr", detail });
-    expect(screen.snapshot()).not.toContain("package manager detail");
-    renderer.setLogDisplayMode("all");
-    expect(screen.snapshot()).toContain("package manager detail");
-    renderer.setLogDisplayMode("stderr");
-    expect(screen.snapshot()).not.toContain("package manager detail");
     renderer.shutdown();
   });
 
@@ -4801,7 +4776,10 @@ describe("TerminalRenderer setup flow session", () => {
       "warning",
     );
     renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.renderCommandResult("Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.");
+    renderer.finishCommand({
+      kind: "result",
+      message: "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.",
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -5293,7 +5271,7 @@ describe("TerminalRenderer command echo spacing", () => {
     input.type("/connect");
     input.enter();
     await prompt;
-    renderer.renderCommandResult("Project linked.");
+    renderer.finishCommand({ kind: "result", message: "Project linked." });
     renderer.shutdown();
 
     const lines = screen.snapshot().split("\n");
@@ -5542,7 +5520,11 @@ describe("TerminalRenderer command typeahead", () => {
     expect(screen.snapshot()).not.toContain("Show available commands");
     expect(screen.snapshot()).not.toContain("│ /help");
     renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
-    renderer.renderCommandResult("", "success", "Model set to anthropic/claude-opus-4.8");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.8",
+    });
     renderer.shutdown();
     expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
     expect(screen.snapshot()).not.toContain("/help");
@@ -5615,7 +5597,11 @@ describe("TerminalRenderer command typeahead", () => {
     expect(screen.snapshot()).not.toContain("Application");
     expect(screen.snapshot()).not.toContain("│ /info");
     renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
-    renderer.renderCommandResult("", "success", "Model set to anthropic/claude-opus-4.8");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.8",
+    });
     renderer.shutdown();
     expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
     expect(screen.snapshot()).not.toContain("/info");
@@ -5690,6 +5676,10 @@ describe("TerminalRenderer command typeahead", () => {
       "/model anthropic/claude-opus-4.6 default",
       "/help",
       "/info",
+      "/add connection/linear",
+      "/login chatgpt",
+      "/loglevel all",
+      "/traces",
     ]) {
       const prompt = renderer.readPrompt();
       input.type(text);

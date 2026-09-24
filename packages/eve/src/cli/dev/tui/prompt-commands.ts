@@ -30,6 +30,8 @@ export interface PromptCommandSpec {
   readonly argumentHint?: string;
   /** Accepts a trailing argument (enables `/name <arg>` parsing). */
   readonly takesArgument: boolean;
+  /** Whether recalling this command would reopen a modal or take over prompt navigation. */
+  readonly history: "keep" | "omit";
   /** Maps a recognized invocation to its parsed command. */
   readonly build: (argument: string) => PromptCommand;
 }
@@ -46,6 +48,7 @@ interface PromptCommandDefinition extends PromptCommandSpec {
 const PROMPT_COMMAND_DEFINITIONS = [
   {
     name: "model",
+    history: "omit",
     aliases: [],
     description: "Choose a model, speed, and reasoning",
     argumentHint: "[provider/model]",
@@ -55,6 +58,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "reset",
+    history: "keep",
     aliases: [],
     description: "Start a fresh session",
     takesArgument: false,
@@ -63,6 +67,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "clear",
+    history: "keep",
     aliases: ["new"],
     description: "Clear the current session context",
     takesArgument: false,
@@ -71,6 +76,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "compact",
+    history: "keep",
     aliases: [],
     description: "Compact the current session context",
     takesArgument: false,
@@ -79,6 +85,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "cancel",
+    history: "keep",
     aliases: [],
     description: "Cancel the running turn",
     takesArgument: false,
@@ -87,6 +94,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "login",
+    history: "omit",
     aliases: [],
     description: "Connect a model provider",
     argumentHint: "[connection]",
@@ -96,6 +104,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "add",
+    history: "omit",
     aliases: [],
     description: "Add an integration from the registry",
     takesArgument: true,
@@ -104,6 +113,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "deploy",
+    history: "keep",
     aliases: [],
     description: "Deploy the agent to Vercel",
     takesArgument: false,
@@ -112,6 +122,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "traces",
+    history: "omit",
     aliases: [],
     description: "Open the local trace viewer",
     argumentHint: "[trace]",
@@ -121,6 +132,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "loglevel",
+    history: "omit",
     aliases: [],
     description: "Show or hide captured stdout/stderr/sandbox logs",
     argumentHint: "[all|stderr|sandbox|none]",
@@ -130,6 +142,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "info",
+    history: "omit",
     aliases: [],
     description: "Show application and messaging information",
     takesArgument: false,
@@ -138,6 +151,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "help",
+    history: "omit",
     aliases: [],
     description: "Show available commands",
     takesArgument: false,
@@ -146,6 +160,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "exit",
+    history: "keep",
     aliases: ["quit"],
     description: "Quit the TUI",
     takesArgument: false,
@@ -189,18 +204,26 @@ export function isPromptCommandAvailableFor(
  * message.
  */
 export function parsePromptCommand(prompt: string): PromptCommand | null {
+  const match = promptCommandSpec(prompt);
+  return match === undefined ? null : match.spec.build(match.argument);
+}
+
+/** Resolve an invocation and its history policy from the same command definition. */
+export function promptCommandSpec(
+  prompt: string,
+): { spec: PromptCommandSpec; argument: string } | undefined {
   const trimmed = prompt.trim();
-  if (!trimmed.startsWith("/")) return null;
+  if (!trimmed.startsWith("/")) return undefined;
   for (const spec of PROMPT_COMMANDS) {
     for (const alias of [spec.name, ...spec.aliases]) {
       const token = `/${alias}`;
-      if (trimmed === token) return spec.build("");
+      if (trimmed === token) return { spec, argument: "" };
       if (spec.takesArgument && trimmed.startsWith(`${token} `)) {
-        return spec.build(trimmed.slice(token.length).trim());
+        return { spec, argument: trimmed.slice(token.length).trim() };
       }
     }
   }
-  return null;
+  return undefined;
 }
 
 /** True for prompts that are commands, which never echo as user messages. */

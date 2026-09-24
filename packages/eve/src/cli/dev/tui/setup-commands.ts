@@ -34,10 +34,7 @@ export const SETUP_FLOW_CONFIG = {
 } satisfies Record<TuiSetupCommand, { title: string }>;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<
-    SetupFlowRenderer,
-    "readProviderPicker" | "setNavigation" | "waitForInterrupt" | "captureInstallFailureOutput"
-  >;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation" | "waitForInterrupt">;
 
 type MuteableSetupRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation">;
@@ -303,7 +300,6 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
-          onInstallFailureOutput: input.renderer.captureInstallFailureOutput,
           onScreen: input.onOnboardingScreen,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
@@ -412,8 +408,10 @@ function registryResult(
 ): TuiSetupCommandResult {
   const { status, summary, message } = registryCommandOutcome(result, warnings);
   const outcome: TuiSetupCommandResult = { message, summary, preserveFlowDiagnostics: false };
-  if (status === "neutral") outcome.cancelled = true;
-  else outcome.tone = status;
+  if (status === "neutral") {
+    if (result.cancelled === true || result.outcomes.some((item) => item.kind === "cancelled"))
+      outcome.cancelled = true;
+  } else outcome.tone = status;
   return outcome;
 }
 

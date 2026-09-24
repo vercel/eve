@@ -24,7 +24,7 @@ import {
   wrapVisibleLine,
 } from "#cli/ui/terminal-text.js";
 
-export type ToolStatus = "running" | "done" | "error" | "denied" | "approval" | "neutral";
+export type ToolStatus = "running" | "done" | "error" | "denied" | "approval";
 
 export type BlockKind =
   | "user"
@@ -84,7 +84,7 @@ export interface Block {
   /** Structured remediation shown between an error's body and its detail. */
   hint?: string;
 
-  /** Tool, connection, or synthetic command lifecycle status. */
+  /** Tool, connection, or completed command lifecycle status. */
   status?: ToolStatus;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
@@ -436,35 +436,23 @@ function paintCommands(line: string, theme: Theme): string {
 /**
  * A slash command invocation. While it runs, its gutter pulses — or holds a
  * still `▪` beside an open setup panel, which pulses itself. It then carries
- * the settled outcome — `✓`, `⨯`, or `─` — or the user `│` when the
- * command only reports. A settled summary replaces the invocation, dimmed as a
+ * a settled `*`. A settled summary replaces the invocation, dimmed as a
  * record. The `❯` glyph remains exclusive to live input because the TUI tests
  * use `❯` to detect a ready prompt.
  */
 function renderCommand(block: Block, theme: Theme, context: RenderBlockContext): string[] {
   const c = theme.colors;
-  if (block.result !== undefined) {
-    return [`${commandGutter(block, theme)} ${c.dim(block.result)}`];
-  }
   const gutter =
-    block.live !== true || context.transientPanelOpen === true
-      ? commandGutter(block, theme)
-      : context.setupFlowOpen === true
-        ? c.gray(theme.glyph.square)
-        : c.gray(context.activityPulse);
-  return [`${gutter} ${block.body ?? ""}`];
-}
-
-/** Settled outcome marks stay gray: the glyph shape carries the outcome. */
-function commandGutter(block: Block, theme: Theme): string {
-  const c = theme.colors;
-  return block.status === "done"
-    ? c.gray(theme.glyph.success)
-    : block.status === "error"
-      ? c.gray(theme.glyph.error)
-      : block.status === "neutral"
-        ? c.gray(theme.glyph.dash)
-        : theme.glyph.user;
+    block.live !== true
+      ? block.status === "done"
+        ? c.gray("*")
+        : theme.glyph.user
+      : context.transientPanelOpen === true
+        ? theme.glyph.user
+        : context.setupFlowOpen === true
+          ? c.gray(theme.glyph.square)
+          : c.gray(context.activityPulse);
+  return [`${gutter} ${block.result === undefined ? (block.body ?? "") : c.dim(block.result)}`];
 }
 
 /**
@@ -485,6 +473,7 @@ function paintOutcomeMarker(
   if (marker === "⨯") return line.replace(marker, paint(c.red)(theme.glyph.error));
   if (marker === "–") return line.replace(marker, paint(c.yellow)(theme.glyph.dash));
   if (marker === "⚠") return line.replace(marker, paint(c.yellow)(theme.glyph.warning));
+  if (marker === "*") return line.replace(marker, c.gray("*"));
   return line;
 }
 
@@ -512,19 +501,6 @@ function renderFlow(block: Block, width: number, theme: Theme): string[] {
  */
 function renderResult(block: Block, width: number, theme: Theme): string[] {
   const lines = wrap(block.body ?? "", width - 7);
-  if (block.status === "done") {
-    const elbow = theme.colors.dim(theme.glyph.elbow);
-    const success = theme.colors.gray(theme.glyph.success);
-    const rule = theme.colors.dim(theme.glyph.rule);
-    const corner = theme.colors.dim(theme.glyph.corner);
-    if (lines.length === 0) return [`   ${elbow}  ${success}`];
-    return lines.map((line, index) => {
-      if (index === 0) return `   ${elbow}  ${success} ${line}`;
-      const marker = index === lines.length - 1 ? corner : rule;
-      return `      ${marker} ${line}`;
-    });
-  }
-
   const marker = theme.colors.dim(theme.glyph.elbow);
   if (lines.length === 0) return [`   ${marker}`];
   // SGR 22 closes bold and dim together, so a result that bolds a span (the
