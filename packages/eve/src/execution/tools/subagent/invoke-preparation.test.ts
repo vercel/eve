@@ -84,7 +84,13 @@ describe("planAgentDispatch", () => {
           subagentsByNodeId: new Map([
             [
               localAction.nodeId,
-              { definition: { description: "Research", kind: "subagent", modelChoices } },
+              {
+                definition: {
+                  description: "Research",
+                  kind: "subagent",
+                  modelChoices: modelChoices?.map((id) => ({ id })),
+                },
+              },
             ],
           ]),
         },

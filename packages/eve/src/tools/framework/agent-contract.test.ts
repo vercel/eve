@@ -15,11 +15,15 @@ describe("createSubagentToolInputSchema", () => {
   });
 
   it("adds an optional model enum that defaults to the first choice", async () => {
-    const schema = createSubagentToolInputSchema(["anthropic/claude-sonnet-5", "openai/gpt-5.5"]);
+    const schema = createSubagentToolInputSchema([
+      { id: "anthropic/claude-sonnet-5" },
+      { id: "openai/gpt-5.5", description: "Hard reasoning." },
+    ]);
     expect(serializeInputSchema(schema)).toMatchObject({
       properties: {
         model: {
           default: "anthropic/claude-sonnet-5",
+          description: expect.stringContaining("- openai/gpt-5.5: Hard reasoning."),
           enum: ["anthropic/claude-sonnet-5", "openai/gpt-5.5"],
           type: "string",
         },

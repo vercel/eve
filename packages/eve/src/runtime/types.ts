@@ -265,6 +265,12 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly websocket?: WebSocketRouteHandler;
 }
 
+/** One model a subagent's caller may select, from its `choice()` config. */
+export interface SubagentModelChoice {
+  readonly id: string;
+  readonly description?: string;
+}
+
 /**
  * Runtime-owned local subagent node resolved from one compiled local
  * subagent package.
@@ -279,8 +285,8 @@ export type ResolvedRuntimeSubagentNode = Readonly<
       | {
           description: string;
           dynamic?: never;
-          /** Caller-selectable Gateway model ids; the first is the default. */
-          modelChoices?: readonly string[];
+          /** Models the caller may select by `id`; the first is the default. */
+          modelChoices?: readonly SubagentModelChoice[];
         }
       | {
           description?: never;

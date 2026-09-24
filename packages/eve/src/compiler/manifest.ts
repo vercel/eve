@@ -128,6 +128,12 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
   routing: ModelRouting;
 };
 
+/** One `choice()` entry. The caller selects it by `model.id`. */
+export interface CompiledModelChoice {
+  readonly description?: string;
+  readonly model: CompiledRuntimeModelReference;
+}
+
 /**
  * Dynamic model resolver source preserved in the compiled manifest.
  */
@@ -161,7 +167,7 @@ export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
     | {
         readonly model: CompiledRuntimeModelReference;
         /** Models a caller may select for a new session; the first is `model`. */
-        readonly modelChoices?: readonly CompiledRuntimeModelReference[];
+        readonly modelChoices?: readonly CompiledModelChoice[];
         readonly dynamicModel?: never;
       }
     | {
@@ -554,6 +560,7 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
+    sourceChoiceIndex: z.number().int().nonnegative().optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
     routing: modelRoutingSchema,
   })
@@ -621,7 +628,17 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
     .object({
       ...compiledAgentConfigBaseFields,
       model: compiledRuntimeModelReferenceSchema,
-      modelChoices: z.array(compiledRuntimeModelReferenceSchema).min(1).optional(),
+      modelChoices: z
+        .array(
+          z
+            .object({
+              description: z.string().optional(),
+              model: compiledRuntimeModelReferenceSchema,
+            })
+            .strict(),
+        )
+        .min(1)
+        .optional(),
     })
     .strict(),
   z
@@ -1222,7 +1239,12 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
     model: cloneCompiledRuntimeModelReference(config.model),
     ...(config.modelChoices === undefined
       ? {}
-      : { modelChoices: config.modelChoices.map(cloneCompiledRuntimeModelReference) }),
+      : {
+          modelChoices: config.modelChoices.map((choice) => ({
+            ...(choice.description === undefined ? {} : { description: choice.description }),
+            model: cloneCompiledRuntimeModelReference(choice.model),
+          })),
+        }),
   };
 }
 
@@ -1318,6 +1340,9 @@ function cloneCompiledRuntimeModelReference(
   }
   if (model.source !== undefined) {
     clone.source = { ...model.source };
+  }
+  if (model.sourceChoiceIndex !== undefined) {
+    clone.sourceChoiceIndex = model.sourceChoiceIndex;
   }
   return clone;
 }

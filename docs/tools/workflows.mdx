@@ -15,7 +15,7 @@ suspend in either execution mode; running in the background does not require a s
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel, `ctx.agents` for effective callable-agent descriptions (plus `models` for a subagent that lists [model choices](../subagents#let-the-parent-choose-the-model)), and `ctx.agent` for durable agent delegation. Use `yield` to report
+the session's channel, `ctx.agents` for effective callable-agent descriptions (plus `models` for a subagent that offers a [model `choice`](../subagents#let-the-parent-choose-the-model)), and `ctx.agent` for durable agent delegation. Use `yield` to report
 progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
 stay in local variables in the workflow body.
 
@@ -113,7 +113,7 @@ export default workflow({ maxSubagents: 20 });
 ```
 
 The model supplies an async function body through the tool's `js` input. Its only host capability is
-`ctx.agent(name, { message, agentId?, model?, outputSchema? })`. `model` picks one of a subagent's [listed models](../subagents#let-the-parent-choose-the-model) for a new child. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
+`ctx.agent(name, { message, agentId?, model?, outputSchema? })`. `model` picks one of a subagent's [model choices](../subagents#let-the-parent-choose-the-model) by slug for a new child. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
 
 ```js
 const [triage, review] = await Promise.all([

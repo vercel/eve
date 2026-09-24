@@ -97,7 +97,11 @@ async function loadSourceBackedRuntimeModelReference(
     definition,
     `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to match the public eve shape.`,
   );
-  const model = normalizedDefinition.model;
+  const authoredModel = normalizedDefinition.model;
+  const model =
+    isModelChoicesDefinition(authoredModel) && reference.sourceChoiceIndex !== undefined
+      ? authoredModel.choices[reference.sourceChoiceIndex]?.model
+      : authoredModel;
 
   if (model === undefined) {
     throw new Error(

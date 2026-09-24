@@ -43,19 +43,28 @@ describe("resolveWorkflowAgentMetadata", () => {
   });
 
   it("lists a subagent's model choices", () => {
-    const models = ["openai/gpt-5.4-mini", "openai/gpt-5.4"];
+    const modelChoices = [
+      { id: "openai/gpt-5.4-mini", description: "Quick drafts." },
+      { id: "openai/gpt-5.4" },
+    ];
     const ctx = context({
       nodeId: "subagents/coordinator",
       subagentsByName: new Map([
         [
           "writer",
-          { definition: { description: "Write reports.", kind: "subagent", modelChoices: models } },
+          { definition: { description: "Write reports.", kind: "subagent", modelChoices } },
         ],
       ]),
     });
 
     expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
-      writer: { description: "Write reports.", models },
+      writer: {
+        description: "Write reports.",
+        models: {
+          "openai/gpt-5.4-mini": { description: "Quick drafts." },
+          "openai/gpt-5.4": {},
+        },
+      },
     });
   });
 

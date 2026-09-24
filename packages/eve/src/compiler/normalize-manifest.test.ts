@@ -30,6 +30,7 @@ import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { choice } from "#models/choice.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
@@ -667,27 +668,23 @@ describe("compileAgentManifest source graph", () => {
     });
   });
 
-  it("compiles a model array into a default model and model choices", async () => {
-    const compiled = await compileAgentManifest(manifest(), {
-      sourceRegistries: [
-        registry([
-          {
-            logicalPath: "agent.ts",
-            loadNamespace: async () => ({
-              default: defineAgent({ model: ["openai/gpt-5.4", "anthropic/claude-opus-4.7"] }),
-            }),
-          },
-        ]),
-      ],
-    });
-
-    expect(compiledAgentManifestSchema.parse(compiled).config).toEqual(compiled.config);
-    expect(compiled.config.model?.id).toBe("openai/gpt-5.4");
-    expect(compiled.config.modelChoices?.map((choice) => choice.id)).toEqual([
-      "openai/gpt-5.4",
-      "anthropic/claude-opus-4.7",
-    ]);
-    expect(compiled.config.modelChoices?.[1]?.contextWindowTokens).toBeGreaterThan(0);
+  it("rejects choice() on a root agent", async () => {
+    await expect(
+      compileAgentManifest(manifest(), {
+        sourceRegistries: [
+          registry([
+            {
+              logicalPath: "agent.ts",
+              loadNamespace: async () => ({
+                default: defineAgent({
+                  model: choice(["openai/gpt-5.4", "anthropic/claude-opus-4.7"]),
+                }),
+              }),
+            },
+          ]),
+        ],
+      }),
+    ).rejects.toThrow("a root agent has no caller");
   });
 
   it("classifies extension mount initialization as runtime-only", async () => {

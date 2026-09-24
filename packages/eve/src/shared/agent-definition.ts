@@ -48,6 +48,8 @@ export type InternalAgentModelDefinition = {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
+  /** Position in the source export's `choice()` list when `source` holds several models. */
+  sourceChoiceIndex?: number;
   providerOptions?: Record<string, JsonObject>;
 };
 
@@ -91,16 +93,34 @@ export function isDynamicModelDefinition(
   return isDynamicSentinel(value);
 }
 
+export const MODEL_CHOICE_KIND = "eve.model-choice";
+
+/** One model a subagent's caller may pick, as normalized by `choice()`. */
+export interface PublicAgentModelChoice {
+  readonly model: PublicAgentStaticModelDefinition;
+  /** Tells the caller when to pick this model. */
+  readonly description?: string;
+  /** Provider options for this model only. */
+  readonly modelOptions?: AgentModelOptionsDefinition;
+}
+
 /**
- * AI Gateway model ids a subagent's caller may choose from. The first id is
- * the default. Behaves like a `session.started` dynamic model selection.
+ * Models a subagent's caller may pick when it starts a child, created with
+ * `choice()` from `eve/models`. The first choice is the default.
  */
-export type PublicAgentModelChoicesDefinition = readonly [string, ...string[]];
+export interface PublicAgentModelChoicesDefinition {
+  readonly kind: typeof MODEL_CHOICE_KIND;
+  readonly choices: readonly [PublicAgentModelChoice, ...PublicAgentModelChoice[]];
+}
 
 export function isModelChoicesDefinition(
   value: unknown,
 ): value is PublicAgentModelChoicesDefinition {
-  return Array.isArray(value);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === MODEL_CHOICE_KIND
+  );
 }
 
 /**
@@ -407,8 +427,8 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
       }
     | {
         /**
-         * AI Gateway model ids the caller may choose from when it starts this
-         * agent as a subagent. The first id is the default.
+         * Models the caller may pick when it starts this agent as a subagent,
+         * created with `choice()` from `eve/models`. The first is the default.
          */
         readonly model: PublicAgentModelChoicesDefinition;
         readonly modelContextWindowTokens?: never;

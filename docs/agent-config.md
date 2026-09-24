@@ -28,7 +28,7 @@ A config that selects a static Gateway model is compile-only. A config that cont
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
-A declared subagent can also list several Gateway model ids, such as `model: ["anthropic/claude-sonnet-5", "anthropic/claude-opus-5.5"]`, so its caller can pick one per child. The first entry is the default. See [Let the parent choose the model](./subagents#let-the-parent-choose-the-model).
+A declared subagent can also offer several models with `choice` from `eve/models`, such as `model: choice(["anthropic/claude-sonnet-5", "anthropic/claude-opus-5.5"])`, so its caller can pick one per child. The first entry is the default. See [Let the parent choose the model](./subagents#let-the-parent-choose-the-model).
 
 Use eve's helpers for direct OpenAI or Anthropic access without installing another provider package:
 

@@ -26,12 +26,20 @@ export function resolveWorkflowAgentMetadata(
   for (const [name, registered] of bundle.subagentRegistry.subagentsByName ?? []) {
     const { definition } = registered;
     if (definition.description === undefined) continue;
-    const models = definition.kind === "subagent" ? definition.modelChoices : undefined;
+    const choices = definition.kind === "subagent" ? definition.modelChoices : undefined;
     agents.set(
       name,
-      models === undefined
+      choices === undefined
         ? { description: definition.description }
-        : { description: definition.description, models },
+        : {
+            description: definition.description,
+            models: Object.fromEntries(
+              choices.map((choice) => [
+                choice.id,
+                choice.description === undefined ? {} : { description: choice.description },
+              ]),
+            ),
+          },
     );
   }
 

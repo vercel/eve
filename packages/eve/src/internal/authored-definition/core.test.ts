@@ -6,6 +6,7 @@ import {
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { choice } from "#models/choice.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
@@ -99,30 +100,30 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"compaction.model" does not support defineDynamic');
   });
 
-  it("accepts a model array", () => {
-    expect(
-      normalizeAgentDefinition(
-        { model: ["anthropic/claude-sonnet-5", "openai/gpt-5.5"] },
-        FAILURE_MESSAGE,
-      ).model,
-    ).toEqual(["anthropic/claude-sonnet-5", "openai/gpt-5.5"]);
+  it("accepts choice() models", () => {
+    const model = choice({
+      "anthropic/claude-sonnet-5": "Routine lookups.",
+      "openai/gpt-5.5": { modelOptions: { providerOptions: { gateway: { order: ["openai"] } } } },
+    });
+    expect(normalizeAgentDefinition({ model }, FAILURE_MESSAGE).model).toEqual(model);
   });
 
   it.each([
-    [[], "at least one"],
-    [["openai/gpt-5.5", 42], "non-empty AI Gateway model id"],
-    [["openai/gpt-5.5", "openai/gpt-5.5"], 'lists "openai/gpt-5.5" more than once'],
-  ])("rejects an invalid model array %j", (model, error) => {
+    [{ kind: "eve.model-choice", choices: [] }, "at least one"],
+    [{ kind: "eve.model-choice", choices: [{ model: 42 }] }, "non-empty AI Gateway slug"],
+    [{ kind: "eve.model-choice", choices: [{ model: "a/b", description: "" }] }, "description"],
+    [choice(["openai/gpt-5.5", "openai/gpt-5.5"]), 'lists "openai/gpt-5.5" more than once'],
+  ])("rejects an invalid choice() %j", (model, error) => {
     expect(() => normalizeAgentDefinition({ model }, FAILURE_MESSAGE)).toThrow(error);
   });
 
-  it("rejects definition-level model metadata for a model array", () => {
+  it("rejects definition-level model metadata next to choice()", () => {
     expect(() =>
       normalizeAgentDefinition(
-        { model: ["openai/gpt-5.5"], modelContextWindowTokens: 128_000 },
+        { model: choice(["openai/gpt-5.5"]), modelContextWindowTokens: 128_000 },
         FAILURE_MESSAGE,
       ),
-    ).toThrow(/model" array.*modelContextWindowTokens/);
+    ).toThrow(/choice\(\) model.*modelContextWindowTokens/);
   });
 
   it("rejects unsupported reasoning effort", () => {

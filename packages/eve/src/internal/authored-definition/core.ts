@@ -1,4 +1,4 @@
-import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
+import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -89,7 +89,7 @@ export function normalizeAgentDefinition(
     (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
   ) {
     throw new Error(
-      `${message} A "model" array does not support sibling "modelContextWindowTokens" or "modelOptions" fields. eve resolves each model's limits from the AI Gateway catalog.`,
+      `${message} A choice() model does not support sibling "modelContextWindowTokens" or "modelOptions" fields. Set "modelOptions" on each choice; eve resolves each model's limits from the AI Gateway catalog.`,
     );
   }
 
@@ -155,7 +155,7 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
-  if (Array.isArray(value)) {
+  if (isModelChoicesDefinition(value)) {
     return normalizeModelChoices(value, message);
   }
 
@@ -181,29 +181,45 @@ function normalizeAgentModelDefinition(
 }
 
 function normalizeModelChoices(
-  value: readonly unknown[],
+  value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
-  if (value.length === 0) {
-    throw new Error(`${message} A "model" array must list at least one AI Gateway model id.`);
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["choices", "kind"], message);
+  if (!Array.isArray(record.choices) || record.choices.length === 0) {
+    throw new Error(`${message} choice() must list at least one model.`);
   }
-  const choices = value.map((choice) => {
-    if (typeof choice !== "string" || choice.trim() === "") {
+  const choices = record.choices.map((entry: unknown) => {
+    const choice = expectObjectRecord(entry, message);
+    expectOnlyKnownKeys(choice, ["description", "model", "modelOptions"], message);
+    const model = choice.model;
+    if (typeof model === "string" ? model.trim() === "" : !isRuntimeLanguageModel(model)) {
       throw new Error(
-        `${message} Every entry in a "model" array must be a non-empty AI Gateway model id string.`,
+        `${message} Every choice() model must be a non-empty AI Gateway slug or a LanguageModel.`,
       );
     }
-    return choice;
+    if (
+      choice.description !== undefined &&
+      (typeof choice.description !== "string" || choice.description.trim() === "")
+    ) {
+      throw new Error(`${message} A choice() description must be a non-empty string.`);
+    }
+    return {
+      model,
+      ...(choice.description === undefined ? {} : { description: choice.description }),
+      ...(choice.modelOptions === undefined
+        ? {}
+        : { modelOptions: normalizeAgentModelOptions(choice.modelOptions, message) }),
+    };
   });
-  const duplicate = choices.find((choice, index) => choices.indexOf(choice) !== index);
+  const slugs = choices.flatMap((choice) =>
+    typeof choice.model === "string" ? [choice.model] : [],
+  );
+  const duplicate = slugs.find((slug, index) => slugs.indexOf(slug) !== index);
   if (duplicate !== undefined) {
-    throw new Error(`${message} The "model" array lists "${duplicate}" more than once.`);
+    throw new Error(`${message} choice() lists "${duplicate}" more than once.`);
   }
-  const [first, ...rest] = choices;
-  if (first === undefined) {
-    throw new Error(`${message} A "model" array must list at least one AI Gateway model id.`);
-  }
-  return [first, ...rest];
+  return { kind: record.kind, choices } as unknown as NormalizedAgentDefinition["model"];
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

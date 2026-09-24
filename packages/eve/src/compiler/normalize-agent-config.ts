@@ -13,10 +13,15 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicModelDefinition,
   isModelChoicesDefinition,
+  type PublicAgentModelChoicesDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { DynamicToolEventName } from "#dynamic/definition.js";
-import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
+import type {
+  CompiledAgentDefinition,
+  CompiledModelChoice,
+  CompiledRuntimeModelReference,
+} from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
@@ -61,18 +66,10 @@ export async function compileAgentConfig(
     ? definition.model
     : undefined;
   const modelChoices = isModelChoicesDefinition(definition.model)
-    ? await Promise.all(
-        definition.model.map((choice) =>
-          normalizeAuthoredModelReference({
-            modelCatalog: context.modelCatalog,
-            purpose: "the model choice",
-            value: choice,
-          }),
-        ),
-      )
+    ? await compileModelChoices(definition.model, context, configModule, configModulePath)
     : undefined;
   const model =
-    modelChoices?.[0] ??
+    modelChoices?.[0]?.model ??
     (dynamicModelDefinition === undefined
       ? await normalizeAuthoredModelReference({
           modelCatalog: context.modelCatalog,
@@ -211,6 +208,38 @@ function normalizeExperimentalDefinition(
   }
 
   return compiledExperimental;
+}
+
+async function compileModelChoices(
+  definition: PublicAgentModelChoicesDefinition,
+  context: ManifestCompileContext,
+  source: ModuleSourceRef,
+  sourcePath: string,
+): Promise<readonly CompiledModelChoice[]> {
+  const choices = await Promise.all(
+    definition.choices.map(async (choice, index): Promise<CompiledModelChoice> => {
+      const model = await normalizeAuthoredModelReference({
+        modelCatalog: context.modelCatalog,
+        purpose: "the model choice",
+        providerOptions: choice.modelOptions?.providerOptions,
+        source,
+        sourcePath,
+        value: choice.model,
+      });
+      return {
+        ...(choice.description === undefined ? {} : { description: choice.description }),
+        model: model.source === undefined ? model : { ...model, sourceChoiceIndex: index },
+      };
+    }),
+  );
+  const slugs = choices.map((choice) => choice.model.id);
+  const duplicate = slugs.find((slug, index) => slugs.indexOf(slug) !== index);
+  if (duplicate !== undefined) {
+    throw new Error(
+      `The choice() in "${sourcePath}" lists "${duplicate}" more than once. Each choice needs its own model.`,
+    );
+  }
+  return choices;
 }
 
 async function normalizeAuthoredModelReference(input: {

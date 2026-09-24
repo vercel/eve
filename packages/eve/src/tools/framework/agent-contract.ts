@@ -1,4 +1,5 @@
 import type { JsonObject } from "#shared/json.js";
+import type { SubagentModelChoice } from "#runtime/types.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export const AGENT_TOOL_NAME = "agent";
@@ -41,7 +42,9 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = createSubagentToolInputSchema(undefine
  * Subagent tool input. A subagent whose `agent.ts` lists several models also
  * accepts a `model` choice; the first listed model is the default.
  */
-export function createSubagentToolInputSchema(modelChoices: readonly string[] | undefined) {
+export function createSubagentToolInputSchema(
+  modelChoices: readonly SubagentModelChoice[] | undefined,
+) {
   return defineJsonSchema<SubagentToolInput>({
     type: "object",
     properties:
@@ -49,14 +52,25 @@ export function createSubagentToolInputSchema(modelChoices: readonly string[] | 
         ? SUBAGENT_TOOL_INPUT_PROPERTIES
         : {
             ...SUBAGENT_TOOL_INPUT_PROPERTIES,
-            model: {
-              type: "string",
-              enum: [...modelChoices],
-              default: modelChoices[0]!,
-              description: `Model for a new agent. Defaults to ${modelChoices[0]}. Omit this field when continuing an agent with \`agentId\`.`,
-            },
+            model: createModelChoiceProperty(modelChoices),
           },
     required: ["message"],
     additionalProperties: false,
   });
+}
+
+function createModelChoiceProperty(modelChoices: readonly SubagentModelChoice[]) {
+  const ids = modelChoices.map((choice) => choice.id);
+  const described = modelChoices.flatMap((choice) =>
+    choice.description === undefined ? [] : [`- ${choice.id}: ${choice.description}`],
+  );
+  return {
+    type: "string" as const,
+    enum: ids,
+    default: ids[0]!,
+    description: [
+      `Model for a new agent. Defaults to ${ids[0]}. Omit this field when continuing an agent with \`agentId\`.`,
+      ...described,
+    ].join("\n"),
+  };
 }

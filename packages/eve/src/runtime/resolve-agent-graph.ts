@@ -27,6 +27,7 @@ import type {
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
+  SubagentModelChoice,
 } from "#runtime/types.js";
 
 /**
@@ -245,7 +246,7 @@ async function resolveRuntimeSubagent(input: {
     | {
         readonly description: string;
         readonly dynamic?: never;
-        readonly modelChoices?: readonly string[];
+        readonly modelChoices?: readonly SubagentModelChoice[];
         readonly tool?: boolean;
       }
     | {
@@ -256,7 +257,10 @@ async function resolveRuntimeSubagent(input: {
     input.sourceRef.configResolver === undefined
       ? {
           description: input.sourceRef.description,
-          modelChoices: input.sourceRef.agent.config.modelChoices?.map((choice) => choice.id),
+          modelChoices: input.sourceRef.agent.config.modelChoices?.map((choice) => ({
+            id: choice.model.id,
+            ...(choice.description === undefined ? {} : { description: choice.description }),
+          })),
           tool: input.sourceRef.agent.config.tool,
         }
       : {

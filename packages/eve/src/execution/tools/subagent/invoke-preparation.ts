@@ -172,9 +172,9 @@ function rejectInvalidModelChoice(input: {
   if (choices === undefined) {
     return reject(`Subagent "${getSubagentName(action)}" does not accept a "model" choice.`);
   }
-  if (typeof model !== "string" || !choices.includes(model)) {
+  if (typeof model !== "string" || !choices.some((choice) => choice.id === model)) {
     return reject(
-      `Subagent "${getSubagentName(action)}" accepts one of these models: ${choices.join(", ")}.`,
+      `Subagent "${getSubagentName(action)}" accepts one of these models: ${choices.map((choice) => choice.id).join(", ")}.`,
     );
   }
   return undefined;

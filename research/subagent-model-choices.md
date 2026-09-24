@@ -1,6 +1,6 @@
 ---
 issue: "TBD (maintainer-requested implementation; no matching issue found)"
-status: proposed
+status: implemented
 last_updated: "2026-09-24"
 ---
 
@@ -111,6 +111,20 @@ option shape, not its classifier.
 **Won't the parent always pick the strongest model?** It might. Descriptions
 and a sensible first entry steer it, and the author bounds the cost: a model
 that should never be picked does not belong in the list.
+
+**Why not let the caller pass any model id?** The author owns cost, provider
+access, and which models the child's instructions were tested against. A
+closed list keeps that decision with the author, and lets eve check every
+option at build.
+
+**Why is the key the slug, not an alias like `fast`?** The slug is already
+the model's name everywhere else in eve: config, logs, traces. An alias would
+be one more name to map back. The description carries the "when to use it".
+
+**Why no per-choice `reasoning`?** The agent's own `reasoning` already applies
+to whichever model runs. `auto` needs it per option because it picks effort
+along with the model; here a real need for that has not shown up yet, and it
+can be added to the entry object later without breaking anything.
 
 **What about callers that are not models?** Authored workflow code passes
 `model` or omits it and gets the first entry. A root agent has no caller at

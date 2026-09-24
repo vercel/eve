@@ -7,6 +7,7 @@ import { ContextContainer } from "#context/container.js";
 import { RuntimeModelMetadataCacheKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { defineDynamic } from "#dynamic/definition.js";
+import { choice } from "#models/choice.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -70,6 +71,27 @@ describe("dynamic runtime model resolution", () => {
     if (typeof model === "string") throw new Error("expected a mock model instance");
     expect(model.provider).toBe("eve-runtime-mock");
     expect(model.modelId).toBe("eve-mock/dynamic-subagent");
+  });
+
+  it("reloads the chosen provider model from a choice() export", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("EVE_MOCK_AUTHORED_MODELS", "");
+    const luna = createLanguageModel("openai.responses", "gpt-6-luna");
+    const sol = createLanguageModel("openai.responses", "gpt-6-sol");
+    const moduleMap = createModuleMap({
+      default: { description: "Research.", model: choice([{ model: luna }, { model: sol }]) },
+    });
+
+    const model = await resolveRuntimeModelReference(
+      {
+        id: "openai/gpt-6-sol",
+        source: DYNAMIC_MODEL_SOURCE,
+        sourceChoiceIndex: 1,
+      },
+      { moduleMap, nodeId: undefined },
+    );
+
+    expect(model).toBe(sol);
   });
 
   it("loads resolver-only definitions and normalizes explicit metadata", async () => {

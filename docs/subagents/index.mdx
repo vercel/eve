@@ -113,24 +113,40 @@ Local `eve dev` makes the bundled `self-modification__agent` subagent available 
 
 ### Let the parent choose the model
 
-Set `model` to an array of AI Gateway model ids to let the caller pick one when it starts a child. The first entry is the default:
+Use `choice` from `eve/models` to let the caller pick a model when it starts a child. The first entry is the default, and each description tells the caller when to pick it:
 
 ```ts title="agent/subagents/researcher/agent.ts"
 import { defineAgent } from "eve";
+import { choice } from "eve/models";
 
 export default defineAgent({
   description: "Investigate ambiguous questions before the parent agent responds.",
-  model: ["anthropic/claude-sonnet-5", "anthropic/claude-opus-5.5"],
+  model: choice({
+    "anthropic/claude-sonnet-5": "Routine lookups where speed matters.",
+    "anthropic/claude-opus-5.5": "Hard questions that need careful reasoning.",
+  }),
 });
 ```
 
-The subagent's tool then accepts an optional `model` field limited to those ids, and `ctx.agent("researcher", { message, model })` accepts the same field. The choice behaves like a `session.started` [dynamic model](./agent-config#choose-the-model-dynamically) selection: it applies to the new child for its whole lifetime, and compaction follows the chosen model's context window.
+The subagent's tool then accepts an optional `model` field limited to those slugs, with the descriptions in its schema. `ctx.agent("researcher", { message, model })` accepts the same slugs, and `ctx.agents.researcher.models` lists them. The pick behaves like a `session.started` [dynamic model](./agent-config#choose-the-model-dynamically) selection: it applies to the new child for its whole lifetime, and compaction follows the chosen model's context window.
+
+`choice` also takes a list. A list entry is a slug or `{ model, description?, modelOptions? }`, where `model` may be an AI SDK `LanguageModel`; the caller then sends its Gateway slug. `modelOptions` applies to that choice only, so AI Gateway fallback models still work inside a choice:
+
+```ts
+model: choice([
+  "anthropic/claude-sonnet-5",
+  {
+    model: "anthropic/claude-opus-5.5",
+    modelOptions: { providerOptions: { gateway: { models: ["openai/gpt-5.5"] } } },
+  },
+]),
+```
 
 - Omitting `model` uses the first entry.
-- An unlisted id, or `model` sent to a subagent without choices, is rejected as a tool error.
+- An unlisted slug, or `model` sent to a subagent without `choice`, is rejected as a tool error.
 - `model` with the `agentId` of an existing child is rejected; the child keeps its model.
-- Every entry must be a Gateway model id with catalog metadata. An array does not accept sibling `modelContextWindowTokens` or `modelOptions`.
-- The array applies only to declared local subagents. A root agent uses its first entry, and dynamic subagent configs must return one static model.
+- Context windows come from the Gateway catalog, so `choice` does not accept a sibling `modelContextWindowTokens` or `modelOptions`. Slugs must be unique.
+- `choice` applies only to declared local subagents. A root agent has no caller, so the build rejects `choice` there. Dynamic subagent configs must return one static model.
 
 ### Vercel workspace peers
 
