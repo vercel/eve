@@ -19,7 +19,7 @@ export default defineNuxtConfig({
 });
 ```
 
-The module looks for an `agent/` folder in the Nuxt project root. Pass `eveRoot` when the agent lives elsewhere:
+The module looks for an `agent/` folder or an `agents/` workspace in the Nuxt project root. Pass `eveRoot` when the eve project lives elsewhere:
 
 ```ts
 export default defineNuxtConfig({
@@ -30,7 +30,7 @@ export default defineNuxtConfig({
 });
 ```
 
-The `eve` key accepts only two options, `eveRoot` and `eveBuildCommand`.
+The `eve` key accepts only two options, `eveRoot` and `eveBuildCommand`. For a workspace, each member is mounted at `/eve/<name>/v1/*`; select it in Vue with `useEveAgent({ agent: "<name>" })`.
 
 ## Call the composable
 
@@ -66,7 +66,7 @@ The browser still needs a production authentication policy. See [Authenticate br
 ## Dev vs deploy topology
 
 - **Local dev.** `npm run dev` starts the eve dev server next to `nuxt dev` and proxies the eve routes through it. As far as the browser knows, everything is the Nuxt origin.
-- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds the module adds Build Output [`services`](https://vercel.com/docs/services) for eve and `routes` that send `/eve/v1/**` to that service before filesystem routing; the Nuxt app itself remains the default app. No `vercel.json` is required. By default the generated service runs the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
+- **Vercel.** The web app and the eve runtime deploy as a single project. On Vercel builds the module adds Build Output [`services`](https://vercel.com/docs/services) for eve and routes that send `/eve/v1/**` for a standalone agent, or `/eve/<name>/v1/**` for each workspace member, to the corresponding service before filesystem routing; the Nuxt app itself remains the default app. No `vercel.json` is required. By default the generated service runs the installed eve binary from the agent root, so the agent directory does not need its own `package.json`. When the agent needs its own build step, set `eveBuildCommand`:
 
   ```ts
   export default defineNuxtConfig({
