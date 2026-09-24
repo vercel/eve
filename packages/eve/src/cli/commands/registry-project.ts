@@ -85,11 +85,28 @@ function parseRegistryMapping(argument: string): { namespace: string; url: strin
   return { namespace, url };
 }
 
-export async function assertCanInstallWebChat(appRoot: string): Promise<void> {
-  if ((await resolveEveProjectContext(appRoot)).kind === "standalone") return;
-  throw new Error(
-    "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+/** Resolves and prepares the root package that owns Web Chat. */
+export async function prepareWebChatProjectRoot(appRoot: string): Promise<string> {
+  const project = await resolveEveProjectContext(appRoot);
+  if (project.kind === "workspace") {
+    throw new Error("Web Chat setup requires a selected workspace agent.");
+  }
+  const root = project.environmentRoot;
+  const packageJsonPath = join(root, "package.json");
+  const source = await readFile(packageJsonPath, "utf8");
+  const document = JSON.parse(source) as {
+    scripts?: Record<string, string>;
+    [key: string]: unknown;
+  };
+  const scripts = { ...document.scripts };
+  scripts["dev:web"] ??= "next dev apps/web";
+  scripts["build:web"] ??= "next build apps/web";
+  await writeFile(
+    packageJsonPath,
+    `${JSON.stringify({ ...document, scripts }, null, 2)}\n`,
+    "utf8",
   );
+  return root;
 }
 
 /** Reads registry namespace mappings from package.json. */
@@ -175,11 +192,14 @@ export function addWebRegistryTsconfig(source: string, path: string): string {
 
 /** Prepares the TypeScript host configuration shadcn registry items expect. */
 export async function prepareWebRegistryProject(appRoot: string): Promise<void> {
-  const path = join(appRoot, "tsconfig.json");
+  const path = join(appRoot, "apps", "web", "tsconfig.json");
   let source: string;
   try {
     source = await readFile(path, "utf8");
   } catch (error) {
+    // A fresh Web Chat gets its canonical tsconfig from the registry item
+    // inside the rollback-protected install transaction.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw new Error(
       `Could not add Web Chat because ${path} could not be read: ${errorMessage(error)}`,
     );

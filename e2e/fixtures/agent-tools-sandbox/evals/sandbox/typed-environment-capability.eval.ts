@@ -9,25 +9,23 @@ export default defineEval({
       "Ask the `deny-all` subagent with message: Verify the configured environment sandbox capability.",
     );
     turn.expectOk();
-    const sessionId = turn.sessionId;
-    if (sessionId === undefined) throw new Error("Typed sandbox turn has no session id.");
     const completed = await t.target
-      .watchTurn(sessionId, { startIndex: requireStreamIndex(turn.session) })
+      .watchTurn(turn.sessionId, { startIndex: requireStreamIndex(turn.session) })
       .result();
     completed.expectOk();
+    const called = completed.events.find(
+      (event) => event.type === "subagent.called" && event.data.name === "deny-all",
+    );
+    if (called?.type !== "subagent.called") {
+      throw new Error("Typed sandbox turn did not call the deny-all subagent.");
+    }
+
+    const childTurn = await t.target.watchTurn(called.data.childSessionId).result();
+    childTurn.expectOk();
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-
-    // Real models paraphrase the child's report, so assert on the tool result
-    // inside the child session rather than on the parent's final message.
-    const called = [...turn.events, ...completed.events].find(
-      (event) => event.type === "subagent.called" && event.data.name === "deny-all",
-    );
-    if (called?.type !== "subagent.called") throw new Error("deny-all was not delegated.");
-    const child = await t.target.watchTurn(called.data.childSessionId).result();
-    child.expectOk();
-    child.calledTool("verify-typed-sandbox", { output: { blocked: true }, status: "completed" });
+    childTurn.calledTool("verify-typed-sandbox", { output: { blocked: true } });
   },
 });
 

@@ -47,7 +47,7 @@ import {
   parseLocalTraceSegment,
   type LocalTraceSpan,
 } from "#tracing/local-trace-reader.js";
-import { summarizeLocalTrace } from "#cli/commands/trace-detail.js";
+import { summarizeLocalTrace } from "#tracing/local-trace-summary.js";
 import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -662,7 +662,7 @@ describe("exported agent telemetry contract", () => {
         "trace parent:turn_2 outcome=cancelled channel=http:web delivery=delivery-cancelled",
         "  invoke_agent parent",
       ]);
-      expect(summarizeLocalTrace(parsed)).toMatchObject({
+      expect(summarizeLocalTrace(parsed[0]!.traceId, parsed)).toMatchObject({
         inputTokens: 10,
         outputTokens: 5,
         cacheReadTokens: 4,

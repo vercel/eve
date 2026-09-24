@@ -1,9 +1,7 @@
 /**
- * Span-level detail rendering and trace-level usage aggregation for
- * `eve traces`. Kept separate from the command module: the tree renderer
- * stays compact while these helpers answer "what does this span carry" —
- * inline metric chips for tree rows, the `--verbose` per-span block, and
- * the usage/cost totals summarized in the trace header.
+ * Span-level detail rendering for `eve traces`. Kept separate from the command
+ * module: the tree renderer stays compact while these helpers answer "what
+ * does this span carry" — inline metric chips and the `--verbose` per-span block.
  */
 
 import { formatCompactTokenCount } from "#cli/dev/tui/stream-format.js";
@@ -11,20 +9,7 @@ import { formatAttributeContent } from "#cli/dev/tui/traces/trace-content.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { sanitizeForTerminal } from "#cli/ui/output.js";
 import type { LocalTraceSpan } from "#tracing/local-trace-reader.js";
-import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
-
-/** Usage and cost totals aggregated over a trace's `agent.step` spans. */
-export interface LocalTraceSummary {
-  readonly cacheReadTokens: number;
-  readonly cacheWriteTokens: number;
-  /** Total gateway cost in USD; undefined when no span reported cost. */
-  readonly costUsd?: number;
-  readonly errorCount: number;
-  readonly inputTokens: number;
-  /** Distinct model ids seen on any span, first-seen order. */
-  readonly models: readonly string[];
-  readonly outputTokens: number;
-}
+import { localTraceSpanCostUsd, type LocalTraceSummary } from "#tracing/local-trace-summary.js";
 
 /**
  * Compact metrics for one tree row: token chips (`↑1.4K`/`↓213`), cost
@@ -39,58 +24,18 @@ export function spanMetricChips(span: LocalTraceSpan): string[] {
   const output = numberAttribute(span, "agent.usage.output_tokens");
   if (input !== undefined) chips.push(`↑${formatCompactTokenCount(input)}`);
   if (output !== undefined) chips.push(`↓${formatCompactTokenCount(output)}`);
-  const cost = spanCostUsd(span);
+  const cost = localTraceSpanCostUsd(span);
   if (cost !== undefined) chips.push(formatCostUsd(cost));
   return chips;
 }
 
-/**
- * Aggregates usage, cost, models, and errors across one trace. Only
- * `agent.step` spans contribute usage: model spans carry the same counters
- * and a subagent's totals already appear as its own step spans in the same
- * trace, so summing anything else would double-count.
- */
-export function summarizeLocalTrace(spans: readonly LocalTraceSpan[]): LocalTraceSummary {
-  const models: string[] = [];
-  let cacheReadTokens = 0;
-  let cacheWriteTokens = 0;
-  let costUsd: number | undefined;
-  let errorCount = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  for (const span of spans) {
-    const model =
-      stringAttribute(span, "agent.model.id") ?? stringAttribute(span, "gen_ai.request.model");
-    if (model !== undefined && !models.includes(model)) models.push(model);
-    if (span.statusCode === 2) errorCount += 1;
-    if (span.name !== "agent.step") continue;
-    inputTokens += numberAttribute(span, "agent.usage.input_tokens") ?? 0;
-    outputTokens += numberAttribute(span, "agent.usage.output_tokens") ?? 0;
-    cacheReadTokens +=
-      numberAttribute(span, AGENT_USAGE_ATTRIBUTES.cacheReadTokens) ??
-      numberAttribute(span, "gen_ai.usage.cache_read.input_tokens") ??
-      0;
-    cacheWriteTokens +=
-      numberAttribute(span, AGENT_USAGE_ATTRIBUTES.cacheWriteTokens) ??
-      numberAttribute(span, "gen_ai.usage.cache_write.input_tokens") ??
-      numberAttribute(span, "gen_ai.usage.cache_creation.input_tokens") ??
-      0;
-    const cost = spanCostUsd(span);
-    if (cost !== undefined) costUsd = (costUsd ?? 0) + cost;
-  }
-  return {
-    cacheReadTokens,
-    cacheWriteTokens,
-    costUsd,
-    errorCount,
-    inputTokens,
-    models,
-    outputTokens,
-  };
-}
-
 /** One-line `Tokens` header value: `↑1.2K in · ↓340 out · 1.1K cached`. */
-export function formatTokenSummary(summary: LocalTraceSummary): string {
+export function formatTokenSummary(
+  summary: Pick<
+    LocalTraceSummary,
+    "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens"
+  >,
+): string {
   const parts = [
     `↑${formatCompactTokenCount(summary.inputTokens)} in`,
     `↓${formatCompactTokenCount(summary.outputTokens)} out`,
@@ -217,12 +162,6 @@ function spanDetailEntries(span: LocalTraceSpan, width: number): SpanDetailEntry
   return entries;
 }
 
-function spanCostUsd(span: LocalTraceSpan): number | undefined {
-  return (
-    numberAttribute(span, "gen_ai.usage.gateway_cost") ?? numberAttribute(span, "gen_ai.usage.cost")
-  );
-}
-
 function spanKind(kind: number): string {
   switch (kind) {
     case 2:
@@ -246,11 +185,6 @@ function numberAttribute(span: LocalTraceSpan, key: string): number | undefined 
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
-}
-
-function stringAttribute(span: LocalTraceSpan, key: string): string | undefined {
-  const value = span.attributes[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function durationMs(start: bigint, end: bigint): number {

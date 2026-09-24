@@ -35,7 +35,10 @@ const WEB_CHANNEL_SOURCE_PATH = "agent/channels/eve.ts";
 
 const FILE_TRANSFORMS: Record<string, ReadonlyArray<readonly [string, string]>> = {
   "app/_components/agent-chat.tsx": [
-    ['const AGENT_NAME = "eve-agent";', 'const AGENT_NAME = "__EVE_INIT_APP_NAME__";'],
+    [
+      'const DEFAULT_AGENT_NAME = "eve-agent";',
+      'const DEFAULT_AGENT_NAME = "__EVE_INIT_APP_NAME__";',
+    ],
   ],
   "app/layout.tsx": [['  title: "eve Next.js Starter",', '  title: "__EVE_INIT_APP_NAME__",']],
   "next.config.ts": [
@@ -70,11 +73,7 @@ function shouldCopySourcePath(relativePath: string): boolean {
   ) {
     return false;
   }
-  return (
-    !relativePath.startsWith("agent/") ||
-    relativePath === WEB_CHANNEL_SOURCE_PATH ||
-    WEB_CHANNEL_SOURCE_PATH.startsWith(`${relativePath}/`)
-  );
+  return !relativePath.startsWith("agent/");
 }
 
 async function discoverSourceFiles(sourceRoot: string, relativeDirectory = ""): Promise<string[]> {
@@ -176,6 +175,11 @@ async function renderGeneratedModule(): Promise<string> {
     }),
   );
   const packageTemplate = parsePackageTemplate(await readFile(REGISTRY_PATH, "utf8"));
+  const webChannelTemplate = await readFile(join(SOURCE_ROOT, WEB_CHANNEL_SOURCE_PATH), "utf8");
+  const webSignInWithVercelChannelTemplate = await readFile(
+    join(SIGN_IN_WITH_VERCEL_SOURCE_ROOT, WEB_CHANNEL_SOURCE_PATH),
+    "utf8",
+  );
 
   return [
     "// Generated from apps/docs/registry/channel/web by eve's setup build (src/setup/build.ts).",
@@ -183,6 +187,11 @@ async function renderGeneratedModule(): Promise<string> {
     "",
     "export const WEB_APP_TEMPLATE_FILES = {",
     ...entries,
+    "} as const;",
+    "",
+    "export const WEB_CHANNEL_TEMPLATES = {",
+    `  default: ${quoteSourceFile(webChannelTemplate)},`,
+    `  "sign-in-with-vercel": ${quoteSourceFile(webSignInWithVercelChannelTemplate)},`,
     "} as const;",
     "",
     "export const WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES = {",

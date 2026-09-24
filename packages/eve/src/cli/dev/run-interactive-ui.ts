@@ -34,9 +34,9 @@ export async function runInteractiveDevelopmentUi(input: {
     async () => input.runDevelopmentTui ?? (await import("#cli/dev/tui/tui.js")).runDevelopmentTui,
     input.report,
   );
-  const applicationRoot = input.server.appRoot ?? input.applicationRoot;
-  const projectContext = await findEveProjectContext(applicationRoot);
-  const workspaceRoot = projectContext?.environmentRoot ?? applicationRoot;
+  const projectContext = await findEveProjectContext(input.applicationRoot);
+  const workspaceRoot =
+    projectContext?.environmentRoot ?? input.server.appRoot ?? input.applicationRoot;
   const agentRoot =
     projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined;
   const target =
