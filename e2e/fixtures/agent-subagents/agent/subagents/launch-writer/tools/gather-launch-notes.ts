@@ -9,10 +9,11 @@ interface LaunchNotes {
   readonly product: string;
 }
 
-// Slow on purpose: the requester's turn ends, and a follow-up can arrive, while the draft is in progress.
+// Slow on purpose: the requester's turn ends, and a follow-up reaches the
+// writer, while the draft is still in progress, even with slow models.
 async function execute(): Promise<LaunchNotes> {
   "use workflow";
-  await sleep("20s");
+  await sleep("45s");
   return {
     audience: "Teams that plan projects together",
     highlights: ["Shared boards that sync offline", "A weekly summary of every board"],
@@ -22,7 +23,7 @@ async function execute(): Promise<LaunchNotes> {
 }
 
 const tool: WorkflowToolDefinition<Record<string, never>, LaunchNotes> = defineWorkflowTool({
-  description: "Collect the launch notes for the Orbit Notebook. Takes about 20 seconds.",
+  description: "Collect the launch notes for the Orbit Notebook. Takes about 45 seconds.",
   inputSchema: z.object({}),
   execute,
 });

@@ -36,3 +36,63 @@ describe("SessionInputQueue.hasSteeringMessage", () => {
     expect(queue.hasSteeringMessage("call-1")).toBe(false);
   });
 });
+
+describe("an owner's steering messages", () => {
+  const steer = (key: string, message = "Mention the price.") => ({
+    caller,
+    kind: "deliver" as const,
+    payloads: [{ message }],
+    steerKey: key,
+  });
+
+  it("admits each key once, so a resent message is dropped", () => {
+    const queue = new SessionInputQueue();
+
+    expect(queue.enqueueDelivery(steer("turn-1:call-2"))).toBeDefined();
+    expect(queue.enqueueDelivery(steer("turn-1:call-2"))).toBeUndefined();
+    expect(queue.pendingCount).toBe(1);
+    expect(queue.takeSteerCount("call-1")).toBe(1);
+  });
+
+  it("counts a message that arrives after the answer toward the call's next turn", () => {
+    // The writer answered call-1 and reported the one message it had.
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery(steer("turn-1:call-2"));
+    queue.takeSteering(new Set([0]), "call-1");
+    expect(queue.takeSteerCount("call-1")).toBe(1);
+
+    // A message sent just before the owner applied that answer arrives now:
+    // it starts a new turn for the same call and counts toward that answer.
+    queue.enqueueDelivery(steer("turn-1:call-3", "Mention the date."));
+    const next = queue.takeNext();
+    expect(next).toMatchObject({ delivery: { caller, steerKey: "turn-1:call-3" }, kind: "turn" });
+    expect(queue.takeSteerCount("call-1")).toBe(1);
+    expect(queue.takeSteerCount("call-1")).toBe(0);
+  });
+
+  it("coalesces steering messages for the same call", () => {
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery(steer("turn-1:call-2"));
+    queue.enqueueDelivery(steer("turn-1:call-3", "Mention the date."));
+
+    const steering = queue.takeSteering(new Set([0, 1]), "call-1");
+    expect(steering?.delivery).toMatchObject({
+      caller,
+      payloads: [{ message: "Mention the price." }, { message: "Mention the date." }],
+    });
+  });
+
+  it("drops a cancelled call's waiting messages so they start no work", () => {
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery(steer("turn-1:call-2"));
+    queue.enqueueDelivery({ kind: "deliver", payloads: [{ message: "Unrelated." }] });
+
+    queue.discardSteering("call-1");
+
+    expect(queue.pendingCount).toBe(1);
+    expect(queue.hasSteeringMessage("call-1")).toBe(true);
+    expect(queue.takeSteerCount("call-1")).toBe(0);
+    // A resent copy of the dropped message stays dropped.
+    expect(queue.enqueueDelivery(steer("turn-1:call-2"))).toBeUndefined();
+  });
+});

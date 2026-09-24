@@ -439,10 +439,11 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
       auth = item.auth;
     }
     if (item.caller !== undefined) {
-      if (caller !== undefined) {
+      // An owner's steering messages name the call they steer.
+      if (caller !== undefined && caller.callId !== item.caller.callId) {
         throw new Error("Cannot coalesce deliveries from different turns.");
       }
-      caller = item.caller;
+      caller ??= item.caller;
     }
     payloads.push(...item.payloads);
     deliveryMetadata.push(
@@ -460,8 +461,10 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
     payloads,
   };
-  // A turn is scheduled only when a schedule sent all of its input.
-  if (rest.every((item) => item.scheduleId !== undefined)) return coalesced;
+  // Input a schedule sent keeps its turn scheduled, so the scheduled run
+  // still posts one final reply when a person's message joins it.
+  const scheduleId = items.find((item) => item.scheduleId !== undefined)?.scheduleId;
+  if (scheduleId !== undefined) return { ...coalesced, scheduleId };
   const { scheduleId: _scheduleId, ...unscheduled } = coalesced;
   return unscheduled as T;
 }

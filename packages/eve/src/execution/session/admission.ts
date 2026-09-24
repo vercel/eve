@@ -87,7 +87,8 @@ export async function admitSessionInboxPayload(
 
   switch (command.kind) {
     case "deliver": {
-      return { admission: input.queue.enqueueDelivery(command), kind: "delivery" };
+      const admission = input.queue.enqueueDelivery(command);
+      return admission === undefined ? { kind: "consumed" } : { admission, kind: "delivery" };
     }
     case "clear":
     case "compact":

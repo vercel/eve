@@ -8,6 +8,8 @@ import {
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ScheduleIdKey } from "#context/keys.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { ScheduleDispatcher } from "#channel/schedule.js";
 
 function createRuntime(): Runtime {
   return {
@@ -62,7 +64,7 @@ describe("createChannelAddress", () => {
     });
   });
 
-  it("marks a message a schedule sends to an existing session with the schedule", async () => {
+  it("marks a message a schedule's dispatch sends to an existing session", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({
       adapter: { kind: "slack" },
@@ -70,15 +72,38 @@ describe("createChannelAddress", () => {
       continuationToken: "C1:T1",
       runtime,
     });
-    const scope = new ContextContainer();
-    scope.set(ScheduleIdKey, "daily-digest");
+    const dispatcher = new ScheduleDispatcher({ channels: [], runtime });
 
-    await contextStorage.run(scope, () => address.send("Post the digest.", { auth: null }));
+    await dispatcher.trigger({
+      scheduleId: "daily-digest",
+      run: async () => {
+        await address.send("Post the digest.", { auth: null });
+      },
+    });
 
     expect(runtime.dispatchContinuation).toHaveBeenCalledWith({
       command: expect.objectContaining({ kind: "send", scheduleId: "daily-digest" }),
       continuationToken: "slack:C1:T1",
     });
+  });
+
+  it("does not mark a send from a later turn of a session a schedule created", async () => {
+    const runtime = createRuntime();
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+    // The saved context of a schedule-created session, as its tools see it in any turn.
+    const saved = new ContextContainer();
+    saved.set(ScheduleIdKey, "daily-digest");
+    const session = await deserializeContext(serializeContext(saved));
+
+    await contextStorage.run(session, () => address.send("Share the notes.", { auth: null }));
+
+    const [call] = vi.mocked(runtime.dispatchContinuation).mock.calls;
+    expect(call?.[0].command).not.toHaveProperty("scheduleId");
   });
 
   it("uses the channel policy unless a send overrides it", async () => {

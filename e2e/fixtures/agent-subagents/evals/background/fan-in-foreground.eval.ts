@@ -17,7 +17,7 @@ const REQUEST = [
 export default defineEval({
   description: "A request that needs two answers together keeps both agent calls waited.",
   tags: ["real-model"],
-  timeoutMs: 240_000,
+  timeoutMs: 180_000,
   async test(t) {
     const turn = await t.send(REQUEST);
     turn.expectOk();

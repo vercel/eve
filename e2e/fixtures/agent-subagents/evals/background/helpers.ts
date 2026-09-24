@@ -10,6 +10,13 @@ export function taskStarts(events: SessionEvents, name: string) {
   );
 }
 
+/** The task ids a steering message moved to the background. */
+export function detachedTaskIds(events: SessionEvents): readonly string[] {
+  return events.flatMap((event) =>
+    event.type === "task.detached" && event.data.reason === "steer" ? [event.data.taskId] : [],
+  );
+}
+
 /**
  * The agent ids from background receipts the turn's calls to one agent
  * returned. A background call's `task.started` can land after its turn ends,
@@ -41,4 +48,24 @@ export async function watchNextTurn(t: EveEvalContext, turn: EveEvalTurn): Promi
   return await t.target
     .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
     .result();
+}
+
+/**
+ * Watches the turns after `turn` until the turns watched so far satisfy
+ * `done`, for at most `maxTurns` turns, and returns every turn it watched.
+ */
+export async function watchTurnsUntil(
+  t: EveEvalContext,
+  turn: EveEvalTurn,
+  done: (watched: readonly EveEvalTurn[]) => boolean,
+  maxTurns: number,
+): Promise<readonly EveEvalTurn[]> {
+  const watched: EveEvalTurn[] = [];
+  let last = turn;
+  while (watched.length < maxTurns) {
+    last = await watchNextTurn(t, last);
+    watched.push(last);
+    if (done(watched)) break;
+  }
+  return watched;
 }

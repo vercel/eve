@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { taskResultDeliveries, taskStarts, watchNextTurn } from "./helpers";
+import { detachedTaskIds, taskResultDeliveries, taskStarts, watchNextTurn } from "./helpers";
 
 const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
 const ALICE_REQUEST = [
@@ -14,25 +14,23 @@ const BOB_NOTE = [
 ].join(" ");
 
 /**
- * A shared thread where Bob posts an unrelated note while Alice's two
- * forecast lookups run. The note moves the lookups to the background as one
- * group, so Alice still gets one combined answer instead of one post per
+ * A shared thread where Bob posts an unrelated note while Alice's forecast
+ * lookups run. The note moves the lookups the turn is waiting on to the
+ * background as one group, whether the model requested them together or one
+ * at a time, so Alice still gets one combined answer instead of one post per
  * lookup, and nothing is delegated twice.
  */
 export default defineEval({
   description:
     "An unrelated message in a shared thread does not fragment another user's request into several posts.",
   tags: ["real-model"],
-  timeoutMs: 300_000,
+  timeoutMs: 240_000,
   async test(t) {
     const conversation = await t.session();
     const live = await conversation.start(ALICE_REQUEST);
+    // Every lookup the turn waits on is recorded before the first child
+    // reports task.started, so the note detaches all of them from here.
     await live.waitForEvent("task.started", { data: { name: "forecaster" } });
-    // Give the second lookup a moment to start; both are requested in one step.
-    for (let waited = 0; waited < 20_000; waited += 250) {
-      if (taskStarts(live.events, "forecaster").length >= 2) break;
-      await t.sleep(250);
-    }
 
     await live.session.start(BOB_NOTE, {
       headers: { authorization: BOB_AUTHORIZATION },
@@ -40,18 +38,20 @@ export default defineEval({
     });
     const shared = await live.result();
     shared.expectOk();
-    await t.require(
-      taskStarts(shared.events, "forecaster"),
+    const detached = await t.require(
+      detachedTaskIds(shared.events),
       satisfies(
-        (calls: ReturnType<typeof taskStarts>) =>
-          calls.length === 2 && calls.every((call) => call.mode === "foreground"),
-        "both lookups started in the foreground",
+        (taskIds: readonly string[]) => taskIds.length > 0,
+        "Bob's note moves Alice's waiting lookups to the background",
       ),
     );
-    shared.event("task.detached", { data: { reason: "steer" }, count: 2 });
     t.judge("The reply acknowledges Bob's note that the team lunch moved to 1 pm.", {
       on: shared.message ?? "",
     }).soft(0.7);
+    t.judge(
+      "The reply does not yet give Alice a final answer about which city will be warmer tomorrow.",
+      { on: shared.message ?? "" },
+    ).soft(0.7);
 
     const result = await watchNextTurn(t, shared);
     result.expectOk();
@@ -62,20 +62,19 @@ export default defineEval({
     ).gate(0.7);
 
     const events = [...shared.events, ...result.events];
-    const forecasterIds = taskStarts(events, "forecaster").map((call) => call.taskId);
     t.check(
-      taskResultDeliveries(events),
+      taskResultDeliveries(events).filter((taskIds) =>
+        taskIds.some((taskId) => detached.includes(taskId)),
+      ),
       satisfies(
         (deliveries: readonly (readonly string[])[]) =>
-          deliveries.length === 1 &&
-          deliveries[0]?.length === 2 &&
-          forecasterIds.every((taskId) => deliveries[0]?.includes(taskId)),
-        "both forecasts arrive together in one task.result message",
+          deliveries.length === 1 && detached.every((taskId) => deliveries[0]?.includes(taskId)),
+        "the moved lookups arrive together in one task.result message",
       ),
     );
     t.check(
-      forecasterIds.length,
-      satisfies((count: number) => count === 2, "no lookup is delegated twice"),
+      taskStarts(events, "forecaster").length,
+      satisfies((count: number) => count >= 1 && count <= 2, "no lookup is delegated twice"),
     );
     result.noFailedActions();
   },

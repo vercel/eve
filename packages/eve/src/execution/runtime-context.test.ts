@@ -6,6 +6,7 @@ import {
   ChannelInstrumentationKey,
   ContinuationHookTokensKey,
   ContinuationTokenKey,
+  DelegatedSessionKey,
   ParentTraceContextKey,
   type Session,
   type SessionAuthContext,
@@ -247,6 +248,33 @@ describe("buildRunContext", () => {
       }),
     );
     expect(ctx.require(ScheduleIdKey)).toBe("automatic-reports");
+  });
+
+  it("marks a session a parent or a remote caller created as delegated", () => {
+    const run = {
+      adapter: { kind: "http" },
+      auth: null,
+      input: { message: "Prepare report A" },
+      mode: "conversation" as const,
+    };
+    const parent = {
+      callId: "call-1",
+      rootSessionId: "root-session",
+      sessionId: "parent-session",
+      turn: { id: "turn-1", sequence: 0 },
+    };
+    const callback = {
+      callId: "call-2",
+      subagentName: "reporter",
+      token: "token",
+      url: "https://caller.example/callback",
+    };
+    const build = (extra: object) =>
+      buildRunContext({ bundle: createMinimalBundle(), run: { ...run, ...extra } });
+
+    expect(build({}).get(DelegatedSessionKey)).toBeUndefined();
+    expect(build({ parent }).get(DelegatedSessionKey)).toBe(true);
+    expect(build({ callback }).get(DelegatedSessionKey)).toBe(true);
   });
 
   it("stores a title only for top-level sessions", () => {

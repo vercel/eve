@@ -80,3 +80,18 @@ export function settledEvents(effects: readonly TaskEffect[]): TaskSettledStream
       : [],
   );
 }
+
+/**
+ * One `task.started` for each generation an agent opened to run steering
+ * messages that reached it after it answered.
+ */
+export function continuedEvents(
+  effects: readonly TaskEffect[],
+  ownerSessionId: string,
+): TaskStartedStreamEvent[] {
+  return effects.flatMap((effect) =>
+    effect.kind === "continued" && effect.record.child !== undefined
+      ? [taskStartedEvent({ child: effect.record.child, ownerSessionId, record: effect.record })]
+      : [],
+  );
+}

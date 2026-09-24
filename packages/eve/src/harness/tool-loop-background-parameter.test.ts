@@ -2,13 +2,15 @@ import { jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ParentSessionKey, ScheduleIdKey } from "#context/keys.js";
+import { DelegatedSessionKey, ScheduleIdKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest, type MockModelResponder } from "#evals/mock-model.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
+import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   BACKGROUND_PARAMETER_DESCRIPTION,
   renderBackgroundTasksInstruction,
@@ -30,6 +32,13 @@ const REMIND: HarnessToolDefinition = {
   workflowId: "workflow//./agent/tools/remind//execute",
 };
 
+const TASK_CANCEL: HarnessToolDefinition = {
+  description: "Stop background agents or tasks by id.",
+  inputSchema: jsonSchema({ type: "object", properties: { taskIds: { type: "array" } } }),
+  name: "task_cancel",
+  workflowId: TASK_CANCEL_WORKFLOW_ID,
+};
+
 const SESSION: HarnessSession = {
   agent: { modelReference: { id: "model" }, system: "Test assistant", tools: [] },
   compaction: { recentWindowSize: 10, threshold: 100_000 },
@@ -42,6 +51,7 @@ async function firstRequest(input: {
   readonly configure?: (ctx: ContextContainer) => void;
   readonly mode?: "conversation" | "task";
   readonly respond?: MockModelResponder;
+  readonly tools?: readonly HarnessToolDefinition[];
 }): Promise<{ readonly request: MockModelRequest; readonly session: HarnessSession }> {
   const requests: MockModelRequest[] = [];
   const model = mockModel((request) => {
@@ -52,7 +62,7 @@ async function firstRequest(input: {
     handleEvent: async () => {},
     mode: input.mode ?? "conversation",
     resolveModel: async () => model,
-    tools: new Map([RESEARCHER, REMIND].map((tool) => [tool.name, tool])),
+    tools: new Map((input.tools ?? [RESEARCHER, REMIND]).map((tool) => [tool.name, tool])),
   });
   const ctx = new ContextContainer();
   input.configure?.(ctx);
@@ -84,15 +94,8 @@ describe("the agent tool background parameter", () => {
   it.each([
     ["a task-mode run", { mode: "task" as const }],
     [
-      "a child session",
-      {
-        configure: (ctx: ContextContainer) =>
-          ctx.set(ParentSessionKey, { callId: "call-1", sessionId: "parent" } as never),
-      },
-    ],
-    [
-      "a session a schedule created",
-      { configure: (ctx: ContextContainer) => ctx.set(ScheduleIdKey, "daily-report") },
+      "a session a caller created",
+      { configure: (ctx: ContextContainer) => ctx.set(DelegatedSessionKey, true) },
     ],
   ])("is not offered in %s", async (_label, options) => {
     const { request } = await firstRequest(options);
@@ -100,6 +103,34 @@ describe("the agent tool background parameter", () => {
     expect(request.tools.map((tool) => tool.name)).toContain("researcher");
     expect(properties(request, "researcher").background).toBeUndefined();
     expect(properties(request, "researcher").message).toBeDefined();
+  });
+
+  it("is offered in a session a schedule created, whose later turns can detach", async () => {
+    const { request } = await firstRequest({
+      configure: (ctx) => ctx.set(ScheduleIdKey, "daily-report"),
+    });
+
+    expect(properties(request, "researcher").background).toEqual({
+      description: BACKGROUND_PARAMETER_DESCRIPTION,
+      type: "boolean",
+    });
+  });
+
+  it("offers task_cancel and the agent block when the only agent tools are dynamic", async () => {
+    const { request } = await firstRequest({
+      configure: (ctx) =>
+        ctx.set(BundleKey, {
+          subagentRegistry: { dynamicResolvers: [{ kind: "subagent", name: "specialist" }] },
+        } as never),
+      tools: [TASK_CANCEL],
+    });
+    const system = request.messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.text)
+      .join("\n");
+
+    expect(request.tools.map((tool) => tool.name)).toEqual(["task_cancel"]);
+    expect(system).toContain(renderBackgroundTasksInstruction({ agents: true }));
   });
 
   it("adds the background block that defers the [Tasks] note to the agent messaging block", async () => {

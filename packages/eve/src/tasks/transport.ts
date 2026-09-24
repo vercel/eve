@@ -12,7 +12,7 @@ import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import { renderAgentUnreachable } from "#tasks/render.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
@@ -25,6 +25,7 @@ import {
 import type { ChildAddress, TaskCommand } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { readTaskCreator } from "#tasks/results.js";
+import { ownerInboxHookToken } from "#tasks/state.js";
 import type { TaskEffect } from "#tasks/table.js";
 
 // Owner → child delivery: new generations for idle agents and owner commands.
@@ -56,16 +57,8 @@ async function runCommand(
   ctx: ContextContainer | undefined,
 ): Promise<void> {
   const child = record.child;
-  if (child === undefined) return;
-  if (command.kind === "message") {
-    // The call that sent it already returned its receipt; the agent's result still arrives.
-    const failure = await sendAgentMessage({ command, ctx, record });
-    if (failure !== undefined) {
-      log.warn("a held message did not reach its agent", { taskId: record.id });
-    }
-    return;
-  }
-  if (command.kind !== "cancel") return;
+  // Held messages go through `flushHeldCommands`, which knows the owner.
+  if (child === undefined || command.kind !== "cancel") return;
   try {
     if (child.kind === "remote") {
       const remote = resolveRemoteChild(record, ctx);
@@ -96,15 +89,19 @@ async function runCommand(
 }
 
 /**
- * Sends a `message` command to a working agent. It carries no caller, so the
- * child's current caller keeps the generation: a local or remote child applies
- * it as steering of its current turn, or as its next turn when it is holding
- * that caller until its own background work settles. Returns the call's error
- * output when the message did not reach the child.
+ * Sends a steering message to a working agent. A local agent receives it for
+ * its current generation's call, with the owner's key, so it admits the
+ * message once and reports receiving it when it answers that call: in its
+ * current turn, in its next turn for the same call when it is holding that
+ * call for its own background work, or as a new turn for the call when it
+ * has already answered. A remote agent receives it without a caller and
+ * applies it to its current turn. Returns the call's error output when the
+ * message did not reach the agent.
  */
 export async function sendAgentMessage(input: {
   readonly command: Extract<TaskCommand, { readonly kind: "message" }>;
   readonly ctx: ContextContainer | undefined;
+  readonly ownerSessionId: string;
   readonly record: TaskRecord;
 }): Promise<JsonValue | undefined> {
   const { command, record } = input;
@@ -115,16 +112,15 @@ export async function sendAgentMessage(input: {
   });
   const bundle = input.ctx?.get(BundleKey);
   if (child === undefined || bundle === undefined) return unreachable(false);
-  const payload: { message: string; outputSchema?: JsonObject } = { message: command.message };
-  if (command.outputSchema !== undefined) payload.outputSchema = command.outputSchema;
   try {
     if (child.kind === "remote") {
       const remote = resolveRemoteChild(record, input.ctx);
       if (remote === undefined) return unreachable(true);
-      // The child's current generation already has the owner's callback.
+      // The child's current generation already has the owner's callback. Only
+      // the principal that started that generation may steer it.
       await continueRemoteAgentSession({
         auth: readTaskCreator(record.creator).auth,
-        ...payload,
+        message: command.message,
         remote: { ...remote, url: child.url },
         sessionId: child.sessionId,
         turnPolicy: "steer",
@@ -132,12 +128,23 @@ export async function sendAgentMessage(input: {
       return undefined;
     }
     if (child.kind !== "local") return unreachable(true);
-    // Without `auth`, the child keeps acting as the principal that started it.
+    // Without `auth`, the child keeps acting as the principal that started
+    // it, which is the steering principal: only that principal may steer.
     const result = await createWorkflowRuntime({
       compiledArtifactsSource: bundle.compiledArtifactsSource,
       nodeId: record.nodeId,
     }).dispatchSession({
-      command: { kind: "send", payload, turnPolicy: "steer" },
+      command: {
+        caller: {
+          callId: record.callId,
+          replyTo: { kind: "hook", token: ownerInboxHookToken(input.ownerSessionId) },
+          subagentName: record.name,
+        },
+        kind: "send",
+        payload: { message: command.message },
+        steerKey: command.key,
+        turnPolicy: "steer",
+      },
       sessionId: child.sessionId,
     });
     return result.status === "accepted" ? undefined : unreachable(result.retryable !== true);

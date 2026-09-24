@@ -11,8 +11,9 @@ export default defineEval({
     turn.event("task.started", { data: { kind: "workflow", name: "blocking_agent" }, count: 1 });
     // Both agent calls and the blocking_agent workflow tool call settle as tasks.
     turn.event("task.settled", { data: { status: "completed" }, count: 3 });
-    turn.messageIncludes("WORKFLOW-CHILD:api:blocking");
-    turn.messageIncludes("WORKFLOW-CHILD:api:direct");
+    // Each child echoes its whole input, which eve wraps in the delegation prompt.
+    turn.messageIncludes(/WORKFLOW-CHILD:[\s\S]*?Caller message:\napi:blocking/u);
+    turn.messageIncludes(/WORKFLOW-CHILD:[\s\S]*?Caller message:\napi:direct/u);
     turn.event("turn.started", { count: 1 });
 
     t.succeeded();

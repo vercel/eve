@@ -8,6 +8,7 @@ import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TaskStartedHookPayload, TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import type { ChildTaskReport } from "#tasks/protocol.js";
 import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
 import {
   isSubagentAdapterState,
@@ -83,6 +84,8 @@ export interface SettledTurnNotification {
   readonly errorCode?: string;
   /** Usage accumulated since the previous caller settlement, including yielded turns. */
   readonly usage?: TokenUsage;
+  /** Steering messages for the call that the session received since it last answered it. */
+  readonly steers?: number;
 }
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
@@ -176,8 +179,12 @@ function createSettledTurnResult(input: {
   readonly lifecycle: AgentTurnOutcome["kind"];
   readonly sessionId: string;
   readonly settled: SettledTurnNotification;
-}): RuntimeSubagentChildResult {
+}): ChildTaskReport {
   const usageDelta = input.settled.usage ?? ZERO_TOKEN_USAGE;
+  const steers =
+    input.settled.steers === undefined || input.settled.steers === 0
+      ? {}
+      : { steers: input.settled.steers };
 
   if (input.settled.isError === true) {
     const error = {
@@ -196,11 +203,12 @@ function createSettledTurnResult(input: {
       },
       output: error,
       subagentName: input.caller.subagentName,
+      ...steers,
     };
   }
 
   const output = parseJsonValue(input.settled.output);
-  const result: RuntimeSubagentChildResult = {
+  const result: ChildTaskReport = {
     callId: input.caller.callId,
     kind: "subagent-result",
     origin: "child",
@@ -211,6 +219,7 @@ function createSettledTurnResult(input: {
     },
     output,
     subagentName: input.caller.subagentName,
+    ...steers,
   };
   // Legacy per-result usage projection (usage spans); the parent folds
   // `outcome.usageDelta`, never this field, when an outcome is present.

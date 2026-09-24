@@ -70,12 +70,15 @@ limit as `detach: true` workflow tools and detached calls. A call over the limit
 fails with `TOO_MANY_BACKGROUND_TASKS`. Passing the `agentId` of an idle agent with
 `background: true` gives it new work in the background.
 
-Only interactive root sessions offer the parameter, and the decision is fixed for the session, so the
-tool list does not change between turns. A subagent's session, a task-mode run, and a session that a
-schedule created do not see it, and every agent call there waits. A schedule can also send a
-message into an existing interactive session; the turn that message starts treats
-`background: true` as a waited call, so a scheduled run posts one final reply. `ctx.agent` in a
-workflow body always waits.
+Only interactive root sessions offer the parameter. The decision is fixed when the session is
+created, so the tool list does not change between turns, even when a later turn arrives with a
+caller. A subagent's session and a task-mode run do not see it, and every agent call there waits. A
+session that a schedule created offers it, but the turn the schedule started treats
+`background: true` as a waited call, so a scheduled run posts one final reply; later turns in that
+session can run calls in the background. The same rule applies to the turn that a message sent by a
+schedule's handler starts in an existing interactive session, including when another message joins
+that turn. A message sent from a later turn of a schedule-created session, such as by a tool, does
+not count as a schedule's message. `ctx.agent` in a workflow body always waits.
 
 `background` and detach cover different moments. `background: true` skips the wait when the model
 makes the call. Detach moves calls that are already waiting to the background when a new message
@@ -329,7 +332,11 @@ Pass the `agentId` of a child that is still working to send it a message, such a
 Sent your message to agent researcher-7k2m9q, which is still working. Its result will arrive in a later message.
 ```
 
-The child still delivers exactly one result for its current call, through that call: a background child's result arrives in a `task.result` message, and a waited call's result stays that call's tool result. The child receives the message as a steering message: in its current turn, or in its next turn for the same call when it is waiting on its own background tasks. A child that has not started yet receives the message when it starts. A message that reaches the child after it has replied does not change the result that is already on its way. The child keeps running as the principal whose call started its current work.
+The child still delivers exactly one result for its current call, through that call: a background child's result arrives in a `task.result` message, and a waited call's result stays that call's tool result. The child receives the message as a steering message: in its current turn, or in its next turn for the same call when it is waiting on its own background tasks. A child that has not started yet receives the message when it starts; if eve cannot deliver it then, eve logs the failure, and the child's result does not reflect the message. The message does not change the output schema of the child's current call.
+
+The child keeps running as the principal whose call started its current work, so only that principal can send it a message. A call from another principal, such as another user in a shared thread, fails with `AGENT_BUSY`, and so does a model call that names a child whose current work a workflow body started with `ctx.agent`. Omit `agentId` to start a new child instead.
+
+A local child can reply just before a message reaches it. The child then runs the message as its next turn for the same call, and eve tracks that turn as the child's next background work: the parent stream reports another `task.started` with the same `taskId` and `mode: "background"`, and the turn's result arrives in a `task.result` message like any background result, so the model still receives a result that reflects its message. A remote child applies a message only to a turn that is still running; see [Remote agents](./guides/remote-agents#how-remote-dispatch-and-callbacks-work).
 
 Delivery failures are reported to the caller as `AGENT_UNREACHABLE`; eve does not start a replacement child session to hide them.
 

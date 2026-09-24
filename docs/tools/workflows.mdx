@@ -322,7 +322,9 @@ const result = await ctx.agent("reviewer", {
 The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
 continue an idle child. A workflow body waits for the child's own answer, so an `agentId` that names
 a child still working on another call fails with `AGENT_BUSY`, and `ctx.agent` never runs a call in
-the background. An inline `outputSchema` requires structured output and determines the
+the background. For the same reason, while a `ctx.agent` call is working, a model call that passes
+that child's `agentId` fails with `AGENT_BUSY` instead of sending it a message. An inline
+`outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 
 ### Route to a hidden subagent with Jev

@@ -82,8 +82,16 @@ export class SessionExecution {
     return this.input.cursor;
   }
 
-  async runTurn(delivery: TurnStepPayload | undefined): Promise<TurnOutcome> {
-    const turn = new ActiveTurn(this.input, delivery?.delivery?.caller?.callId);
+  /**
+   * Runs one turn. `callerCallId` names the delegated call the session is
+   * answering, whose owner's steering messages steer this turn; it defaults to
+   * the caller of the delivery that starts the turn.
+   */
+  async runTurn(
+    delivery: TurnStepPayload | undefined,
+    callerCallId: string | undefined = delivery?.delivery?.caller?.callId,
+  ): Promise<TurnOutcome> {
+    const turn = new ActiveTurn(this.input, callerCallId);
     try {
       return await this.runTurnSteps(turn, delivery);
     } finally {

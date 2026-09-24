@@ -5,7 +5,7 @@ import { defineJsonSchema } from "#tools/schema.js";
 export const AGENT_TOOL_NAME = "agent";
 
 export const AGENT_TOOL_DESCRIPTION = [
-  "Delegate a focused subtask to a copy of yourself, or give an idle previous delegation more work with `agentId`.",
+  "Delegate a focused subtask to a copy of yourself. Pass `agentId` to give an idle copy more work, or to send a correction to a copy that is still working.",
   "Use it to isolate complex work or split a large task into independent pieces.",
   "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
   "A new child has fresh history and state but reuses your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",

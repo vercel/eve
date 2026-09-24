@@ -108,6 +108,15 @@ export type TaskEffect =
     }
   | {
       /**
+       * An agent answered before steering messages reached it, and runs them
+       * as its next turn for the same call: `record` is that new background
+       * generation, already working.
+       */
+      readonly kind: "continued";
+      readonly record: TaskRecord;
+    }
+  | {
+      /**
        * A child the owner cancelled confirmed it stopped. Nothing reaches the
        * model, but its usage still counts.
        */
@@ -212,9 +221,8 @@ export type StartTaskResult =
   /** A replayed call whose record already exists; its side effects already ran. */
   | { readonly kind: "existing"; readonly record: TaskRecord }
   | {
-      /** The call named a working agent; the message joins its current generation. */
+      /** The call named a working agent; the owner decides whether its message may join. */
       readonly kind: "steered";
-      readonly transition: TaskTransition;
       readonly record: TaskRecord;
     }
   | { readonly kind: "rejected"; readonly error: TaskError };
@@ -233,8 +241,6 @@ export interface StartTaskInput {
   readonly creator?: JsonObject;
   /** Continue this agent instead of starting a new one. */
   readonly agentId?: string;
-  /** Message and schema forwarded when `agentId` names a working agent. */
-  readonly steering?: { readonly message: string; readonly outputSchema?: JsonObject };
   readonly workflowCaller?: TaskRecord["workflowCaller"];
 }
 
@@ -287,15 +293,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
         error: { code: "AGENT_UNREACHABLE", message: renderAgentUnreachable(agent.id, "ended") },
       };
     }
-    if (!isTerminalTaskStatus(agent.status)) {
-      const command: TaskCommand = withoutUndefined({
-        kind: "message" as const,
-        message: input.steering?.message ?? "",
-        outputSchema: input.steering?.outputSchema,
-      });
-      const transition = issueCommand(table, agent, command);
-      return { kind: "steered", record: findTask(transition.table, agent.id)!, transition };
-    }
+    if (!isTerminalTaskStatus(agent.status)) return { kind: "steered", record: agent };
     const next: TaskRecord = withoutUndefined({
       ...agent,
       callId: input.callId,
@@ -310,6 +308,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
       pendingCommands: undefined,
       startedAt: input.now,
       status: "working",
+      steers: undefined,
       turnId: input.turnId,
       workflowCaller: input.workflowCaller,
     });
@@ -341,6 +340,33 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     workflowCaller: input.workflowCaller,
   });
   return { kind: "started", record, table: toTable([...table.records, record]) };
+}
+
+/**
+ * Sends a working agent a message that joins its current generation. A local
+ * agent reports how many such messages reached it when it answers, so each
+ * one sent to it is counted; a remote agent reports none.
+ */
+export function steerTask(
+  table: TaskTable,
+  taskId: string,
+  command: Extract<TaskCommand, { readonly kind: "message" }>,
+): TaskTransition {
+  const record = findTask(table, taskId);
+  if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
+  const counted =
+    record.child?.kind === "remote" ? record : { ...record, steers: (record.steers ?? 0) + 1 };
+  return issueCommand(replace(table, counted), counted, command);
+}
+
+/** Stops counting a steering message that could not be delivered, so the owner does not wait for it. */
+export function withdrawSteer(table: TaskTable, taskId: string, generation: number): TaskTable {
+  const record = findTask(table, taskId);
+  if (record?.generation !== generation || record.steers === undefined) return table;
+  return replace(
+    table,
+    withoutUndefined({ ...record, steers: record.steers > 1 ? record.steers - 1 : undefined }),
+  );
 }
 
 /**
@@ -409,17 +435,23 @@ export function applyTaskMessage(
       const settled = settleRecord(record, message.outcome);
       const next =
         message.childEnded === true ? withoutUndefined({ ...settled, child: undefined }) : settled;
-      return {
-        effects: [
-          withoutUndefined({
-            kind: "settled" as const,
-            outcome: message.outcome,
-            record: next,
-            usage: message.usage,
-          }),
-        ],
-        table: replace(table, next),
-      };
+      const effects: TaskEffect[] = [
+        withoutUndefined({
+          kind: "settled" as const,
+          outcome: message.outcome,
+          record: next,
+          usage: message.usage,
+        }),
+      ];
+      const missed = (record.steers ?? 0) - (message.steers ?? 0);
+      if (missed <= 0 || message.childEnded === true) {
+        return { effects, table: replace(table, next) };
+      }
+      // The agent answered before these messages reached it. It runs them as
+      // its next turn for the same call, so they become its next generation.
+      const continued = continueAfterMissedSteers(record, next, missed, now);
+      effects.push({ kind: "continued", record: continued });
+      return { effects, table: replace(table, continued) };
     }
   }
 }
@@ -566,6 +598,37 @@ function issueCommand(table: TaskTable, record: TaskRecord, command: TaskCommand
   }
   const next = { ...record, pendingCommands: [...(record.pendingCommands ?? []), command] };
   return { effects: [], table: replace(table, next) };
+}
+
+/**
+ * The background generation an agent starts when it answered before steering
+ * messages reached it. It keeps the call and the time limit of the generation
+ * it follows, and its result arrives as a `task.result`.
+ */
+function continueAfterMissedSteers(
+  record: TaskRecord,
+  settled: TaskRecord,
+  missed: number,
+  now: string,
+): TaskRecord {
+  const limitMs =
+    record.deadlineAt === undefined
+      ? undefined
+      : Date.parse(record.deadlineAt) - Date.parse(record.startedAt);
+  return withoutUndefined({
+    ...settled,
+    delivered: false,
+    deadlineAt:
+      limitMs === undefined ? undefined : new Date(Date.parse(now) + limitMs).toISOString(),
+    detachGroup: undefined,
+    generation: record.generation + 1,
+    inputSeq: undefined,
+    mode: "background" as const,
+    startedAt: now,
+    status: "working" as const,
+    steers: missed,
+    workflowCaller: undefined,
+  });
 }
 
 function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {

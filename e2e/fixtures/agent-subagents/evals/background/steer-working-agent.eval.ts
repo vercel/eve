@@ -1,7 +1,7 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { receiptTaskIds, taskResultDeliveries, taskStarts, watchNextTurn } from "./helpers";
+import { receiptTaskIds, taskResultDeliveries, taskStarts, watchTurnsUntil } from "./helpers";
 
 const REQUEST = [
   "Hi, this is Alice from the product team.",
@@ -15,8 +15,10 @@ const FOLLOW_UP = [
 
 /**
  * A follow-up about work already in progress goes to the working agent
- * through its agentId: no second writer starts, and one draft arrives that
- * includes the follow-up.
+ * through its agentId: no second writer starts, and a draft that includes the
+ * follow-up arrives. The writer's slow tool keeps it working when the
+ * follow-up lands; if it still answers first, eve runs the follow-up as the
+ * same agent's next background work, and one more result arrives for it.
  */
 export default defineEval({
   description:
@@ -42,26 +44,43 @@ export default defineEval({
       { on: followUp.message ?? "" },
     ).gate(0.7);
 
-    const result = await watchNextTurn(t, followUp);
+    const eventsWith = (turns: readonly EveEvalTurn[]) => [
+      ...first.events,
+      ...followUp.events,
+      ...turns.flatMap((turn) => turn.events),
+    ];
+    // Watch until every piece of the writer's work has reported.
+    const later = await watchTurnsUntil(
+      t,
+      followUp,
+      (watched) =>
+        taskResultDeliveries(eventsWith(watched)).flat().length >=
+        taskStarts(eventsWith(watched), "launch-writer").length,
+      2,
+    );
+    const result = later.at(-1)!;
     result.expectOk();
     result.messageIncludes(/\$49/);
 
-    const events = [...first.events, ...followUp.events, ...result.events];
+    const events = eventsWith(later);
+    const starts = taskStarts(events, "launch-writer");
     t.check(
-      taskStarts(events, "launch-writer"),
+      starts,
       satisfies(
-        (calls: ReturnType<typeof taskStarts>) => calls.length === 1 && calls[0]?.taskId === taskId,
-        "the follow-up joins the working writer; no second writer starts",
+        (calls: typeof starts) =>
+          calls.length >= 1 && calls.length <= 2 && calls.every((call) => call.taskId === taskId),
+        "the follow-up goes to the working writer; no second writer starts",
       ),
     );
     t.check(
       taskResultDeliveries(events),
       satisfies(
         (deliveries: readonly (readonly string[])[]) =>
-          deliveries.length === 1 && deliveries[0]?.join() === taskId,
-        "exactly one result arrives for the draft",
+          deliveries.flat().length === starts.length &&
+          deliveries.flat().every((delivered) => delivered === taskId),
+        "exactly one result arrives for each piece of the writer's work",
       ),
     );
-    result.noFailedActions();
+    for (const turn of later) turn.noFailedActions();
   },
 });

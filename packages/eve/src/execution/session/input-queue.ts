@@ -54,15 +54,55 @@ export type SessionInputSelection =
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private nextSequence = 0;
+  /** Every steering key admitted, so an owner's resent message is dropped. */
+  private readonly steerKeys = new Set<string>();
+  /** Steering messages admitted per delegated call since the session last answered it. */
+  private readonly steerCounts = new Map<string, number>();
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission {
+  /**
+   * Admits a delivery. An owner's steering message is admitted once per key;
+   * a repeat, such as one resent by a retried owner step, returns `undefined`.
+   */
+  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+    const key = delivery.steerKey;
+    if (key !== undefined) {
+      if (this.steerKeys.has(key)) return undefined;
+      this.steerKeys.add(key);
+      const callId = delivery.caller?.callId;
+      if (callId !== undefined)
+        this.steerCounts.set(callId, (this.steerCounts.get(callId) ?? 0) + 1);
+    }
     const admission = { delivery, sequence: this.nextSequence++ };
     this.entries.push({ ...admission, kind: "delivery" });
     return admission;
+  }
+
+  /**
+   * Steering messages admitted for a delegated call since the last answer,
+   * reported with the answer that settles the call. Every one of them
+   * reached that answer: a steering message waiting in the queue holds the
+   * answer (see {@link hasSteeringMessage}), and one admitted afterwards
+   * starts the call's next turn and counts toward that turn's answer.
+   */
+  takeSteerCount(callId: string): number {
+    const count = this.steerCounts.get(callId) ?? 0;
+    this.steerCounts.delete(callId);
+    return count;
+  }
+
+  /** Drops a cancelled call's waiting steering messages, so they do not start work nobody receives. */
+  discardSteering(callId: string): void {
+    this.steerCounts.delete(callId);
+    this.retain(
+      (entry) =>
+        entry.kind !== "delivery" ||
+        entry.delivery.steerKey === undefined ||
+        entry.delivery.caller?.callId !== callId,
+    );
   }
 
   enqueueControl(control: SessionControl): void {

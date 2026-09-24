@@ -12,8 +12,10 @@ import {
   pruneTaskTable,
   readTaskTable,
   startTask,
+  steerTask,
   TASK_TABLE_STATE_KEY,
   timeOutTask,
+  withdrawSteer,
   writeTaskTable,
   type TaskTable,
 } from "#tasks/table.js";
@@ -137,7 +139,7 @@ describe("startTask", () => {
     if (notAgent.kind === "rejected") expect(notAgent.error.message).toContain("task_cancel");
   });
 
-  it("joins the working generation when a working agent is addressed", () => {
+  it("reports a working agent without changing it, so the owner decides whether a message may join", () => {
     const agent = started(undefined, { kind: "agent", name: "researcher" });
     const steered = startTask(agent.table, {
       agentId: agent.record.id,
@@ -147,27 +149,140 @@ describe("startTask", () => {
       name: "researcher",
       now: NOW,
       ownerId: "session_1",
-      steering: { message: "also check Plain" },
       turnId: "turn_0",
     });
-    expect(steered.kind).toBe("steered");
-    if (steered.kind !== "steered") return;
-    expect(steered.record.generation).toBe(1);
-    // No child yet, so the command is held until the child starts.
-    expect(steered.record.pendingCommands).toEqual([
-      { kind: "message", message: "also check Plain" },
-    ]);
+    expect(steered).toEqual({ kind: "steered", record: agent.record });
+  });
+});
+
+describe("steerTask", () => {
+  const message = { key: "k1", kind: "message", message: "also check Plain" } as const;
+  const localChild = {
+    continuationToken: "child_token",
+    kind: "local",
+    sessionId: "child",
+  } as const;
+
+  it("holds a message for an unstarted agent and counts it, then sends it on task.started", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    const steered = steerTask(agent.table, agent.record.id, message);
+    expect(steered.effects).toEqual([]);
+    expect(steered.table.records[0]).toMatchObject({ pendingCommands: [message], steers: 1 });
+
     const start = applyTaskMessage(
-      steered.transition.table,
-      { child, generation: 1, kind: "task.started", taskId: agent.record.id },
+      steered.table,
+      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
       NOW,
     );
-    expect(start.effects).toEqual([
-      expect.objectContaining({
-        commands: [{ kind: "message", message: "also check Plain" }],
-        kind: "send",
-      }),
+    expect(start.effects).toEqual([expect.objectContaining({ commands: [message], kind: "send" })]);
+    expect(withdrawSteer(start.table, agent.record.id, 1).records[0]?.steers).toBeUndefined();
+  });
+
+  it("does not count messages to a remote agent, which reports none", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    const remote = applyTaskMessage(
+      agent.table,
+      {
+        child: {
+          callbackBaseUrl: "https://owner",
+          kind: "remote",
+          sessionId: "r",
+          url: "https://r",
+        },
+        generation: 1,
+        kind: "task.started",
+        taskId: agent.record.id,
+      },
+      NOW,
+    ).table;
+    const steered = steerTask(remote, agent.record.id, message);
+    expect(steered.effects).toEqual([
+      expect.objectContaining({ commands: [message], kind: "send" }),
     ]);
+    expect(steered.table.records[0]?.steers).toBeUndefined();
+  });
+
+  it("opens the next background generation when the agent answered before a message reached it", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher", timeoutMs: 60_000 });
+    const running = applyTaskMessage(
+      agent.table,
+      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
+      NOW,
+    ).table;
+    const steered = steerTask(steerTask(running, agent.record.id, message).table, agent.record.id, {
+      ...message,
+      key: "k2",
+    }).table;
+    const later = "2026-09-24T14:05:00.000Z";
+    const answered = applyTaskMessage(
+      steered,
+      {
+        generation: 1,
+        kind: "task.settled",
+        outcome: { output: "draft", status: "completed" },
+        steers: 1,
+        taskId: agent.record.id,
+      },
+      later,
+    );
+
+    expect(answered.effects).toEqual([
+      expect.objectContaining({
+        kind: "settled",
+        record: expect.objectContaining({ generation: 1, status: "completed" }),
+      }),
+      {
+        kind: "continued",
+        record: expect.objectContaining({
+          callId: "call_1",
+          deadlineAt: "2026-09-24T14:06:00.000Z",
+          delivered: false,
+          generation: 2,
+          mode: "background",
+          startedAt: later,
+          status: "working",
+          steers: 1,
+        }),
+      },
+    ]);
+    // The continuation settles like any generation, and nothing more is expected.
+    const done = applyTaskMessage(
+      answered.table,
+      {
+        generation: 2,
+        kind: "task.settled",
+        outcome: { output: "draft with Plain", status: "completed" },
+        steers: 1,
+        taskId: agent.record.id,
+      },
+      later,
+    );
+    expect(done.effects).toEqual([expect.objectContaining({ kind: "settled" })]);
+    expect(done.table.records[0]).toMatchObject({ generation: 2, status: "completed" });
+  });
+
+  it("settles normally when every message reached the answer or the agent's session ended", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    const running = applyTaskMessage(
+      agent.table,
+      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
+      NOW,
+    ).table;
+    const steered = steerTask(running, agent.record.id, message).table;
+    const settled = {
+      generation: 1,
+      kind: "task.settled",
+      outcome: { output: "draft", status: "completed" },
+      taskId: agent.record.id,
+    } as const;
+    expect(
+      applyTaskMessage(steered, { ...settled, steers: 1 }, NOW).effects.map(({ kind }) => kind),
+    ).toEqual(["settled"]);
+    expect(
+      applyTaskMessage(steered, { ...settled, childEnded: true }, NOW).effects.map(
+        ({ kind }) => kind,
+      ),
+    ).toEqual(["settled"]);
   });
 });
 

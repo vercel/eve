@@ -70,11 +70,9 @@ import {
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
-import { renderBackgroundTasksInstruction, resolveTasksAnnouncement } from "#tasks/render.js";
-import { hasPendingBackgroundWork, supportsBackgroundTasks } from "#tasks/results.js";
-import { isTaskCancelTool } from "#tasks/cancel-tool.js";
-import { withAgentBackgroundParameter } from "#harness/agent-background-parameter.js";
+import { resolveTasksAnnouncement } from "#tasks/render.js";
+import { hasPendingBackgroundWork } from "#tasks/results.js";
+import { applyBackgroundTaskSurface, resolveBackgroundTaskSurface } from "#tasks/interactive.js";
 import { getTaskTable } from "#tasks/state.js";
 import {
   createResultTurnReplyPrompt,
@@ -1323,22 +1321,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     ): ModelMessage[] =>
       note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
 
-    // Static per session, so the system prefix and tools stay stable for the prompt cache.
-    const interactiveRoot = config.mode === "conversation" && !hasDelegatedCaller;
-    const backgroundTasks = supportsBackgroundTasks({
-      interactiveRoot,
-      tools: config.tools.values(),
+    const backgroundTaskSurface = resolveBackgroundTaskSurface({
+      ctx,
+      mode: config.mode,
+      tools: config.tools,
     });
-    // A session a schedule created keeps every agent call waited, so it never offers `background`.
-    const backgroundAgentCalls =
-      backgroundTasks && interactiveRoot && ctx?.get(ScheduleIdKey) === undefined;
-    const backgroundTasksInstruction = backgroundTasks
-      ? renderBackgroundTasksInstruction({
-          agents: [...config.tools.values()].some(
-            (tool) => tool.workflowId === AGENT_TASK_WORKFLOW_ID,
-          ),
-        })
-      : undefined;
+    const backgroundTasksInstruction = backgroundTaskSurface.instruction;
     const prepareModelInstructions = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
         ? [{ role: "system" as const, content: extraSystemNote }]
@@ -1407,13 +1395,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
 
     const prepareModelTools = async (opts: ModelCallOptions) => {
-      const allTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
-      // task_cancel shares the background-tasks block's static predicate.
-      const harnessTools = backgroundAgentCalls
-        ? withAgentBackgroundParameter(allTools)
-        : backgroundTasks
-          ? allTools
-          : new Map([...allTools].filter(([, tool]) => !isTaskCancelTool(tool)));
+      const harnessTools = applyBackgroundTaskSurface(
+        buildHarnessToolsWithDynamicSubagents(config.tools, ctx),
+        backgroundTaskSurface,
+      );
       const advertisedHarnessTools = getAdvertisedTools({
         session,
         tools: harnessTools,

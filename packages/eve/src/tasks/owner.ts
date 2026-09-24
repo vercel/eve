@@ -4,10 +4,8 @@ import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#ch
 import type { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
-import {
-  isInteractiveRootTurn,
-  prepareActionDispatch,
-} from "#execution/coordination-dispatch-shared.js";
+import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
+import { isInteractiveRootTurn } from "#tasks/interactive.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -32,7 +30,7 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { settledEvents, taskStartedEvent } from "#tasks/events.js";
+import { continuedEvents, settledEvents, taskStartedEvent } from "#tasks/events.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeAgentDispatchRequest,
@@ -42,17 +40,12 @@ import type {
 } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import {
-  AGENT_BUSY,
-  AGENT_UNREACHABLE,
-  SUBAGENT_EXECUTION_FAILED,
-} from "#subagents/agent-handle-errors.js";
-import { renderAgentBusy, renderAgentUnreachable } from "#tasks/render.js";
+import { AGENT_UNREACHABLE, SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
+import { renderAgentUnreachable } from "#tasks/render.js";
 import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
-import { steerWorkingAgent } from "#tasks/steer.js";
+import { flushHeldCommands, steerWorkingAgent } from "#tasks/steer.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
-import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
   flushAgentInvocationTraces,
@@ -60,14 +53,9 @@ import {
 } from "#tracing/agent-invocation-terminal.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
-import { isTerminalTaskStatus, type ChildAddress } from "#tasks/protocol.js";
+import { isTerminalTaskStatus, reportedSteers, type ChildAddress } from "#tasks/protocol.js";
 import { createFailedResult, toTaskError, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
-import {
-  cancelOrphanedChild,
-  deliverToChild,
-  runCommands,
-  type CommandEffect,
-} from "#tasks/transport.js";
+import { cancelOrphanedChild, deliverToChild, type CommandEffect } from "#tasks/transport.js";
 import {
   getTaskTable,
   ownerInboxHookToken,
@@ -255,10 +243,6 @@ export async function startAgentTasks(input: {
       nodeId: action.nodeId,
       now: input.now,
       ownerId: session.sessionId,
-      steering: {
-        message: call.input.message,
-        outputSchema: normalizeRequestedOutputSchema(call.input.outputSchema),
-      },
       timeoutMs: resolveAgentTaskTimeout({ action, bundle: prepared.bundle, ctx }),
       turnId,
       workflowCaller: call.workflowCaller,
@@ -275,15 +259,24 @@ export async function startAgentTasks(input: {
       continue;
     }
     if (started.kind === "steered") {
-      if (call.workflowCaller !== undefined) {
-        // `ctx.agent` resolves to the agent's own output, which belongs to the call that started it.
-        fail(call, action, { code: AGENT_BUSY, message: renderAgentBusy(started.record.id) });
+      const steered = await steerWorkingAgent({
+        callId: call.callId,
+        ctx,
+        fromWorkflow: call.workflowCaller !== undefined,
+        message: call.input.message,
+        ownerSessionId: session.sessionId,
+        record: started.record,
+        steerer: prepared.auth,
+        table,
+        toolName,
+        turnId,
+      });
+      if (steered.kind === "rejected") {
+        fail(call, action, steered.output);
         continue;
       }
-      session = setTaskTable(session, started.transition.table);
-      results.push(
-        await steerWorkingAgent({ callId: call.callId, ctx, steered: started, toolName }),
-      );
+      session = setTaskTable(session, steered.table);
+      results.push(steered.result);
       continue;
     }
     if (background) {
@@ -392,8 +385,15 @@ export async function startAgentTasks(input: {
     }
     if (child !== undefined) {
       const adopted = adoptChild(getTaskTable(session), record, child, input.now);
-      session = setTaskTable(session, adopted.table);
-      await runCommands(adopted.commands, ctx);
+      session = setTaskTable(
+        session,
+        await flushHeldCommands({
+          ctx,
+          effects: adopted.commands,
+          ownerSessionId: session.sessionId,
+          table: adopted.table,
+        }),
+      );
       events.push(
         taskStartedEvent({
           child,
@@ -465,11 +465,17 @@ export async function applyTaskReport(input: {
     if (record !== undefined) {
       const child: ChildAddress = { kind: "local", ...input.payload.child };
       const adopted = adoptChild(getTaskTable(session), record, child, input.now);
-      session = setTaskTable(session, adopted.table);
-      if (adopted.commands.length > 0) {
-        await runCommands(adopted.commands, await readContext(input.serializedContext));
-      }
-      const current = findTask(adopted.table, record.id)!;
+      const flushed =
+        adopted.commands.length === 0
+          ? adopted.table
+          : await flushHeldCommands({
+              ctx: await readContext(input.serializedContext),
+              effects: adopted.commands,
+              ownerSessionId: session.sessionId,
+              table: adopted.table,
+            });
+      session = setTaskTable(session, flushed);
+      const current = findTask(flushed, record.id)!;
       // A task cancelled before its child started already reported `task.settled`.
       if (!isTerminalTaskStatus(current.status)) {
         events.push(
@@ -493,6 +499,7 @@ export async function applyTaskReport(input: {
           generation: record.generation,
           kind: "task.settled",
           outcome,
+          steers: reportedSteers(result),
           taskId: record.id,
           usage: result.outcome.usageDelta,
         },
@@ -524,16 +531,17 @@ export async function applyTaskReport(input: {
         );
         continue;
       }
-      const settled = settledEvents(applied.effects);
-      if (settled.length === 0) continue;
-      events.push(...settled);
+      const settledEffect = applied.effects.find((effect) => effect.kind === "settled");
+      if (settledEffect === undefined) continue;
+      events.push(...settledEvents(applied.effects));
       // A waited call's result is delivered now; a background one is held for delivery.
       const background = record.mode === "background" && record.workflowCaller === undefined;
       let next = setTaskTable(
         session,
         background ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
       );
-      if (background) next = holdTaskResult(next, findTask(applied.table, record.id)!, outcome);
+      if (background) next = holdTaskResult(next, settledEffect.record, outcome);
+      events.push(...continuedEvents(applied.effects, session.sessionId));
       if (childEnded && record.child?.kind === "local") {
         next = clearProxyInputRequestsForChild(next, record.child.continuationToken);
       }

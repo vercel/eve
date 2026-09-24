@@ -1240,6 +1240,86 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("answers an owner's steering message that arrives after the answer as the call's next turn", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-late-steering" },
+    });
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    });
+    const childContinuationToken = "subagent:parent-session:call-1";
+    const caller = {
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: sessionInboxHookToken(childContinuationToken) },
+      subagentName: "researcher",
+    };
+
+    await runtime.run(async () => {
+      const child = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "delegated first turn" },
+          serializedContext: buildSerializedContext({
+            channelKind: "subagent",
+            channelState: {
+              callId: "call-1",
+              parentContinuationToken: sessionInboxHookToken(childContinuationToken),
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+            continuationToken: childContinuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+
+      try {
+        await withTimeout(stream.nextTurn(), "delegated first turn");
+        await waitForRuntimeActionResult(child.runId, "call-1");
+
+        // The owner sent a correction before it applied that answer. A step
+        // retry sends it again with the same key.
+        const steering = {
+          command: {
+            caller,
+            kind: "send" as const,
+            payload: { message: "late correction" },
+            steerKey: "researcher-abc234:1:call-2",
+            turnPolicy: "steer" as const,
+          },
+          sessionId: child.runId,
+        };
+        await workflowRuntime.dispatchSession(steering);
+        await workflowRuntime.dispatchSession(steering);
+
+        const secondTurn = await withTimeout(stream.nextTurn(), "late correction turn");
+        expect(secondTurn.at(-1)?.type).toBe("session.waiting");
+        const results = await vi.waitFor(
+          async () => {
+            const found = await listSubagentResults(child.runId, "call-1");
+            if (found.length < 2) throw new Error("waiting for the second answer");
+            return found;
+          },
+          { interval: 100, timeout: 10_000 },
+        );
+        // The first answer reports no steering; the second answers the
+        // correction for the same call and reports it once, despite the resend.
+        expect(results).toEqual([
+          expect.not.objectContaining({ steers: expect.anything() }),
+          expect.objectContaining({
+            output: expect.stringContaining("late correction"),
+            steers: 1,
+          }),
+        ]);
+      } finally {
+        stream.dispose();
+        await child.cancel();
+      }
+    });
+  });
+
   it("forwards continued-turn HITL through the rebound caller", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "workflow-entry-delegated-hitl-rebind" },
@@ -2427,6 +2507,28 @@ async function waitForSubagentInputRequest(runId: string, callId: string): Promi
   }
 
   throw new Error(`Timed out waiting for a subagent input request from caller "${callId}".`);
+}
+
+/** Every delegated result for `callId` the run's inbox received, in order. */
+async function listSubagentResults(runId: string, callId: string): Promise<unknown[]> {
+  const world = await getWorld();
+  const events = await world.events.list({
+    pagination: { limit: 1000 },
+    resolveData: "all",
+    runId,
+  });
+  const results: unknown[] = [];
+  for (const event of events.data) {
+    if (event.eventType !== "hook_received") continue;
+    const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+    if (!hasSubagentResult(payload, callId)) continue;
+    results.push(
+      ...(payload as { readonly results: readonly { readonly callId?: unknown }[] }).results.filter(
+        (result) => result.callId === callId,
+      ),
+    );
+  }
+  return results;
 }
 
 function hasSubagentResult(value: unknown, callId: string): boolean {

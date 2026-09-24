@@ -1,5 +1,6 @@
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export type TaskKind = "agent" | "workflow";
@@ -80,6 +81,8 @@ export type TaskMessage =
       readonly usage?: TokenUsage;
       /** The child session ended with this generation, so the agent cannot be given more work. */
       readonly childEnded?: boolean;
+      /** Steering messages the child received for this generation before it answered. */
+      readonly steers?: number;
     }
   | {
       /** Signals that a deadline or cancellation confirmation window may have passed. */
@@ -100,7 +103,31 @@ export type TaskDeadlineSignal = Extract<TaskMessage, { readonly kind: "task.dea
 export type TaskCommand =
   | { readonly kind: "cancel" }
   | { readonly kind: "answer"; readonly responses: readonly InputResponse[] }
-  | { readonly kind: "message"; readonly message: string; readonly outputSchema?: JsonObject };
+  | {
+      /**
+       * A steering message that joins the current generation. It never changes
+       * the generation's output schema, which belongs to the call that started it.
+       */
+      readonly kind: "message";
+      readonly message: string;
+      /** Idempotency key, from the steering call's turn and call IDs. */
+      readonly key: string;
+    };
+
+/**
+ * A child's report that settles a delegated call, with the steering messages
+ * the child received for the call since it last answered it. The count
+ * travels with the report but stays out of the public result type.
+ */
+export type ChildTaskReport = RuntimeSubagentChildResult & { readonly steers?: number };
+
+/** The steering messages a child reported receiving, when its report carries a valid count. */
+export function reportedSteers(result: RuntimeSubagentChildResult): number | undefined {
+  const steers = (result as ChildTaskReport).steers;
+  return typeof steers === "number" && Number.isSafeInteger(steers) && steers > 0
+    ? steers
+    : undefined;
+}
 
 export function isTerminalTaskStatus(status: TaskStatus): status is TerminalTaskStatus {
   return status === "completed" || status === "failed" || status === "cancelled";

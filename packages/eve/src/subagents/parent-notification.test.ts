@@ -232,6 +232,24 @@ describe("turn caller notification", () => {
     });
   });
 
+  it("reports how many steering messages reached the answer", async () => {
+    await notifyTurnCallerStep({
+      caller: {
+        callId: "call-2",
+        replyTo: { kind: "hook", token: "parent-turn-2" },
+        subagentName: "research",
+      },
+      lifecycle: "parked",
+      sessionId: "child-session",
+      settled: { output: "draft with pricing", steers: 2 },
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith("parent-turn-2", {
+      kind: "runtime-action-result",
+      results: [expect.objectContaining({ callId: "call-2", steers: 2 })],
+    });
+  });
+
   it("notifies the caller of a continued turn with a zero usage delta", async () => {
     await notifyTurnCallerStep({
       caller: {

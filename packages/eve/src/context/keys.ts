@@ -98,6 +98,12 @@ export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
 );
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
+/**
+ * Authored schedule whose dispatch is running right now. Only the dispatcher
+ * sets it, as a virtual value, so it never reaches a session's saved context
+ * and a later send from a schedule-created session is not marked scheduled.
+ */
+export const ScheduleDispatchKey = new ContextKey<string>("eve.internal.scheduleDispatch");
 /** Authored schedule whose delivery started the current turn of an existing session. */
 export const TurnScheduleIdKey = new ContextKey<string>("eve.turnScheduleId");
 /** Display title derived from the session's initial input. */
@@ -157,6 +163,13 @@ export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
 export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
+
+/**
+ * Set when a caller created the session: a parent session or a remote
+ * caller's callback. Unlike {@link SessionCallbackKey}, which each caller's
+ * turn rebinds, it never changes, so per-session decisions stay fixed.
+ */
+export const DelegatedSessionKey = new ContextKey<true>("eve.delegatedSession");
 
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.

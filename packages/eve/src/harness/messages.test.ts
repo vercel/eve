@@ -90,20 +90,22 @@ describe("coalesceDeliveries", () => {
     ]);
   });
 
-  it("keeps a schedule only when the schedule sent every delivery", () => {
-    const scheduled = { kind: "deliver" as const, payloads: [{ message: "digest" }] };
-    expect(
-      coalesceDeliveries([
-        { ...scheduled, scheduleId: "digest" },
-        { ...scheduled, scheduleId: "digest" },
-      ]).scheduleId,
-    ).toBe("digest");
-    expect(
-      coalesceDeliveries([{ ...scheduled, scheduleId: "digest" }, scheduled]),
-    ).not.toHaveProperty("scheduleId");
-    expect(
-      coalesceDeliveries([scheduled, { ...scheduled, scheduleId: "digest" }]),
-    ).not.toHaveProperty("scheduleId");
+  it("keeps the turn scheduled when any merged delivery came from a schedule", () => {
+    type Delivery = {
+      readonly kind: "deliver";
+      readonly payloads: readonly { readonly message: string }[];
+      readonly scheduleId?: string;
+    };
+    const person: Delivery = { kind: "deliver", payloads: [{ message: "also check Plain" }] };
+    const scheduled: Delivery = {
+      ...person,
+      payloads: [{ message: "digest" }],
+      scheduleId: "digest",
+    };
+    expect(coalesceDeliveries([scheduled, scheduled]).scheduleId).toBe("digest");
+    expect(coalesceDeliveries([scheduled, person]).scheduleId).toBe("digest");
+    expect(coalesceDeliveries([person, scheduled]).scheduleId).toBe("digest");
+    expect(coalesceDeliveries([person, person])).not.toHaveProperty("scheduleId");
   });
 });
 

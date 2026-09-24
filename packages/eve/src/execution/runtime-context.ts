@@ -10,6 +10,7 @@ import {
   ContinuationHookTokensKey,
   ContinuationTokenKey,
   ConversationIdKey,
+  DelegatedSessionKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
   ModeKey,
@@ -95,6 +96,9 @@ export function buildRunContext(input: {
 
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
+  }
+  if (run.callback !== undefined || run.parent !== undefined) {
+    ctx.set(DelegatedSessionKey, true);
   }
   if (run.activityObserver !== undefined) {
     ctx.set(ActivityObserverKey, run.activityObserver);

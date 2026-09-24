@@ -191,6 +191,8 @@ export type SessionCommand =
       readonly requestId?: string;
       /** Authored schedule whose dispatch sent this message. */
       readonly scheduleId?: string;
+      /** See {@link DeliverHookPayload.steerKey}. */
+      readonly steerKey?: string;
       readonly turnPolicy?: TurnPolicy;
     }
   | {
@@ -266,6 +268,13 @@ export interface DeliverHookPayload {
    * a scheduled turn: its agent calls wait, so it posts one final reply.
    */
   readonly scheduleId?: string;
+  /**
+   * Owner-assigned key of a steering message for the delegated call named by
+   * `caller`. The session admits each key once and reports how many it
+   * admitted when it answers that call, so the owner knows whether the
+   * message reached the answer.
+   */
+  readonly steerKey?: string;
   readonly turnPolicy?: TurnPolicy;
 }
 

@@ -57,9 +57,10 @@ export function renderDetachedReceipt(
  * goes to the call that is waiting for it.
  */
 export function renderSteeringReceipt(record: Pick<TaskRecord, "id" | "mode">): string {
+  const sent = `Sent your message to agent ${record.id}, which is still working.`;
   return record.mode === "background"
-    ? `Sent your message to agent ${record.id}, which is still working. Its result will arrive in a later message.`
-    : `Sent your message to agent ${record.id}, which is still working on another call. That call will receive its result.`;
+    ? `${sent} Its result will arrive in a later message.`
+    : `${sent} Its result will arrive as the result of the call that started it.`;
 }
 
 /** Tool result for a `sleep` that a steering message ended early. */
@@ -168,7 +169,7 @@ export const AGENT_MESSAGING_INSTRUCTION =
 
 /** Description of the `agentId` input on every agent tool. */
 export const AGENT_ID_PARAMETER_DESCRIPTION =
-  "The id of an agent from the latest [Tasks] note or a receipt. An idle agent gets more work in the same child session; an agent that is still working receives this message as a correction to its current work. Omit this field (or pass null or an empty string) to start a new agent.";
+  "The id of an agent from the latest [Tasks] note or a receipt. An idle agent gets more work in the same child session; an agent that is still working receives this message as a correction to its current work, keeps the output format it was given, and still returns one result. Omit this field (or pass null or an empty string) to start a new agent.";
 
 /** How a model-written workflow program calls agents with `ctx.agent`. */
 export const WORKFLOW_PROGRAM_AGENT_CONTRACT =
@@ -260,12 +261,25 @@ export function renderAgentMismatch(record: Pick<TaskRecord, "id" | "name">): st
 }
 
 /**
- * `AGENT_BUSY` error for a `ctx.agent` call that names a working agent. A
- * workflow body awaits the agent's output, so it cannot join a generation it
- * did not start; model calls send the agent a message instead.
+ * `AGENT_BUSY` error for a call that names a working agent it may not send a
+ * message to: a `ctx.agent` call (`workflow-caller`), a model call when a
+ * workflow body started the agent's current work (`workflow-owned`), or a
+ * model call from a principal other than the one the agent works for
+ * (`another-principal`). A workflow body awaits the output of the work it
+ * started, and an agent acts with its starter's credentials.
  */
-export function renderAgentBusy(agentId: string): string {
-  return `Agent "${agentId}" is still working on another call, so a workflow cannot give it more work until it answers. Omit agentId to start a new agent.`;
+export function renderAgentBusy(
+  agentId: string,
+  reason: "another-principal" | "workflow-caller" | "workflow-owned",
+): string {
+  switch (reason) {
+    case "workflow-caller":
+      return `Agent "${agentId}" is still working on another call, so a workflow cannot give it more work until it answers. Omit agentId to start a new agent.`;
+    case "workflow-owned":
+      return `Agent "${agentId}" is working for a workflow tool call, so it cannot take your message until it answers. Omit agentId to start a new agent.`;
+    case "another-principal":
+      return `Agent "${agentId}" is working for another user, so it cannot take your message. Omit agentId to start a new agent.`;
+  }
 }
 
 /**

@@ -4,7 +4,7 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import { createSession, type Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ScheduleIdKey } from "#context/keys.js";
+import { ScheduleDispatchKey, ScheduleIdKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -76,6 +76,7 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.scheduleId);
+    scope.setVirtualContext(ScheduleDispatchKey, input.scheduleId);
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 

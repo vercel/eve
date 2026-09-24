@@ -3,10 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
-import {
-  isInteractiveRootTurn,
-  prepareActionDispatch,
-} from "#execution/coordination-dispatch-shared.js";
+import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
+import { isInteractiveRootTurn } from "#tasks/interactive.js";
 import {
   createDurableSessionState,
   readDurableSession,
@@ -34,6 +32,7 @@ import {
   startAgentTasks,
   type AgentTaskCall,
 } from "#tasks/owner.js";
+import type { ChildTaskReport } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
   getTaskTable,
@@ -43,13 +42,11 @@ import {
 } from "#tasks/state.js";
 import { cancelTask, evaluateTaskDeadlines, pruneTaskTable } from "#tasks/table.js";
 import { renderBackgroundReceipt, renderSteeringReceipt } from "#tasks/render.js";
-import { deliverableTaskResults } from "#tasks/results.js";
+import { deliverableTaskResults, encodeTaskCreator } from "#tasks/results.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
-vi.mock("#execution/coordination-dispatch-shared.js", () => ({
-  isInteractiveRootTurn: vi.fn(),
-  prepareActionDispatch: vi.fn(),
-}));
+vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
+vi.mock("#tasks/interactive.js", () => ({ isInteractiveRootTurn: vi.fn() }));
 vi.mock("#execution/tools/subagent/start.js", () => ({ startSubagent: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
@@ -654,17 +651,55 @@ describe("steering a working agent", () => {
     mode: "background",
     turnId: "turn-0",
   });
+  const ALICE = {
+    attributes: {},
+    authenticator: "slack",
+    principalId: "U-alice",
+    principalType: "user",
+  } as const;
+  const BOB = { ...ALICE, principalId: "U-bob" } as const;
+  const steer = (message: string, callId = "call-1") => ({
+    command: {
+      caller: {
+        callId: "call-0",
+        replyTo: { kind: "hook", token: OWNER_INBOX },
+        subagentName: "research",
+      },
+      kind: "send",
+      payload: { message },
+      steerKey: `turn-1:${callId}`,
+      turnPolicy: "steer",
+    },
+    sessionId: "child-session",
+  });
+  const answer = (output: string, steers?: number) => {
+    const result: ChildTaskReport = {
+      ...childResult({
+        kind: "parked",
+        result: { kind: "succeeded", output },
+        usageDelta: ZERO_USAGE,
+      }),
+      callId: "call-0",
+      steers,
+    };
+    return resultPayload(result);
+  };
+  const asPrincipal = (auth: typeof ALICE | typeof BOB) => {
+    const base = vi.mocked(prepareActionDispatch).getMockImplementation()!;
+    vi.mocked(prepareActionDispatch).mockImplementation(async (input) => ({
+      ...(await base(input)),
+      auth,
+      creator: { auth },
+    }));
+  };
 
-  it("sends the message into the current generation and returns the steering receipt", async () => {
+  it("sends the message for the generation's own call and returns the steering receipt", async () => {
     const update = await start(
       [modelCall({ agentId: working.id, message: "Also cover pricing." })],
       [working],
     );
 
-    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
-      command: { kind: "send", payload: { message: "Also cover pricing." }, turnPolicy: "steer" },
-      sessionId: "child-session",
-    });
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith(steer("Also cover pricing."));
     expect(update.results).toEqual([
       {
         callId: "call-1",
@@ -674,10 +709,21 @@ describe("steering a working agent", () => {
         toolName: "research",
       },
     ]);
-    // No new generation and no task.started: the agent keeps its original caller.
+    // No new generation and no task.started; the owner counts the message it sent.
     expect(update.events).toEqual([]);
-    expect(records(update.sessionState)).toEqual([working]);
+    expect(records(update.sessionState)).toEqual([{ ...working, steers: 1 }]);
     expect(startSubagent).not.toHaveBeenCalled();
+  });
+
+  it("resends the same key when a retried step steers again, so the agent admits it once", async () => {
+    const call = modelCall({ agentId: working.id, message: "Also cover pricing." });
+    await start([call], [working]);
+    await start([call], [working]);
+
+    expect(dispatchSession.mock.calls).toEqual([
+      [steer("Also cover pricing.")],
+      [steer("Also cover pricing.")],
+    ]);
   });
 
   it("steers in the background regardless of the call's background flag", async () => {
@@ -689,7 +735,7 @@ describe("steering a working agent", () => {
     expect(update.results).toEqual([
       expect.objectContaining({ modelOutput: renderSteeringReceipt(working) }),
     ]);
-    expect(records(update.sessionState)).toEqual([working]);
+    expect(records(update.sessionState)).toEqual([{ ...working, steers: 1 }]);
   });
 
   it("holds the message for an agent that has not started, and sends it when it starts", async () => {
@@ -704,8 +750,9 @@ describe("steering a working agent", () => {
     expect(update.results).toEqual([
       expect.objectContaining({ modelOutput: renderSteeringReceipt(unstarted) }),
     ]);
+    const held = { key: "turn-1:call-1", kind: "message", message: "Also cover pricing." };
     expect(records(update.sessionState)).toEqual([
-      { ...unstarted, pendingCommands: [{ kind: "message", message: "Also cover pricing." }] },
+      { ...unstarted, pendingCommands: [held], steers: 1 },
     ]);
 
     const adopted = await applyTaskReport({
@@ -719,47 +766,118 @@ describe("steering a working agent", () => {
       sessionState: update.sessionState,
     });
 
-    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
-      command: { kind: "send", payload: { message: "Also cover pricing." }, turnPolicy: "steer" },
-      sessionId: "child-session",
-    });
-    expect(records(adopted.sessionState)).toEqual([{ ...unstarted, child: LOCAL_CHILD }]);
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith(steer("Also cover pricing."));
+    expect(records(adopted.sessionState)).toEqual([
+      { ...unstarted, child: LOCAL_CHILD, steers: 1 },
+    ]);
   });
 
-  it("delivers exactly one result for the steered generation", async () => {
+  it("stops counting a held message it cannot deliver when the agent starts", async () => {
+    const unstarted = createTaskRecord({ callId: "call-0", mode: "background", turnId: "turn-0" });
+    const update = await start([modelCall({ agentId: unstarted.id })], [unstarted]);
+    dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const adopted = await applyTaskReport({
+      now: NOW,
+      payload: {
+        callId: "call-0",
+        child: { continuationToken: "child-token", sessionId: "child-session" },
+        kind: "task.started",
+      },
+      serializedContext: {},
+      sessionState: update.sessionState,
+    });
+
+    expect(records(adopted.sessionState)).toEqual([{ ...unstarted, child: LOCAL_CHILD }]);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("a held steering message did not reach its agent"),
+      expect.objectContaining({ taskId: unstarted.id }),
+    );
+    error.mockRestore();
+  });
+
+  it("delivers exactly one result when the agent answered after receiving the message", async () => {
     const steered = await start(
       [modelCall({ agentId: working.id, message: "Also cover pricing." })],
       [working],
     );
-    const report = resultPayload({
-      ...childResult({
-        kind: "parked",
-        result: { kind: "succeeded", output: "Draft with pricing." },
-        usageDelta: ZERO_USAGE,
-      }),
-      callId: "call-0",
-    });
 
     const first = await applyTaskReport({
       now: NOW,
-      payload: report,
+      payload: answer("Draft with pricing.", 1),
       serializedContext: {},
       sessionState: steered.sessionState,
     });
     const repeated = await applyTaskReport({
       now: NOW,
-      payload: report,
+      payload: answer("Draft with pricing.", 1),
       serializedContext: {},
       sessionState: first.sessionState,
     });
 
     expect(settledTaskIds(first.events)).toEqual([working.id]);
+    expect(first.events.map((event) => event.type)).toEqual(["task.settled"]);
     expect(deliverableTaskResults(readDurableSession(first.sessionState).state)).toHaveLength(1);
+    expect(records(first.sessionState)[0]).toMatchObject({ generation: 1, status: "completed" });
     expect(repeated.events).toEqual([]);
     expect(deliverableTaskResults(readDurableSession(repeated.sessionState).state)).toHaveLength(1);
   });
 
-  it("tells the model a waited agent's result goes to the call waiting for it", async () => {
+  it("runs a message that reached the agent after it answered as its next background generation", async () => {
+    // Alice's writer answers while the owner is mid-step; its answer waits in
+    // the owner's inbox as the model sends the writer a correction.
+    const steered = await start(
+      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [working],
+    );
+
+    const answered = await applyTaskReport({
+      now: NOW,
+      payload: answer("Draft without pricing."),
+      serializedContext: {},
+      sessionState: steered.sessionState,
+    });
+
+    // The answer settles its generation and is held for the model. The
+    // correction became the agent's next turn for the same call, now tracked
+    // as a background generation whose result arrives later.
+    expect(answered.events.map((event) => event.type)).toEqual(["task.settled", "task.started"]);
+    expect(answered.events[1]).toMatchObject({
+      data: { callId: "call-0", mode: "background", taskId: working.id },
+    });
+    expect(records(answered.sessionState)).toEqual([
+      expect.objectContaining({
+        delivered: false,
+        generation: 2,
+        mode: "background",
+        status: "working",
+        steers: 1,
+      }),
+    ]);
+    const held = readDurableSession(answered.sessionState).state;
+    expect(deliverableTaskResults(held)).toEqual([
+      expect.objectContaining({ generation: 1, taskId: working.id }),
+    ]);
+
+    const continued = await applyTaskReport({
+      now: NOW,
+      payload: answer("Draft with pricing.", 1),
+      serializedContext: {},
+      sessionState: answered.sessionState,
+    });
+
+    expect(continued.events.map((event) => event.type)).toEqual(["task.settled"]);
+    expect(deliverableTaskResults(readDurableSession(continued.sessionState).state)).toEqual([
+      expect.objectContaining({ generation: 1 }),
+      expect.objectContaining({
+        generation: 2,
+        outcome: { output: "Draft with pricing.", status: "completed" },
+      }),
+    ]);
+  });
+
+  it("tells the model a waited agent's result goes to the call that started it", async () => {
     const waited = createTaskRecord({ callId: "call-0", child: LOCAL_CHILD });
 
     const update = await start([modelCall({ agentId: waited.id })], [waited]);
@@ -767,7 +885,7 @@ describe("steering a working agent", () => {
     expect(update.results).toEqual([
       expect.objectContaining({ modelOutput: renderSteeringReceipt(waited) }),
     ]);
-    expect(renderSteeringReceipt(waited)).toContain("That call will receive its result.");
+    expect(renderSteeringReceipt(waited)).toContain("the result of the call that started it");
   });
 
   it("returns AGENT_UNREACHABLE instead of a receipt when the message does not arrive", async () => {
@@ -781,13 +899,61 @@ describe("steering a working agent", () => {
         output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
       }),
     ]);
+    expect(records(update.sessionState)).toEqual([working]);
   });
 
-  it("never returns AGENT_BUSY to the model", async () => {
-    for (const record of [working, createTaskRecord({ callId: "call-0", child: LOCAL_CHILD })]) {
-      const update = await start([modelCall({ agentId: record.id })], [record]);
-      expect(JSON.stringify(update.results)).not.toContain("AGENT_BUSY");
-    }
+  it("lets only the principal that started the agent's work steer it", async () => {
+    // Alice started the writer in a shared thread; Bob's turn names it.
+    const alices = { ...working, creator: encodeTaskCreator({ auth: ALICE }) };
+    asPrincipal(BOB);
+
+    const update = await start([modelCall({ agentId: alices.id, message: "Drop it." })], [alices]);
+
+    expect(dispatchSession).not.toHaveBeenCalled();
+    expect(update.results).toEqual([
+      {
+        callId: "call-1",
+        isError: true,
+        kind: "tool-result",
+        output: {
+          code: "AGENT_BUSY",
+          message: `Agent "${alices.id}" is working for another user, so it cannot take your message. Omit agentId to start a new agent.`,
+        },
+        toolName: "research",
+      },
+    ]);
+    expect(records(update.sessionState)).toEqual([alices]);
+
+    asPrincipal(ALICE);
+    const own = await start([modelCall({ agentId: alices.id, message: "Shorter." })], [alices]);
+    expect(own.results).toEqual([
+      expect.objectContaining({ modelOutput: renderSteeringReceipt(alices) }),
+    ]);
+  });
+
+  it("returns AGENT_BUSY when a workflow body started the agent's current work", async () => {
+    const workflowOwned = {
+      ...working,
+      mode: "foreground" as const,
+      workflowCaller: { replyTo: "reply", runId: "run-1" },
+    };
+
+    const update = await start(
+      [modelCall({ agentId: workflowOwned.id, message: "Return a list instead." })],
+      [workflowOwned],
+    );
+
+    expect(dispatchSession).not.toHaveBeenCalled();
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: {
+          code: "AGENT_BUSY",
+          message: expect.stringContaining("is working for a workflow tool call"),
+        },
+      }),
+    ]);
+    expect(records(update.sessionState)).toEqual([workflowOwned]);
   });
 });
 

@@ -16,6 +16,7 @@ import {
   resolveRemoteAgentForAction,
 } from "#subagents/remote-dispatch.js";
 import { encodeTaskCreator } from "#tasks/results.js";
+import { ownerInboxHookToken } from "#tasks/state.js";
 import { deliverToChild, runCommands, sendAgentMessage } from "#tasks/transport.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({
@@ -293,34 +294,47 @@ describe("sendAgentMessage", () => {
     principalId: "U-alice",
     principalType: "user",
   } as const;
-  const command = { kind: "message" as const, message: "Also cover the pricing change." };
+  const command = {
+    key: "turn-1:call-2",
+    kind: "message" as const,
+    message: "Also cover the pricing change.",
+  };
 
-  it("steers a local agent without a new caller or a new principal", async () => {
+  it("steers a local agent for its current call, with the owner's key and no new principal", async () => {
     await expect(
       sendAgentMessage({
         command,
         ctx: contextWithBundle(),
+        ownerSessionId: "owner-session",
         record: createTaskRecord({ child: localChild }),
       }),
     ).resolves.toBeUndefined();
 
-    // No caller: the child's current caller keeps the generation. No auth:
-    // the child keeps acting as the principal that started it.
+    // The caller names the generation's own call, so the message joins it or
+    // starts that call's next turn. No auth: the child keeps acting as the
+    // principal that started it, the only one that may steer it.
     expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
       command: {
+        caller: {
+          callId: "call-1",
+          replyTo: { kind: "hook", token: ownerInboxHookToken("owner-session") },
+          subagentName: "research",
+        },
         kind: "send",
         payload: { message: "Also cover the pricing change." },
+        steerKey: "turn-1:call-2",
         turnPolicy: "steer",
       },
       sessionId: "child-session",
     });
   });
 
-  it("steers a remote agent where it runs, without a new callback", async () => {
+  it("steers a remote agent where it runs, without a new callback or output schema", async () => {
     await expect(
       sendAgentMessage({
-        command: { ...command, outputSchema: { type: "object" } },
+        command,
         ctx: contextWithBundle(),
+        ownerSessionId: "owner-session",
         record: createTaskRecord({
           child: remoteChild,
           creator: encodeTaskCreator({ auth: ALICE }),
@@ -331,7 +345,6 @@ describe("sendAgentMessage", () => {
     expect(continueRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
       auth: ALICE,
       message: "Also cover the pricing change.",
-      outputSchema: { type: "object" },
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
       turnPolicy: "steer",
@@ -350,6 +363,7 @@ describe("sendAgentMessage", () => {
     const failure = await sendAgentMessage({
       command,
       ctx: contextWithBundle(),
+      ownerSessionId: "owner-session",
       record: createTaskRecord({ child }),
     });
 
@@ -360,16 +374,13 @@ describe("sendAgentMessage", () => {
     error.mockRestore();
   });
 
-  it("delivers a held message when its agent starts, as a command effect", async () => {
+  it("leaves held messages to flushHeldCommands and runs only cancels", async () => {
     await runCommands(
       [{ commands: [command], kind: "send", record: createTaskRecord({ child: localChild }) }],
       contextWithBundle(),
     );
 
-    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
-      command: expect.objectContaining({ kind: "send", turnPolicy: "steer" }),
-      sessionId: "child-session",
-    });
+    expect(dispatchSession).not.toHaveBeenCalled();
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
   });
 });

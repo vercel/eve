@@ -21,6 +21,7 @@ describe("session inbox payloads", () => {
       payloads: [{ message: "hello" }],
       requestId: undefined,
       scheduleId: undefined,
+      steerKey: undefined,
       title: undefined,
       turnPolicy: undefined,
     });
@@ -34,6 +35,16 @@ describe("session inbox payloads", () => {
         scheduleId: "daily-digest",
       }),
     ).toMatchObject({ kind: "deliver", scheduleId: "daily-digest" });
+  });
+
+  it("keeps the key of an owner's steering message", () => {
+    expect(
+      decodeSessionInboxPayload({
+        kind: "send",
+        payload: { message: "Mention the price." },
+        steerKey: "turn-1:call-2",
+      }),
+    ).toMatchObject({ kind: "deliver", steerKey: "turn-1:call-2" });
   });
 
   it("accepts only current delivery and control kinds", () => {

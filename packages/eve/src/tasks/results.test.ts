@@ -15,7 +15,6 @@ import {
   readPendingTaskResults,
   readTaskCreator,
   sameTaskPrincipal,
-  supportsBackgroundTasks,
   takeTaskResults,
   workingBackgroundTaskIds,
 } from "#tasks/results.js";
@@ -241,30 +240,5 @@ describe("task principals", () => {
     expect(readTaskCreator(encodeTaskCreator(creator))).toEqual(creator);
     expect(readTaskCreator({ auth: { principalId: 7 } })).toEqual({ auth: null });
     expect(readTaskCreator(undefined)).toEqual({ auth: null });
-  });
-});
-
-describe("supportsBackgroundTasks", () => {
-  const workflowTool = { workflowId: "workflow//deploy" };
-
-  it("includes interactive root sessions with an agent or workflow tool", () => {
-    expect(supportsBackgroundTasks({ interactiveRoot: true, tools: [workflowTool] })).toBe(true);
-    expect(supportsBackgroundTasks({ interactiveRoot: true, tools: [{}] })).toBe(false);
-  });
-
-  it("includes any session with a detach: true tool, and only those elsewhere", () => {
-    expect(
-      supportsBackgroundTasks({
-        interactiveRoot: false,
-        tools: [{ ...workflowTool, detach: true }],
-      }),
-    ).toBe(true);
-    expect(supportsBackgroundTasks({ interactiveRoot: false, tools: [workflowTool] })).toBe(false);
-    expect(
-      supportsBackgroundTasks({
-        interactiveRoot: false,
-        tools: [{ ...workflowTool, detach: { timeout: 1_000 } }],
-      }),
-    ).toBe(false);
   });
 });

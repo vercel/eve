@@ -259,7 +259,9 @@ async function runSessionLoop(
       });
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
-    return await execution.runTurn(payload);
+    // The owner steers the call this session is answering, including in the
+    // first turn, whose input carries no caller, and in result turns.
+    return await execution.runTurn(payload, caller?.callId);
   };
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
@@ -338,7 +340,10 @@ async function runSessionLoop(
       if (action.cancelled === true) {
         const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
         // A cancelled agent also stops its own background tasks.
-        if (progress.caller !== undefined) await cancelTasks(cursor, { kind: "all" });
+        if (progress.caller !== undefined) {
+          queue.discardSteering(progress.caller.callId);
+          await cancelTasks(cursor, { kind: "all" });
+        }
         const settled = await settleCancelledTurn();
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
@@ -352,14 +357,16 @@ async function runSessionLoop(
         !hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state) &&
         // A message the owner sent this working agent as its turn ended joins
         // the same call, so the reply that settles it has seen the message.
+        // One that arrives after the reply starts the call's next turn.
         !(progress.caller !== undefined && queue.hasSteeringMessage(progress.caller.callId))
       ) {
         if (progress.caller !== undefined) {
+          const steers = queue.takeSteerCount(progress.caller.callId);
           await notifyTurnCallerStep({
             caller: progress.caller,
             lifecycle: "parked",
             sessionId: boot.sessionId,
-            settled: action.settled,
+            settled: steers === 0 ? action.settled : { ...action.settled, steers },
           });
         }
         progress.caller = undefined;
@@ -396,6 +403,7 @@ async function runSessionLoop(
             next.kind === "cancel-turn" ||
             hasOpenTurnWork(cursor.sessionState.snapshot.session.state);
           await cancelTurnDescendants(cursor);
+          if (caller !== undefined) queue.discardSteering(caller.callId);
           // A cancelled agent, or task-mode run, also stops its own background tasks.
           if (caller !== undefined || (next.kind === "cancel-parked" && boot.mode === "task")) {
             await cancelTasks(cursor, { kind: "all" });

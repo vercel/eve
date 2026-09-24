@@ -43,6 +43,12 @@ export interface TaskRecord {
   readonly inputSeq?: number;
   /** One-line summary of an idle agent's last answer. */
   readonly lastStatus?: string;
+  /**
+   * Steering messages sent to a local agent's current generation that the
+   * agent has not yet reported receiving. Any still missing when it answers
+   * start its next generation.
+   */
+  readonly steers?: number;
   /** Set when a workflow tool body started the current generation; its result goes to this reply hook. */
   readonly workflowCaller?: { readonly runId: string; readonly replyTo: string };
   /** The current generation's result reached history. */
@@ -129,10 +135,7 @@ function isTaskCommand(value: unknown): value is TaskCommand {
     case "answer":
       return Array.isArray(value.responses);
     case "message":
-      return (
-        typeof value.message === "string" &&
-        (value.outputSchema === undefined || isRecordObject(value.outputSchema))
-      );
+      return typeof value.message === "string" && isString(value.key);
     default:
       return false;
   }
@@ -183,6 +186,11 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
     return fail("invalid inputSeq");
   if (value.lastStatus !== undefined && typeof value.lastStatus !== "string")
     return fail("invalid lastStatus");
+  if (
+    value.steers !== undefined &&
+    (typeof value.steers !== "number" || !Number.isSafeInteger(value.steers) || value.steers < 0)
+  )
+    return fail("invalid steers");
   if (
     value.workflowCaller !== undefined &&
     (!isRecordObject(value.workflowCaller) ||
