@@ -41,6 +41,13 @@ export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
 /**
+ * Route pattern returning the latest result one delegated session reported
+ * to its caller for one call, so an owner whose callback was lost can
+ * reconcile at its deadline.
+ */
+export const EVE_SESSION_REPORT_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/reports/:callId`;
+
+/**
  * Parent-origin proxy route for one remotely executed child session stream.
  */
 export const EVE_SUBAGENT_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:parentSessionId/subagents/:callId/:childSessionId/stream`;
@@ -150,6 +157,11 @@ export function createEveSessionClearRoutePath(sessionId: string): string {
 /** Builds the ID-addressed reset route for one session. */
 export function createEveSessionResetRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reset`;
+}
+
+/** Builds the report route for one call a delegated session answered. */
+export function createEveSessionReportRoutePath(sessionId: string, callId: string): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/reports/${encodeURIComponent(callId)}`;
 }
 
 /** Builds the ID-addressed event-stream route for one session. */

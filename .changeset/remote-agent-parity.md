@@ -1,0 +1,7 @@
+---
+"eve": minor
+---
+
+Remote agents now behave like local subagents: a remote child inherits the caller's session capabilities, so its tool approvals, `ctx.ask()` questions, and sign-in prompts surface on the caller's stream with the call's `taskId` and are answered there; a steering message that reaches it after it answered runs as its next turn instead of being lost; retried continue requests carry an `operationId` the remote admits once; a callback that arrives after the caller's session ended gets `200 {"duplicate":true}` instead of `404`; and a lost result callback is recovered at the call's deadline by one read of the new `GET /eve/v1/session/:sessionId/reports/:callId` route. A remote agent's start failure now settles `START_FAILED`, and a call that names an agent another user started, working or idle, fails with `AGENT_OTHER_PRINCIPAL`.
+
+Upgrading: run the calling agent and every remote agent it calls on this version together. Delegated requests now carry a task protocol version, and a start across mixed versions fails at once with `START_FAILED` (a newer remote answers an older caller `409 TASK_PROTOCOL_MISMATCH`). Sessions from earlier releases are not migrated: background tasks those releases left working fail with `STATE_LOST` when the session next runs and the session continues, while the `task.*` events and the waited-by-default task model described above replace the earlier background tasks and `subagent.*` events.

@@ -24,6 +24,8 @@ import { STATE_LOST_MESSAGE } from "#tasks/render.js";
 import { readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable, planTaskTimer, readTaskTimer, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
 import { recordNestedAgentInvocationTerminal } from "#tracing/agent-invocation-terminal.js";
+import { readRemoteTaskReport } from "#tasks/transport.js";
+import type { ChildTaskReport } from "#tasks/protocol.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
@@ -44,6 +46,10 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   cancelRun: vi.fn(),
   getRun: vi.fn(),
   getWorld: vi.fn(),
+}));
+vi.mock("#tasks/transport.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readRemoteTaskReport: vi.fn(),
 }));
 
 const STARTED = "2026-09-24T12:00:00.000Z";
@@ -433,6 +439,155 @@ describe("applyTaskDeadlines", () => {
       expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([]);
       expect(stateOf(update.sessionState)?.["eve.taskTable"]).toBeUndefined();
     }
+  });
+
+  describe("reconciling a remote task at its deadline", () => {
+    const remote = createTaskRecord({
+      child: REMOTE_CHILD,
+      deadlineAt: DEADLINE,
+      name: "billing",
+      startedAt: STARTED,
+    });
+    const report = (): ChildTaskReport => ({
+      callId: "call-1",
+      kind: "subagent-result",
+      origin: "child",
+      outcome: {
+        kind: "parked",
+        result: { kind: "succeeded", output: "Refund approved." },
+        usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 4, outputTokens: 3 },
+      },
+      output: "Refund approved.",
+      subagentName: "billing",
+    });
+
+    it("settles the task with the answer whose callback never arrived, instead of timing out", async () => {
+      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report());
+
+      const update = await applyTaskDeadlines(input([remote], { now: AFTER_DEADLINE }));
+
+      expect(readRemoteTaskReport).toHaveBeenCalledExactlyOnceWith(remote, expect.anything());
+      expect(update.results).toEqual([
+        { callId: "call-1", kind: "tool-result", output: "Refund approved.", toolName: "billing" },
+      ]);
+      expect(update.events).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({ output: "Refund approved.", status: "completed" }),
+          type: "task.settled",
+        }),
+      ]);
+      expect(records(update.sessionState)).toEqual([
+        expect.objectContaining({ child: REMOTE_CHILD, delivered: true, status: "completed" }),
+      ]);
+    });
+
+    it("times out a remote task whose child has not answered", async () => {
+      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(undefined);
+
+      const update = await applyTaskDeadlines(input([remote], { now: AFTER_DEADLINE }));
+
+      expect(update.results).toEqual([
+        expect.objectContaining({
+          isError: true,
+          output: expect.objectContaining({ code: "TIMED_OUT" }),
+        }),
+      ]);
+      expect(records(update.sessionState)).toEqual([expect.objectContaining({ status: "failed" })]);
+    });
+
+    it("times out a remote task whose latest answer predates a steering message it was sent", async () => {
+      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report());
+
+      const update = await applyTaskDeadlines(
+        input([{ ...remote, steers: 1 }], { now: AFTER_DEADLINE }),
+      );
+
+      expect(update.results).toEqual([
+        expect.objectContaining({ output: expect.objectContaining({ code: "TIMED_OUT" }) }),
+      ]);
+    });
+
+    it("reads nothing for a remote task that is not due or waits on a human", async () => {
+      await applyTaskDeadlines(
+        input(
+          [
+            { ...remote, deadlineAt: "2026-09-24T15:00:00.000Z" },
+            { ...remote, clockStoppedAt: STARTED, id: "billing-def567", status: "input_required" },
+          ],
+          { now: AFTER_DEADLINE },
+        ),
+      );
+
+      expect(readRemoteTaskReport).not.toHaveBeenCalled();
+    });
+  });
+
+  it("reports a background run an earlier release left working as STATE_LOST and removes its registry", async () => {
+    const auth = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "U-alice",
+      principalType: "user",
+    };
+    const origin = { stepIndex: 0, turnId: "turn-old" };
+    const address = { hookToken: "inbox", runId: "run-old" };
+    const legacyRun = (callId: string, task?: Record<string, unknown>) => ({
+      address,
+      callId,
+      lifetime: task === undefined ? "turn" : "session",
+      origin,
+      task,
+      toolName: "researcher",
+    });
+    const state = {
+      "eve.workflowTool": {
+        runs: [
+          legacyRun("call-working", {
+            dispatchContext: { auth: { current: auth, initiator: auth } },
+            metadata: { kind: "subagent", name: "researcher" },
+            taskId: "call-working",
+          }),
+          legacyRun("call-reported", {
+            dispatchContext: { auth: { current: auth, initiator: auth } },
+            metadata: { kind: "tool", name: "deploy" },
+            outcome: { lastOutput: { type: "result", value: "ok" }, status: "completed" },
+            taskId: "call-reported",
+          }),
+          legacyRun("call-waiting"),
+        ],
+        version: 3,
+      },
+    };
+    // Its loss wakes the owner at once.
+    expect(wakeToArm(state)).toBe(new Date(0).toISOString());
+
+    const update = await applyTaskDeadlines({
+      now: "2026-09-24T13:00:00.000Z",
+      serializedContext: {},
+      sessionState: ownerState(state),
+      signal: { kind: "task.deadline", ownerRunId: "owner", wakeAt: new Date(0).toISOString() },
+    });
+
+    const error = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
+    expect(update.events).toEqual([
+      {
+        data: { callId: "call-working", error, status: "failed", taskId: "call-working" },
+        type: "task.settled",
+      },
+    ]);
+    // Its creator's next result turn tells the model the work is lost.
+    expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([
+      {
+        creator: { auth },
+        generation: 1,
+        kind: "agent",
+        name: "researcher",
+        outcome: { error, status: "failed" },
+        taskId: "call-working",
+      },
+    ]);
+    expect(stateOf(update.sessionState)?.["eve.workflowTool"]).toBeUndefined();
+    expect(wakeToArm(stateOf(update.sessionState))).toBeUndefined();
   });
 
   it("removes an unreadable record whose result was already delivered without reporting it", async () => {

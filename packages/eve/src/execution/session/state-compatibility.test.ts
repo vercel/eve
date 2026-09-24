@@ -42,11 +42,21 @@ describe("handoff state inspection", () => {
   });
   it.each([
     ["a waiting run", turnRun],
-    ["a background run", backgroundRun],
+    [
+      "a background run that already reported",
+      { ...backgroundRun, task: { ...backgroundRun.task, outcome: { status: "completed" } } },
+    ],
   ])("ignores %s in the workflow tool run registry earlier releases wrote", (_label, run) => {
     expect(
       isSessionStateIdleForHandoff(checkpoint({ "eve.workflowTool": { version: 3, runs: [run] } })),
     ).toBe(true);
+  });
+  it("holds a working background run an earlier release wrote until its loss is reported", () => {
+    expect(
+      isSessionStateIdleForHandoff(
+        checkpoint({ "eve.workflowTool": { version: 3, runs: [backgroundRun] } }),
+      ),
+    ).toBe(false);
   });
   it("refuses a working workflow tool call", () => {
     expect(

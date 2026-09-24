@@ -31,6 +31,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks,
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
 - `POST /eve/v1/session/:sessionId/reset` (retire the session)
 - `GET /eve/v1/session/:sessionId/stream` (stream events as NDJSON)
+- `GET /eve/v1/session/:sessionId/reports/:callId` (read the latest result a delegated session reported for one call)
 
 The session routes use only durable session IDs. Create a session explicitly, then put its returned ID in every follow-up, control, and stream path.
 
@@ -42,7 +43,7 @@ Create a conversation session before its first message with a bodyless request:
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","status":"accepted","taskProtocol":1}
 ```
 
 See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) for the
@@ -58,7 +59,7 @@ Include an initial message to create the session and start its first turn in one
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","status":"accepted","taskProtocol":1}
 ```
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
@@ -75,7 +76,7 @@ curl -X POST https://<deployment>/eve/v1/session \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
+# {"ok":true,"sessionId":"wrun_A","status":"accepted","taskProtocol":1}
 ```
 
 When the create request includes a message, a follow-up request accepts exactly one of
@@ -90,6 +91,10 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
 Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer output or local tool execution begins, steering interrupts pending model generation and applies the correction in the same turn. Executing tools finish and checkpoint their results first. After answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output; interrupted provider-managed search may run again. The turn ID stays the same.
 
 Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
+
+A follow-up can carry its own `operationId`, a string of up to 256 characters. The session admits one message per `operationId`, so a retried request is not delivered twice.
+
+Accepted create and follow-up responses report `taskProtocol`, the task protocol version this deployment uses when another eve deployment calls it as a [remote agent](../guides/remote-agents#upgrading-remote-agents). A request that carries a `callback` or a `taskProtocol` must send this deployment's version, or the route answers `409` with `"code": "TASK_PROTOCOL_MISMATCH"`. A calling eve deployment reads `GET /eve/v1/session/:sessionId/reports/:callId`, with the channel's auth, once at a call's deadline to recover a result whose callback never arrived.
 
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.

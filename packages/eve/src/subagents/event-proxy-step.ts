@@ -24,6 +24,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import { emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
+import { forwardEventToRemoteCaller } from "#subagents/remote-caller-events.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -103,6 +104,8 @@ export async function emitProxiedSubagentEvent(input: {
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
+      // A remotely called session passes its descendants' requests up to its caller.
+      await forwardEventToRemoteCaller({ ctx, event: transformed, sessionId: session.sessionId });
       await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
     };
 

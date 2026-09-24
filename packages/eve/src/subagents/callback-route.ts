@@ -1,15 +1,19 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#subagents/agent-handle-errors.js";
-import type { RuntimeActionResultHookPayload } from "#channel/types.js";
+import type { HookPayload } from "#channel/types.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { isSessionHandoffPending } from "#execution/session-inbox/resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { TASK_CALLBACK_ALIAS_PREFIX } from "#tasks/state.js";
+import type { ChildTaskReport } from "#tasks/protocol.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
 import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
+import { projectRemoteHitlCallback } from "#subagents/callback-hitl.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   cacheReadTokens: 0,
@@ -21,7 +25,11 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 // Wire schemas of the child→parent callback route. Possession of the owner's
 // callback alias is the authorization to report; results bind to a remote
 // task by callId and agent name. The self-reported `sessionId` narrows which
-// remote task a result may settle; older eve deployments may omit it.
+// remote task a result may settle. Input requests and authorization events
+// travel the same route, so a remote child's HITL reaches the owner's client.
+
+/** Steering messages a child reports receiving for the call; absent means none. */
+const steersSchema = z.number().int().nonnegative().optional();
 
 /**
  * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
@@ -52,6 +60,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     kind: z.literal("turn.completed"),
     outcome: agentTurnOutcomeWithCostSchema,
     output: jsonValueSchema.optional(),
+    steers: steersSchema,
     subagentName: z.string().min(1),
   }),
   z.object({
@@ -59,6 +68,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     error: jsonValueSchema,
     kind: z.literal("turn.failed"),
     outcome: agentTurnOutcomeWithCostSchema,
+    steers: steersSchema,
     subagentName: z.string().min(1),
   }),
 ]);
@@ -84,29 +94,55 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
-  const result = projectSessionCallbackResult(body);
-  if (result instanceof Response) {
-    return result;
-  }
-  const sessionId = Reflect.get(body as object, "sessionId");
-  const source: { kind: "remote"; sessionId?: string } = { kind: "remote" };
-  if (typeof sessionId === "string" && sessionId.length > 0) source.sessionId = sessionId;
-  const payload: RuntimeActionResultHookPayload = {
-    kind: "runtime-action-result",
-    results: [result],
-    source,
-  };
+  const payload = projectCallbackHookPayload(body);
+  if (payload instanceof Response) return payload;
+  return await resumeOwner(token, payload);
+}
 
+/**
+ * Hands a report to the owner, which applies each generation's first
+ * terminal report once, so a repeat changes nothing. A report no owner can
+ * take any more, because the owner session ended, is answered as a
+ * duplicate: the child must not fail or keep retrying over it.
+ */
+async function resumeOwner(token: string, payload: HookPayload): Promise<Response> {
   try {
     await resumeHook(token, payload);
-  } catch {
-    return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+    const alias = token.slice(sessionInboxHookToken("").length);
+    if (await isSessionHandoffPending(alias)) {
+      return Response.json(
+        { error: "The session is moving to another deployment. Retry.", ok: false },
+        { headers: { "retry-after": "1" }, status: 503 },
+      );
+    }
+    return Response.json({ duplicate: true, ok: true }, { status: 200 });
   }
-
   return Response.json({ ok: true }, { status: 202 });
 }
 
-function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResult | Response {
+function projectCallbackHookPayload(value: unknown): HookPayload | Response {
+  if (value === null || typeof value !== "object") {
+    return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
+  }
+  const hitl = projectRemoteHitlCallback(value);
+  if (hitl !== undefined) return hitl;
+  const result = projectSessionCallbackResult(value);
+  if (result instanceof Response) return result;
+  const sessionId = Reflect.get(value, "sessionId");
+  const source: { kind: "remote"; sessionId?: string } = { kind: "remote" };
+  if (typeof sessionId === "string" && sessionId.length > 0) source.sessionId = sessionId;
+  return { kind: "runtime-action-result", results: [result], source };
+}
+
+/**
+ * Projects a result callback body into the child result the owner applies.
+ * The deadline's reconciliation read projects a recorded report the same way.
+ */
+export function projectSessionCallbackResult(
+  value: unknown,
+): RuntimeSubagentChildResult | Response {
   if (value === null || typeof value !== "object") {
     return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
   }
@@ -172,8 +208,10 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
     };
   }
 
+  const steers =
+    payload.steers === undefined || payload.steers === 0 ? {} : { steers: payload.steers };
   if (payload.kind === "turn.completed") {
-    return {
+    const report: ChildTaskReport = {
       callId: payload.callId,
       kind: "subagent-result",
       origin: "child",
@@ -183,10 +221,12 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
       // Per-result usage projection (usage spans); the parent folds
       // `outcome.usageDelta`, never this field, when an outcome is present.
       usage: payload.outcome.usageDelta,
+      ...steers,
     };
+    return report;
   }
 
-  return {
+  const report: ChildTaskReport = {
     callId: payload.callId,
     isError: true,
     kind: "subagent-result",
@@ -194,7 +234,9 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
     outcome: payload.outcome,
     output: payload.error,
     subagentName: payload.subagentName,
+    ...steers,
   };
+  return report;
 }
 
 /**

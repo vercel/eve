@@ -262,23 +262,19 @@ export function renderAgentMismatch(record: Pick<TaskRecord, "id" | "name">): st
 
 /**
  * `AGENT_BUSY` error for a call that names a working agent it may not send a
- * message to: a `ctx.agent` call (`workflow-caller`), a model call when a
- * workflow body started the agent's current work (`workflow-owned`), or a
- * model call from a principal other than the one the agent works for
- * (`another-principal`). A workflow body awaits the output of the work it
- * started, and an agent acts with its starter's credentials.
+ * message to: a `ctx.agent` call (`workflow-caller`), or a model call when a
+ * workflow body started the agent's current work (`workflow-owned`). A
+ * workflow body awaits the output of the work it started.
  */
 export function renderAgentBusy(
   agentId: string,
-  reason: "another-principal" | "workflow-caller" | "workflow-owned",
+  reason: "workflow-caller" | "workflow-owned",
 ): string {
   switch (reason) {
     case "workflow-caller":
       return `Agent "${agentId}" is still working on another call, so a workflow cannot give it more work until it answers. Omit agentId to start a new agent.`;
     case "workflow-owned":
       return `Agent "${agentId}" is working for a workflow tool call, so it cannot take your message until it answers. Omit agentId to start a new agent.`;
-    case "another-principal":
-      return `Agent "${agentId}" is working for another user, so it cannot take your message. Omit agentId to start a new agent.`;
   }
 }
 
@@ -299,6 +295,31 @@ export function renderAgentUnreachable(
     case "temporary":
       return `Agent "${agentId}" is temporarily unreachable. Try again.`;
   }
+}
+
+/**
+ * `AGENT_OTHER_PRINCIPAL` error for a call that names an agent another user
+ * started. The agent acts with its starter's credentials and keeps their
+ * conversation, so only that user may give it more work or redirect it.
+ */
+export function renderAgentOtherPrincipal(agentId: string): string {
+  return `Agent "${agentId}" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.`;
+}
+
+/**
+ * `START_FAILED` message for a remote agent whose deployment speaks another
+ * task protocol version, or reports none because it runs an older eve.
+ */
+export function renderTaskProtocolMismatch(input: {
+  readonly name: string;
+  readonly localVersion: number;
+  readonly remoteVersion: number | undefined;
+}): string {
+  const remote =
+    input.remoteVersion === undefined
+      ? "reports no task protocol version (it runs an older eve)"
+      : `uses task protocol version ${String(input.remoteVersion)}`;
+  return `Remote agent "${input.name}" cannot be called: its deployment ${remote}, and this deployment uses version ${String(input.localVersion)}. Upgrade both deployments to the same eve version.`;
 }
 
 /** Error for a `ctx.agent` call whose child closed its reply channel without answering. */

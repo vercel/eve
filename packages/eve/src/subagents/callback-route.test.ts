@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import { isSessionHandoffPending } from "#execution/session-inbox/resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { ownerInboxHookToken, TASK_CALLBACK_ALIAS_PREFIX } from "#tasks/state.js";
@@ -12,10 +14,12 @@ const CALLBACK_URL = `https://app.example.com/eve/v1/callback/${encodeURICompone
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
 }));
+vi.mock("#execution/session-inbox/resume.js", () => ({ isSessionHandoffPending: vi.fn() }));
 
 describe("session callback route", () => {
   beforeEach(() => {
     resumeHookMock.mockReset();
+    vi.mocked(isSessionHandoffPending).mockReset().mockResolvedValue(false);
   });
 
   it.each([
@@ -44,8 +48,8 @@ describe("session callback route", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("reports a callback whose alias no longer has an owner as not pending", async () => {
-    resumeHookMock.mockRejectedValue(new Error("hook not found"));
+  it("answers a callback no owner can take any more as a duplicate, never 404", async () => {
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("hook not found"));
 
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
@@ -61,8 +65,142 @@ describe("session callback route", () => {
       createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ duplicate: true, ok: true });
     expect(resumeHookMock).toHaveBeenCalledOnce();
+    expect(isSessionHandoffPending).toHaveBeenCalledExactlyOnceWith(
+      `${TASK_CALLBACK_ALIAS_PREFIX}${"ab".repeat(24)}`,
+    );
+  });
+
+  it("asks the child to retry while the owner session moves to another deployment", async () => {
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("hook not found"));
+    vi.mocked(isSessionHandoffPending).mockResolvedValue(true);
+
+    const response = await handleSessionCallbackRequest(
+      new Request(CALLBACK_URL, {
+        body: JSON.stringify({
+          callId: "call-1",
+          kind: "session.completed",
+          output: "done",
+          sessionId: "remote-session",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
+    );
+
+    expect(response.status).toBe(503);
+  });
+
+  it("passes a remote child's input request to its owner as a remote-sourced proxy request", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      requests: [
+        {
+          action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "refund" },
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "deny", label: "Deny" },
+          ],
+          prompt: "Approve refund?",
+          requestId: "req-1",
+        },
+      ],
+      sequence: 2,
+      stepIndex: 0,
+      turnId: "turn_0",
+    };
+
+    const response = await handleSessionCallbackRequest(
+      new Request(CALLBACK_URL, {
+        body: JSON.stringify({
+          callId: "call-1",
+          event,
+          kind: "input.requested",
+          sessionId: "remote-session",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
+      callId: "call-1",
+      childContinuationToken: "eve:remote-child:remote-session",
+      childSessionId: "remote-session",
+      event,
+      kind: "subagent-input-request",
+      source: { kind: "remote" },
+      subagentName: "research",
+    });
+  });
+
+  it("passes a remote child's authorization event to its owner", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      data: { attemptId: "a-1", connection: "github", sequence: 1, turnId: "turn_0" },
+      type: "authorization.required",
+    };
+
+    const response = await handleSessionCallbackRequest(
+      new Request(CALLBACK_URL, {
+        body: JSON.stringify({
+          callId: "call-1",
+          event,
+          kind: "authorization.event",
+          sessionId: "remote-session",
+          subagentName: "research",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
+      callId: "call-1",
+      childSessionId: "remote-session",
+      event,
+      kind: "subagent-authorization-event",
+      source: { kind: "remote" },
+      subagentName: "research",
+    });
+  });
+
+  it.each([
+    ["without its session", { event: { requests: [] }, kind: "input.requested" }],
+    [
+      "with no requests",
+      {
+        event: { requests: [], sequence: 0, stepIndex: 0, turnId: "t" },
+        kind: "input.requested",
+        sessionId: "s",
+      },
+    ],
+    [
+      "with an unknown event type",
+      {
+        event: { data: {}, type: "message.completed" },
+        kind: "authorization.event",
+        sessionId: "s",
+      },
+    ],
+  ])("rejects an input callback %s", async (_label, body) => {
+    const response = await handleSessionCallbackRequest(
+      new Request(CALLBACK_URL, {
+        body: JSON.stringify({ callId: "call-1", subagentName: "research", ...body }),
+        method: "POST",
+      }),
+      createRouteContext({ token: CALLBACK_TOKEN }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
   it.each(["task.update", "task.input-requested", "task.authorization", "turn.started"])(
@@ -364,6 +502,7 @@ describe("session callback route", () => {
           outcome,
           output: "next result",
           sessionId: "remote-session",
+          steers: 2,
           subagentName: "research",
         }),
         method: "POST",
@@ -372,6 +511,7 @@ describe("session callback route", () => {
     );
 
     expect(response.status).toBe(202);
+    // The steering messages the child received for the call travel with its answer.
     expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
       source: { kind: "remote", sessionId: "remote-session" },
@@ -382,6 +522,7 @@ describe("session callback route", () => {
           origin: "child",
           outcome,
           output: "next result",
+          steers: 2,
           subagentName: "research",
           usage: outcome.usageDelta,
         },

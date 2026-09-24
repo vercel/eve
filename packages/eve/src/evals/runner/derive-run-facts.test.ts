@@ -586,7 +586,7 @@ describe("deriveRunFacts", () => {
       subagentResult({
         callId: "c1",
         subagentName: "weather",
-        output: { code: "REMOTE_AGENT_START_FAILED" },
+        output: { code: "START_FAILED" },
         status: "failed",
       }),
     ]);
@@ -595,7 +595,7 @@ describe("deriveRunFacts", () => {
       {
         callId: "c1",
         name: "weather",
-        output: { code: "REMOTE_AGENT_START_FAILED" },
+        output: { code: "START_FAILED" },
         status: "failed",
         turnIndex: 0,
         sessionId: undefined,

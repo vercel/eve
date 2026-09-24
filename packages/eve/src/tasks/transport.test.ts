@@ -9,15 +9,23 @@ import {
 import { createTaskRecord } from "#internal/testing/task-records.js";
 import { cancelRun, getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import {
-  cancelRemoteAgentTurn,
+  answerRemoteAgentSession,
   continueRemoteAgentSession,
   isRetryableRemoteAgentContinueError,
-  resolveRemoteAgentForAction,
-} from "#subagents/remote-dispatch.js";
+  readRemoteAgentReport,
+} from "#subagents/remote-continue.js";
+import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 import { ownerInboxHookToken } from "#tasks/state.js";
-import { deliverToChild, runCommands, sendAgentMessage } from "#tasks/transport.js";
+import {
+  answerRemoteTask,
+  deliverToChild,
+  readRemoteTaskReport,
+  runCommands,
+  sendAgentMessage,
+} from "#tasks/transport.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: vi.fn(),
@@ -32,9 +40,13 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
 }));
 vi.mock("#subagents/remote-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
+  resolveRemoteAgentForAction: vi.fn(),
+}));
+vi.mock("#subagents/remote-continue.js", () => ({
+  answerRemoteAgentSession: vi.fn(),
   continueRemoteAgentSession: vi.fn(),
   isRetryableRemoteAgentContinueError: vi.fn(),
-  resolveRemoteAgentForAction: vi.fn(),
+  readRemoteAgentReport: vi.fn(),
 }));
 
 const localChild = {
@@ -100,7 +112,11 @@ describe("deliverToChild", () => {
           subagentName: "research",
         },
         kind: "send",
+        // The call's identity, so a resent message is admitted once; it starts
+        // the call's turn rather than steering another one.
+        operationId: "turn-1:update-call",
         payload: { message: "Use Alice's updated requirements", outputSchema: undefined },
+        turnPolicy: "queue",
       },
       sessionId: "child-session",
     });
@@ -150,11 +166,35 @@ describe("deliverToChild", () => {
         url: expect.stringContaining("https://parent.example"),
       },
       message: "Use Alice's updated requirements",
+      operationId: "turn-1:update-call",
       outputSchema: undefined,
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
+      turnPolicy: "queue",
     });
     expect(dispatchSession).not.toHaveBeenCalled();
+  });
+
+  it("fails a continuation START_FAILED when the remote runs another task protocol", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(
+      new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 }),
+    );
+
+    const failure = await deliverToChild({
+      action: { ...action, kind: "remote-agent-call", remoteAgentName: "research" },
+      auth: null,
+      bundle,
+      child: remoteChild,
+      record: createTaskRecord({ child: remoteChild }),
+      replyToken: "task-callback:alias",
+    });
+
+    expect(failure).toEqual({
+      code: "START_FAILED",
+      message: expect.stringContaining("Upgrade both deployments to the same eve version."),
+    });
+    error.mockRestore();
   });
 });
 
@@ -303,6 +343,7 @@ describe("sendAgentMessage", () => {
   it("steers a local agent for its current call, with the owner's key and no new principal", async () => {
     await expect(
       sendAgentMessage({
+        callbackAlias: "eve:task-callback:alias",
         command,
         ctx: contextWithBundle(),
         ownerSessionId: "owner-session",
@@ -321,17 +362,18 @@ describe("sendAgentMessage", () => {
           subagentName: "research",
         },
         kind: "send",
+        operationId: "turn-1:call-2",
         payload: { message: "Also cover the pricing change." },
-        steerKey: "turn-1:call-2",
         turnPolicy: "steer",
       },
       sessionId: "child-session",
     });
   });
 
-  it("steers a remote agent where it runs, without a new callback or output schema", async () => {
+  it("steers a remote agent for its current call where it runs, with the owner's key and callback", async () => {
     await expect(
       sendAgentMessage({
+        callbackAlias: "eve:task-callback:alias",
         command,
         ctx: contextWithBundle(),
         ownerSessionId: "owner-session",
@@ -342,9 +384,18 @@ describe("sendAgentMessage", () => {
       }),
     ).resolves.toBeUndefined();
 
+    // Like a local agent, the remote agent counts the message for the call it
+    // answers, or runs it as that call's next turn after answering.
     expect(continueRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
       auth: ALICE,
+      callback: {
+        callId: "call-1",
+        subagentName: "research",
+        token: "eve:inbox:v1:eve:task-callback:alias",
+        url: "https://parent.example/eve/v1/callback/eve%3Ainbox%3Av1%3Aeve%3Atask-callback%3Aalias",
+      },
       message: "Also cover the pricing change.",
+      operationId: "turn-1:call-2",
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
       turnPolicy: "steer",
@@ -361,6 +412,7 @@ describe("sendAgentMessage", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const failure = await sendAgentMessage({
+      callbackAlias: "eve:task-callback:alias",
       command,
       ctx: contextWithBundle(),
       ownerSessionId: "owner-session",
@@ -382,5 +434,97 @@ describe("sendAgentMessage", () => {
 
     expect(dispatchSession).not.toHaveBeenCalled();
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+  });
+});
+
+describe("answerRemoteTask", () => {
+  it("answers a remote agent's input request where it runs, as the answering user", async () => {
+    const BOB = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "U-bob",
+      principalType: "user",
+    } as const;
+    const inputResponses = [{ optionId: "approve", requestId: "req-1" }];
+
+    await expect(
+      answerRemoteTask({
+        auth: BOB,
+        ctx: contextWithBundle(),
+        inputResponses,
+        record: createTaskRecord({ child: remoteChild }),
+      }),
+    ).resolves.toBe(true);
+
+    expect(answerRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
+      auth: BOB,
+      inputResponses,
+      remote: { name: "research", url: "https://child.example" },
+      sessionId: "remote-child",
+    });
+  });
+
+  it("keeps an answer that did not reach the remote agent answerable", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
+
+    await expect(
+      answerRemoteTask({
+        auth: null,
+        ctx: contextWithBundle(),
+        inputResponses: [{ optionId: "approve", requestId: "req-1" }],
+        record: createTaskRecord({ child: remoteChild }),
+      }),
+    ).resolves.toBe(false);
+    error.mockRestore();
+  });
+});
+
+describe("readRemoteTaskReport", () => {
+  const report = {
+    callId: "call-1",
+    kind: "turn.completed",
+    outcome: {
+      kind: "parked",
+      result: { kind: "succeeded", output: "Found it." },
+      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 3, outputTokens: 2 },
+    },
+    output: "Found it.",
+    sessionId: "remote-child",
+    steers: 1,
+    subagentName: "research",
+  };
+
+  it("reads the remote agent's latest report for the current call as its callback result", async () => {
+    vi.mocked(readRemoteAgentReport).mockResolvedValueOnce(report);
+
+    const result = await readRemoteTaskReport(
+      createTaskRecord({ child: remoteChild }),
+      contextWithBundle(),
+    );
+
+    expect(readRemoteAgentReport).toHaveBeenCalledExactlyOnceWith({
+      callId: "call-1",
+      remote: { name: "research", url: "https://child.example" },
+      sessionId: "remote-child",
+    });
+    expect(result).toMatchObject({
+      callId: "call-1",
+      output: "Found it.",
+      steers: 1,
+      subagentName: "research",
+    });
+  });
+
+  it.each([
+    ["no report", undefined],
+    ["another agent's report", { ...report, subagentName: "billing" }],
+    ["a malformed report", { callId: "call-1", kind: "turn.completed" }],
+  ])("treats %s as unfinished", async (_label, value) => {
+    vi.mocked(readRemoteAgentReport).mockResolvedValueOnce(value);
+
+    await expect(
+      readRemoteTaskReport(createTaskRecord({ child: remoteChild }), contextWithBundle()),
+    ).resolves.toBeUndefined();
   });
 });

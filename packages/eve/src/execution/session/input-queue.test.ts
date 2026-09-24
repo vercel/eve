@@ -42,7 +42,7 @@ describe("an owner's steering messages", () => {
     caller,
     kind: "deliver" as const,
     payloads: [{ message }],
-    steerKey: key,
+    operationId: key,
   });
 
   it("admits each key once, so a resent message is dropped", () => {
@@ -65,7 +65,10 @@ describe("an owner's steering messages", () => {
     // it starts a new turn for the same call and counts toward that answer.
     queue.enqueueDelivery(steer("turn-1:call-3", "Mention the date."));
     const next = queue.takeNext();
-    expect(next).toMatchObject({ delivery: { caller, steerKey: "turn-1:call-3" }, kind: "turn" });
+    expect(next).toMatchObject({
+      delivery: { caller, operationId: "turn-1:call-3" },
+      kind: "turn",
+    });
     expect(queue.takeSteerCount("call-1")).toBe(1);
     expect(queue.takeSteerCount("call-1")).toBe(0);
   });
@@ -80,6 +83,22 @@ describe("an owner's steering messages", () => {
       caller,
       payloads: [{ message: "Mention the price." }, { message: "Mention the date." }],
     });
+  });
+
+  it("admits an owner's new call once without counting it as a steering message", () => {
+    const queue = new SessionInputQueue();
+    const next = {
+      caller: { ...caller, callId: "call-4" },
+      kind: "deliver" as const,
+      operationId: "turn-2:call-4",
+      payloads: [{ message: "Now draft the summary." }],
+      turnPolicy: "queue" as const,
+    };
+
+    expect(queue.enqueueDelivery(next)).toBeDefined();
+    expect(queue.enqueueDelivery(next)).toBeUndefined();
+    expect(queue.pendingCount).toBe(1);
+    expect(queue.takeSteerCount("call-4")).toBe(0);
   });
 
   it("drops a cancelled call's waiting messages so they start no work", () => {

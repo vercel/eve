@@ -135,9 +135,9 @@ export default defineRemoteAgent({
 
 The create-session request carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). Every continuation carries only that turn's `session.auth.current`; the remote session keeps its original `auth.initiator`. Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment resolves its own per-user credentials through its own connections.
 
-This makes caller authority turn-scoped even when the remote child session is persistent. If Alice starts the child and Bob later continues it, the follow-up runs with Bob as `auth.current`, not Alice. If the parent turn's auth is `null`, a local child clears `auth.current`, while a remote child uses the freshly verified transport principal; neither inherits Alice. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a later turn can resolve only the grant belonging to its own `auth.current` principal.
+This keeps caller authority with the principal that started the child, even when the remote child session is persistent. Only that principal can continue the child: if Alice starts it and Bob's turn later names its `agentId`, the call fails with `AGENT_OTHER_PRINCIPAL`, and Bob's request needs a new child, which acts as Bob. When the parent turn's auth is `null`, a new local child has no `auth.current`, while a new remote child uses the freshly verified transport principal. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a turn can resolve only the grant belonging to its own `auth.current` principal.
 
-Identity forwarding does not make a persistent session private to one caller. Conversation history, tool outputs, and other child-session state still persist. If those values must not be visible across users, give each user a distinct child session or enforce that ownership at the application boundary.
+The principal check covers calls made through the parent. The remote child is still an ordinary session on the remote deployment, and its conversation history, tool outputs, and other state persist there. If those values must not be visible across users, also enforce that ownership at the remote deployment's boundary.
 
 Forwarding identity is explicit on both sides. The receiver names which deployments it trusts with `eveChannel({ trustedForwarders })` and can limit each one to the principals it may assert (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); refusing the forwarder or what it asserts rejects a forwarded principal with a 403. The same trust decision covers parent session lineage and, with principal forwarding, trace-content constraints.
 
@@ -187,17 +187,19 @@ widen capture and use metadata-only tracing.
 
 A remote subagent runs in its own deployment, and the parent turn waits for its answer:
 
-1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
-2. The remote child runs its turn.
+1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL, the parent session's capabilities, and its task protocol version.
+2. The remote child runs its turn. Questions, approvals, and sign-in prompts it raises travel back through the same callback URL.
 3. The child posts its answer to the callback URL, and the answer becomes the tool result for the parent's call.
 
 The parent stream carries the same `task.started`, `action.result`, and `task.settled` events as local delegation. For a remote call, `task.started.data.child.remote.url` records the target.
 
-In an interactive root session, the model can run a remote agent call in the background with `background: true`, exactly as with a local subagent: the call returns a receipt, and the remote child's answer arrives through the same callback and reaches the model later in a `task.result` message. See [Run a call in the background](../subagents#run-a-call-in-the-background). Passing the `agentId` of a remote child that is still working sends its message with a continue request that carries no callback and `turnPolicy: "steer"`, so the remote child applies it to its current turn and answers through the callback it already has. Only the principal whose call started the child's current work can send it a message; a call from another principal fails with `AGENT_BUSY`. When the definition forwards the caller identity, the continue request forwards that same principal. Two limits apply to remote children and not to local ones: a message that arrives after the remote child answered starts a turn in the remote session whose answer does not reach the parent, and eve does not deduplicate a continue request that it retries. Upgrade the remote deployment to the same eve version before relying on this behavior.
+In an interactive root session, the model can run a remote agent call in the background with `background: true`, exactly as with a local subagent: the call returns a receipt, and the remote child's answer arrives through the same callback and reaches the model later in a `task.result` message. See [Run a call in the background](../subagents#run-a-call-in-the-background).
+
+Passing the `agentId` of a remote child that is still working sends its message as a steering message for the child's current call, as for a local child. The remote child applies the message to its current turn, or, when it already answered, runs the message as its next turn for the same call; the parent then tracks that turn as the child's next background work, and its answer arrives through the callback. Only the principal whose call started the child's current work can give it more work or send it a message; a call from another principal fails with `AGENT_OTHER_PRINCIPAL`. When the definition forwards the caller identity, the continue request forwards that same principal.
 
 Clients follow a remote child through the parent. [`session.streamSubagent()`](./client/streaming#follow-a-subagent) reads `task.started.data.child.streamPath`, a route on the parent deployment. The parent verifies that the child belongs to that session, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
 
-Each remote call has the same time limit as a local one: 2 hours of active time unless you set `timeout` on the definition, in milliseconds, or `false` to keep only the parent session's lifetime as the limit. A call still working at the limit fails with `TIMED_OUT`, and eve sends the remote child a cancellation. A remote agent that typically runs longer needs a larger `timeout`:
+Each remote call has the same time limit as a local one: 2 hours of active time unless you set `timeout` on the definition, in milliseconds, or `false` to keep only the parent session's lifetime as the limit. Time the child spends waiting on a person does not count. A call still working at the limit fails with `TIMED_OUT`, and eve sends the remote child a cancellation. A remote agent that typically runs longer needs a larger `timeout`:
 
 ```ts title="agent/subagents/content.ts"
 import { defineRemoteAgent } from "eve";
@@ -209,13 +211,41 @@ export default defineRemoteAgent({
 });
 ```
 
-Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
+Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-A remote child cannot ask the parent's user for input or authorization yet. If a remote child's turn stops for a tool approval, a `ctx.ask()` question, or a connection sign-in, the child fails and the parent's call fails with its error instead of waiting. Configure tools and connections on the remote deployment so the turn can finish without a person.
+A failed _start_ fails the call with `START_FAILED`, including a start refused because the two deployments run different eve versions (see [Upgrading remote agents](#upgrading-remote-agents)). After a remote starts, a terminal failure callback fails the call with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
 
-A failed _start_ fails the tool call. After a remote starts, a terminal failure callback fails the call with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
+### Questions, approvals, and sign-in
+
+A remote child inherits the parent session's capabilities, as a local child does. When the parent session can reach a person, a tool approval, a `ctx.ask()` question, or a connection sign-in prompt in the remote child surfaces on the parent's stream as `input.requested` or `authorization.*` with the `taskId` of the call that asked. Answer it on the parent session with `inputResponses`, exactly as for a local child; eve forwards the answer to the remote session, as the answering principal when the definition forwards the caller identity. A sign-in completes on the remote deployment, whose connection callback the prompt links to. When the parent session cannot request input, such as a session a schedule started, the remote child's `ctx.ask()` questions resolve as `unavailable`.
+
+A request the remote child could not deliver to the parent is not retried; the call's time limit bounds the wait.
+
+### Retries and lost callbacks
+
+Retries on either side do not apply a call's work or its result twice:
+
+- Every continue or steering request eve sends a remote child carries an `operationId` derived from the call, so the remote admits a retried request once.
+- The parent applies the first result reported for each call, so a repeated callback changes nothing. A callback that arrives after the parent session ended is answered `200` with `{"ok":true,"duplicate":true}`, so the remote child neither fails nor keeps retrying it. While the parent session moves to another deployment, the callback route answers `503` and the child retries.
+- A lost callback is recovered at the call's deadline. Before a remote call fails with `TIMED_OUT`, eve reads the remote session's latest result for that call once, from `GET /eve/v1/session/:childSessionId/reports/:callId` with the definition's `auth` and `headers`. If the child already answered, the call settles with that answer. Otherwise it fails with `TIMED_OUT`, and eve cancels the child's turn.
+
+## Upgrading remote agents
+
+A remote agent and the agent that calls it must run the same eve version. The child side of a call keeps the call open until its own work finishes, forwards its questions and approvals, counts steering messages, and records its results for the parent's deadline read. Every delegated request carries the parent's task protocol version as `taskProtocol`, and every accepted response reports the remote's version. Upgrade the calling deployment and each remote agent it calls together.
+
+A start across mixed versions fails at once, in either direction, instead of waiting for the call's time limit:
+
+- A remote agent on an older eve accepts the call without reporting a version. The parent resets the session the remote started and fails the call with `START_FAILED`:
+
+  ```text
+  Remote agent "billing" cannot be called: its deployment reports no task protocol version (it runs an older eve), and this deployment uses version 1. Upgrade both deployments to the same eve version.
+  ```
+
+- A remote agent on the current eve refuses a call from an older parent, which sends a callback without a version, with `409` and `"code": "TASK_PROTOCOL_MISMATCH"`, so the older parent's call fails at start.
+
+Sessions are not migrated across versions. When a session from an earlier release next runs, each background task that release left working fails with `STATE_LOST`, the model receives that result in a `task.result` message, and the session continues. Start the work again if it is still needed.
 
 ## What to read next
 

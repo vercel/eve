@@ -1,4 +1,3 @@
-import { REMOTE_AGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import type {
   RuntimeRemoteAgentDispatchRequest,
   RuntimeSubagentDispatchRequest,
@@ -29,6 +28,7 @@ export function getSubagentName(
   return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
 }
 
+/** A remote agent that did not start, including one on another task protocol version, settles `START_FAILED`. */
 export function createRemoteAgentStartFailureResult(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly error: unknown;
@@ -39,7 +39,7 @@ export function createRemoteAgentStartFailureResult(input: {
     kind: "subagent-result",
     origin: "dispatch",
     output: {
-      code: REMOTE_AGENT_START_FAILED,
+      code: "START_FAILED",
       message: toErrorMessage(input.error),
     },
     subagentName: input.action.remoteAgentName,

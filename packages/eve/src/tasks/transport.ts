@@ -16,12 +16,19 @@ import type { JsonValue } from "#shared/json.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import { renderAgentUnreachable } from "#tasks/render.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
+import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import {
-  cancelRemoteAgentTurn,
+  answerRemoteAgentSession,
   continueRemoteAgentSession,
   isRetryableRemoteAgentContinueError,
-  resolveRemoteAgentForAction,
-} from "#subagents/remote-dispatch.js";
+  readRemoteAgentReport,
+  type RemoteCallback,
+} from "#subagents/remote-continue.js";
+import { projectSessionCallbackResult } from "#subagents/callback-route.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
+import type { InputResponse } from "#shared/input.js";
+import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
 import type { ChildAddress, TaskCommand } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { readTaskCreator } from "#tasks/results.js";
@@ -89,16 +96,18 @@ async function runCommand(
 }
 
 /**
- * Sends a steering message to a working agent. A local agent receives it for
- * its current generation's call, with the owner's key, so it admits the
- * message once and reports receiving it when it answers that call: in its
- * current turn, in its next turn for the same call when it is holding that
- * call for its own background work, or as a new turn for the call when it
- * has already answered. A remote agent receives it without a caller and
- * applies it to its current turn. Returns the call's error output when the
- * message did not reach the agent.
+ * Sends a steering message to a working agent for its current generation's
+ * call, with the owner's key, so the agent admits the message once and
+ * reports receiving it when it answers that call: in its current turn, in
+ * its next turn for the same call when it is holding that call for its own
+ * background work, or as a new turn for the call when it has already
+ * answered. A remote agent gets the same message over HTTP, with the owner's
+ * callback for the call. Returns the call's error output when the message
+ * did not reach the agent.
  */
 export async function sendAgentMessage(input: {
+  /** The owner's remote callback alias; a remote agent answers through it. */
+  readonly callbackAlias: string | undefined;
   readonly command: Extract<TaskCommand, { readonly kind: "message" }>;
   readonly ctx: ContextContainer | undefined;
   readonly ownerSessionId: string;
@@ -115,12 +124,13 @@ export async function sendAgentMessage(input: {
   try {
     if (child.kind === "remote") {
       const remote = resolveRemoteChild(record, input.ctx);
-      if (remote === undefined) return unreachable(true);
-      // The child's current generation already has the owner's callback. Only
-      // the principal that started that generation may steer it.
+      if (remote === undefined || input.callbackAlias === undefined) return unreachable(true);
+      // Only the principal that started the generation may steer it.
       await continueRemoteAgentSession({
         auth: readTaskCreator(record.creator).auth,
+        callback: remoteCallback(record.callId, record.name, child, input.callbackAlias),
         message: command.message,
+        operationId: command.key,
         remote: { ...remote, url: child.url },
         sessionId: child.sessionId,
         turnPolicy: "steer",
@@ -141,8 +151,8 @@ export async function sendAgentMessage(input: {
           subagentName: record.name,
         },
         kind: "send",
+        operationId: command.key,
         payload: { message: command.message },
-        steerKey: command.key,
         turnPolicy: "steer",
       },
       sessionId: child.sessionId,
@@ -153,10 +163,90 @@ export async function sendAgentMessage(input: {
       childKind: child.kind,
       taskId: record.id,
     });
+    if (error instanceof RemoteTaskProtocolError) return protocolFailure(error);
     return unreachable(
       isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
     );
   }
+}
+
+/**
+ * Answers input requests a remote agent surfaced. Returns whether the
+ * answers reached it; ones that did not stay answerable.
+ */
+export async function answerRemoteTask(input: {
+  readonly auth: SessionAuthContext | null;
+  readonly ctx: ContextContainer | undefined;
+  readonly inputResponses: readonly InputResponse[];
+  readonly record: TaskRecord;
+}): Promise<boolean> {
+  const { record } = input;
+  const child = record.child;
+  const remote = resolveRemoteChild(record, input.ctx);
+  if (child?.kind !== "remote" || remote === undefined) return false;
+  try {
+    await answerRemoteAgentSession({
+      auth: input.auth,
+      inputResponses: input.inputResponses,
+      remote: { ...remote, url: child.url },
+      sessionId: child.sessionId,
+    });
+    return true;
+  } catch (error) {
+    logError(log, "failed to answer a remote agent's input request", error, {
+      taskId: record.id,
+    });
+    return false;
+  }
+}
+
+/**
+ * The deadline's one read of a remote agent: the latest result it reported
+ * for the task's current call, as its callback would have carried it.
+ * `undefined` when it has not answered the call or cannot be read.
+ */
+export async function readRemoteTaskReport(
+  record: TaskRecord,
+  ctx: ContextContainer | undefined,
+): Promise<RuntimeSubagentChildResult | undefined> {
+  const child = record.child;
+  const remote = resolveRemoteChild(record, ctx);
+  if (child?.kind !== "remote" || remote === undefined) return undefined;
+  try {
+    const report = await readRemoteAgentReport({
+      callId: record.callId,
+      remote: { ...remote, url: child.url },
+      sessionId: child.sessionId,
+    });
+    if (report === undefined) return undefined;
+    const result = projectSessionCallbackResult(report);
+    return result instanceof Response || result.subagentName !== record.name ? undefined : result;
+  } catch (error) {
+    logError(log, "failed to read a remote agent's report at its deadline", error, {
+      taskId: record.id,
+    });
+    return undefined;
+  }
+}
+
+/** A remote on another task protocol version cannot start the work; the error says what to upgrade. */
+function protocolFailure(error: RemoteTaskProtocolError): JsonValue {
+  return { code: "START_FAILED", message: error.message };
+}
+
+function remoteCallback(
+  callId: string,
+  subagentName: string,
+  child: Extract<ChildAddress, { readonly kind: "remote" }>,
+  callbackAlias: string,
+): RemoteCallback {
+  const token = sessionInboxHookToken(callbackAlias);
+  return {
+    callId,
+    subagentName,
+    token,
+    url: createWorkflowCallbackUrl(child.callbackBaseUrl, createEveCallbackRoutePath(token)),
+  };
 }
 
 function resolveRemoteChild(record: TaskRecord, ctx: ContextContainer | undefined) {
@@ -208,6 +298,8 @@ export async function deliverToChild(input: {
     code: AGENT_UNREACHABLE,
     message: renderAgentUnreachable(record.id, permanent ? "gone" : "temporary"),
   });
+  // The call's identity: a retried step resends it, and the agent admits it once.
+  const operationId = `${record.turnId}:${action.callId}`;
   try {
     if (child.kind === "remote") {
       const resolved = resolveRemoteAgentForAction({
@@ -228,9 +320,11 @@ export async function deliverToChild(input: {
           ),
         },
         message,
+        operationId,
         outputSchema,
         remote: { ...resolved, url: child.url },
         sessionId: child.sessionId,
+        turnPolicy: "queue",
       });
       return undefined;
     }
@@ -248,7 +342,9 @@ export async function deliverToChild(input: {
           subagentName: record.name,
         },
         kind: "send",
+        operationId,
         payload: { message, outputSchema },
+        turnPolicy: "queue",
       },
       sessionId: child.sessionId,
     });
@@ -258,6 +354,9 @@ export async function deliverToChild(input: {
       callId: action.callId,
       taskId: record.id,
     });
-    return unreachable(isRuntimeNoActiveSessionError(error));
+    if (error instanceof RemoteTaskProtocolError) return protocolFailure(error);
+    return unreachable(
+      isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
+    );
   }
 }

@@ -58,11 +58,14 @@ export async function admitSessionInboxPayload(
         record.callId === value.callId &&
         (record.status === "working" || record.status === "input_required"),
     );
-    if (
-      task?.name === value.subagentName &&
-      (task.child === undefined ||
-        (task.child.kind === "local" && task.child.sessionId === value.childSessionId))
-    ) {
+    // A remote child reports only through the callback route, which marks its
+    // payloads; it may speak only for the remote session the owner started.
+    const fromChild =
+      value.source?.kind === "remote"
+        ? task?.child?.kind === "remote" && task.child.sessionId === value.childSessionId
+        : task?.child === undefined ||
+          (task.child.kind === "local" && task.child.sessionId === value.childSessionId);
+    if (task?.name === value.subagentName && fromChild) {
       await input.cursor.apply(
         await runProxySubagentEventStep({
           hookPayload: value,

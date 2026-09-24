@@ -47,6 +47,12 @@ import type { HarnessSession } from "#harness/types.js";
  * The only simulated component is Vercel's route engine itself.
  */
 
+// This suite covers callback routing; recording a report needs a workflow world it does not start.
+vi.mock("#subagents/task-reports.js", () => ({
+  readLatestTaskReport: vi.fn(async () => undefined),
+  recordTaskReport: vi.fn(async () => {}),
+}));
+
 const DEPLOYMENT_AGENTS = [
   {
     name: "support",
@@ -241,6 +247,7 @@ describe("multi-agent callback routing", () => {
             ok: true,
             sessionId: "remote-session-1",
             status: "accepted",
+            taskProtocol: 1,
           }),
         );
       });

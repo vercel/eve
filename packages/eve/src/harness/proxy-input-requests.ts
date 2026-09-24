@@ -8,6 +8,20 @@ import {
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
+const REMOTE_CHILD_ROUTE_PREFIX = "eve:remote-child:";
+
+/**
+ * The route token for requests a remote child surfaced. Its answers go to
+ * the remote session over HTTP, never to a local inbox.
+ */
+export function remoteChildRouteToken(sessionId: string): string {
+  return `${REMOTE_CHILD_ROUTE_PREFIX}${sessionId}`;
+}
+
+export function isRemoteChildRouteToken(token: string): boolean {
+  return token.startsWith(REMOTE_CHILD_ROUTE_PREFIX);
+}
+
 const PROXY_INPUT_REQUEST_KINDS = {
   question: true,
   "session-limit": true,

@@ -8,7 +8,8 @@ import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TaskStartedHookPayload, TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import type { ChildTaskReport } from "#tasks/protocol.js";
+import { reportedSteers, type ChildTaskReport } from "#tasks/protocol.js";
+import { recordTaskReport } from "#subagents/task-reports.js";
 import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
 import {
   isSubagentAdapterState,
@@ -339,39 +340,29 @@ export async function bindTurnCallerContextStep(input: {
   };
 }
 
+/**
+ * Posts a settled turn to a remote caller. The report is recorded first, so
+ * a caller whose callback is lost can still read it at its deadline.
+ */
 async function postSettledTurnCallback(input: {
   readonly result: RuntimeSubagentChildResult;
-  /** Informational on the wire (tracing); the receiver never verifies it. */
+  /** Narrows which remote task the report may settle; it is also the report's store. */
   readonly sessionId: string;
   readonly url: string;
 }): Promise<void> {
-  const { sessionId } = input;
-  if (input.result.isError === true) {
-    await postCallbackPayload({
-      payload: {
-        callId: input.result.callId,
-        error: input.result.output,
-        kind: "turn.failed",
-        outcome: input.result.outcome,
-        sessionId,
-        subagentName: input.result.subagentName,
-      },
-      url: input.url,
-    });
-    return;
-  }
-
-  await postCallbackPayload({
-    payload: {
-      callId: input.result.callId,
-      kind: "turn.completed",
-      outcome: input.result.outcome,
-      output: input.result.output,
-      sessionId,
-      subagentName: input.result.subagentName,
-    },
-    url: input.url,
-  });
+  const { result, sessionId } = input;
+  const common = {
+    callId: result.callId,
+    sessionId,
+    steers: reportedSteers(result),
+    subagentName: result.subagentName,
+  };
+  const payload =
+    result.isError === true
+      ? { ...common, error: result.output, kind: "turn.failed", outcome: result.outcome }
+      : { ...common, kind: "turn.completed", outcome: result.outcome, output: result.output };
+  await recordTaskReport({ report: payload, sessionId });
+  await postCallbackPayload({ payload, url: input.url });
 }
 
 async function postCallbackPayload(input: {

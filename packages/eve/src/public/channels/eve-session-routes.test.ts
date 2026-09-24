@@ -75,6 +75,7 @@ describe("eve ID-addressed session routes", () => {
       ok: true,
       sessionId: "wrun_A",
       status: "accepted",
+      taskProtocol: 1,
     });
     expect(onMessage).not.toHaveBeenCalled();
     expect(createSession).toHaveBeenCalledWith(
@@ -134,6 +135,7 @@ describe("eve ID-addressed session routes", () => {
       ok: true,
       sessionId: "wrun_A",
       status: "accepted",
+      taskProtocol: 1,
     });
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -166,6 +168,7 @@ describe("eve ID-addressed session routes", () => {
     const response = await route("POST", "/eve/v1/session")(
       new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({
+          taskProtocol: 1,
           callback: {
             callId: "call-1",
             subagentName: "research",
@@ -207,6 +210,7 @@ describe("eve ID-addressed session routes", () => {
     const response = await route("POST", "/eve/v1/session")(
       new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({
+          taskProtocol: 1,
           callback: {
             callId: "call-1",
             subagentName: "research",
@@ -249,6 +253,7 @@ describe("eve ID-addressed session routes", () => {
     const response = await route("POST", "/eve/v1/session")(
       new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({
+          taskProtocol: 1,
           callback: {
             callId: "call-1",
             subagentName: "research",
@@ -296,6 +301,7 @@ describe("eve ID-addressed session routes", () => {
       })(
         new Request("https://eve.test/eve/v1/session", {
           body: JSON.stringify({
+            taskProtocol: 1,
             callback: callback
               ? {
                   callId: "call-1",
@@ -322,6 +328,7 @@ describe("eve ID-addressed session routes", () => {
         ok: true,
         sessionId: "wrun_A",
         status: "accepted",
+        taskProtocol: 1,
       });
       expect(createSession).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -362,6 +369,7 @@ describe("eve ID-addressed session routes", () => {
       })(
         new Request("https://eve.test/eve/v1/session", {
           body: JSON.stringify({
+            taskProtocol: 1,
             callback: {
               callId: "call-1",
               subagentName: "research",

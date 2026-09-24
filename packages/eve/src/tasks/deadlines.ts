@@ -31,15 +31,16 @@ import {
   type TaskEffect,
 } from "#tasks/table.js";
 import { runCommands } from "#tasks/transport.js";
+import { reconcileDueRemoteTasks } from "#tasks/reconcile.js";
 import {
   flushAgentInvocationTraces,
   invocationError,
   recordNestedAgentInvocationTerminal,
 } from "#tracing/agent-invocation-terminal.js";
 
-// Owner-side handling of the timer's `task.deadline` signal: time out due
-// tasks, and hard-stop children that did not confirm a stop in time.
-// Nothing here waits on a child.
+// Owner-side handling of the timer's `task.deadline` signal: reconcile due
+// remote tasks with one read, time out the rest, and hard-stop children that
+// did not confirm a stop in time. Nothing here waits on a child.
 
 const HARD_STOP_REASON = "The task did not stop within its cancellation window.";
 
@@ -65,8 +66,7 @@ export async function applyTaskDeadlines(input: {
   readonly sessionState: DurableSessionState;
   readonly signal: TaskDeadlineSignal;
 }): Promise<TaskOwnerUpdate> {
-  let session = readDurableSession(input.sessionState);
-  const armed = readTaskTimer(session.state);
+  const armed = readTaskTimer(readDurableSession(input.sessionState).state);
   // The armed timer's own signal proves its wake time passed, even when this
   // step's clock lags the clock the timer slept on.
   const nowMs =
@@ -77,11 +77,13 @@ export async function applyTaskDeadlines(input: {
       : Date.parse(input.now);
   const now = new Date(nowMs).toISOString();
 
+  const reconciled = await reconcileDueRemoteTasks({ ...input, now });
+  let session = readDurableSession(reconciled.sessionState);
   const evaluated = evaluateTaskDeadlines(getTaskTable(session), now);
   let table = evaluated.table;
-  let serializedContext = input.serializedContext;
-  const results: RuntimeToolResultActionResult[] = [];
-  const replies: WorkflowCallerReply[] = [];
+  let serializedContext = reconciled.serializedContext;
+  const results: RuntimeToolResultActionResult[] = [...reconciled.results];
+  const replies: WorkflowCallerReply[] = [...reconciled.replies];
   // Background results are delivered by a later model step, not to a caller.
   const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
   for (const effect of evaluated.effects) {
@@ -138,11 +140,11 @@ export async function applyTaskDeadlines(input: {
   });
   for (const { outcome, record } of held) session = holdTaskResult(session, record, outcome);
   return {
-    events: [...settledEvents(evaluated.effects), ...lost.events],
+    events: [...reconciled.events, ...settledEvents(evaluated.effects), ...lost.events],
     replies,
     results,
     serializedContext: await flushAgentInvocationTraces(serializedContext),
-    sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
+    sessionState: replaceDurableSessionSnapshot({ session, state: reconciled.sessionState }),
   };
 }
 

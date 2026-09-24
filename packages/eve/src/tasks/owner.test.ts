@@ -460,7 +460,9 @@ describe("startAgentTasks", () => {
           subagentName: "research",
         },
         kind: "send",
+        operationId: "turn-1:call-1",
         payload: { message: "Summarize them.", outputSchema: undefined },
+        turnPolicy: "queue",
       },
       sessionId: "child-session",
     });
@@ -666,8 +668,8 @@ describe("steering a working agent", () => {
         subagentName: "research",
       },
       kind: "send",
+      operationId: `turn-1:${callId}`,
       payload: { message },
-      steerKey: `turn-1:${callId}`,
       turnPolicy: "steer",
     },
     sessionId: "child-session",
@@ -916,8 +918,8 @@ describe("steering a working agent", () => {
         isError: true,
         kind: "tool-result",
         output: {
-          code: "AGENT_BUSY",
-          message: `Agent "${alices.id}" is working for another user, so it cannot take your message. Omit agentId to start a new agent.`,
+          code: "AGENT_OTHER_PRINCIPAL",
+          message: `Agent "${alices.id}" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.`,
         },
         toolName: "research",
       },
@@ -928,6 +930,47 @@ describe("steering a working agent", () => {
     const own = await start([modelCall({ agentId: alices.id, message: "Shorter." })], [alices]);
     expect(own.results).toEqual([
       expect.objectContaining({ modelOutput: renderSteeringReceipt(alices) }),
+    ]);
+  });
+
+  it("lets only the principal that started an idle agent give it more work", async () => {
+    // Alice's researcher answered and is idle; in the shared thread, Bob's
+    // turn names it. Its session holds Alice's conversation and acts for her.
+    const idle = createTaskRecord({
+      callId: "call-0",
+      child: LOCAL_CHILD,
+      creator: encodeTaskCreator({ auth: ALICE }),
+      delivered: true,
+      lastStatus: "Found three sources.",
+      status: "completed",
+      turnId: "turn-0",
+    });
+    asPrincipal(BOB);
+
+    const update = await start(
+      [modelCall({ agentId: idle.id, message: "Summarize them for me." })],
+      [idle],
+    );
+
+    expect(dispatchSession).not.toHaveBeenCalled();
+    expect(startSubagent).not.toHaveBeenCalled();
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: {
+          code: "AGENT_OTHER_PRINCIPAL",
+          message: `Agent "${idle.id}" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.`,
+        },
+      }),
+    ]);
+    expect(update.events).toEqual([]);
+    expect(records(update.sessionState)).toEqual([idle]);
+
+    asPrincipal(ALICE);
+    const own = await start([modelCall({ agentId: idle.id, message: "Summarize them." })], [idle]);
+    expect(own.results).toEqual([]);
+    expect(records(own.sessionState)).toEqual([
+      expect.objectContaining({ generation: 2, id: idle.id, status: "working" }),
     ]);
   });
 
@@ -1262,13 +1305,10 @@ describe("applyTaskReport", () => {
       expect(records(update.sessionState)).toEqual([record]);
     });
 
-    it.each([
-      ["with the session it reported", { kind: "remote" as const, sessionId: "remote-child" }],
-      ["from an older deployment that omits its session", { kind: "remote" as const }],
-    ])("settles a remote task from a remote-stamped result %s", async (_name, source) => {
+    it("settles a remote task from a result stamped with the session it reported", async () => {
       const update = await applyTaskReport({
         now: NOW,
-        payload: resultPayload(remoteResult, source),
+        payload: resultPayload(remoteResult, { kind: "remote", sessionId: "remote-child" }),
         serializedContext: {},
         sessionState: ownerState([remoteRecord]),
       });
@@ -1276,6 +1316,18 @@ describe("applyTaskReport", () => {
       expect(update.results).toEqual([
         { callId: "call-1", kind: "tool-result", output: "done", toolName: "billing" },
       ]);
+    });
+
+    it("ignores a remote result that does not name its session", async () => {
+      const update = await applyTaskReport({
+        now: NOW,
+        payload: resultPayload(remoteResult, { kind: "remote" }),
+        serializedContext: {},
+        sessionState: ownerState([remoteRecord]),
+      });
+
+      expect(update.results).toEqual([]);
+      expect(records(update.sessionState)).toEqual([remoteRecord]);
     });
   });
 

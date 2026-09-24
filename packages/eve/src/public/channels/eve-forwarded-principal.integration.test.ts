@@ -132,6 +132,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           },
           message: "check my dashboards",
           mode: "task",
+          taskProtocol: 1,
         }),
         headers: {
           "content-type": "application/json",
@@ -247,6 +248,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             },
             message: "check my dashboards",
             mode: "task",
+            taskProtocol: 1,
           }),
           headers: {
             "content-type": "application/json",
@@ -295,6 +297,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           },
           message: "check my dashboards",
           mode: "task",
+          taskProtocol: 1,
         }),
         headers: {
           "content-type": "application/json",
@@ -327,6 +330,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           },
           message: "check my dashboards",
           mode: "task",
+          taskProtocol: 1,
         }),
         headers: {
           "content-type": "application/json",

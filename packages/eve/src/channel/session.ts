@@ -89,6 +89,11 @@ interface SessionDeliveryOptions {
 
 /** Options for sending a message through a fixed session handle. */
 export type SessionSendOptions = SessionDeliveryOptions & {
+  /**
+   * Replay-stable identity of this send. The session admits one delivery per
+   * `operationId`, so a retried request does not deliver the message twice.
+   */
+  readonly operationId?: string;
   /** Initial workflow title for a prewarmed session. */
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
@@ -135,6 +140,7 @@ export function createSession(
         auth: options.auth,
         delivery,
         kind: "send" as const,
+        operationId: options.operationId,
         payload,
         requestId: metadata.requestId,
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,

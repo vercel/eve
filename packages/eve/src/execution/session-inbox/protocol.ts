@@ -37,10 +37,10 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         deliveryMetadata:
           command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
         kind: "deliver",
+        operationId: command.operationId,
         payloads: [command.payload],
         requestId: command.requestId,
         scheduleId: command.scheduleId,
-        steerKey: command.steerKey,
         turnPolicy: command.turnPolicy,
       };
     }

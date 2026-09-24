@@ -59,23 +59,40 @@ const workspaceDispatcher = mockModel({
         requestIndex = index;
       }
     }
-    if (
-      requestIndex < 0 ||
-      request.messages.slice(requestIndex + 1).some((message) => message.role === "tool")
-    ) {
-      return "The workspace lookup was submitted.";
-    }
-    const agentId = listedAgentId(request.messages, "remote-loopback");
+    if (requestIndex < 0) return "The workspace lookup was submitted.";
     const requestCount = request.messages.filter(
       (message) => message.role === "user" && message.text.includes(WORKSPACE_FORWARDING_MARKER),
     ).length;
+    const callId = `workspace-lookup-${requestCount}`;
+    // Another user's agent refuses the call, so start a new agent as its error advises.
+    const refused = request.toolResults.some(
+      (result) =>
+        result.id === callId &&
+        result.isError &&
+        JSON.stringify(result.output).includes("AGENT_OTHER_PRINCIPAL"),
+    );
+    if (refused && !request.toolResults.some((result) => result.id === `${callId}-new`)) {
+      return {
+        toolCalls: [
+          {
+            id: `${callId}-new`,
+            name: "remote-loopback",
+            input: { message: WORKSPACE_LOOKUP_MESSAGE },
+          },
+        ],
+      };
+    }
+    if (request.messages.slice(requestIndex + 1).some((message) => message.role === "tool")) {
+      return "The workspace lookup was submitted.";
+    }
+    const agentId = listedAgentId(request.messages, "remote-loopback");
     if (requestCount > 1 && agentId === undefined) {
       throw new Error("Workspace continuation has no listed remote-loopback agent.");
     }
     return {
       toolCalls: [
         {
-          id: `workspace-lookup-${requestCount}`,
+          id: callId,
           name: "remote-loopback",
           input: { agentId, message: WORKSPACE_LOOKUP_MESSAGE },
         },

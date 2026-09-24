@@ -4,6 +4,7 @@ import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { deriveTaskId } from "#tasks/ids.js";
+import { dropLegacyTaskState, readLegacyTaskLosses } from "#tasks/legacy.js";
 import {
   isTerminalTaskStatus,
   type ChildAddress,
@@ -147,22 +148,27 @@ function toTable(records: readonly TaskRecord[]): TaskTable {
 
 const EMPTY_TABLE = toTable([]);
 
-/** Reads the table, decoding each record on its own so one bad record never fails the session. */
+/**
+ * Reads the table, decoding each record on its own so one bad record never
+ * fails the session. Background runs an earlier release left working are
+ * lost too.
+ */
 export function readTaskTable(state: SessionStateMap | undefined): {
   readonly table: TaskTable;
   readonly lost: readonly LostTask[];
 } {
+  const legacy = readLegacyTaskLosses(state);
   const raw = state?.[TASK_TABLE_STATE_KEY];
-  if (raw === undefined) return { lost: [], table: EMPTY_TABLE };
+  if (raw === undefined) return { lost: legacy, table: EMPTY_TABLE };
   const values =
     typeof raw === "object" && raw !== null && Array.isArray((raw as { records?: unknown }).records)
       ? Array.from((raw as { records: unknown[] }).records)
       : undefined;
   if (values === undefined) {
-    return { lost: [{ reason: "unreadable task table" }], table: EMPTY_TABLE };
+    return { lost: [{ reason: "unreadable task table" }, ...legacy], table: EMPTY_TABLE };
   }
   const records: TaskRecord[] = [];
-  const lost: LostTask[] = [];
+  const lost: LostTask[] = [...legacy];
   const ids = new Set<string>();
   for (const value of values) {
     const decoded = decodeTaskRecord(value);
@@ -188,14 +194,15 @@ export function readTaskTable(state: SessionStateMap | undefined): {
 
 /**
  * Writes the table. Unreadable records already in `state` are kept, so no
- * write loses a task silently; `dropLost` removes them once the owner has
- * reported each loss.
+ * write loses a task silently; `dropLost` removes them, and an earlier
+ * release's registry, once the owner has reported each loss.
  */
 export function writeTaskTable(
-  state: SessionStateMap | undefined,
+  current: SessionStateMap | undefined,
   table: TaskTable,
   options: { readonly dropLost?: boolean } = {},
 ): SessionStateMap | undefined {
+  const state = options.dropLost === true ? dropLegacyTaskState(current) : current;
   const kept =
     options.dropLost === true
       ? []
@@ -343,9 +350,9 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
 }
 
 /**
- * Sends a working agent a message that joins its current generation. A local
- * agent reports how many such messages reached it when it answers, so each
- * one sent to it is counted; a remote agent reports none.
+ * Sends a working agent a message that joins its current generation. The
+ * agent, local or remote, reports how many such messages reached it when it
+ * answers, so each one sent to it is counted.
  */
 export function steerTask(
   table: TaskTable,
@@ -354,8 +361,7 @@ export function steerTask(
 ): TaskTransition {
   const record = findTask(table, taskId);
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
-  const counted =
-    record.child?.kind === "remote" ? record : { ...record, steers: (record.steers ?? 0) + 1 };
+  const counted = { ...record, steers: (record.steers ?? 0) + 1 };
   return issueCommand(replace(table, counted), counted, command);
 }
 

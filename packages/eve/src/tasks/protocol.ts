@@ -3,6 +3,16 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
+/**
+ * Version of the owner/child task protocol that crosses deployments. A remote
+ * owner sends it with every delegated request; a child rejects any other
+ * version, and an owner rejects a child that does not report this one.
+ */
+export const TASK_PROTOCOL_VERSION = 1;
+
+/** The error code a child answers a delegated request from another protocol version with. */
+export const TASK_PROTOCOL_MISMATCH = "TASK_PROTOCOL_MISMATCH";
+
 export type TaskKind = "agent" | "workflow";
 
 /** Whether the owner's turn waits for the result (`foreground`) or not (`background`). */

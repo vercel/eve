@@ -1,19 +1,17 @@
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
-import { AgentHandleError } from "#protocol/agent-handle-error.js";
 import {
   createEveCallbackRoutePath,
   createEveSessionCancelRoutePath,
   createEveSessionResetRoutePath,
-  createEveSessionRoutePath,
 } from "#protocol/routes.js";
 import type {
   ActivityObserverConfig,
   CancelTurnResult,
   SessionAuthContext,
+  SessionCapabilities,
   SessionTraceContext,
-  TurnPolicy,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
@@ -33,13 +31,21 @@ import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
-import type { JsonObject } from "#shared/json.js";
+import { createLogger, logError } from "#internal/logging.js";
+import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
+import {
+  readJsonBody,
+  readTaskProtocolRejection,
+  requireTaskProtocol,
+} from "#subagents/remote-protocol.js";
 import {
   writeForwardedAudienceBaggage,
   writeForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import { writeConversationBaggage } from "#tracing/conversation-context.js";
+
+const log = createLogger("subagents.remote-dispatch");
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -66,6 +72,8 @@ export async function startRemoteAgentSession(input: {
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
+  /** The owner's capabilities, which the remote child inherits like a local one. */
+  readonly capabilities?: SessionCapabilities;
   readonly originAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
@@ -92,7 +100,7 @@ export async function startRemoteAgentSession(input: {
 
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
-    capabilities: {};
+    capabilities: SessionCapabilities;
     callback: {
       callId: string;
       subagentName: string;
@@ -105,8 +113,9 @@ export async function startRemoteAgentSession(input: {
     mode: "conversation" | "task";
     operationId?: string;
     outputSchema?: object;
+    taskProtocol: number;
   } = {
-    capabilities: {},
+    capabilities: { requestInput: input.capabilities?.requestInput === true },
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
@@ -123,6 +132,7 @@ export async function startRemoteAgentSession(input: {
     mode: "conversation",
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
+    taskProtocol: TASK_PROTOCOL_VERSION,
   };
   if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
@@ -164,29 +174,42 @@ export async function startRemoteAgentSession(input: {
     method: "POST",
   });
 
+  const name = input.action.remoteAgentName;
+  const body = await readJsonBody(response);
   if (!response.ok) {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session request failed with HTTP ${response.status}.`,
+    throw (
+      readTaskProtocolRejection({ body, name, status: response.status }) ??
+      new Error(
+        `Remote agent "${name}" create-session request failed with HTTP ${response.status}.`,
+      )
     );
   }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON.`,
-    );
-  }
-
   const parsed = CreateSessionResponseSchema.safeParse(body);
   if (!parsed.success) {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response was invalid.`,
-    );
+    throw new Error(`Remote agent "${name}" create-session response was invalid.`);
   }
-
+  try {
+    requireTaskProtocol({ body, name });
+  } catch (error) {
+    // An older eve accepted the call without the protocol; retire the session it started.
+    await retireIncompatibleSession({ remote: input.remote, sessionId: parsed.data.sessionId });
+    throw error;
+  }
   return { sessionId: parsed.data.sessionId };
+}
+
+async function retireIncompatibleSession(input: {
+  readonly remote: ResolvedRuntimeRemoteAgentNode;
+  readonly sessionId: string;
+}): Promise<void> {
+  try {
+    await resetRemoteAgentSession(input);
+  } catch (error) {
+    logError(log, "failed to reset a session an incompatible remote agent started", error, {
+      remoteAgentName: input.remote.name,
+      sessionId: input.sessionId,
+    });
+  }
 }
 
 function buildForwardedTraceAssertion(input: {
@@ -211,128 +234,8 @@ function buildForwardedTraceAssertion(input: {
   };
 }
 
-/** Continues one remote-agent session by its immutable session ID. */
-export async function continueRemoteAgentSession(input: {
-  readonly activityObserver?: ActivityObserverConfig;
-  /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
-  readonly auth: SessionAuthContext | null;
-  readonly callback?: {
-    readonly callId: string;
-    readonly subagentName: string;
-    readonly token: string;
-    readonly url: string;
-  };
-  readonly message: string;
-  readonly outputSchema?: JsonObject;
-  readonly remote: ResolvedRuntimeRemoteAgentNode;
-  readonly sessionId: string;
-  /** How the message treats the remote session's active turn; the receiver's default otherwise. */
-  readonly turnPolicy?: TurnPolicy;
-}): Promise<void> {
-  const forwardedPrincipal = buildForwardedPrincipalField(input);
-  const requestBody: {
-    activityObserver?: ActivityObserverConfig;
-    callback: typeof input.callback;
-    forwardedPrincipal?: ForwardedPrincipal;
-    message: string;
-    outputSchema?: JsonObject;
-    turnPolicy?: TurnPolicy;
-  } = {
-    activityObserver: input.activityObserver,
-    callback: input.callback,
-    message: input.message,
-    outputSchema: input.outputSchema,
-  };
-  if (forwardedPrincipal !== undefined) {
-    requestBody.forwardedPrincipal = forwardedPrincipal;
-  }
-  if (input.turnPolicy !== undefined) requestBody.turnPolicy = input.turnPolicy;
-
-  const response = await fetch(createRemoteAgentContinueUrl(input.remote, input.sessionId), {
-    body: JSON.stringify(requestBody),
-    headers: {
-      "content-type": "application/json",
-      ...(await resolveRemoteAgentRequestHeaders(input.remote)),
-    },
-    method: "POST",
-  });
-
-  if (!response.ok) {
-    const responseCode = await readRemoteAgentErrorCode(response);
-    const permanent =
-      response.status === 404 || responseCode === AgentHandleError.SessionNotResumable.code;
-    const compatibilityHint =
-      response.status === 400 && forwardedPrincipal !== undefined
-        ? " The receiver may support forwarded principals only on session creation; upgrade it before retrying."
-        : "";
-    throw new RemoteAgentContinueRequestError(
-      `Remote agent "${input.remote.name}" continue-session request failed${
-        permanent ? " permanently" : ""
-      } with HTTP ${response.status}.${compatibilityHint}`,
-      {
-        deliveryAmbiguous: isAmbiguousRemoteContinueStatus(response.status),
-        retryable: !permanent,
-      },
-    );
-  }
-}
-
-/**
- * Failure of a continue-session request, classified at the HTTP boundary.
- * Exported so tests can exercise {@link isRetryableRemoteAgentContinueError}
- * with real instances instead of re-encoding the classification.
- */
-export class RemoteAgentContinueRequestError extends Error {
-  readonly deliveryAmbiguous: boolean;
-  readonly retryable: boolean;
-
-  constructor(
-    message: string,
-    options: { readonly deliveryAmbiguous: boolean; readonly retryable: boolean },
-  ) {
-    super(message);
-    this.name = "RemoteAgentContinueRequestError";
-    this.deliveryAmbiguous = options.deliveryAmbiguous;
-    this.retryable = options.retryable;
-  }
-}
-
-/**
- * Returns true when a failed continue request may be retried. Only a
- * session that no longer exists (404 / SESSION_NOT_RESUMABLE) is permanent;
- * transient HTTP and network failures stay retryable so the owner keeps the
- * agent and surfaces a retryable error instead of discarding it — the model decides whether to try the same agentId again
- * (the step itself never re-sends: the callee may have accepted a delivery
- * whose response was lost).
- */
-export function isRetryableRemoteAgentContinueError(error: unknown): boolean {
-  return !(error instanceof RemoteAgentContinueRequestError) || error.retryable;
-}
-
-/** Whether the callee may have accepted the continuation before delivery failed. */
-export function isAmbiguousRemoteAgentContinueError(error: unknown): boolean {
-  return !(error instanceof RemoteAgentContinueRequestError) || error.deliveryAmbiguous;
-}
-
-function isAmbiguousRemoteContinueStatus(status: number): boolean {
-  return status === 408 || status === 425 || status >= 500;
-}
-
-async function readRemoteAgentErrorCode(response: Response): Promise<string | undefined> {
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    return undefined;
-  }
-  if (body === null || typeof body !== "object") {
-    return undefined;
-  }
-  const code = Reflect.get(body, "code");
-  return typeof code === "string" ? code : undefined;
-}
-
-function buildForwardedPrincipalField(input: {
+/** The principal field a remote request carries when the definition forwards the caller. */
+export function buildForwardedPrincipalField(input: {
   readonly auth?: SessionAuthContext | null;
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
@@ -610,18 +513,12 @@ function createRemoteAgentCancelTurnUrl(
   return createRemoteAgentRouteUrl(remote.url, createEveSessionCancelRoutePath(sessionId));
 }
 
-function createRemoteAgentContinueUrl(
-  remote: ResolvedRuntimeRemoteAgentNode,
-  sessionId: string,
-): string {
-  return createRemoteAgentRouteUrl(remote.url, createEveSessionRoutePath(sessionId));
-}
-
 function isRetryableRemoteCancelStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
-async function resolveRemoteAgentRequestHeaders(
+/** Resolves the authored outbound headers and auth for one request to a remote agent. */
+export async function resolveRemoteAgentRequestHeaders(
   remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers">,
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};

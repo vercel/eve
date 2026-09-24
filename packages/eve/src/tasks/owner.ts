@@ -3,7 +3,6 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
-import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
 import { isInteractiveRootTurn } from "#tasks/interactive.js";
 import {
@@ -23,7 +22,6 @@ import {
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -31,10 +29,8 @@ import {
 } from "#harness/turn-tag-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { continuedEvents, settledEvents, taskStartedEvent } from "#tasks/events.js";
-import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeAgentDispatchRequest,
-  RuntimeSubagentChildResult,
   RuntimeSubagentResult,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
@@ -56,6 +52,14 @@ import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.
 import { isTerminalTaskStatus, reportedSteers, type ChildAddress } from "#tasks/protocol.js";
 import { createFailedResult, toTaskError, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
 import { cancelOrphanedChild, deliverToChild, type CommandEffect } from "#tasks/transport.js";
+import {
+  clearReportedChildRoutes,
+  findReportedTask,
+  readAgentId,
+  readDynamicRemoteAgent,
+  rejectOtherPrincipal,
+  resolveFailedCall,
+} from "#tasks/owner-calls.js";
 import {
   getTaskTable,
   ownerInboxHookToken,
@@ -233,6 +237,11 @@ export async function startAgentTasks(input: {
     const background =
       call.background === true && call.workflowCaller === undefined && backgroundAllowed;
     let table = getTaskTable(session);
+    const otherPrincipal = rejectOtherPrincipal({ agentId, caller: prepared.auth, table });
+    if (otherPrincipal !== undefined) {
+      fail(call, action, otherPrincipal);
+      continue;
+    }
     const started = startTask(table, {
       agentId,
       callId: call.callId,
@@ -260,13 +269,13 @@ export async function startAgentTasks(input: {
     }
     if (started.kind === "steered") {
       const steered = await steerWorkingAgent({
+        callbackAlias,
         callId: call.callId,
         ctx,
         fromWorkflow: call.workflowCaller !== undefined,
         message: call.input.message,
         ownerSessionId: session.sessionId,
         record: started.record,
-        steerer: prepared.auth,
         table,
         toolName,
         turnId,
@@ -388,6 +397,7 @@ export async function startAgentTasks(input: {
       session = setTaskTable(
         session,
         await flushHeldCommands({
+          callbackAlias,
           ctx,
           effects: adopted.commands,
           ownerSessionId: session.sessionId,
@@ -469,6 +479,7 @@ export async function applyTaskReport(input: {
         adopted.commands.length === 0
           ? adopted.table
           : await flushHeldCommands({
+              callbackAlias: readTaskCallbackAlias(session.state),
               ctx: await readContext(input.serializedContext),
               effects: adopted.commands,
               ownerSessionId: session.sessionId,
@@ -507,13 +518,11 @@ export async function applyTaskReport(input: {
       );
       if (applied.effects.some((effect) => effect.kind === "confirmed")) {
         // A cancelled child confirmed it stopped: count its spend, report nothing.
-        const confirmed =
-          childEnded && record.child?.kind === "local"
-            ? clearProxyInputRequestsForChild(
-                setTaskTable(session, applied.table),
-                record.child.continuationToken,
-              )
-            : setTaskTable(session, applied.table);
+        const confirmed = clearReportedChildRoutes(
+          setTaskTable(session, applied.table),
+          record,
+          childEnded,
+        );
         session = setTurnUsageState(
           confirmed,
           accumulateSessionUsage({
@@ -542,9 +551,7 @@ export async function applyTaskReport(input: {
       );
       if (background) next = holdTaskResult(next, settledEffect.record, outcome);
       events.push(...continuedEvents(applied.effects, session.sessionId));
-      if (childEnded && record.child?.kind === "local") {
-        next = clearProxyInputRequestsForChild(next, record.child.continuationToken);
-      }
+      next = clearReportedChildRoutes(next, record, childEnded);
       session = setTurnUsageState(
         next,
         accumulateSessionUsage({
@@ -609,82 +616,4 @@ export async function readContext(
   } catch {
     return undefined;
   }
-}
-
-function readDynamicRemoteAgent(input: {
-  readonly action: RuntimeAgentDispatchRequest;
-  readonly bundle: CompiledBundle;
-  readonly ctx: Awaited<ReturnType<typeof deserializeContext>>;
-}) {
-  if (input.action.kind !== "remote-agent-call") return undefined;
-  if (input.bundle.subagentRegistry.dynamicNodeIds?.has(input.action.nodeId) !== true)
-    return undefined;
-  const selection = getDynamicSubagentSelection(input.ctx, input.action.nodeId);
-  return selection?.kind === "remote" ? selection.remoteAgent : undefined;
-}
-
-function readAgentId(action: RuntimeAgentDispatchRequest): string | undefined {
-  const value = action.input.agentId;
-  return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-/**
- * The task a child's result settles: the current generation's call, from a
- * child of the matching kind. A cancelled task still accepts its child's
- * confirmation. Remote results must come from the remote session the owner
- * started, so one remote child cannot settle another task.
- */
-function findReportedTask(
-  table: TaskTable,
-  result: RuntimeSubagentChildResult,
-  source: RuntimeActionResultHookPayload["source"],
-): TaskRecord | undefined {
-  return table.records.find((record) => {
-    if (record.callId !== result.callId || record.name !== result.subagentName) return false;
-    if (
-      record.status !== "working" &&
-      record.status !== "input_required" &&
-      record.cancelConfirmBy === undefined
-    ) {
-      return false;
-    }
-    if (source?.kind === "remote") {
-      return (
-        record.child?.kind === "remote" &&
-        (source.sessionId === undefined || source.sessionId === record.child.sessionId)
-      );
-    }
-    return record.child?.kind !== "remote";
-  });
-}
-
-function resolveFailedCall(input: {
-  readonly action: RuntimeAgentDispatchRequest | undefined;
-  readonly call: AgentTaskCall;
-  readonly output: JsonValue;
-  readonly replies: WorkflowCallerReply[];
-  readonly results: RuntimeToolResultActionResult[];
-}): void {
-  const { call } = input;
-  if (call.workflowCaller !== undefined) {
-    input.replies.push({
-      replyTo: call.workflowCaller.replyTo,
-      result: {
-        callId: call.callId,
-        isError: true,
-        kind: "subagent-result",
-        origin: "dispatch",
-        output: input.output,
-        subagentName: call.input.target,
-      },
-    });
-    return;
-  }
-  input.results.push({
-    callId: call.callId,
-    isError: true,
-    kind: "tool-result",
-    output: input.output,
-    toolName: call.toolName ?? call.input.target,
-  });
 }

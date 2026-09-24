@@ -862,6 +862,7 @@ describe("eveChannel — onMessage", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           callId: "call-2",
           subagentName: "research",
@@ -886,11 +887,62 @@ describe("eveChannel — onMessage", () => {
     );
   });
 
+  it("passes a continuation's operation id to the session so a resent request is admitted once", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-2",
+          subagentName: "research",
+          token: "tok123",
+          url: "https://caller.example.com/eve/v1/callback/tok123",
+        },
+        message: "follow up",
+        operationId: "turn-3:call-2",
+        taskProtocol: 1,
+        turnPolicy: "steer",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send).toHaveBeenCalledWith(
+      "follow up",
+      expect.objectContaining({ operationId: "turn-3:call-2", turnPolicy: "steer" }),
+    );
+  });
+
+  it.each(["", 7, "x".repeat(257)])("rejects an invalid operation id (%j)", async (operationId) => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ message: "follow up", operationId }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a delegated continuation from another task protocol version", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        inputResponses: [{ requestId: "r", text: "y" }],
+        taskProtocol: 0,
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(handler.respond).not.toHaveBeenCalled();
+  });
+
   it("rejects invalid callback metadata on continuation requests", async () => {
     const handler = createEveContinueHandler({ auth: none() });
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           callId: "call-2",
           subagentName: "research",
@@ -1088,6 +1140,7 @@ describe("eveChannel — create session (text)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           callId: "call-1",
           subagentName: "research",
@@ -1117,6 +1170,7 @@ describe("eveChannel — create session (text)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           callId: "call-1",
           subagentName: "research",
@@ -1137,6 +1191,7 @@ describe("eveChannel — create session (text)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           subagentName: "research",
           token: "tok123",
@@ -1159,6 +1214,7 @@ describe("eveChannel — create session (text)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           callId: "call-1",
           subagentName: "research",
@@ -1182,6 +1238,7 @@ describe("eveChannel — create session (text)", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        taskProtocol: 1,
         callback: {
           callId: "call-1",
           extra: true,
@@ -1199,6 +1256,49 @@ describe("eveChannel — create session (text)", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("Unrecognized key"),
     });
+  });
+
+  it.each([
+    ["an older eve that sends no version", undefined, "no task protocol version"],
+    ["another version", 2, "task protocol version 2"],
+  ])(
+    "rejects a delegated create from %s with a precise 409",
+    async (_label, taskProtocol, sent) => {
+      const handler = createEveCreateHandler({ auth: none() });
+
+      const response = await handler.fetch(
+        createJsonMessageRequest({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          message: "hi",
+          taskProtocol,
+        }),
+      );
+
+      expect(response.status).toBe(409);
+      expect(handler.send).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toEqual({
+        code: "TASK_PROTOCOL_MISMATCH",
+        error: expect.stringMatching(
+          new RegExp(`the calling deployment sent ${sent}.*Upgrade both deployments`),
+        ),
+        ok: false,
+        taskProtocol: 1,
+      });
+    },
+  );
+
+  it("reports its task protocol on an accepted create", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(createJsonMessageRequest({ message: "hi" }));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ taskProtocol: 1 });
   });
 
   it("rejects invalid create-session modes", async () => {
@@ -1620,6 +1720,7 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
       sessionId: "test-session-id",
       status: "accepted",
       deliveryId: "accepted-delivery",
+      taskProtocol: 1,
     });
   });
 

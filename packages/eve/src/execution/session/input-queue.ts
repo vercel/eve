@@ -54,8 +54,8 @@ export type SessionInputSelection =
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private nextSequence = 0;
-  /** Every steering key admitted, so an owner's resent message is dropped. */
-  private readonly steerKeys = new Set<string>();
+  /** Every operation admitted, so a resent delivery is dropped. */
+  private readonly operationIds = new Set<string>();
   /** Steering messages admitted per delegated call since the session last answered it. */
   private readonly steerCounts = new Map<string, number>();
 
@@ -64,16 +64,16 @@ export class SessionInputQueue {
   }
 
   /**
-   * Admits a delivery. An owner's steering message is admitted once per key;
-   * a repeat, such as one resent by a retried owner step, returns `undefined`.
+   * Admits a delivery. A delivery with an `operationId` is admitted once; a
+   * repeat, such as one resent by a retried owner step, returns `undefined`.
    */
   enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
-    const key = delivery.steerKey;
+    const key = delivery.operationId;
     if (key !== undefined) {
-      if (this.steerKeys.has(key)) return undefined;
-      this.steerKeys.add(key);
+      if (this.operationIds.has(key)) return undefined;
+      this.operationIds.add(key);
       const callId = delivery.caller?.callId;
-      if (callId !== undefined)
+      if (callId !== undefined && isOwnerSteer(delivery))
         this.steerCounts.set(callId, (this.steerCounts.get(callId) ?? 0) + 1);
     }
     const admission = { delivery, sequence: this.nextSequence++ };
@@ -100,7 +100,7 @@ export class SessionInputQueue {
     this.retain(
       (entry) =>
         entry.kind !== "delivery" ||
-        entry.delivery.steerKey === undefined ||
+        !isOwnerSteer(entry.delivery) ||
         entry.delivery.caller?.callId !== callId,
     );
   }
@@ -269,6 +269,18 @@ export function isSteeringDelivery(
   return (
     (delivery.turnPolicy ?? "steer") === "steer" &&
     (delivery.caller === undefined || delivery.caller.callId === callerCallId)
+  );
+}
+
+/**
+ * An owner's steering message for its delegated call: keyed, addressed to the
+ * call, and steering. An owner starts a call's next turn with `queue`.
+ */
+function isOwnerSteer(delivery: DeliverHookPayload): boolean {
+  return (
+    delivery.operationId !== undefined &&
+    delivery.caller !== undefined &&
+    (delivery.turnPolicy ?? "steer") === "steer"
   );
 }
 

@@ -44,7 +44,7 @@ export interface TaskRecord {
   /** One-line summary of an idle agent's last answer. */
   readonly lastStatus?: string;
   /**
-   * Steering messages sent to a local agent's current generation that the
+   * Steering messages sent to an agent's current generation that the
    * agent has not yet reported receiving. Any still missing when it answers
    * start its next generation.
    */

@@ -37,6 +37,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import { describeInvalidCancelOptions } from "#shared/session-cancel.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
+import { parseOperationIdField } from "#eve-channel/task-protocol-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
@@ -131,6 +132,7 @@ interface ParsedSessionMessageBody {
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
   context?: readonly string[];
+  operationId?: string;
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
 }
@@ -159,6 +161,8 @@ export function parseSessionMessageBody(
   if (outputSchema instanceof Response) return outputSchema;
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
   if (turnPolicy instanceof Response) return turnPolicy;
+  const operationId = parseOperationIdField(payload.operationId);
+  if (operationId instanceof Response) return operationId;
 
   if (message === undefined && inputResponses === undefined) {
     return Response.json(
@@ -183,6 +187,7 @@ export function parseSessionMessageBody(
     message,
     inputResponses,
     context,
+    operationId,
     outputSchema,
     turnPolicy,
   };

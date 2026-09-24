@@ -191,8 +191,8 @@ export type SessionCommand =
       readonly requestId?: string;
       /** Authored schedule whose dispatch sent this message. */
       readonly scheduleId?: string;
-      /** See {@link DeliverHookPayload.steerKey}. */
-      readonly steerKey?: string;
+      /** See {@link DeliverHookPayload.operationId}. */
+      readonly operationId?: string;
       readonly turnPolicy?: TurnPolicy;
     }
   | {
@@ -269,12 +269,13 @@ export interface DeliverHookPayload {
    */
   readonly scheduleId?: string;
   /**
-   * Owner-assigned key of a steering message for the delegated call named by
-   * `caller`. The session admits each key once and reports how many it
-   * admitted when it answers that call, so the owner knows whether the
-   * message reached the answer.
+   * Replay-stable identity of this delivery. The session admits each
+   * `operationId` once, so a retried send is not delivered twice. A steering
+   * delivery with a `caller` is a steering message for that caller's call:
+   * the session reports how many it admitted when it answers that call, so
+   * the owner knows whether the message reached the answer.
    */
-  readonly steerKey?: string;
+  readonly operationId?: string;
   readonly turnPolicy?: TurnPolicy;
 }
 
@@ -343,6 +344,8 @@ export interface SubagentInputRequestHookPayload {
   readonly childSessionInbox?: SessionInboxAddress;
   readonly event: SubagentInputRequestEvent;
   readonly kind: "subagent-input-request";
+  /** Set by the remote callback route; the owner applies it only to remote tasks. */
+  readonly source?: { readonly kind: "remote" };
   readonly subagentName: string;
 }
 
@@ -369,6 +372,8 @@ export interface SubagentAuthorizationEventHookPayload {
   readonly childSessionId: string;
   readonly event: SubagentAuthorizationEvent;
   readonly kind: "subagent-authorization-event";
+  /** Set by the remote callback route; the owner applies it only to remote tasks. */
+  readonly source?: { readonly kind: "remote" };
   readonly subagentName: string;
 }
 

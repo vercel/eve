@@ -20,7 +20,6 @@ const CREATE_CHILD_MESSAGE = [
 ].join(" ");
 const CONTINUE_CHILD_MESSAGE = [
   WORKSPACE_FORWARDING_MARKER,
-  "A different user is making this request now.",
   "Continue that same remote-loopback agent using its agentId with this message:",
   JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
 ].join(" ");
@@ -30,11 +29,11 @@ const CLARIFICATION = [
   "Do not reuse previous answers; let the service deny access when no membership exists.",
 ].join(" ");
 
-/** Three users resume one remote child; each tool call resolves only its current caller's workspace membership. */
+/** A remote child serves only the user who started it; each caller's lookups resolve only their own membership. */
 export default defineEval({
   tags: ["principal-forwarding"],
   description:
-    "A persistent remote child switches between two workspace memberships and denies a third caller with none.",
+    "Alice resumes her remote child, while Bob and a caller with no membership are refused it and each get their own.",
   async test(t) {
     // Alice creates the child and reads her workspace label.
     const aliceTurn = await t.send(CREATE_CHILD_MESSAGE);
@@ -42,40 +41,42 @@ export default defineEval({
     const childSessionId = aliceParent.childSessionId;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
-    let childEventCount = aliceChild.events.length;
 
-    // Bob continues the same child and must resolve Bob's workspace label, not Alice's.
-    const bobTurn = await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
+    // Alice continues her own child, and the continuation still runs as her.
+    const resumeTurn = await aliceParent.session.send(CONTINUE_CHILD_MESSAGE);
+    const resumed = await waitForRemoteChild(t, aliceParent.session, resumeTurn, {
+      expectedSessionId: childSessionId,
+    });
+    const resumedChild = await t.target
+      .watchTurn(childSessionId, { startIndex: aliceChild.events.length })
+      .result();
+    await expectWorkspaceReads(t, resumedChild, ALICE_WORKSPACE_LABEL);
+
+    // Bob names Alice's child. It refuses him, so his lookup runs in a child of his own.
+    const bobTurn = await resumed.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: BOB_AUTHORIZATION },
     });
-    const bobParent = await waitForRemoteChild(
-      t,
-      aliceParent.session,
-      bobTurn,
-      childSessionId,
-      BOB_AUTHORIZATION,
-    );
-    const bobChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childEventCount })
-      .result();
+    const bobParent = await waitForRemoteChild(t, resumed.session, bobTurn, {
+      authorization: BOB_AUTHORIZATION,
+      otherThan: childSessionId,
+    });
+    expectRefused(bobParent.turn);
+    const bobChild = await t.target.watchTurn(bobParent.childSessionId).result();
     await expectWorkspaceReads(t, bobChild, BOB_WORKSPACE_LABEL);
-    childEventCount += bobChild.events.length;
 
-    // A grantless observer continues it once more. Reusing either prior membership
-    // would complete this call; correct per-turn scoping denies access.
+    // The observer, who has no membership, is refused too; its own child is denied access.
     const observerTurn = await bobParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: OBSERVER_AUTHORIZATION },
     });
-    await waitForRemoteChild(
-      t,
-      bobParent.session,
-      observerTurn,
-      childSessionId,
-      OBSERVER_AUTHORIZATION,
-    );
-    const observerChild = await t.target
-      .watchTurn(childSessionId, { startIndex: childEventCount })
-      .result();
+    const observerParent = await waitForRemoteChild(t, bobParent.session, observerTurn, {
+      authorization: OBSERVER_AUTHORIZATION,
+      otherThan: childSessionId,
+    });
+    expectRefused(observerParent.turn);
+    if (observerParent.childSessionId === bobParent.childSessionId) {
+      throw new Error("The observer's lookup ran in Bob's remote child.");
+    }
+    const observerChild = await t.target.watchTurn(observerParent.childSessionId).result();
     observerChild.expectOk();
     observerChild.calledTool("read-workspace-label", { status: "failed" });
     observerChild.calledTool("read-workspace-label", { count: 0, status: "completed" });
@@ -87,12 +88,25 @@ export default defineEval({
       },
     });
 
-    t.event("task.started", { data: { name: "remote-loopback" }, count: 3 })
+    t.event("task.started", { data: { name: "remote-loopback" }, count: 4 })
       .soft()
       .label("no repeated delegation");
     t.succeeded();
   },
 });
+
+function expectRefused(turn: EveEvalTurn): void {
+  turn.event("action.result", {
+    data: {
+      result: {
+        kind: "tool-result",
+        output: { code: "AGENT_OTHER_PRINCIPAL" },
+        toolName: "remote-loopback",
+      },
+      status: "failed",
+    },
+  });
+}
 
 async function expectWorkspaceReads(
   t: EveEvalContext,
@@ -123,9 +137,17 @@ async function waitForRemoteChild(
   t: EveEvalContext,
   initial: SessionCursor,
   initialTurn: EveEvalTurn,
-  expectedSessionId?: string,
-  authorization?: string,
-): Promise<{ readonly childSessionId: string; readonly session: SessionCursor }> {
+  options: {
+    readonly authorization?: string;
+    readonly expectedSessionId?: string;
+    readonly otherThan?: string;
+  } = {},
+): Promise<{
+  readonly childSessionId: string;
+  readonly session: SessionCursor;
+  readonly turn: EveEvalTurn;
+}> {
+  const { authorization, expectedSessionId, otherThan } = options;
   let session = initial;
   let turn = initialTurn;
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -141,7 +163,10 @@ async function waitForRemoteChild(
       if (expectedSessionId !== undefined && childSessionId !== expectedSessionId) {
         throw new Error("The parent turn did not continue the existing remote child.");
       }
-      return { childSessionId, session };
+      if (childSessionId === otherThan) {
+        throw new Error("Another user's remote child took this caller's lookup.");
+      }
+      return { childSessionId, session, turn };
     }
     turn.noFailedActions();
     if (attempt === 4) break;

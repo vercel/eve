@@ -18,10 +18,10 @@ describe("session inbox payloads", () => {
       caller: undefined,
       deliveryMetadata: [{ deliveryId: "delivery-1", payloadIndex: 0 }],
       kind: "deliver",
+      operationId: undefined,
       payloads: [{ message: "hello" }],
       requestId: undefined,
       scheduleId: undefined,
-      steerKey: undefined,
       title: undefined,
       turnPolicy: undefined,
     });
@@ -37,14 +37,14 @@ describe("session inbox payloads", () => {
     ).toMatchObject({ kind: "deliver", scheduleId: "daily-digest" });
   });
 
-  it("keeps the key of an owner's steering message", () => {
+  it("keeps the operation id of an owner's message", () => {
     expect(
       decodeSessionInboxPayload({
         kind: "send",
+        operationId: "turn-1:call-2",
         payload: { message: "Mention the price." },
-        steerKey: "turn-1:call-2",
       }),
-    ).toMatchObject({ kind: "deliver", steerKey: "turn-1:call-2" });
+    ).toMatchObject({ kind: "deliver", operationId: "turn-1:call-2" });
   });
 
   it("accepts only current delivery and control kinds", () => {

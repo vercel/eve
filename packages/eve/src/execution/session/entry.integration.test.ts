@@ -1286,7 +1286,7 @@ describe("workflowEntry integration", () => {
             caller,
             kind: "send" as const,
             payload: { message: "late correction" },
-            steerKey: "researcher-abc234:1:call-2",
+            operationId: "researcher-abc234:1:call-2",
             turnPolicy: "steer" as const,
           },
           sessionId: child.runId,

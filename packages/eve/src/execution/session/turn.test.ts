@@ -87,40 +87,43 @@ describe("SessionExecution turn checkpoints", () => {
   it.each([
     ["input", { hasPendingAuthorization: false, hasPendingInputBatch: true }],
     ["authorization", { hasPendingAuthorization: true, hasPendingInputBatch: false }],
-  ] as const)("fails a remotely called turn that parks for %s", async (_label, pending) => {
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: () => [],
-      hasPending: () => false,
-      next: vi.fn(),
-      restore: vi.fn(),
-      onDelivery: () => () => {},
-      onInterrupt: () => () => {},
-    };
-    const sessionState = state("");
-    vi.mocked(turnStep).mockResolvedValue({
-      action: "park",
-      ...pending,
-      serializedContext: {},
-      sessionState,
-    });
+  ] as const)(
+    "parks a remotely called turn for %s, as a local child does",
+    async (_label, pending) => {
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: () => [],
+        hasPending: () => false,
+        next: vi.fn(),
+        restore: vi.fn(),
+        onDelivery: () => () => {},
+        onInterrupt: () => () => {},
+      };
+      const sessionState = state("");
+      vi.mocked(turnStep).mockResolvedValue({
+        action: "park",
+        ...pending,
+        serializedContext: {},
+        sessionState,
+      });
 
-    await expect(
-      createExecution({ inbox, sessionState }).runTurn({
-        delivery: {
-          caller: {
-            callId: "call-1",
-            replyTo: { kind: "callback", token: "tok", url: "https://parent.example/cb/tok" },
-            subagentName: "researcher",
+      await expect(
+        createExecution({ inbox, sessionState }).runTurn({
+          delivery: {
+            caller: {
+              callId: "call-1",
+              replyTo: { kind: "callback", token: "tok", url: "https://parent.example/cb/tok" },
+              subagentName: "researcher",
+            },
+            kind: "deliver",
+            payloads: [{ message: "Alice asked for a deployment review." }],
           },
-          kind: "deliver",
-          payloads: [{ message: "Alice asked for a deployment review." }],
-        },
-      }),
-    ).rejects.toThrow("called by a remote agent that cannot answer");
-  });
+        }),
+      ).resolves.toMatchObject({ kind: "park" });
+    },
+  );
 
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {

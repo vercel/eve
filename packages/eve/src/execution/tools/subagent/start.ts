@@ -96,6 +96,7 @@ export async function startSubagent(input: {
         auth: input.auth,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
+        capabilities: input.capabilities,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parent,

@@ -1,4 +1,3 @@
-import type { SessionAuthContext } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
@@ -8,7 +7,6 @@ import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { steeringReceiptResult } from "#tasks/receipts.js";
 import { renderAgentBusy } from "#tasks/render.js";
-import { readTaskCreator, sameTaskPrincipal } from "#tasks/results.js";
 import { steerTask, withdrawSteer, type TaskTable } from "#tasks/table.js";
 import { runCommands, sendAgentMessage, type CommandEffect } from "#tasks/transport.js";
 
@@ -21,17 +19,19 @@ const log = createLogger("tasks.steer");
  * An agent that has not started yet gets the message when it reports
  * `task.started`. The message never changes the generation's output schema.
  *
- * Only the principal that started the generation may steer it, because the
- * agent acts with that principal's credentials. A workflow body awaits the
- * output of the generation it started, so neither a `ctx.agent` call nor a
- * model call may join a generation the other started.
+ * The owner already rejected a call from a principal other than the one
+ * the agent works for. A workflow body awaits the output of the generation
+ * it started, so neither a `ctx.agent` call nor a model call may join a
+ * generation the other started.
  *
- * A local agent that answered before the message reached it runs the message
- * as its next turn for the same call. Its answer reports how many messages
- * it received, so the owner records that turn as the agent's next background
- * generation, whose result arrives as a `task.result`.
+ * An agent, local or remote, that answered before the message reached it
+ * runs the message as its next turn for the same call. Its answer reports
+ * how many messages it received, so the owner records that turn as the
+ * agent's next background generation, whose result arrives as a
+ * `task.result`.
  */
 export async function steerWorkingAgent(input: {
+  readonly callbackAlias: string | undefined;
   readonly callId: string;
   readonly ctx: ContextContainer;
   /** The call comes from a workflow body (`ctx.agent`). */
@@ -39,7 +39,6 @@ export async function steerWorkingAgent(input: {
   readonly message: string;
   readonly ownerSessionId: string;
   readonly record: TaskRecord;
-  readonly steerer: SessionAuthContext | null;
   readonly table: TaskTable;
   readonly toolName: string;
   /** The owner turn of the steering call. */
@@ -59,9 +58,6 @@ export async function steerWorkingAgent(input: {
   });
   if (input.fromWorkflow) return busy("workflow-caller");
   if (record.workflowCaller !== undefined) return busy("workflow-owned");
-  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.steerer)) {
-    return busy("another-principal");
-  }
   const command = {
     // The steering call's identity: a retried step resends the same key, and
     // the agent admits it once.
@@ -73,6 +69,7 @@ export async function steerWorkingAgent(input: {
   for (const effect of transition.effects) {
     if (effect.kind !== "send") continue;
     const failure = await sendAgentMessage({
+      callbackAlias: input.callbackAlias,
       command,
       ctx: input.ctx,
       ownerSessionId: input.ownerSessionId,
@@ -95,6 +92,7 @@ export async function steerWorkingAgent(input: {
  * are not sent.
  */
 export async function flushHeldCommands(input: {
+  readonly callbackAlias: string | undefined;
   readonly ctx: ContextContainer | undefined;
   readonly effects: readonly CommandEffect[];
   readonly ownerSessionId: string;
@@ -109,6 +107,7 @@ export async function flushHeldCommands(input: {
     for (const command of effect.commands) {
       if (command.kind !== "message") continue;
       const failure = await sendAgentMessage({
+        callbackAlias: input.callbackAlias,
         command,
         ctx: input.ctx,
         ownerSessionId: input.ownerSessionId,

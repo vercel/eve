@@ -1,5 +1,6 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { deserializeContext } from "#context/serialize.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
@@ -21,8 +22,15 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
-import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import {
+  getProxyInputRequests,
+  isRemoteChildRouteToken,
+  retireProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import { resumeResolvedTaskClocks } from "#tasks/clock.js";
+import { getTaskTable } from "#tasks/state.js";
+import { findTask } from "#tasks/table.js";
+import { answerRemoteTask } from "#tasks/transport.js";
 
 export type RoutedDeliverResult =
   | {
@@ -115,6 +123,25 @@ export async function routeProxiedDeliverStep(input: {
 
   let retired = false;
   for (const child of children.values()) {
+    if (isRemoteChildRouteToken(child.childContinuationToken)) {
+      const taskId = routes.get(child.retireRequestIds[0] ?? "")?.taskId;
+      const record =
+        taskId === undefined ? undefined : findTask(getTaskTable(durableSession), taskId);
+      const answered =
+        record !== undefined &&
+        (await answerRemoteTask({
+          auth: sourceDelivery.auth ?? null,
+          ctx: await deserializeContext(input.serializedContext ?? {}),
+          inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
+          record,
+        }));
+      // An answer that did not reach the remote child stays answerable.
+      if (answered) {
+        durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+        retired = true;
+      }
+      continue;
+    }
     if (child.answerHook !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);

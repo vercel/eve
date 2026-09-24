@@ -53,9 +53,6 @@ import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
-const REMOTE_CALLER_WAIT_ERROR_MESSAGE =
-  "This agent needs human input or authorization, but it was called by a remote agent that cannot answer. " +
-  "Configure the tool or connection on this deployment so it does not require approval or sign-in.";
 
 export interface SessionExecutionInput {
   readonly capabilities?: SessionCapabilities;
@@ -171,14 +168,6 @@ export class SessionExecution {
       }
 
       if (result.action === "park") {
-        // A remote caller has no channel to answer on and waits on this child
-        // without a deadline, so fail instead of parking the caller forever.
-        if (
-          delivery?.delivery?.caller?.replyTo.kind === "callback" &&
-          (result.hasPendingAuthorization || result.hasPendingInputBatch)
-        ) {
-          throw new Error(REMOTE_CALLER_WAIT_ERROR_MESSAGE);
-        }
         const canPark =
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||

@@ -53,6 +53,45 @@ it("drops a request that matches no working task", async () => {
   expect(runProxySubagentEventStep).not.toHaveBeenCalled();
 });
 
+const REMOTE_CHILD = {
+  callbackBaseUrl: "https://owner.example",
+  kind: "remote" as const,
+  sessionId: "remote-1",
+  url: "https://billing.example",
+};
+const remoteRequest: SubagentInputRequestHookPayload = {
+  ...inputRequest,
+  childContinuationToken: "eve:remote-child:remote-1",
+  childSessionId: "remote-1",
+  source: { kind: "remote" },
+};
+
+it("proxies a remote child's request, marked by the callback route, with the task's ID", async () => {
+  const cursor = createCursor([createTaskRecord({ child: REMOTE_CHILD })]);
+
+  await admitSessionInboxPayload(remoteRequest, { cursor, queue: new SessionInputQueue() });
+
+  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ hookPayload: remoteRequest, taskId: "research-abc234" }),
+  );
+});
+
+it.each([
+  ["a remote request for a local child", remoteRequest, CHILD],
+  [
+    "a remote request from another remote session",
+    { ...remoteRequest, childSessionId: "remote-2" },
+    REMOTE_CHILD,
+  ],
+  ["an unmarked request for a remote child", inputRequest, REMOTE_CHILD],
+])("drops %s", async (_label, request, child) => {
+  const cursor = createCursor([createTaskRecord({ child })]);
+
+  await admitSessionInboxPayload(request, { cursor, queue: new SessionInputQueue() });
+
+  expect(runProxySubagentEventStep).not.toHaveBeenCalled();
+});
+
 it("admits the owner timer's signal for the deadline step", async () => {
   const signal = {
     kind: "task.deadline" as const,

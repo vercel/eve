@@ -178,7 +178,7 @@ describe("steerTask", () => {
     expect(withdrawSteer(start.table, agent.record.id, 1).records[0]?.steers).toBeUndefined();
   });
 
-  it("does not count messages to a remote agent, which reports none", () => {
+  it("counts messages to a remote agent, which reports them with its answer", () => {
     const agent = started(undefined, { kind: "agent", name: "researcher" });
     const remote = applyTaskMessage(
       agent.table,
@@ -199,7 +199,7 @@ describe("steerTask", () => {
     expect(steered.effects).toEqual([
       expect.objectContaining({ commands: [message], kind: "send" }),
     ]);
-    expect(steered.table.records[0]?.steers).toBeUndefined();
+    expect(steered.table.records[0]?.steers).toBe(1);
   });
 
   it("opens the next background generation when the agent answered before a message reached it", () => {

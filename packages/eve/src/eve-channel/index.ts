@@ -13,16 +13,9 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
-  readRemoteAgentStreamHeadersResolver,
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
-import {
-  EVE_SESSION_ID_HEADER,
-  EVE_STREAM_CONTROL_VERSION_QUERY,
-  EVE_STREAM_FORMAT_HEADER,
-  EVE_STREAM_TAIL_INDEX_HEADER,
-  EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
   EVE_CALLBACK_ROUTE_PATTERN,
@@ -37,8 +30,7 @@ import {
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
-  createEveSessionStreamRoutePath,
-  createEveSubagentStreamRoutePath,
+  EVE_SESSION_REPORT_ROUTE_PATTERN,
 } from "#protocol/routes.js";
 import type { CancelTurnResponse } from "#protocol/cancel-turn.js";
 import type { ClearResponse } from "#protocol/clear-session.js";
@@ -64,24 +56,22 @@ import {
   deriveOperationContinuationToken,
   parseCancelTurnBody,
   parseCreateBody,
-  parseIncludeTailIndex,
   parseJsonRequest,
   parseOptionalJsonRequest,
   parseResetBody,
   parseSessionControlBody,
   parseSessionMessageBody,
-  parseStartIndex,
   rejectSessionContinuationToken,
   requireSessionId,
 } from "#eve-channel/request.js";
 import { attachClientContext } from "#internal/client-context.js";
+import { healthResponse, normalizeEveCors, resolveOnMessage } from "#eve-channel/support.js";
+import { handleSubagentStreamRequest } from "#eve-channel/subagent-stream-route.js";
+import { handleSessionReportRequest } from "#eve-channel/session-report-route.js";
 import {
-  findRemoteSubagentBinding,
-  healthResponse,
-  normalizeEveCors,
-  resolveOnMessage,
-  type RemoteSubagentBinding,
-} from "#eve-channel/support.js";
+  rejectTaskProtocolMismatch,
+  TASK_PROTOCOL_RESPONSE_FIELD,
+} from "#eve-channel/task-protocol-request.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
 
 export * from "#eve-channel/types.js";
@@ -152,6 +142,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (payload instanceof Response) return payload;
         const tokenRejection = rejectSessionContinuationToken(payload);
         if (tokenRejection !== null) return tokenRejection;
+        const protocolRejection = rejectTaskProtocolMismatch(payload);
+        if (protocolRejection !== undefined) return protocolRejection;
 
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
@@ -232,7 +224,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
             return Response.json(
-              { ok: true, sessionId: owner.id, status: "accepted" },
+              {
+                ok: true,
+                sessionId: owner.id,
+                status: "accepted",
+                ...TASK_PROTOCOL_RESPONSE_FIELD,
+              },
               {
                 headers: {
                   "cache-control": "no-store",
@@ -339,7 +336,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
 
         return Response.json(
-          { ok: true, sessionId: handle.sessionId, status: "accepted" },
+          {
+            ok: true,
+            sessionId: handle.sessionId,
+            status: "accepted",
+            ...TASK_PROTOCOL_RESPONSE_FIELD,
+          },
           {
             headers: {
               "cache-control": "no-store",
@@ -358,6 +360,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (sessionId instanceof Response) return sessionId;
         const payload = await parseJsonRequest(req);
         if (payload instanceof Response) return payload;
+        const protocolRejection = rejectTaskProtocolMismatch(payload);
+        if (protocolRejection !== undefined) return protocolRejection;
         const forwarded = await resolveForwardedPrincipal({
           trustedForwarders: input.trustedForwarders,
           forwarder: authResult,
@@ -396,6 +400,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               auth: dispatchAuth,
               callback: body.callback,
               context,
+              operationId: body.operationId,
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
               title,
@@ -433,6 +438,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             sessionId: result.sessionId,
             status: "accepted",
             deliveryId: result.deliveryId,
+            ...TASK_PROTOCOL_RESPONSE_FIELD,
           },
           {
             headers: {
@@ -577,108 +583,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         return await createSessionStreamResponse(req, attachSession(sessionId));
       }),
 
-      GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, async (req, args) => {
-        const authResult = await routeAuth(req, input.auth);
-        if (authResult instanceof Response) return authResult;
+      GET(EVE_SESSION_REPORT_ROUTE_PATTERN, (req, args) =>
+        handleSessionReportRequest(input, req, args),
+      ),
 
-        const parentSessionId = args.params.parentSessionId;
-        const callId = args.params.callId;
-        const childSessionId = args.params.childSessionId;
-        if (!parentSessionId || !callId || !childSessionId) {
-          return Response.json(
-            { error: "Missing subagent stream coordinates.", ok: false },
-            { status: 400 },
-          );
-        }
-
-        const startIndex = parseStartIndex(req);
-        if (startIndex instanceof Response) return startIndex;
-        const includeTailIndex = parseIncludeTailIndex(req);
-
-        const childStreamPath = createEveSubagentStreamRoutePath({
-          callId,
-          childSessionId,
-          parentSessionId,
-        });
-        let binding: RemoteSubagentBinding;
-        try {
-          const parent = args.attachSession(parentSessionId);
-          const found = await findRemoteSubagentBinding({
-            callId,
-            childSessionId,
-            childStreamPath,
-            parent,
-          });
-          if (found === undefined) {
-            throw new Error("Remote subagent binding not found.");
-          }
-          binding = found;
-        } catch {
-          return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
-        }
-
-        const resolveHeaders = readRemoteAgentStreamHeadersResolver(args);
-        if (resolveHeaders === undefined) {
-          return Response.json(
-            {
-              error: "Subagent stream proxy requires internal channel dispatch context.",
-              ok: false,
-            },
-            { status: 500 },
-          );
-        }
-
-        let headers: Record<string, string>;
-        try {
-          headers = await resolveHeaders({
-            name: binding.name,
-            resolverId: binding.remote.resolverId,
-            url: binding.remote.url,
-          });
-        } catch {
-          return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
-        }
-
-        const upstreamUrl = new URL(
-          createEveSessionStreamRoutePath(childSessionId).replace(/^\/+/, ""),
-          `${binding.remote.url.replace(/\/+$/, "")}/`,
-        );
-        if (startIndex !== undefined) {
-          upstreamUrl.searchParams.set("startIndex", String(startIndex));
-        }
-        const controlVersion = new URL(req.url).searchParams.get(EVE_STREAM_CONTROL_VERSION_QUERY);
-        if (controlVersion !== null) {
-          upstreamUrl.searchParams.set(EVE_STREAM_CONTROL_VERSION_QUERY, controlVersion);
-        }
-        if (includeTailIndex) {
-          upstreamUrl.searchParams.set("includeTailIndex", "1");
-        }
-
-        const upstream = await fetch(upstreamUrl, {
-          cache: "no-store",
-          headers,
-          redirect: "manual",
-          signal: req.signal,
-        });
-        const responseHeaders = new Headers();
-        for (const name of [
-          "cache-control",
-          "content-type",
-          "x-accel-buffering",
-          EVE_SESSION_ID_HEADER,
-          EVE_STREAM_FORMAT_HEADER,
-          EVE_STREAM_TAIL_INDEX_HEADER,
-          EVE_STREAM_VERSION_HEADER,
-        ]) {
-          const value = upstream.headers.get(name);
-          if (value !== null) responseHeaders.set(name, value);
-        }
-        return new Response(upstream.body, {
-          headers: responseHeaders,
-          status: upstream.status,
-          statusText: upstream.statusText,
-        });
-      }),
+      GET(EVE_SUBAGENT_STREAM_ROUTE_PATTERN, (req, args) =>
+        handleSubagentStreamRequest(input, req, args),
+      ),
     ],
     events: input.events,
   });

@@ -4,15 +4,13 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { readForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import {
   cancelRemoteAgentTurn,
-  continueRemoteAgentSession,
-  isAmbiguousRemoteAgentContinueError,
   isRetryableRemoteAgentCancelError,
-  isRetryableRemoteAgentContinueError,
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
   startRemoteAgentSession,
 } from "#subagents/remote-dispatch.js";
+import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
@@ -176,7 +174,7 @@ describe("startRemoteAgentSession", () => {
       .fn()
       .mockResolvedValue(
         Response.json(
-          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { ok: true, sessionId: "remote-session", status: "accepted", taskProtocol: 1 },
           { status: 202 },
         ),
       );
@@ -211,6 +209,7 @@ describe("startRemoteAgentSession", () => {
             ok: true,
             sessionId: "accepted-child",
             status: "accepted",
+            taskProtocol: 1,
           },
           { status: 202 },
         ),
@@ -272,6 +271,7 @@ describe("startRemoteAgentSession", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -335,6 +335,7 @@ describe("startRemoteAgentSession", () => {
         token: "eve:parent-token",
         url: "https://caller.example.com/eve/v1/callback/eve%3Aparent-token",
       },
+      capabilities: { requestInput: false },
       message: [
         'You are the subagent "research".',
         "Description: Performs research.",
@@ -344,8 +345,8 @@ describe("startRemoteAgentSession", () => {
         "Caller message:",
         "find the marker",
       ].join("\n"),
-      capabilities: {},
       mode: "conversation",
+      taskProtocol: 1,
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -364,7 +365,7 @@ describe("startRemoteAgentSession", () => {
       .fn()
       .mockResolvedValue(
         Response.json(
-          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { ok: true, sessionId: "remote-session", status: "accepted", taskProtocol: 1 },
           { status: 202 },
         ),
       );
@@ -455,6 +456,7 @@ describe("startRemoteAgentSession", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -490,6 +492,7 @@ describe("startRemoteAgentSession", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -519,7 +522,84 @@ describe("startRemoteAgentSession", () => {
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.outputSchema).toEqual(outputSchema);
     expect(body.mode).toBe("conversation");
-    expect(body.capabilities).toEqual({});
+    expect(body.capabilities).toEqual({ requestInput: false });
+  });
+
+  it("lets the remote child ask for input exactly when the owner can", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted", taskProtocol: 1 },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      capabilities: { requestInput: true },
+      remote: createRemoteAgent(),
+      session: createParentSession(),
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.capabilities).toEqual({ requestInput: true });
+    expect(body.taskProtocol).toBe(1);
+  });
+
+  it("fails fast with the version when the remote rejects this task protocol", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { code: "TASK_PROTOCOL_MISMATCH", error: "mismatch", ok: false, taskProtocol: 2 },
+            { status: 409 },
+          ),
+        ),
+    );
+
+    const error = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: createParentSession(),
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(RemoteTaskProtocolError);
+    expect((error as Error).message).toBe(
+      'Remote agent "research" cannot be called: its deployment uses task protocol version 2, and this deployment uses version 1. Upgrade both deployments to the same eve version.',
+    );
+  });
+
+  it("rejects an older remote that accepts without a version and retires its session", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ ok: true, sessionId: "old-session", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ ok: true, previousSessionId: "old-session", status: "reset" }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: createParentSession(),
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(RemoteTaskProtocolError);
+    expect((error as Error).message).toContain(
+      "reports no task protocol version (it runs an older eve)",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://remote.example.com/eve/v1/session/old-session/reset",
+    );
   });
 
   it("ignores an empty model-passed outputSchema instead of forwarding it", async () => {
@@ -533,6 +613,7 @@ describe("startRemoteAgentSession", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         {
           status: 202,
@@ -567,6 +648,7 @@ describe("startRemoteAgentSession", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -603,6 +685,7 @@ describe("startRemoteAgentSession", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -669,6 +752,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         ok: true,
         sessionId: "remote-session",
         status: "accepted",
+        taskProtocol: 1,
       }),
       {
         status: 202,
@@ -848,6 +932,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -886,6 +971,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
           ok: true,
           sessionId: "remote-session",
           status: "accepted",
+          taskProtocol: 1,
         }),
         { status: 202 },
       ),
@@ -918,190 +1004,6 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       "forwardedPrincipal",
     );
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
-  });
-});
-
-describe("continueRemoteAgentSession", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("posts raw continuation input with callback metadata and fresh auth headers", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await continueRemoteAgentSession({
-      activityObserver: {
-        sink: {
-          url: "https://caller.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-          version: 1,
-        },
-        workIdentity: {
-          callId: "call-next",
-          id: "work:next",
-          kind: "remote-agent",
-          name: "research",
-          rootSessionId: "root",
-          rootTurnId: "turn",
-        },
-      },
-      auth: null,
-      callback: {
-        callId: "call-next",
-        subagentName: "research",
-        token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-      },
-      message: "follow up",
-      outputSchema: { type: "object" },
-      remote: createRemoteAgent(),
-      sessionId: "remote-session",
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://remote.example.com/eve/v1/session/remote-session",
-      {
-        body: JSON.stringify({
-          activityObserver: {
-            sink: {
-              url: "https://caller.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-              version: 1,
-            },
-            workIdentity: {
-              callId: "call-next",
-              id: "work:next",
-              kind: "remote-agent",
-              name: "research",
-              rootSessionId: "root",
-              rootTurnId: "turn",
-            },
-          },
-          callback: {
-            callId: "call-next",
-            subagentName: "research",
-            token: "parent-inbox",
-            url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-          },
-          message: "follow up",
-          outputSchema: { type: "object" },
-        }),
-        headers: {
-          authorization: "Bearer remote-token",
-          "content-type": "application/json",
-          "x-static": "yes",
-        },
-        method: "POST",
-      },
-    );
-  });
-
-  it("forwards only the current turn principal when continuation forwarding is enabled", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    const current: SessionAuthContext = {
-      attributes: { user_id: "U456" },
-      authenticator: "slack-webhook",
-      issuer: "slack",
-      principalId: "slack:U456",
-      principalType: "user",
-      subject: "U456",
-    };
-
-    await continueRemoteAgentSession({
-      auth: current,
-      callback: {
-        callId: "call-next",
-        subagentName: "research",
-        token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-      },
-      message: "follow up",
-      remote: { ...createRemoteAgent(), forwardPrincipal: true },
-      sessionId: "remote-session",
-    });
-
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
-      current,
-    });
-  });
-
-  it("suggests receiver version skew without making a forwarded continuation permanent", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 400 })));
-    const current: SessionAuthContext = {
-      attributes: { user_id: "U456" },
-      authenticator: "slack-webhook",
-      issuer: "slack",
-      principalId: "slack:U456",
-      principalType: "user",
-      subject: "U456",
-    };
-
-    const error = await continueRemoteAgentSession({
-      auth: current,
-      callback: {
-        callId: "call-next",
-        subagentName: "research",
-        token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-      },
-      message: "follow up",
-      remote: { ...createRemoteAgent(), forwardPrincipal: true },
-      sessionId: "remote-session",
-    }).catch((cause: unknown) => cause);
-
-    expect(error).toMatchObject({
-      message:
-        'Remote agent "research" continue-session request failed with HTTP 400. The receiver may support forwarded principals only on session creation; upgrade it before retrying.',
-    });
-    expect(isRetryableRemoteAgentContinueError(error)).toBe(true);
-  });
-
-  it("classifies only missing-session continue failures as permanent", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(null, { status: 503 }))
-      .mockResolvedValueOnce(new Response(null, { status: 401 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ code: "SESSION_NOT_RESUMABLE" }), { status: 410 }),
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 404 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const continueInput = () => ({
-      auth: null,
-      callback: {
-        callId: "call-next",
-        subagentName: "research",
-        token: "parent-inbox",
-        url: "https://caller.example.com/eve/v1/callback/parent-inbox",
-      },
-      message: "follow up",
-      remote: createRemoteAgent(),
-      sessionId: "remote-session",
-    });
-    const transient = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-    const rejected = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-    const sessionNotResumable = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-    const missing = await continueRemoteAgentSession(continueInput()).catch(
-      (error: unknown) => error,
-    );
-
-    expect(isRetryableRemoteAgentContinueError(transient)).toBe(true);
-    expect(isAmbiguousRemoteAgentContinueError(transient)).toBe(true);
-    expect(isRetryableRemoteAgentContinueError(rejected)).toBe(true);
-    expect(isAmbiguousRemoteAgentContinueError(rejected)).toBe(false);
-    expect(isRetryableRemoteAgentContinueError(sessionNotResumable)).toBe(false);
-    expect(isAmbiguousRemoteAgentContinueError(sessionNotResumable)).toBe(false);
-    expect(isRetryableRemoteAgentContinueError(missing)).toBe(false);
-    expect(isAmbiguousRemoteAgentContinueError(missing)).toBe(false);
-    expect(isRetryableRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
-    expect(isAmbiguousRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
   });
 });
 
@@ -1303,6 +1205,17 @@ describe("resetRemoteAgentSession", () => {
     ).rejects.toThrow("response was invalid");
   });
 });
+
+function createParentSession() {
+  return {
+    agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+    compaction: { recentWindowSize: 10, threshold: 100000 },
+    continuationToken: "eve:parent-token",
+    history: [],
+    sessionId: "parent-session",
+    state: {},
+  };
+}
 
 function createAction(): RuntimeRemoteAgentDispatchRequest {
   return {

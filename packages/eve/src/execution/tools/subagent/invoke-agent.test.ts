@@ -198,7 +198,7 @@ describe("workflow agent invocation routing", () => {
       kind: "subagent-result" as const,
       origin: "dispatch" as const,
       output: {
-        code: "REMOTE_AGENT_START_FAILED",
+        code: "START_FAILED",
         message: "The remote agent could not be started.",
       },
       subagentName: "research",

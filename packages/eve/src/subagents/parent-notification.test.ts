@@ -17,6 +17,7 @@ import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { recordTaskReport } from "#subagents/task-reports.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: vi.fn(),
 }));
+vi.mock("#subagents/task-reports.js", () => ({ recordTaskReport: vi.fn() }));
 
 const resumeHookMock = vi.mocked(resumeHook);
 const fetchMock = vi.fn();
@@ -159,6 +161,7 @@ describe("notifyDelegatedParentStep", () => {
 
 describe("turn caller notification", () => {
   beforeEach(() => {
+    vi.mocked(recordTaskReport).mockReset();
     resumeHookMock.mockReset();
     resumeHookMock.mockResolvedValue(undefined as never);
     fetchMock.mockReset();
@@ -390,6 +393,31 @@ describe("turn caller notification", () => {
       subagentName: "remote",
     });
     expect(resumeHookMock).not.toHaveBeenCalled();
+    // Recorded before it is sent, so a caller whose callback is lost can read it at its deadline.
+    expect(recordTaskReport).toHaveBeenCalledExactlyOnceWith({
+      report: body,
+      sessionId: "remote-session",
+    });
+  });
+
+  it("reports the steering messages a remote caller's call received", async () => {
+    await notifyTurnCallerStep({
+      caller: {
+        callId: "call-remote",
+        replyTo: {
+          kind: "callback",
+          token: "parent-turn",
+          url: "https://caller.example/eve/v1/callback/parent-turn",
+        },
+        subagentName: "remote",
+      },
+      lifecycle: "parked",
+      sessionId: "remote-session",
+      settled: { output: "revised answer", steers: 2 },
+    });
+
+    const body: unknown = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
+    expect(body).toMatchObject({ callId: "call-remote", kind: "turn.completed", steers: 2 });
   });
 
   it("posts a failed turn with its outcome to a remote callback", async () => {

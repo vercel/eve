@@ -9,9 +9,9 @@ import type { SessionAuthContext } from "eve/context";
  *
  * - The `remote-loopback` hop authenticates with a fixture authorization and runs as
  *   the `router-app` service principal — the trusted forwarder.
- * - Bob and the observer each have a fixture authorization, so the eval can continue
- *   Alice's child as two distinct callers. Bob has his own user grant; the
- *   observer deliberately has none.
+ * - Bob and the observer each have a fixture authorization, so the eval can reach
+ *   the remote agent as two more distinct callers. Bob has his own user grant;
+ *   the observer deliberately has none.
  * - Every other caller (the local eval driver is anonymous; the Vercel one
  *   may carry ambient OIDC) falls through to Alice's fixed user principal.
  */

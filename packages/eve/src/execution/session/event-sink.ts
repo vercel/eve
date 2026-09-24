@@ -5,6 +5,7 @@ import { TurnDeliveryIdsKey } from "#context/keys.js";
 import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
+import { forwardEventToRemoteCaller } from "#subagents/remote-caller-events.js";
 import {
   encodeMessageStreamEvent,
   type MessageStreamEvent,
@@ -41,6 +42,7 @@ export function createSessionEventSink(input: SessionEventSinkInput): SessionEve
 
   const deliver = async (event: UnstampedMessageStreamEvent): Promise<PublishedSessionEvent> => {
     const toEmit = await callAdapterEventHandler(adapter, event, adapterCtx);
+    await forwardEventToRemoteCaller({ ctx, event: toEmit, sessionId: input.sessionId });
     setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
     const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
     await writer.write(encodeMessageStreamEvent(stamped));
