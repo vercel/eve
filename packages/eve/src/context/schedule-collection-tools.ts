@@ -28,7 +28,7 @@ const scheduleNameSchema = z
 const timezoneSchema = z
   .string()
   .describe(
-    "IANA timezone such as America/New_York, Europe/London, Asia/Tokyo, or UTC. Never send local; ask for the user's IANA timezone when it is unknown.",
+    "IANA timezone such as America/New_York or UTC. Optional; omission uses UTC. For a relative delay, calculate a UTC one-time date from a reliable current clock; do not ask for the user's timezone. Ask for a timezone only when an absolute local wall-clock time would otherwise be ambiguous.",
   );
 
 const expressionSchema = z.discriminatedUnion("type", [
