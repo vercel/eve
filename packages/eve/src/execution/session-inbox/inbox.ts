@@ -75,6 +75,11 @@ export interface SessionInboxOwnership {
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
+  /**
+   * Ends the inbox with its session: disposes every hook and drops unread
+   * payloads. Later claims do nothing, so a session that is finalizing never
+   * reopens an address it no longer reads.
+   */
   dispose(): Promise<void>;
   /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
   release(): Promise<SessionInboxPayload[]>;
@@ -100,6 +105,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
   const deliveryHandlers = new Set<(payload: SessionInboxPayload) => void>();
   let failure: { error: unknown } | undefined;
+  let disposed = false;
 
   const notify = (): void => {
     for (const resolve of waiters) resolve();
@@ -142,6 +148,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 
   const claimSessionHook = async (token: string): Promise<void> => {
+    if (disposed) return;
     if (!token) throw new Error("A session alias requires a nonempty continuation token.");
     const existing = sources.find((source) => source.token === token);
     if (existing !== undefined) return await existing.registered;
@@ -233,6 +240,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     },
     async dispose() {
       // Accepted-but-unread payloads are dropped: disposal ends the session.
+      disposed = true;
       await stop();
     },
     async release() {

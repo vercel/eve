@@ -33,7 +33,8 @@ const PARENT_SESSION_ENDED = "Parent session ended";
  * timer targets children with work in flight or an unconfirmed cancel, and
  * is armed before any request: this step may itself be the cleanup of a
  * child whose parent hard-stops it midway. The requests go out together, and
- * an idle agent whose request did not reach it gets a timer of its own.
+ * an idle agent whose request did not reach it gets a timer of its own, which
+ * asks it again and hard-stops it only if that request fails too.
  */
 export async function terminateChildSessionsStep(input: {
   readonly serializedContext?: Record<string, unknown>;
@@ -86,7 +87,9 @@ export async function terminateChildSessionsStep(input: {
     // A child with work in flight is already covered by the timer above.
     if (child.kind === "local" && !hasWorkInFlight(record)) unreached.push(child);
   });
-  await armHardStop(ownerSessionId, unreached, TASK_CANCEL_CONFIRM_MS);
+  // A child that was only moving to another deployment then still runs its
+  // own cleanup as it ends.
+  await armHardStop(ownerSessionId, unreached, TASK_CANCEL_CONFIRM_MS, PARENT_SESSION_ENDED);
 }
 
 /**
@@ -149,10 +152,12 @@ async function armHardStop(
   ownerSessionId: string,
   targets: readonly HardStopTarget[],
   windowMs: number,
+  endReason?: string,
 ): Promise<void> {
   if (targets.length === 0) return;
   try {
     await armChildHardStop({
+      endReason,
       ownerSessionId,
       targets,
       wakeAt: new Date(Date.now() + windowMs).toISOString(),

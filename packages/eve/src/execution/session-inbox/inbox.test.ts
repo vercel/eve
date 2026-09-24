@@ -455,6 +455,20 @@ describe("createSessionInbox", () => {
     expect(auth.dispose).toHaveBeenCalledOnce();
     expect(auth.return).not.toHaveBeenCalled();
   });
+
+  it("ignores claims after disposal, so a finalizing session never reopens an address", async () => {
+    installHooks(createMockHook({ token: "stable" }));
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    await inbox.dispose();
+
+    await inbox.claimSessionHook("stable");
+    await inbox.claimSessionHooks(["stable", "alias", "eve:task-callback:alias"]);
+
+    expect(createHookMock).toHaveBeenCalledOnce();
+    expect(hookTokens(inbox)).toEqual([]);
+    await expect(inbox.next()).resolves.toBeUndefined();
+  });
 });
 
 function authCallback(connectionName: string): SessionInboxPayload {

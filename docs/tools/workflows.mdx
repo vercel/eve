@@ -625,7 +625,9 @@ on `ctx.ask` or an approval does not count toward the limit. `timeout: false` is
 it unset.
 
 At the limit, eve first reads the run once. A run that already finished but whose outcome never
-reached the session settles the call with that outcome instead of `TIMED_OUT`.
+reached the session settles the call with that outcome instead of `TIMED_OUT`. A call without a
+`timeout` is never read this way: if its outcome never reaches the session, the call waits until the
+session ends.
 
 The top-level `timeout` and [`detach: { timeout }`](#detach-after-a-timeout) are different.
 `timeout` ends the call with `TIMED_OUT`. `detach.timeout` only stops the turn from waiting: the call

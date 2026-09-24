@@ -20,6 +20,13 @@ export interface TaskTimerWorkflowInput {
    * signalled.
    */
   readonly hardStop?: readonly HardStopTarget[];
+  /**
+   * Set when the request to end the `hardStop` children did not reach them:
+   * at `wakeAt` the request goes out again with this reason, and only a child
+   * it still cannot reach is hard-stopped, so the others run their own
+   * cleanup as they end.
+   */
+  readonly endReason?: string;
 }
 
 /** Sleeps until the owner's next task deadline, then signals the owner or hard-stops its children. */
@@ -28,7 +35,7 @@ export async function taskTimerWorkflow(input: TaskTimerWorkflowInput): Promise<
 
   await sleep(new Date(input.wakeAt));
   if (input.hardStop !== undefined) {
-    await hardStopTaskChildrenStep(input.hardStop);
+    await hardStopTaskChildrenStep(input.hardStop, input.endReason);
     return;
   }
   await signalTaskDeadlineStep(input);

@@ -294,7 +294,7 @@ describe("terminateChildSessionsStep", () => {
     }
   });
 
-  it("hard-stops an idle agent whose request to end did not reach it", async () => {
+  it("arms a timer that asks an idle agent again when the request to end did not reach it", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const unreached = localRecord({
       id: "research-aaaaaa",
@@ -313,7 +313,10 @@ describe("terminateChildSessionsStep", () => {
         ]),
       });
 
+      // The timer sends the request again before it hard-stops the agent,
+      // so an agent that was only moving still runs its own cleanup.
       expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith({
+        endReason: "Parent session ended",
         ownerSessionId: "parent-session",
         targets: [unreached.child],
         wakeAt: "2026-09-24T14:00:30.000Z",

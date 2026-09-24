@@ -15,7 +15,12 @@ import {
   nextTurnDelivery,
   type NextTurnInstruction,
 } from "#execution/session/next-input.js";
-import { cancelTasks, cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
+import {
+  cancelTasks,
+  cancelTurnDescendants,
+  closeTaskOwnerInbox,
+  syncTaskTimer,
+} from "#tasks/owner-body.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
@@ -124,13 +129,15 @@ export async function runPreparedSession(
     try {
       loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
     } finally {
-      await inbox.dispose();
+      if (loop?.kind !== "terminal") await inbox.dispose();
     }
     if (loop.kind === "transferred") {
       if (boot.anchor.kind !== "self") return { output: "" };
       result = await handoff.awaitAnchoredResult();
       return result;
     }
+    // Closed before anything else runs: nothing below may reopen an address.
+    await closeTaskOwnerInbox(cursor, inbox);
     // Session end cancels every working task; nothing is delivered afterwards.
     if (loop.outcome.kind === "expired") await cancelTasks(cursor, { kind: "all" });
     result = await finalizeSession(loop.outcome, {

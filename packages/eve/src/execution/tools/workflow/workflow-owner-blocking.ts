@@ -22,7 +22,14 @@ export interface BlockingWorkflowOwner {
    */
   claim(): Promise<boolean>;
   handleCommand(message: WorkflowToolRunControlMessage): void;
-  handleMessage(message: WorkflowToolRunMessage): Promise<void>;
+  /**
+   * Sends a message to the owner session. Returns `false` when the owner of an
+   * outcome is gone: the owner hands off only while no task is working, so an
+   * outcome it still waits for always finds it, and a missing inbox means its
+   * session ended. An outcome for a task the owner already stopped only
+   * confirms the stop, which the owner's timer enforces without it.
+   */
+  handleMessage(message: WorkflowToolRunMessage): Promise<boolean>;
 }
 
 /** Routes invocation messages to the waiting turn and accepts cancellation. */
@@ -46,9 +53,7 @@ export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWor
         controller.abort(new WorkflowToolRunCancelledError(message.reason));
     },
     handleMessage(message: WorkflowToolRunMessage) {
-      return resumeHookStep(input.owner.inbox, message, {
-        ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
-      });
+      return resumeHookStep(input.owner.inbox, message, { ifPresent: message.kind === "outcome" });
     },
   };
 }

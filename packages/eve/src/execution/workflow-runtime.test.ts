@@ -1283,6 +1283,30 @@ describe("requestWorkflowSessionEnd", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("tries once more when a new owner took over the inbox and removed the marker in between", async () => {
+    let tries = 0;
+    let markerProbes = 0;
+    // The inbox is unowned for the first try; the new owner claims it before the next.
+    resumeHookMock.mockImplementation(async () => {
+      tries += 1;
+      if (tries === 1) throw new HookNotFoundError("missing");
+      return { runId: "new-owner" };
+    });
+    getHookByTokenMock.mockImplementation(async (token: string) => {
+      if (token === marker) markerProbes += 1;
+      throw new HookNotFoundError(token);
+    });
+
+    await requestWorkflowSessionEnd({ reason: "Parent session ended", sessionId: "child-1" });
+
+    expect(markerProbes).toBeGreaterThan(0);
+    expect(resumeHookMock).toHaveBeenCalledTimes(2);
+    expect(resumeHookMock).toHaveBeenLastCalledWith(
+      sessionInboxHookToken(sessionCommandHookToken("child-1")),
+      { kind: "reset", reason: "Parent session ended" },
+    );
+  });
+
   it("fails when the session is still moving to another deployment after the retry window", async () => {
     vi.useFakeTimers();
     try {

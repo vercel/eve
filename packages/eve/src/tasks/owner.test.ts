@@ -576,7 +576,7 @@ describe("explicit background agent calls", () => {
     expect(armChildHardStop).not.toHaveBeenCalled();
   });
 
-  it("hard-stops a retired idle agent that the request to end did not reach", async () => {
+  it("arms a timer that asks a retired idle agent again when the request to end did not reach it", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
     vi.mocked(requestWorkflowSessionEnd).mockRejectedValue(
@@ -601,6 +601,7 @@ describe("explicit background agent calls", () => {
       await start([modelCall()], idle);
 
       expect(armChildHardStop).toHaveBeenCalledExactlyOnceWith({
+        endReason: "The parent retired this idle agent.",
         ownerSessionId: "parent",
         targets: [idle.at(-1)!.child],
         wakeAt: "2026-09-24T14:00:30.000Z",

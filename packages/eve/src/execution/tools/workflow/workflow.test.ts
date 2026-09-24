@@ -68,6 +68,7 @@ const input = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.deliver.mockResolvedValue(true);
   setControl(new AbortController());
   mocks.executeWorkflowBody.mockResolvedValue({
     outcome: { output: "done", status: "completed" },
@@ -116,7 +117,7 @@ it("emits every persisted report before the terminal outcome", async () => {
       kind: "outcome",
       result: { output: "done", status: "completed" },
     },
-    { ifPresent: false },
+    { ifPresent: true },
   );
   expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
     expect.objectContaining({ owner: { inbox: "invocation-owner" } }),
@@ -252,9 +253,7 @@ function setControl(controller: AbortController, claimed = true) {
     ),
     handleCommand: vi.fn(),
     handleMessage: (message: WorkflowToolRunMessage) =>
-      mocks.deliver("parent", message, {
-        ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
-      }),
+      mocks.deliver("parent", message, { ifPresent: message.kind === "outcome" }),
   });
 }
 
@@ -394,3 +393,41 @@ it.each([
     });
   },
 );
+
+it("warns without failing when a finished run's owner session already ended", async () => {
+  mocks.executeWorkflowBody.mockResolvedValue({
+    reportCount: 0,
+    outcome: { output: "done", status: "completed" },
+  });
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { inbox: "owner" },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+      }),
+    }),
+  });
+  // The owner's inbox is gone: its session ended as the run finished.
+  mocks.deliver.mockResolvedValue(false);
+
+  const returned = await workflowToolRunWorkflow(input);
+
+  expect(mocks.deliver).toHaveBeenCalledExactlyOnceWith(
+    "parent",
+    expect.objectContaining({ kind: "outcome" }),
+    { ifPresent: true },
+  );
+  expect(mocks.logUndelivered).toHaveBeenCalledExactlyOnceWith({ message: returned });
+});
+
+it("stays quiet when a cancelled run's owner session already ended", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("session ended"));
+  setControl(controller);
+  mocks.deliver.mockResolvedValue(false);
+
+  await workflowToolRunWorkflow(input);
+
+  expect(mocks.deliver).toHaveBeenCalledOnce();
+  expect(mocks.logUndelivered).not.toHaveBeenCalled();
+});

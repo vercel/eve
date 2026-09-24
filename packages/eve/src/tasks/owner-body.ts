@@ -2,6 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
@@ -11,7 +12,7 @@ import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import type { WaitedTaskChanges } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
-import { planTaskTimer } from "#tasks/state.js";
+import { hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { cancelTasksStep, type TaskCancelSelector } from "#tasks/cancel.js";
 import {
@@ -110,6 +111,29 @@ export async function applyTaskReport(
       sessionState: cursor.sessionState,
     }),
   );
+}
+
+/**
+ * Ends the owner's inbox with its session. A child still starting may have
+ * reported its address just as the session ended, in a report the owner never
+ * read. When a child is starting, the inbox is released first, which commits
+ * its end and returns every report it accepted: each child that reported is
+ * adopted, so a cancel held for it is sent and the session end reaches it. A
+ * child that reports later finds its owner gone and exits.
+ */
+export async function closeTaskOwnerInbox(
+  cursor: SessionStateCursor,
+  inbox: Pick<SessionInboxHandle, "dispose" | "release">,
+): Promise<void> {
+  let unread: readonly SessionInboxPayload[] = [];
+  try {
+    if (hasStartingChildren(cursor.sessionState.snapshot.session)) unread = await inbox.release();
+  } finally {
+    await inbox.dispose();
+  }
+  for (const payload of unread) {
+    if (payload.kind === "task.started") await applyTaskReport(cursor, payload);
+  }
 }
 
 /** Applies a workflow tool run's outcome and returns the tool result of the call it settled. */

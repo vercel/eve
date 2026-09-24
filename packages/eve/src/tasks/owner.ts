@@ -66,6 +66,7 @@ import {
 import {
   cancelOrphanedChild,
   deliverToChild,
+  RETIRED_IDLE_AGENT_REASON,
   retireIdleAgent,
   type CommandEffect,
 } from "#tasks/transport.js";
@@ -460,6 +461,7 @@ export async function startAgentTasks(input: {
     if (unreached.length > 0) {
       try {
         await armChildHardStop({
+          endReason: RETIRED_IDLE_AGENT_REASON,
           ownerSessionId: session.sessionId,
           targets: unreached,
           wakeAt: new Date(Date.parse(input.now) + TASK_CANCEL_CONFIRM_MS).toISOString(),

@@ -471,27 +471,33 @@ export async function requestWorkflowTurnCancellation(
  * its inbox: it cancels its turn and its own tasks, ends its children, and
  * settles its caller. A session that already ended is left alone. A session
  * still moving to another deployment after the inbox's retry window did not
- * get the request, so this throws: the caller must stop it another way.
+ * get the request, so this throws: the caller must ask again later or stop it
+ * another way.
  */
 export async function requestWorkflowSessionEnd(input: {
   readonly reason: string;
   readonly sessionId: string;
 }): Promise<void> {
+  const request = () =>
+    resumeSessionInbox({ sessionId: input.sessionId }, { kind: "reset", reason: input.reason });
   try {
-    await resumeSessionInbox(
-      { sessionId: input.sessionId },
-      { kind: "reset", reason: input.reason },
-    );
+    await request();
   } catch (error) {
     if (!isInactiveCommandTarget(error)) throw error;
-    if (
-      HookNotFoundError.is(error) &&
-      (await isSessionHandoffPending(sessionCommandHookToken(input.sessionId)))
-    ) {
+    if (!HookNotFoundError.is(error)) return;
+    if (await isSessionHandoffPending(sessionCommandHookToken(input.sessionId))) {
       throw new Error(
         `Session "${input.sessionId}" was moving to another deployment and did not receive the request to end.`,
         { cause: error },
       );
+    }
+    // A releasing owner removes its marker only once the inbox has an owner
+    // again, so an owner may have claimed it since the last try: one more try
+    // tells that apart from a session that ended.
+    try {
+      await request();
+    } catch (retryError) {
+      if (!isInactiveCommandTarget(retryError)) throw retryError;
     }
   }
 }

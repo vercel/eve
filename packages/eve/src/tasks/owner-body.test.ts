@@ -13,12 +13,14 @@ import {
   applyTaskOwnerUpdate,
   cancelTasks,
   cancelTurnDescendants,
+  closeTaskOwnerInbox,
   settleWorkflowTask,
   startAgentTasks,
   syncTaskTimer,
 } from "#tasks/owner-body.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
-import { startAgentTasksStep } from "#tasks/owner.js";
+import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import { applyTaskReportStep, startAgentTasksStep } from "#tasks/owner.js";
 import { TASK_CALLBACK_ALIAS_STATE_KEY, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
@@ -424,6 +426,116 @@ describe("syncTaskTimer", () => {
     expect(armTaskTimerStep).not.toHaveBeenCalled();
     expect(cancelTaskTimerStep).not.toHaveBeenCalled();
   });
+
+  it("keeps a timer a step armed for a due deadline on a clock ahead of the workflow's", async () => {
+    // The step armed the due deadline for its own time, two seconds ahead.
+    vi.setSystemTime(Date.parse("2026-09-24T14:00:10.000Z"));
+    const cursor = createCursor(
+      stateWith({
+        ...taskTableState([createTaskRecord({ deadlineAt: DEADLINE })]),
+        [TASK_TIMER_STATE_KEY]: {
+          ownerRunId: "owner-1",
+          runId: "timer-1",
+          wakeAt: "2026-09-24T14:00:12.000Z",
+        },
+      }),
+      vi.fn(async () => {}),
+    );
+
+    await syncTaskTimer(cursor);
+
+    expect(armTaskTimerStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("closeTaskOwnerInbox", () => {
+  const started = {
+    callId: "call-1",
+    child: { continuationToken: "child-token", sessionId: "child-session" },
+    kind: "task.started" as const,
+  };
+
+  function fakeInbox(unread: readonly SessionInboxPayload[]) {
+    const calls: string[] = [];
+    return {
+      calls,
+      inbox: {
+        dispose: vi.fn(async () => {
+          calls.push("dispose");
+        }),
+        release: vi.fn(async () => {
+          calls.push("release");
+          return [...unread];
+        }),
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(applyTaskReportStep).mockImplementation(async (input) => ({
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    }));
+    vi.mocked(armTaskTimerStep).mockImplementation(async (input) => ({
+      sessionState: input.sessionState,
+    }));
+  });
+
+  it("adopts a starting child that reported as the session ended, so its held cancel is sent", async () => {
+    // The task was cancelled while its child was starting, so the cancel waits for its address.
+    const starting = createTaskRecord({
+      cancelConfirmBy: "2026-09-24T14:00:30.000Z",
+      delivered: true,
+      pendingCommands: [{ kind: "cancel" }],
+      status: "cancelled",
+    });
+    const claimSessionHooks = vi.fn(async () => {});
+    const cursor = createCursor(stateWith(taskTableState([starting])), claimSessionHooks);
+    const { calls, inbox } = fakeInbox([send("too late"), started]);
+
+    await closeTaskOwnerInbox(cursor, inbox);
+
+    // Released first, so every report the inbox accepted is read before it closes.
+    expect(calls).toEqual(["release", "dispose"]);
+    expect(applyTaskReportStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ payload: started }),
+    );
+  });
+
+  it("only disposes the inbox when no child is starting", async () => {
+    const cursor = createCursor(
+      stateWith(
+        taskTableState([
+          createTaskRecord({
+            child: { continuationToken: "child-token", kind: "local", sessionId: "child-session" },
+          }),
+        ]),
+      ),
+      vi.fn(async () => {}),
+    );
+    const { calls, inbox } = fakeInbox([started]);
+
+    await closeTaskOwnerInbox(cursor, inbox);
+
+    expect(calls).toEqual(["dispose"]);
+    expect(applyTaskReportStep).not.toHaveBeenCalled();
+  });
+
+  it("disposes the inbox even when the release fails", async () => {
+    const cursor = createCursor(
+      stateWith(taskTableState([createTaskRecord()])),
+      vi.fn(async () => {}),
+    );
+    const failure = new Error("release failed");
+    const { calls, inbox } = fakeInbox([]);
+    inbox.release.mockRejectedValue(failure);
+
+    await expect(closeTaskOwnerInbox(cursor, inbox)).rejects.toBe(failure);
+    expect(calls).toEqual(["dispose"]);
+  });
 });
 
 describe("applyTaskDeadline", () => {
@@ -473,6 +585,10 @@ describe("applyTaskDeadline", () => {
     );
   });
 });
+
+function send(message: string): SessionInboxPayload {
+  return { kind: "send", payload: { message } };
+}
 
 function stateWith(state: SessionStateMap): DurableSessionState {
   const base = createTestSessionState();

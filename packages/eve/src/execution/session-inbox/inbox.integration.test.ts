@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { sessionInboxFinalizationWorkflow } from "#internal/testing/session-inbox-finalization-workflow.js";
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
 import { sessionHookPumpWorkflow } from "#internal/testing/session-hook-pump-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
@@ -28,6 +30,31 @@ describe("session command inbox integration", () => {
       await expect(run.returnValue).resolves.toEqual(messages);
     } finally {
       if ((await run.status) === "running") await run.cancel();
+    }
+  });
+
+  it("keeps an ended session's inbox closed when finalization claims its address again", async () => {
+    const endToken = "session-inbox:finalization:end";
+    const finishToken = "session-inbox:finalization:finish";
+    const run = await start(sessionInboxFinalizationWorkflow, [{ endToken, finishToken }]);
+    const stableToken = sessionInboxHookToken(sessionCommandHookToken(run.runId));
+    try {
+      await waitForHook(run, { token: stableToken });
+      await waitForHook(run, { token: endToken });
+      await resumeHook(endToken, undefined);
+      // The run disposed its inbox and claimed the address again before this gate.
+      await waitForHook(run, { token: finishToken });
+
+      // A child reporting now finds its owner gone, and a message is not accepted.
+      await expect(getHookByToken(stableToken)).rejects.toSatisfy((error) =>
+        HookNotFoundError.is(error),
+      );
+      await expect(
+        resumeHook(stableToken, { callId: "call-1", child: {}, kind: "task.started" }),
+      ).rejects.toSatisfy((error) => HookNotFoundError.is(error));
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
     }
   });
 

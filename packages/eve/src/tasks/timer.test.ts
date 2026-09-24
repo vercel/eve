@@ -97,6 +97,58 @@ describe("taskTimerWorkflow", () => {
     expect(cancelRunMock.mock.calls.map((call) => call[1])).toEqual(["child-session", "run-1"]);
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
+
+  it("asks unreached children to end again, and hard-stops only one that the request still misses", async () => {
+    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(sleep).mockResolvedValue(undefined);
+    getWorldMock.mockResolvedValue("world");
+    getHookMock.mockImplementation(async (token: string) => {
+      throw new HookNotFoundError(token);
+    });
+    resumeHookMock.mockImplementation(async (token: string) => {
+      if (token.includes("session-still-moving")) throw new Error("inbox unavailable");
+      return { runId: "child-run" };
+    });
+
+    try {
+      await taskTimerWorkflow({
+        endReason: "Parent session ended",
+        hardStop: [
+          { continuationToken: "moved-token", kind: "local", sessionId: "session-moved" },
+          {
+            continuationToken: "still-moving-token",
+            kind: "local",
+            sessionId: "session-still-moving",
+          },
+        ],
+        ownerRunId: "owner-run",
+        token: TOKEN,
+        wakeAt: WAKE_AT,
+      });
+
+      expect(resumeHookMock.mock.calls).toEqual([
+        [
+          "eve:inbox:v1:eve:session:session-moved:inbox",
+          { kind: "reset", reason: "Parent session ended" },
+        ],
+        [
+          "eve:inbox:v1:eve:session:session-still-moving:inbox",
+          { kind: "reset", reason: "Parent session ended" },
+        ],
+      ]);
+      // The child that got the request ends on its own and runs its cleanup.
+      expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-still-moving", {
+        cancelReason: expect.any(String),
+      });
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[eve:tasks.timer] a task child did not receive the request to end again",
+        expect.objectContaining({ sessionId: "session-still-moving" }),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe("task timer steps", () => {
@@ -153,6 +205,35 @@ describe("task timer steps", () => {
     );
   });
 
+  it("marks children that the request to end did not reach, so the timer asks them again", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    startMock.mockResolvedValue({ runId: "timer-4" });
+    const targets = [
+      { continuationToken: "child-token", kind: "local" as const, sessionId: "child-session" },
+    ];
+
+    await armChildHardStop({
+      endReason: "Parent session ended",
+      ownerSessionId: "parent",
+      targets,
+      wakeAt: WAKE_AT,
+    });
+
+    expect(startMock).toHaveBeenCalledWith(
+      taskTimerWorkflowReference,
+      [
+        {
+          endReason: "Parent session ended",
+          hardStop: targets,
+          ownerRunId: "owner-run",
+          token: TOKEN,
+          wakeAt: WAKE_AT,
+        },
+      ],
+      { deploymentId: "dpl_current" },
+    );
+  });
+
   describe("syncTaskTimerInStep", () => {
     const withState = (state: Record<string, unknown>) => {
       const base = createTestSessionState({ sessionId: "parent" });
@@ -193,6 +274,22 @@ describe("task timer steps", () => {
         cancelReason: expect.any(String),
       });
       expect(readTaskTimer(readDurableSession(synced).state)).toBeUndefined();
+    });
+
+    it("leaves the timer to the owner when arming it fails, so the step is not retried", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      startMock.mockRejectedValue(new Error("start failed"));
+      const sessionState = withState(taskTableState([record(WAKE_AT)]));
+
+      try {
+        await expect(syncTaskTimerInStep(sessionState)).resolves.toBe(sessionState);
+        expect(warnSpy).toHaveBeenCalledWith(
+          "[eve:tasks.timer] failed to sync the task timer in the owner's step",
+          expect.objectContaining({ sessionId: "parent" }),
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
 
     it("leaves a timer that is already in line alone", async () => {

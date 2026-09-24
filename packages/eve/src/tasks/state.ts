@@ -98,6 +98,11 @@ export type TaskTimerPlan =
  * the table needs, and its signal is not overdue. An unreadable record wakes
  * the owner at once: the deadline step reports it as `STATE_LOST` and removes
  * it, so it cannot block handoff. A wake time in the past is armed for `nowMs`.
+ *
+ * A wake that is already due may be armed on another clock: a step arms it
+ * for the step's own time, which can run ahead of the workflow's replayed
+ * clock. A timer armed within the grace of `nowMs` therefore still counts as
+ * firing in time for a due wake, so the owner does not arm it again at once.
  */
 export function planTaskTimer(
   state: SessionStateMap | undefined,
@@ -107,11 +112,13 @@ export function planTaskTimer(
   const needed = lost.length > 0 ? WAKE_NOW : nextTaskWakeAt(table);
   const armed = readTaskTimer(state);
   if (needed === undefined) return armed === undefined ? { kind: "keep" } : { kind: "cancel" };
-  const wakeAtMs = Math.max(Date.parse(needed), current.nowMs);
+  const neededMs = Date.parse(needed);
+  const wakeAtMs = Math.max(neededMs, current.nowMs);
+  const latestKeptMs = neededMs <= current.nowMs ? current.nowMs + TASK_TIMER_GRACE_MS : wakeAtMs;
   if (
     armed !== undefined &&
     armed.ownerRunId === current.ownerRunId &&
-    Date.parse(armed.wakeAt) <= wakeAtMs &&
+    Date.parse(armed.wakeAt) <= latestKeptMs &&
     Date.parse(armed.wakeAt) + TASK_TIMER_GRACE_MS >= current.nowMs
   ) {
     return { kind: "keep" };
@@ -141,6 +148,20 @@ export function readTaskCallbackAlias(state: SessionStateMap | undefined): strin
 export function hasWorkingTasks(session: { readonly state?: SessionStateMap }): boolean {
   return getTaskTable(session).records.some(
     (record) => record.status === "working" || record.status === "input_required",
+  );
+}
+
+/**
+ * Whether a local agent the owner started has not reported its address yet
+ * while its task still needs it: the task is working, or holds a command
+ * for the agent. Only the agent's own report can reach it.
+ */
+export function hasStartingChildren(session: { readonly state?: SessionStateMap }): boolean {
+  return getTaskTable(session).records.some(
+    (record) =>
+      record.kind === "agent" &&
+      record.child === undefined &&
+      (!isTerminalTaskStatus(record.status) || record.pendingCommands !== undefined),
   );
 }
 

@@ -25,9 +25,10 @@ import { logUndeliveredWorkflowOutcomeStep } from "#execution/tools/workflow/und
 
 /**
  * Owns command intake, body execution, and settlement for one turn-owned tool
- * call. The run returns the outcome it reported, so the owner's deadline can
- * read it once if the report never arrived, including a report whose
- * delivery failed for good; a duplicate start returns nothing.
+ * call. The run returns the outcome it reported, so the owner's deadline for a
+ * call with a time limit can read it once if the report never arrived,
+ * including a report whose delivery failed for good; a duplicate start
+ * returns nothing.
  */
 export async function workflowToolRunWorkflow(
   input: WorkflowToolRunInput,
@@ -131,15 +132,23 @@ export async function workflowToolRunWorkflow(
   if (outcome === undefined) return undefined;
   const { input: _input, ...from } = createWorkflowBodyRef(definition);
   const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
+  let delivered: boolean;
   try {
-    await owner.handleMessage({ ...message, kind: "outcome" });
+    delivered = await owner.handleMessage({ ...message, kind: "outcome" });
   } catch (error) {
-    // Failing the run would turn a finished body into EXECUTION_FAILED; the
-    // owner's deadline reads the returned outcome instead.
+    // Failing the run would turn a finished body into EXECUTION_FAILED. Only
+    // a call with a time limit recovers: its deadline reads the returned
+    // outcome. A call without one waits until its session ends.
     await logUndeliveredWorkflowOutcomeStep({
       error: normalizeSerializableError(error),
       message,
     });
+    return message;
+  }
+  // The owner session had ended. A session cancels its runs as it ends, so
+  // only a run that finished first is worth a warning.
+  if (!delivered && outcome.status !== "cancelled") {
+    await logUndeliveredWorkflowOutcomeStep({ message });
   }
   return message;
 }

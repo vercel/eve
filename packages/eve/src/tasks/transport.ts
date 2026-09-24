@@ -310,12 +310,15 @@ function resolveRemoteChild(record: TaskRecord, ctx: ContextContainer | undefine
   });
 }
 
+/** Why a retired idle agent's session ends. */
+export const RETIRED_IDLE_AGENT_REASON = "The parent retired this idle agent.";
+
 /**
  * Ends the session of an idle agent the owner no longer keeps: a local agent
  * ends as a reset session does, and a remote one through its reset route. A
- * failed request is logged, never retried. Returns a local agent the request
- * did not reach, for the owner to hard-stop; a remote agent it did not reach
- * is bounded by its own session lifetime.
+ * failed request is logged. Returns a local agent the request did not reach,
+ * for the owner's timer to ask again and hard-stop if that fails too; a
+ * remote agent it did not reach is bounded by its own session lifetime.
  */
 export async function retireIdleAgent(
   record: TaskRecord,
@@ -323,16 +326,18 @@ export async function retireIdleAgent(
 ): Promise<HardStopTarget | undefined> {
   const child = record.child;
   if (child === undefined || child.kind === "workflow") return undefined;
-  const reason = "The parent retired this idle agent.";
   try {
     if (child.kind === "local") {
-      await requestWorkflowSessionEnd({ reason, sessionId: child.sessionId });
+      await requestWorkflowSessionEnd({
+        reason: RETIRED_IDLE_AGENT_REASON,
+        sessionId: child.sessionId,
+      });
       return undefined;
     }
     const remote = resolveRemoteChild(record, ctx);
     if (remote === undefined) return undefined;
     await resetRemoteAgentSession({
-      reason,
+      reason: RETIRED_IDLE_AGENT_REASON,
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
     });

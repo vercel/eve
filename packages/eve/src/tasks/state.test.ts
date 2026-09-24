@@ -4,6 +4,7 @@ import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/t
 import {
   findWorkflowTask,
   getTaskTable,
+  hasStartingChildren,
   planTaskTimer,
   readTaskCallbackAlias,
   readTaskTimer,
@@ -99,6 +100,23 @@ describe("workflow task lookups", () => {
   });
 });
 
+describe("hasStartingChildren", () => {
+  const has = (...records: Parameters<typeof createTaskRecord>[0][]) =>
+    hasStartingChildren({
+      state: taskTableState(records.map((record) => createTaskRecord(record))),
+    });
+
+  it("finds a local agent that has not reported its address while its task still needs it", () => {
+    expect(has({})).toBe(true);
+    // A cancel held for the agent until it reports.
+    expect(has({ pendingCommands: [{ kind: "cancel" }], status: "cancelled" })).toBe(true);
+  });
+
+  it("ignores an agent that reported, and a finished task whose agent ended", () => {
+    expect(has({ child: localChild }, { status: "completed" })).toBe(false);
+  });
+});
+
 describe("task timer state", () => {
   const DEADLINE = "2026-09-24T14:00:00.000Z";
   const BEFORE = Date.parse("2026-09-24T12:00:00.000Z");
@@ -171,5 +189,28 @@ describe("task timer state", () => {
       kind: "arm",
       wakeAt: new Date(BEFORE).toISOString(),
     });
+  });
+
+  it("keeps a timer armed for a due wake on a clock that runs ahead of the planner's", () => {
+    // A step armed each due wake for its own time, a few seconds past the workflow's.
+    const stepNow = new Date(BEFORE + 3_000).toISOString();
+    const lost = writeTaskTimer({ "eve.taskTable": { records: [{ v: 0 }] } }, armedAt(stepNow));
+    const due = writeTaskTimer(
+      taskTableState([createTaskRecord({ deadlineAt: new Date(BEFORE - 1_000).toISOString() })]),
+      armedAt(stepNow),
+    );
+
+    expect(planTaskTimer(lost, current)).toEqual({ kind: "keep" });
+    expect(planTaskTimer(due, current)).toEqual({ kind: "keep" });
+  });
+
+  it("still re-arms for a deadline that is not due yet but earlier than the armed timer", () => {
+    const soon = new Date(BEFORE + 10_000).toISOString();
+    const table = writeTaskTimer(
+      taskTableState([createTaskRecord({ deadlineAt: soon })]),
+      armedAt(new Date(BEFORE + 30_000).toISOString()),
+    );
+
+    expect(planTaskTimer(table, current)).toEqual({ kind: "arm", wakeAt: soon });
   });
 });

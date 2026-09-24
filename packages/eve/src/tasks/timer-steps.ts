@@ -9,12 +9,13 @@ import { isInactiveTimeoutTarget } from "#execution/session/timeout-steps.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { isSessionHandoffPending, resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
+  requestWorkflowSessionEnd,
   resolveHookOwnerRunId,
   resolveSessionOwnerRunId,
   startWorkflowOnCurrentDeployment,
   taskTimerWorkflowReference,
 } from "#execution/workflow-runtime.js";
-import { createLogger, logError } from "#internal/logging.js";
+import { createLogger, formatError, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import type { ChildAddress } from "#tasks/protocol.js";
 import { planTaskTimer, readTaskTimer, writeTaskTimer } from "#tasks/state.js";
@@ -55,23 +56,35 @@ export async function cancelTaskTimerStep(input: {
  * Brings the owner's timer in line with its task table from inside the step
  * that changed the table, so the owner needs no separate timer step on its
  * busiest paths; its own check after the step then finds the timer in line.
+ *
+ * Best-effort: a failure here must not fail the step, whose retry would
+ * repeat everything else it did, such as starting children. The owner's own
+ * check after the step then arms the timer in a step of its own.
  */
 export async function syncTaskTimerInStep(
   sessionState: DurableSessionState,
 ): Promise<DurableSessionState> {
-  const plan = planTaskTimer(readDurableSession(sessionState).state, {
-    nowMs: Date.now(),
-    get ownerRunId() {
-      return getWorkflowMetadata().workflowRunId;
-    },
-  });
-  switch (plan.kind) {
-    case "arm":
-      return await armTaskTimer(sessionState, plan.wakeAt);
-    case "cancel":
-      return await clearTaskTimer(sessionState);
-    case "keep":
-      return sessionState;
+  try {
+    const plan = planTaskTimer(readDurableSession(sessionState).state, {
+      nowMs: Date.now(),
+      get ownerRunId() {
+        return getWorkflowMetadata().workflowRunId;
+      },
+    });
+    switch (plan.kind) {
+      case "arm":
+        return await armTaskTimer(sessionState, plan.wakeAt);
+      case "cancel":
+        return await clearTaskTimer(sessionState);
+      case "keep":
+        return sessionState;
+    }
+  } catch (error) {
+    createLogger("tasks.timer").warn("failed to sync the task timer in the owner's step", {
+      error: formatError(error),
+      sessionId: sessionState.sessionId,
+    });
+    return sessionState;
   }
 }
 
@@ -134,14 +147,17 @@ export async function signalTaskDeadlineStep(input: TaskTimerWorkflowInput): Pro
 /**
  * Arms a timer for an owner session that is ending: at `wakeAt` it hard-stops
  * each child still running, because the ended owner can no longer be woken
- * to do it.
+ * to do it. With `endReason`, the targets are local agents that the request
+ * to end did not reach: the timer sends that request again first.
  */
 export async function armChildHardStop(input: {
+  readonly endReason?: string;
   readonly ownerSessionId: string;
   readonly targets: readonly HardStopTarget[];
   readonly wakeAt: string;
 }): Promise<void> {
   const timerInput: TaskTimerWorkflowInput = {
+    endReason: input.endReason,
     hardStop: input.targets,
     ownerRunId: getWorkflowMetadata().workflowRunId,
     token: sessionCommandHookToken(input.ownerSessionId),
@@ -150,11 +166,31 @@ export async function armChildHardStop(input: {
   await startWorkflowOnCurrentDeployment(taskTimerWorkflowReference, [timerInput]);
 }
 
-/** Hard-stops each child that is still running; one that already ended is left alone. */
-export async function hardStopTaskChildrenStep(targets: readonly HardStopTarget[]): Promise<void> {
+/**
+ * Hard-stops each child that is still running; one that already ended is
+ * left alone. With `endReason`, each local agent is first asked to end again,
+ * and is hard-stopped only when that request fails too.
+ */
+export async function hardStopTaskChildrenStep(
+  targets: readonly HardStopTarget[],
+  endReason?: string,
+): Promise<void> {
   "use step";
 
-  for (const target of targets) await hardStopTaskChild(target);
+  for (const target of targets) {
+    if (endReason !== undefined && target.kind === "local") {
+      try {
+        await requestWorkflowSessionEnd({ reason: endReason, sessionId: target.sessionId });
+        continue;
+      } catch (error) {
+        createLogger("tasks.timer").warn("a task child did not receive the request to end again", {
+          error: formatError(error),
+          sessionId: target.sessionId,
+        });
+      }
+    }
+    await hardStopTaskChild(target);
+  }
 }
 
 /**
