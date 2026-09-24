@@ -67,9 +67,17 @@ Paths below are relative to the agent directory. Root agents can use every path;
 ## Colocated tests
 
 eve ignores `*.test.*`, `*.spec.*`, and `__tests__/` during automatic discovery
-and when choosing extension runtime entries. The filename patterns apply to
-`.ts`, `.mts`, `.cts`, `.js`, `.mjs`, and `.cjs` modules. Explicit imports,
-sandbox workspace files, and packaged skill resources are unaffected.
+and when choosing extension runtime entries.
+
+```text
+agent/tools/
+├── get_weather.ts          # registered as get_weather
+├── get_weather.test.ts     # excluded from discovery
+└── __tests__/              # excluded from discovery
+    └── fixtures.json
+```
+
+Explicit imports, sandbox workspace files, and packaged skill resources are unaffected.
 
 ## Files available in the sandbox
 
