@@ -144,16 +144,25 @@ export interface TaskInputHookPayload {
 }
 
 /**
- * A request surfaced at this owner. `dismissible` comes only from a workflow
- * `ctx.ask`, and never leaves the owner's record.
+ * What the owner keeps of a request surfaced for a task: enough to route an
+ * answer to it and resolve plain text against it. `dismissible` comes only
+ * from a workflow `ctx.ask`, and never leaves the owner's record.
  */
-export type TaskInputRequest = InputRequest & { readonly dismissible?: boolean };
+export type TaskInputRequest = Pick<
+  InputRequest,
+  "allowFreeform" | "kind" | "options" | "requestId"
+> & { readonly dismissible?: boolean };
 
 /** One `input.requested` batch a task waits on, with the coordinates its resolution repeats. */
 export interface TaskInputBatch {
   readonly turnId: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  /**
+   * The child's own task the child surfaced this batch for; absent for the
+   * child's own request. Coordinates are unique only within one session.
+   */
+  readonly from?: string;
   readonly requests: readonly TaskInputRequest[];
 }
 

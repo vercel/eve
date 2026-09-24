@@ -1,14 +1,16 @@
-import { UnsentCallerEventsKey } from "#context/keys.js";
+import { UnsentCallerEventsKey, type UnsentCallerEvent } from "#context/keys.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { flushUnsentCallerEventsStep } from "#subagents/remote/unsent-caller-events-step.js";
 
 /**
- * Sends the input requests and authorization events a remotely called
- * session could not forward to its caller when they happened, before the
- * session waits for input. Events its caller never takes, even after the
- * step's retries, are dropped; the call's time limit then ends the caller's
- * wait. Runs in the workflow body, so it reaches the network only through
- * its step.
+ * Sends the human-input events a remotely called session could not forward
+ * to its caller when they happened, before the session waits for input.
+ * When the caller still does not take them after the step's retries, a
+ * request, approval, or sign-in event is dropped, and the call's time limit
+ * bounds the caller's wait for it. A resolution is kept for the next flush:
+ * without it, the caller keeps waiting on a request with its task's clock
+ * stopped. A caller that refuses an event outright drops it in the step.
+ * Runs in the workflow body, so it reaches the network only through its step.
  */
 export async function flushUnsentCallerEvents(cursor: SessionStateCursor): Promise<void> {
   const unsent = cursor.serializedContext[UnsentCallerEventsKey.name];
@@ -20,7 +22,13 @@ export async function flushUnsentCallerEvents(cursor: SessionStateCursor): Promi
       }),
     });
   } catch {
-    const { [UnsentCallerEventsKey.name]: _dropped, ...rest } = cursor.serializedContext;
-    await cursor.apply({ serializedContext: rest });
+    const { [UnsentCallerEventsKey.name]: _unsent, ...rest } = cursor.serializedContext;
+    const kept = (unsent as UnsentCallerEvent[]).filter(
+      ({ body }) =>
+        (body.event as { readonly type?: unknown } | undefined)?.type === "input.resolved",
+    );
+    await cursor.apply({
+      serializedContext: kept.length === 0 ? rest : { ...rest, [UnsentCallerEventsKey.name]: kept },
+    });
   }
 }

@@ -17,14 +17,24 @@ import {
   getHarnessEmissionState,
   setHarnessEmissionState,
 } from "#harness/emission.js";
+import { getPendingInputRequestIds } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
-import { createInputResolvedEvent, type InputResolution } from "#protocol/message.js";
+import { createLogger } from "#internal/logging.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { applyTaskInputEvent, type TaskAnswers } from "#tasks/input.js";
+import type { InputRequest } from "#shared/input.js";
+import {
+  admitTaskInputEvent,
+  applyTaskInputEvent,
+  sentAnswerResolutions,
+  type TaskAnswers,
+  type TaskInputPublication,
+} from "#tasks/input.js";
 import type { TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
-import { getTaskTable, readTaskCallbackAlias, setTaskTable } from "#tasks/state.js";
+import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask } from "#tasks/table.js";
 import { answerTask } from "#tasks/transport.js";
+
+const log = createLogger("tasks.input");
 
 interface TaskInputTransition {
   readonly serializedContext: Record<string, unknown>;
@@ -38,48 +48,95 @@ interface TaskInputSurface {
 }
 
 /**
- * Surfaces a child's human-input event with the task's ID and records the
- * requests the task waits on. The event goes through this session's own
- * sink, which passes it on to this session's caller when it has one.
+ * Surfaces a child's human-input event for its task, once admitted against
+ * the requests this owner holds (`admitTaskInputEvent`).
  */
 export async function surfaceTaskInputStep(
   input: TaskInputSurface & { readonly event: TaskInputEvent; readonly taskId: string },
 ): Promise<TaskInputTransition> {
   "use step";
 
+  const session = readDurableSession(input.sessionState);
+  const table = getTaskTable(session);
+  const unchanged = {
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  };
+  const record = findTask(table, input.taskId);
+  if (record === undefined) return unchanged;
+  const admitted = admitTaskInputEvent({
+    event: input.event,
+    record,
+    sessionPending: getPendingInputRequestIds(session.state),
+    table,
+  });
+  if (admitted.refused.length > 0) {
+    log.warn("a child asked with request IDs already pending elsewhere; they are dropped", {
+      requestIds: admitted.refused,
+      taskId: input.taskId,
+    });
+  }
+  if (admitted.events.length === 0) return unchanged;
   const ctx = await deserializeContext(input.serializedContext);
-  return await publishTaskInput(ctx, input, [{ event: input.event, taskId: input.taskId }]);
+  const { taskId } = input;
+  return await publishTaskInput(
+    ctx,
+    input,
+    admitted.events.map((event) => ({ event, taskId })),
+  );
+}
+
+/** Publishes input events the owner itself decided for its tasks. */
+export async function publishTaskInputStep(
+  input: TaskInputSurface & { readonly events: readonly TaskInputPublication[] },
+): Promise<TaskInputTransition> {
+  "use step";
+
+  return await publishTaskInput(
+    await deserializeContext(input.serializedContext),
+    input,
+    input.events,
+  );
 }
 
 /**
- * Sends each task the answers meant for it. A child session announces the
- * requests it resolves; a workflow run's question resolves as its hook takes
- * the answer, so the owner announces that resolution itself.
+ * Sends each task the answers meant for it and returns the resolutions to
+ * publish for the answers that reached their child (`sentAnswerResolutions`).
+ * It publishes nothing itself, so a failed publish never sends an answer twice.
  */
-export async function answerTaskInputStep(
-  input: TaskInputSurface & {
-    readonly answers: readonly TaskAnswers[];
-    readonly delivery: DeliverHookPayload;
-  },
-): Promise<Partial<TaskInputTransition>> {
+export async function answerTasksStep(input: {
+  readonly answers: readonly TaskAnswers[];
+  readonly delivery: DeliverHookPayload;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionId: string;
+}): Promise<readonly TaskInputPublication[]> {
   "use step";
 
   const ctx = await deserializeContext(input.serializedContext);
-  const callbackAlias = readTaskCallbackAlias(readDurableSession(input.sessionState).state);
-  const resolved: { readonly event: TaskInputEvent; readonly taskId: string }[] = [];
+  const resolved: TaskInputPublication[] = [];
   for (const answers of input.answers) {
-    await answerTask({ answers, callbackAlias, ctx, delivery: input.delivery });
-    if (answers.record.child?.kind !== "workflow") continue;
-    const taskId = answers.record.id;
-    resolved.push(...resolutionEvents(answers).map((event) => ({ event, taskId })));
+    const sent = await answerTask({
+      answers,
+      ctx,
+      delivery: input.delivery,
+      ownerSessionId: input.sessionId,
+    });
+    if (sent === "delivered") resolved.push(...sentAnswerResolutions(answers));
   }
-  return resolved.length === 0 ? {} : await publishTaskInput(ctx, input, resolved);
+  return resolved;
 }
 
+/**
+ * Emits each event with its task's ID through this session's own sink, which
+ * passes it on to this session's caller when it has one, and records what
+ * the task then waits on. Between turns the sink stamps the last turn's
+ * delivery IDs: the IDs of the turn that started a waited task, but not
+ * always of the turn that started a background one.
+ */
 async function publishTaskInput(
   ctx: ContextContainer,
   input: TaskInputSurface,
-  events: readonly { readonly event: TaskInputEvent; readonly taskId: string }[],
+  events: readonly TaskInputPublication[],
 ): Promise<TaskInputTransition> {
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
   const durable = readDurableSession(input.sessionState);
@@ -137,7 +194,7 @@ function withTaskId(event: TaskInputEvent, taskId: string): TaskInputEvent {
       return event;
     case "input.requested": {
       const requests = event.data.requests.map(
-        ({ dismissible: _dismissible, ...request }: TaskInputRequest) => request,
+        ({ dismissible: _dismissible, ...request }: InputRequest & TaskInputRequest) => request,
       );
       return { ...event, data: { ...event.data, requests, taskId } };
     }
@@ -164,21 +221,4 @@ function recordTaskInput(
     now,
   );
   return applied.table === table ? session : setTaskTable(session, applied.table);
-}
-
-/** One `input.resolved` per batch the answers resolve, with the batch's coordinates. */
-function resolutionEvents(answers: TaskAnswers): TaskInputEvent[] {
-  const responses = new Map(answers.responses.map((response) => [response.requestId, response]));
-  const dismissed = new Set(answers.dismissed);
-  return (answers.record.input ?? []).flatMap((batch) => {
-    const resolutions = batch.requests.flatMap((request): InputResolution[] => {
-      const { kind, requestId } = request;
-      const response = responses.get(requestId);
-      if (response !== undefined) return [{ kind, outcome: "answered", requestId, response }];
-      return dismissed.has(requestId) ? [{ kind, outcome: "ignored", requestId }] : [];
-    });
-    if (resolutions.length === 0) return [];
-    const { sequence, stepIndex, turnId } = batch;
-    return [createInputResolvedEvent({ resolutions, sequence, stepIndex, turnId })];
-  });
 }

@@ -167,6 +167,7 @@ function isInputBatch(value: unknown): value is TaskInputBatch {
     isString(value.turnId) &&
     isCount(value.sequence) &&
     isCount(value.stepIndex) &&
+    isOptionalString(value.from) &&
     Array.isArray(value.requests) &&
     value.requests.length > 0 &&
     value.requests.every(

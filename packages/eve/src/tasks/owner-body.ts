@@ -16,8 +16,14 @@ import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import type { WaitedTaskChanges } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
-import { hasPendingTaskInput, pendingTaskInput, planTaskAnswers } from "#tasks/input.js";
-import { answerTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
+import {
+  hasPendingTaskInput,
+  planTaskAnswers,
+  taskInputResolutions,
+  withdrawnTaskInput,
+  type TaskInputPublication,
+} from "#tasks/input.js";
+import { answerTasksStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
 import type { TaskDeadlineSignal, TaskInputEvent } from "#tasks/protocol.js";
 import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
@@ -41,12 +47,22 @@ import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
  * its workflow run resumes at once. The run can only answer through this
  * owner's inbox, which the owner reads again after this update returns, so
  * the events still precede anything the run causes on the stream.
+ *
+ * Every owner transition passes here, so this is the one place requests are
+ * withdrawn: a request a task no longer waits on after the update, because
+ * the task was cancelled, timed out, or settled, is published as
+ * `input.resolved` with `ignored`, and reaches this session's caller like a
+ * child's own resolution. A child's resolutions and the owner's answers
+ * change a task's requests only through `surfaceTaskInput` and
+ * `answerTaskInput`, which publish their own events.
  */
 export async function applyTaskOwnerUpdate(
   cursor: SessionStateCursor,
   update: TaskOwnerUpdate,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
+  const before = getTaskTable(cursor.sessionState.snapshot.session);
   await cursor.apply(update);
+  const after = getTaskTable(cursor.sessionState.snapshot.session);
   await Promise.all([
     ...update.replies.map((reply) =>
       resumeHookStep(
@@ -55,7 +71,11 @@ export async function applyTaskOwnerUpdate(
         { ifPresent: true },
       ),
     ),
-    publishTaskEvents(cursor, update.events),
+    publishTaskEvents(
+      cursor,
+      update.events,
+      taskInputResolutions(withdrawnTaskInput(before, after)),
+    ),
   ]);
   return update.results;
 }
@@ -63,8 +83,10 @@ export async function applyTaskOwnerUpdate(
 async function publishTaskEvents(
   cursor: SessionStateCursor,
   events: TaskOwnerUpdate["events"],
+  withdrawn: readonly TaskInputPublication[],
 ): Promise<void> {
   await syncTaskTimer(cursor);
+  await publishTaskInput(cursor, withdrawn);
   for (const event of events) {
     await cursor.apply(
       await emitSubagentEventStep({
@@ -160,17 +182,16 @@ export async function settleWorkflowTask(
 
 /**
  * Cancels the agent tasks and workflow tool calls the active turn is waiting
- * on, without waiting for their children to stop. Returns whether a task's
- * question, other than a session-limit prompt, was pending: it ended the
- * turn's stream when it surfaced, and cancelling withdraws a waited one.
+ * on, without waiting for their children to stop. Returns whether it withdrew
+ * a request of theirs other than a session-limit prompt: that request ended
+ * the turn's stream when it surfaced. A background task's request, which may
+ * predate the turn, does not count.
  */
 export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<boolean> {
-  const table = getTaskTable(cursor.sessionState.snapshot.session);
-  const questionPending = pendingTaskInput(table).some(
-    ({ request }) => request.kind !== "session-limit",
-  );
+  const before = getTaskTable(cursor.sessionState.snapshot.session);
   await cancelTasks(cursor, { kind: "active-turn" });
-  return questionPending;
+  const after = getTaskTable(cursor.sessionState.snapshot.session);
+  return withdrawnTaskInput(before, after).some(({ request }) => request.kind !== "session-limit");
 }
 
 /** Cancels the selected working tasks and publishes their `task.settled` events. */
@@ -248,6 +269,24 @@ export async function surfaceTaskInput(
   await flushUnsentCallerEvents(cursor);
 }
 
+/** Publishes input events the owner decided for its tasks, as `surfaceTaskInput` does a child's. */
+async function publishTaskInput(
+  cursor: SessionStateCursor,
+  events: readonly TaskInputPublication[],
+): Promise<void> {
+  if (events.length === 0) return;
+  await cursor.apply(
+    await publishTaskInputStep({
+      events,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+      sessionWritable: cursor.sessionWritable,
+    }),
+  );
+  await syncTaskTimer(cursor);
+  await flushUnsentCallerEvents(cursor);
+}
+
 /** Where a delivery goes once its answers for tasks are sent. */
 export type TaskAnswerRouting =
   | { readonly kind: "cancel-turn" }
@@ -261,7 +300,9 @@ export type TaskAnswerRouting =
 
 /**
  * Sends the answers a delivery holds for tasks to the children that asked
- * (see `planTaskAnswers`). Without pending task input it takes no step.
+ * (see `planTaskAnswers`), then publishes the requests the sent answers
+ * resolved (see `sentAnswerResolutions`), which no later delivery can
+ * answer. Without pending task input it takes no step.
  */
 export async function answerTaskInput(
   cursor: SessionStateCursor,
@@ -271,17 +312,13 @@ export async function answerTaskInput(
   if (!hasPendingTaskInput(session)) return { kind: "continue", remainder: delivery };
   const plan = planTaskAnswers({ delivery, table: getTaskTable(session) });
   if (plan.answers.length > 0) {
-    await cursor.apply(
-      await answerTaskInputStep({
-        answers: plan.answers,
-        delivery,
-        serializedContext: cursor.serializedContext,
-        sessionState: cursor.sessionState,
-        sessionWritable: cursor.sessionWritable,
-      }),
-    );
-    // A workflow question the owner resolved restarts its task's clock.
-    await syncTaskTimer(cursor);
+    const resolved = await answerTasksStep({
+      answers: plan.answers,
+      delivery,
+      serializedContext: cursor.serializedContext,
+      sessionId: cursor.sessionState.sessionId,
+    });
+    await publishTaskInput(cursor, resolved);
   }
   if (plan.cancelTurn) return { kind: "cancel-turn" };
   const dismissedTaskIds = plan.answers.flatMap((answers) =>

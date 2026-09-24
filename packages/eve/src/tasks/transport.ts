@@ -202,18 +202,17 @@ export async function sendAgentMessage(input: {
  * answered: an approval policy checks that responder, while the child keeps
  * acting as the principal that started it. A local child takes them in its
  * inbox; a remote one over HTTP, where an answer that may yet arrive stays
- * answerable and one that never can fails the task through the owner's
- * inbox, like a result from the child. A workflow run's question hook, named
- * by its request ID, takes an answer or a dismissal.
+ * answerable (`retry`) and one that never can fails the task through the
+ * owner's inbox, like a result from the child (`failed`). A workflow run's
+ * question hook, named by its request ID, takes an answer or a dismissal.
  */
 export async function answerTask(input: {
   readonly answers: TaskAnswers;
-  /** The owner's remote callback alias. */
-  readonly callbackAlias: string | undefined;
   readonly ctx: ContextContainer | undefined;
   /** The delivery that carried the answers; its principal and envelope travel with them. */
   readonly delivery: DeliverHookPayload;
-}): Promise<void> {
+  readonly ownerSessionId: string;
+}): Promise<"delivered" | "retry" | "failed"> {
   const { deliveryMetadata, dismissed, record, responses } = input.answers;
   const child = record.child;
   if (child?.kind === "workflow") {
@@ -231,9 +230,9 @@ export async function answerTask(input: {
         if (!isWorkflowTargetGone(error)) throw error;
       }
     }
-    return;
+    return "delivered";
   }
-  if (responses.length === 0) return;
+  if (responses.length === 0) return "delivered";
   if (child?.kind === "local") {
     await resumeSessionInbox(
       { sessionId: child.sessionId },
@@ -243,10 +242,10 @@ export async function answerTask(input: {
         payloads: [{ inputResponses: responses }],
       },
     );
-    return;
+    return "delivered";
   }
   const remote = resolveRemoteChild(record, input.ctx);
-  if (child?.kind !== "remote" || remote === undefined) return;
+  if (child?.kind !== "remote" || remote === undefined) return "retry";
   try {
     await answerRemoteAgentSession({
       auth: input.delivery.auth ?? null,
@@ -254,14 +253,11 @@ export async function answerTask(input: {
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
     });
+    return "delivered";
   } catch (error) {
     logError(log, "failed to answer a remote agent's input request", error, { taskId: record.id });
     const protocol = error instanceof RemoteTaskProtocolError;
-    if (
-      (!protocol && isRetryableRemoteAgentContinueError(error)) ||
-      input.callbackAlias === undefined
-    )
-      return;
+    if (!protocol && isRetryableRemoteAgentContinueError(error)) return "retry";
     const failure = protocol
       ? { code: AGENT_UNREACHABLE, message: error.message }
       : { code: "AGENT_SESSION_ENDED", message: AGENT_SESSION_ENDED_MESSAGE };
@@ -289,7 +285,8 @@ export async function answerTask(input: {
       ],
       source: { kind: "remote", sessionId: child.sessionId },
     };
-    await resumeHook(sessionInboxHookToken(input.callbackAlias), report);
+    await resumeHook(ownerInboxHookToken(input.ownerSessionId), report);
+    return "failed";
   }
 }
 

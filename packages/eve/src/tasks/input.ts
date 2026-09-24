@@ -6,17 +6,24 @@ import type {
 } from "#channel/types.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
 import type { SessionStateMap } from "#harness/types.js";
+import type { InputResolution } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import type { TaskInputBatch, TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
 import type { TaskTable } from "#tasks/table.js";
 
-// The requests a task waits on live only on its record. A child resolves its
-// own requests and reports it, and the owner follows that report. Read by the
-// session workflow body: no Node.js built-ins and no schema runtime.
+// The requests a task waits on live only on its record, and every change to
+// them is published as an input event for the task. Read by the session
+// workflow body: no Node.js built-ins and no schema runtime.
 
-/** The batches a task waits on after its child requested or resolved input. */
+/** A human-input event this owner publishes for one of its tasks. */
+export interface TaskInputPublication {
+  readonly event: TaskInputEvent;
+  readonly taskId: string;
+}
+
+/** The batches a task waits on after an `input.requested` or `input.resolved` for it. */
 export function applyTaskInputEvent(
   batches: readonly TaskInputBatch[],
   event: Extract<TaskInputEvent, { readonly type: "input.requested" | "input.resolved" }>,
@@ -31,10 +38,14 @@ export function applyTaskInputEvent(
   }
   // A repeated report adds nothing; a request belongs to the batch that first carried it.
   const known = new Set(batches.flatMap((batch) => batch.requests.map((r) => r.requestId)));
-  const requests = event.data.requests.filter((request) => !known.has(request.requestId));
+  const requests = event.data.requests
+    .filter((request) => !known.has(request.requestId))
+    .map(({ allowFreeform, dismissible, kind, options, requestId }: TaskInputRequest) =>
+      withoutUndefined({ allowFreeform, dismissible, kind, options, requestId }),
+    );
   if (requests.length === 0) return batches;
-  const { sequence, stepIndex, turnId } = event.data;
-  return [...batches, { requests, sequence, stepIndex, turnId }];
+  const { sequence, stepIndex, taskId: from, turnId } = event.data;
+  return [...batches, withoutUndefined({ from, requests, sequence, stepIndex, turnId })];
 }
 
 /** One request a task waits on, with the batch it arrived in. */
@@ -54,6 +65,134 @@ export function pendingTaskInput(table: TaskTable): readonly PendingTaskInput[] 
 
 export function hasPendingTaskInput(session: { readonly state?: SessionStateMap }): boolean {
   return getTaskTable(session).records.some((record) => record.input !== undefined);
+}
+
+/** The requests tasks waited on in `before` that no task waits on in `after`. */
+export function withdrawnTaskInput(
+  before: TaskTable,
+  after: TaskTable,
+): readonly PendingTaskInput[] {
+  const kept = new Set(pendingTaskInput(after).map(({ request }) => request.requestId));
+  return pendingTaskInput(before).filter(({ request }) => !kept.has(request.requestId));
+}
+
+/**
+ * One `input.resolved` per batch the requests came in: `answered` with the
+ * response the owner sent, `ignored` for a request dismissed or withdrawn.
+ */
+export function taskInputResolutions(
+  entries: readonly PendingTaskInput[],
+  responses: ReadonlyMap<string, InputResponse> = new Map(),
+): readonly TaskInputPublication[] {
+  const batches = new Map<TaskInputBatch, { taskId: string; resolutions: InputResolution[] }>();
+  for (const { batch, record, request } of entries) {
+    const { kind, requestId } = request;
+    const response = responses.get(requestId);
+    const group = batches.get(batch) ?? { resolutions: [], taskId: record.id };
+    group.resolutions.push(
+      response === undefined
+        ? { kind, outcome: "ignored", requestId }
+        : { kind, outcome: "answered", requestId, response },
+    );
+    batches.set(batch, group);
+  }
+  return [...batches].map(([{ sequence, stepIndex, turnId }, { resolutions, taskId }]) => ({
+    event: { data: { resolutions, sequence, stepIndex, turnId }, type: "input.resolved" },
+    taskId,
+  }));
+}
+
+/** The events to publish for a child's input event, and the requested IDs refused. */
+export interface AdmittedTaskInput {
+  readonly events: readonly TaskInputEvent[];
+  readonly refused: readonly string[];
+}
+
+/**
+ * Admits one input event from a task's child. A child resolves only requests
+ * its own task waits on: a resolution keeps just those and is dropped when
+ * none remain, which also drops a repeat. A requested ID already pending on
+ * another task or on this session itself (`sessionPending`) is refused, so no
+ * child can take the answers meant for another; one pending on this task is
+ * a repeat. A retried child step asks again at the coordinates of its first
+ * batch, which the child never resolves, so that batch is withdrawn first.
+ * Only an agent's own batches are compared: a descendant's coordinates can
+ * repeat another session's, and a workflow run asks each question at its
+ * call's coordinates.
+ */
+export function admitTaskInputEvent(input: {
+  readonly event: TaskInputEvent;
+  readonly record: TaskRecord;
+  readonly sessionPending: ReadonlySet<string>;
+  readonly table: TaskTable;
+}): AdmittedTaskInput {
+  const { event, record } = input;
+  const own = new Set<string>();
+  const taken = new Set(input.sessionPending);
+  for (const entry of pendingTaskInput(input.table)) {
+    (entry.record.id === record.id ? own : taken).add(entry.request.requestId);
+  }
+  if (event.type === "input.resolved") {
+    const resolutions = event.data.resolutions.filter(({ requestId }) => own.has(requestId));
+    const events =
+      resolutions.length === 0 ? [] : [{ ...event, data: { ...event.data, resolutions } }];
+    return { events, refused: [] };
+  }
+  if (event.type !== "input.requested") return { events: [event], refused: [] };
+
+  const refused = event.data.requests.flatMap(({ requestId }) =>
+    taken.has(requestId) ? [requestId] : [],
+  );
+  const requests = event.data.requests.filter(
+    ({ requestId }) => !taken.has(requestId) && !own.has(requestId),
+  );
+  const { sequence, stepIndex, turnId } = event.data;
+  const retried =
+    record.kind === "agent" && event.data.taskId === undefined
+      ? record.input?.find(
+          (batch) =>
+            batch.from === undefined &&
+            batch.turnId === turnId &&
+            batch.sequence === sequence &&
+            batch.stepIndex === stepIndex,
+        )
+      : undefined;
+  const asked = new Set(event.data.requests.map(({ requestId }) => requestId));
+  const withdrawn =
+    retried === undefined
+      ? []
+      : taskInputResolutions(
+          retried.requests.flatMap((request) =>
+            asked.has(request.requestId) ? [] : [{ batch: retried, record, request }],
+          ),
+        );
+  const events = withdrawn.map((publication) => publication.event);
+  if (requests.length > 0) events.push({ ...event, data: { ...event.data, requests } });
+  return { events, refused };
+}
+
+/**
+ * The resolutions the owner publishes once a task's child has its answers. A
+ * question takes the answer it was sent, and a dismissed one is ignored, so
+ * neither takes a second answer. An approval stays until the child resolves
+ * it: the child's response policy may refuse the responder and keep the
+ * request pending for another.
+ */
+export function sentAnswerResolutions(answers: TaskAnswers): readonly TaskInputPublication[] {
+  const { record } = answers;
+  const responses = new Map(answers.responses.map((response) => [response.requestId, response]));
+  const dismissed = new Set(answers.dismissed);
+  return taskInputResolutions(
+    (record.input ?? []).flatMap((batch) =>
+      batch.requests.flatMap((request) =>
+        dismissed.has(request.requestId) ||
+        (request.kind !== "tool-approval" && responses.has(request.requestId))
+          ? [{ batch, record, request }]
+          : [],
+      ),
+    ),
+    responses,
+  );
 }
 
 /** A delivery's answers for one task's child. */
@@ -180,4 +319,8 @@ function metadataOf(delivery: DeliverHookPayload, from: number, payloadIndex: nu
   return (delivery.deliveryMetadata ?? []).flatMap((entry) =>
     entry.payloadIndex === from ? [{ ...entry, payloadIndex }] : [],
   );
+}
+
+function withoutUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }

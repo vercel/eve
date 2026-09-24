@@ -8,6 +8,9 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
+import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import { flushUnsentCallerEventsStep } from "#subagents/remote/unsent-caller-events-step.js";
 import { forwardTaskInputToCaller } from "#tasks/input-forward.js";
 
@@ -205,5 +208,49 @@ describe("flushUnsentCallerEventsStep", () => {
     await expect(flushUnsentCallerEventsStep({ serializedContext })).rejects.toThrow(
       "did not take an input request",
     );
+  });
+});
+
+describe("flushUnsentCallerEvents", () => {
+  it("keeps the resolutions a failed flush could not send for the next one, and drops the rest", async () => {
+    // Bob's approval was resolved while the caller's session moved to another deployment.
+    const resolved = {
+      body: {
+        ...INPUT_BODY,
+        event: {
+          data: {
+            resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "req-1" }],
+            sequence: 3,
+            stepIndex: 1,
+            turnId: "turn_0",
+          },
+          type: "input.resolved",
+        },
+      },
+      url: CALLBACK.url,
+    };
+    const requested = { body: INPUT_BODY, url: CALLBACK.url };
+    const cursor = new SessionStateCursor({
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      serializedContext: { [UnsentCallerEventsKey.name]: [requested, resolved] },
+      sessionState: createTestSessionState(),
+      sessionWritable: new WritableStream<Uint8Array>(),
+    });
+    vi.mocked(postSessionCallbackRequest).mockResolvedValueOnce(
+      new Response(null, { status: 503 }),
+    );
+
+    await flushUnsentCallerEvents(cursor);
+
+    expect(cursor.serializedContext[UnsentCallerEventsKey.name]).toEqual([resolved]);
+
+    await flushUnsentCallerEvents(cursor);
+
+    expect(postSessionCallbackRequest).toHaveBeenLastCalledWith({
+      body: resolved.body,
+      logFailures: true,
+      url: CALLBACK.url,
+    });
+    expect(cursor.serializedContext).not.toHaveProperty(UnsentCallerEventsKey.name);
   });
 });

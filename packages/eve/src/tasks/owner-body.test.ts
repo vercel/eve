@@ -8,11 +8,12 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
-import { answerTaskInputStep } from "#tasks/input-step.js";
+import { answerTasksStep, publishTaskInputStep } from "#tasks/input-step.js";
 import {
   answerTaskInput,
   applyTaskDeadline,
   applyTaskOwnerUpdate,
+  applyTaskReport,
   cancelTasks,
   cancelTurnDescendants,
   closeTaskOwnerInbox,
@@ -47,7 +48,8 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep
 vi.mock("#tasks/cancel.js", () => ({ cancelTasksStep: vi.fn() }));
 vi.mock("#tasks/workflow-task.js", () => ({ settleWorkflowTaskStep: vi.fn() }));
 vi.mock("#tasks/input-step.js", () => ({
-  answerTaskInputStep: vi.fn(),
+  answerTasksStep: vi.fn(),
+  publishTaskInputStep: vi.fn(),
   surfaceTaskInputStep: vi.fn(),
 }));
 
@@ -56,6 +58,10 @@ const CALL = { callId: "call-1", input: { message: "Find sources.", target: "res
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(publishTaskInputStep).mockImplementation(async (input) => ({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  }));
   vi.mocked(startAgentTasksStep).mockImplementation(async (input) => ({
     events: [],
     replies: [],
@@ -251,12 +257,51 @@ describe("cancelTurnDescendants", () => {
       await expect(cancelTurnDescendants(cursor)).resolves.toBe(pending);
     },
   );
+
+  it("does not count a background task's question that the cancel leaves waiting", async () => {
+    // Alice's notes task, started in an earlier turn, still asks; the cancelled turn asked nothing.
+    const notes = createTaskRecord({
+      ...waitingOn("question"),
+      id: "notes-bbbbbb",
+      mode: "background",
+    });
+    const state = stateWith(taskTableState([notes]));
+    const cursor = createCursor(state, vi.fn());
+    vi.mocked(cancelTasksStep).mockResolvedValue({
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    await expect(cancelTurnDescendants(cursor)).resolves.toBe(false);
+  });
 });
 
 describe("answerTaskInput", () => {
   const answer = {
     kind: "deliver" as const,
     payloads: [{ inputResponses: [{ requestId: "q-1" }] }],
+  };
+  const resolved = {
+    event: {
+      data: {
+        resolutions: [
+          {
+            kind: "question" as const,
+            outcome: "answered" as const,
+            requestId: "q-1",
+            response: { requestId: "q-1" },
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child-turn",
+      },
+      type: "input.resolved" as const,
+    },
+    taskId: "research-abc234",
   };
 
   it("passes a delivery through without a step while no task waits on input", async () => {
@@ -266,36 +311,150 @@ describe("answerTaskInput", () => {
       kind: "continue",
       remainder: answer,
     });
-    expect(answerTaskInputStep).not.toHaveBeenCalled();
+    expect(answerTasksStep).not.toHaveBeenCalled();
   });
 
-  it("sends a task its answers in one step and returns what stays with the session", async () => {
+  it("sends a task its answers in one step, then publishes what they resolved in another", async () => {
     const cursor = createCursor(stateWith(taskTableState([waitingOn("question")])), vi.fn());
-    vi.mocked(answerTaskInputStep).mockResolvedValue({});
+    vi.mocked(answerTasksStep).mockResolvedValue([resolved]);
 
     await expect(answerTaskInput(cursor, answer)).resolves.toEqual({
       dismissedTaskIds: [],
       kind: "continue",
       remainder: undefined,
     });
-    expect(answerTaskInputStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        answers: [expect.objectContaining({ responses: [{ requestId: "q-1" }] })],
-        delivery: answer,
-      }),
+    expect(answerTasksStep).toHaveBeenCalledExactlyOnceWith({
+      answers: [expect.objectContaining({ responses: [{ requestId: "q-1" }] })],
+      delivery: answer,
+      serializedContext: {},
+      sessionId: cursor.sessionState.sessionId,
+    });
+    expect(publishTaskInputStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ events: [resolved] }),
     );
+  });
+
+  it("never sends an answer again when publishing its resolution fails", async () => {
+    const cursor = createCursor(stateWith(taskTableState([waitingOn("question")])), vi.fn());
+    vi.mocked(answerTasksStep).mockResolvedValue([resolved]);
+    vi.mocked(publishTaskInputStep).mockRejectedValue(new Error("caller inbox unavailable"));
+
+    await expect(answerTaskInput(cursor, answer)).rejects.toThrow("caller inbox unavailable");
+    // The send is its own step: a retried publish replays its recorded result.
+    expect(answerTasksStep).toHaveBeenCalledOnce();
+    expect(vi.mocked(answerTasksStep).mock.calls[0]![0]).not.toHaveProperty("sessionWritable");
   });
 
   it("stops the turn once a descendant's declined session-limit prompt is sent on", async () => {
     const cursor = createCursor(stateWith(taskTableState([waitingOn("session-limit")])), vi.fn());
-    vi.mocked(answerTaskInputStep).mockResolvedValue({});
+    vi.mocked(answerTasksStep).mockResolvedValue([]);
     const stop = {
       kind: "deliver" as const,
       payloads: [{ inputResponses: [{ optionId: "stop", requestId: "q-1" }] }],
     };
 
     await expect(answerTaskInput(cursor, stop)).resolves.toEqual({ kind: "cancel-turn" });
-    expect(answerTaskInputStep).toHaveBeenCalledOnce();
+    expect(answerTasksStep).toHaveBeenCalledOnce();
+    expect(publishTaskInputStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("withdrawn task input", () => {
+  const settled: UnstampedMessageStreamEvent = {
+    data: { callId: "call-1", status: "cancelled", taskId: "research-abc234" },
+    type: "task.settled",
+  };
+  const update = (sessionState: DurableSessionState) => ({
+    events: [settled],
+    replies: [],
+    results: [],
+    serializedContext: {},
+    sessionState,
+  });
+  const report = { kind: "runtime-action-result" as const, results: [] };
+  const signal = {
+    kind: "task.deadline" as const,
+    ownerRunId: "owner-1",
+    wakeAt: "2026-09-24T14:00:00.000Z",
+  };
+  const outcome = {
+    from: {
+      callId: "call-1",
+      input: {},
+      runId: "run-1",
+      sequence: 0,
+      stepIndex: 0,
+      taskId: "research-abc234",
+      toolName: "deploy",
+      turnId: "turn-1",
+    },
+    result: { status: "cancelled" as const },
+  };
+
+  it.each([
+    [
+      "cancels",
+      cancelTasksStep,
+      (cursor: SessionStateCursor) => cancelTasks(cursor, { kind: "all" }),
+    ],
+    [
+      "times out",
+      applyTaskDeadlinesStep,
+      (cursor: SessionStateCursor) => applyTaskDeadline(cursor, signal),
+    ],
+    [
+      "settles on its child's report",
+      applyTaskReportStep,
+      (cursor: SessionStateCursor) => applyTaskReport(cursor, report),
+    ],
+    [
+      "settles when its workflow run ends with an open question",
+      settleWorkflowTaskStep,
+      (cursor: SessionStateCursor) => settleWorkflowTask(cursor, outcome),
+    ],
+  ] as const)(
+    "publishes the requests of a task the owner %s as ignored, before its events",
+    async (_label, step, run) => {
+      const cursor = createCursor(stateWith(taskTableState([waitingOn("question")])), vi.fn());
+      const after = stateWith(taskTableState([createTaskRecord({ status: "cancelled" })]));
+      vi.mocked(step as typeof cancelTasksStep).mockResolvedValue(update(after));
+      vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => input);
+
+      await run(cursor);
+
+      expect(publishTaskInputStep).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          events: [
+            {
+              event: {
+                data: {
+                  resolutions: [{ kind: "question", outcome: "ignored", requestId: "q-1" }],
+                  sequence: 0,
+                  stepIndex: 0,
+                  turnId: "child-turn",
+                },
+                type: "input.resolved",
+              },
+              taskId: "research-abc234",
+            },
+          ],
+          sessionState: after,
+        }),
+      );
+      expect(vi.mocked(publishTaskInputStep).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(emitSubagentEventStep).mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+
+  it("publishes nothing when every request is still waited on", async () => {
+    const state = stateWith(taskTableState([waitingOn("question")]));
+    const cursor = createCursor(state, vi.fn());
+    vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => input);
+
+    await applyTaskOwnerUpdate(cursor, update(state));
+
+    expect(publishTaskInputStep).not.toHaveBeenCalled();
   });
 });
 

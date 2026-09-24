@@ -2,22 +2,42 @@ import { describe, expect, it } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
+import type { InputRequestedStreamEvent } from "#protocol/message.js";
+import type { InputRequest } from "#shared/input.js";
 import {
+  admitTaskInputEvent,
   applyTaskInputEvent,
   hasPendingTaskInput,
   planTaskAnswers,
+  sentAnswerResolutions,
+  taskInputResolutions,
+  withdrawnTaskInput,
   type TaskAnswers,
+  type TaskInputPublication,
 } from "#tasks/input.js";
-import type { TaskInputBatch, TaskInputRequest } from "#tasks/protocol.js";
+import type { TaskInputBatch, TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
+import {
+  applyTaskMessage,
+  cancelTask,
+  findTask,
+  timeOutTask,
+  type TaskTable,
+} from "#tasks/table.js";
 
+const NOW = "2026-09-24T14:00:00.000Z";
+
+/** The projection a task record keeps of a request. */
 function request(requestId: string, overrides: Partial<TaskInputRequest> = {}): TaskInputRequest {
+  return { kind: "question", requestId, ...overrides };
+}
+
+/** The request as a child's stream carries it. */
+function asked(stored: TaskInputRequest): InputRequest & TaskInputRequest {
   return {
-    action: { callId: "call", input: {}, kind: "tool-call", toolName: "deploy" },
-    kind: "question",
+    action: { callId: "call", input: { region: "secret" }, kind: "tool-call", toolName: "deploy" },
     prompt: "Which region?",
-    requestId,
-    ...overrides,
+    ...stored,
   };
 }
 
@@ -25,11 +45,15 @@ function batch(requests: readonly TaskInputRequest[], sequence = 0): TaskInputBa
   return { requests, sequence, stepIndex: 1, turnId: "turn_c" };
 }
 
-function requested(requests: readonly TaskInputRequest[], sequence = 0) {
-  return {
-    data: { requests, sequence, stepIndex: 1, turnId: "turn_c" },
-    type: "input.requested" as const,
+function requested(requests: readonly TaskInputRequest[], sequence = 0, taskId?: string) {
+  const data: InputRequestedStreamEvent["data"] = {
+    requests: requests.map(asked),
+    sequence,
+    stepIndex: 1,
+    turnId: "turn_c",
   };
+  if (taskId !== undefined) data.taskId = taskId;
+  return { data, type: "input.requested" as const };
 }
 
 function resolved(...requestIds: string[]) {
@@ -48,6 +72,22 @@ function resolved(...requestIds: string[]) {
   };
 }
 
+function ignored(requestIds: readonly string[], sequence = 0): TaskInputEvent {
+  return {
+    data: {
+      resolutions: requestIds.map((requestId) => ({
+        kind: "question",
+        outcome: "ignored",
+        requestId,
+      })),
+      sequence,
+      stepIndex: 1,
+      turnId: "turn_c",
+    },
+    type: "input.resolved",
+  };
+}
+
 describe("applyTaskInputEvent", () => {
   it("adds a requested batch and removes each request its child resolves", () => {
     const added = applyTaskInputEvent([], requested([request("a"), request("b")]));
@@ -56,6 +96,19 @@ describe("applyTaskInputEvent", () => {
     expect(applyTaskInputEvent(added, resolved("a"))).toEqual([batch([request("b")])]);
     expect(applyTaskInputEvent(added, resolved("a", "b"))).toEqual([]);
     expect(applyTaskInputEvent(added, resolved("unknown"))).toEqual(added);
+  });
+
+  it("keeps only what routes an answer, not the prompt or the tool call's arguments", () => {
+    const pick = request("a", {
+      allowFreeform: false,
+      dismissible: true,
+      options: [{ id: "eu", label: "EU" }],
+    });
+
+    const [stored] = applyTaskInputEvent([], requested([pick]));
+
+    expect(stored?.requests).toEqual([pick]);
+    expect(JSON.stringify(stored)).not.toContain("secret");
   });
 
   it("ignores a repeated report of requests it already holds", () => {
@@ -69,12 +122,15 @@ describe("applyTaskInputEvent", () => {
 
   it("keeps two grandchildren's batches, asked through one child, side by side", () => {
     // Alice's research agent delegated to two agents, and each asked a question.
-    const first = applyTaskInputEvent([], requested([request("billing-q")], 1));
-    const both = applyTaskInputEvent(first, requested([request("support-q")], 2));
-    expect(both).toEqual([batch([request("billing-q")], 1), batch([request("support-q")], 2)]);
+    const first = applyTaskInputEvent([], requested([request("billing-q")], 0, "billing-aaaaaa"));
+    const both = applyTaskInputEvent(first, requested([request("support-q")], 0, "support-bbbbbb"));
+    expect(both).toEqual([
+      { ...batch([request("billing-q")]), from: "billing-aaaaaa" },
+      { ...batch([request("support-q")]), from: "support-bbbbbb" },
+    ]);
 
     expect(applyTaskInputEvent(both, resolved("billing-q"))).toEqual([
-      batch([request("support-q")], 2),
+      { ...batch([request("support-q")]), from: "support-bbbbbb" },
     ]);
   });
 });
@@ -82,15 +138,150 @@ describe("applyTaskInputEvent", () => {
 const WORKFLOW = { commandToken: "control", kind: "workflow" as const, runId: "run" };
 const LOCAL = { continuationToken: "child-token", kind: "local" as const, sessionId: "child" };
 
-function waiting(id: string, requests: readonly TaskInputRequest[], child: TaskRecord["child"]) {
+function waiting(
+  id: string,
+  requests: readonly TaskInputRequest[],
+  child: TaskRecord["child"],
+  overrides: Partial<TaskRecord> = {},
+) {
   return createTaskRecord({
     callId: `call-${id}`,
     child,
+    clockStoppedAt: NOW,
     id,
     input: [batch(requests)],
+    kind: child?.kind === "workflow" ? "workflow" : "agent",
     status: "input_required",
+    ...overrides,
   });
 }
+
+/** Records each publication the way the owner does. */
+function record(table: TaskTable, publications: readonly TaskInputPublication[]): TaskTable {
+  return publications.reduce((current, { event, taskId }) => {
+    const task = findTask(current, taskId)!;
+    if (event.type !== "input.requested" && event.type !== "input.resolved") return current;
+    const input = applyTaskInputEvent(task.input ?? [], event);
+    const message = { generation: task.generation, input, kind: "task.input" as const, taskId };
+    return applyTaskMessage(current, message, NOW).table;
+  }, table);
+}
+
+describe("withdrawnTaskInput", () => {
+  const research = waiting("research-aaaaaa", [request("r-1"), request("a-1")], LOCAL, {
+    deadlineAt: "2026-09-24T15:00:00.000Z",
+  });
+  const deploy = waiting("deploy-bbbbbb", [request("d-1")], WORKFLOW);
+  const before = taskTable([research, deploy]);
+
+  it.each([
+    ["cancels", cancelTask(before, research.id, NOW).table],
+    ["times out", timeOutTask(before, research.id, NOW).table],
+    [
+      "settles, like a child that finished past its approval",
+      applyTaskMessage(
+        before,
+        {
+          generation: 1,
+          kind: "task.settled",
+          outcome: { output: "done", status: "completed" },
+          taskId: research.id,
+        },
+        NOW,
+      ).table,
+    ],
+  ])("withdraws every request of a task the owner %s", (_label, after) => {
+    expect(taskInputResolutions(withdrawnTaskInput(before, after))).toEqual([
+      { event: ignored(["r-1", "a-1"]), taskId: research.id },
+    ]);
+  });
+
+  it("withdraws a workflow run's open question when its run ends", () => {
+    const after = applyTaskMessage(
+      before,
+      { generation: 1, kind: "task.settled", outcome: { status: "cancelled" }, taskId: deploy.id },
+      NOW,
+    ).table;
+
+    expect(taskInputResolutions(withdrawnTaskInput(before, after))).toEqual([
+      { event: ignored(["d-1"]), taskId: deploy.id },
+    ]);
+  });
+
+  it("withdraws nothing a task still waits on", () => {
+    expect(withdrawnTaskInput(before, before)).toEqual([]);
+  });
+});
+
+describe("admitTaskInputEvent", () => {
+  const research = waiting("research-aaaaaa", [request("r-1")], LOCAL);
+  const billing = waiting("billing-cccccc", [request("b-1")], LOCAL);
+  const table = taskTable([research, billing]);
+  const admit = (event: TaskInputEvent, sessionPending: readonly string[] = []) =>
+    admitTaskInputEvent({
+      event,
+      record: research,
+      sessionPending: new Set(sessionPending),
+      table,
+    });
+
+  it("keeps only the resolutions of requests its own task waits on", () => {
+    // Bob's billing agent cannot clear Alice's research question, nor the session's own approval.
+    expect(admit(resolved("b-1", "own-approval"))).toEqual({ events: [], refused: [] });
+    expect(admit(resolved("r-1", "b-1")).events).toEqual([resolved("r-1")]);
+  });
+
+  it("refuses requested IDs another task or the session already waits on, and drops repeats", () => {
+    const result = admit(
+      requested([request("b-1"), request("own"), request("r-1"), request("r-2")], 3),
+      ["own"],
+    );
+
+    expect(result).toEqual({
+      events: [requested([request("r-2")], 3)],
+      refused: ["b-1", "own"],
+    });
+    expect(admit(requested([request("r-1")], 3))).toEqual({ events: [], refused: [] });
+  });
+
+  it("withdraws the batch a retried child step asked first, at the same coordinates", () => {
+    const result = admit(requested([request("r-2")]));
+
+    expect(result.events).toEqual([ignored(["r-1"]), requested([request("r-2")])]);
+    expect(
+      findTask(
+        record(
+          table,
+          result.events.map((event) => ({ event, taskId: research.id })),
+        ),
+        research.id,
+      )?.input,
+    ).toEqual([batch([request("r-2")])]);
+  });
+
+  it("keeps a batch at the same coordinates that came from a descendant or a workflow run", () => {
+    // A grandchild's session numbers its turns like the child's own.
+    const forwarded = admit(requested([request("g-1")], 0, "grandchild-dddddd"));
+    expect(forwarded.events).toEqual([requested([request("g-1")], 0, "grandchild-dddddd")]);
+
+    const deploy = waiting("deploy-bbbbbb", [request("d-1")], WORKFLOW);
+    const second = admitTaskInputEvent({
+      event: requested([request("d-2")]),
+      record: deploy,
+      sessionPending: new Set(),
+      table: taskTable([deploy]),
+    });
+    expect(second.events).toEqual([requested([request("d-2")])]);
+  });
+
+  it("passes other input events through", () => {
+    const event: TaskInputEvent = {
+      data: { description: "Sign in", name: "linear", sequence: 0, stepIndex: 0, turnId: "t" },
+      type: "authorization.required",
+    };
+    expect(admit(event)).toEqual({ events: [event], refused: [] });
+  });
+});
 
 function plan(records: readonly TaskRecord[], delivery: Omit<DeliverHookPayload, "kind">) {
   return planTaskAnswers({ delivery: { kind: "deliver", ...delivery }, table: taskTable(records) });
@@ -103,6 +294,89 @@ function routed(answers: readonly TaskAnswers[]) {
     taskId: record.id,
   }));
 }
+
+describe("sentAnswerResolutions", () => {
+  it("retires a sent question, so neither a second message nor a second answer reaches it", () => {
+    const research = waiting("research-aaaaaa", [request("r-1")], LOCAL, {
+      deadlineAt: "2026-09-24T15:00:00.000Z",
+    });
+    const first = plan([research], { payloads: [{ message: "eu-west" }] });
+    const resolutions = sentAnswerResolutions(first.answers[0]!);
+
+    expect(resolutions).toEqual([
+      {
+        event: {
+          data: {
+            resolutions: [
+              {
+                kind: "question",
+                outcome: "answered",
+                requestId: "r-1",
+                response: { requestId: "r-1", text: "eu-west" },
+              },
+            ],
+            sequence: 0,
+            stepIndex: 1,
+            turnId: "turn_c",
+          },
+          type: "input.resolved",
+        },
+        taskId: research.id,
+      },
+    ]);
+    const table = record(taskTable([research]), resolutions);
+    expect(findTask(table, research.id)).toMatchObject({ status: "working" });
+    expect(findTask(table, research.id)).not.toHaveProperty("clockStoppedAt");
+
+    const message: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "Also check the logs." }],
+    };
+    expect(planTaskAnswers({ delivery: message, table }).remainder).toEqual(message);
+    const repeat: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ requestId: "r-1", text: "us-east" }] }],
+    };
+    expect(planTaskAnswers({ delivery: repeat, table }).remainder).toEqual(repeat);
+  });
+
+  it("keeps an approval until the child resolves it, since its policy may refuse the responder", () => {
+    const research = waiting(
+      "research-aaaaaa",
+      [request("a-1", { kind: "tool-approval" }), request("r-1")],
+      LOCAL,
+    );
+    const answers = plan([research], {
+      payloads: [
+        {
+          inputResponses: [
+            { optionId: "approve", requestId: "a-1" },
+            { requestId: "r-1", text: "eu" },
+          ],
+        },
+      ],
+    }).answers;
+
+    const resolutions = sentAnswerResolutions(answers[0]!);
+
+    expect(resolutions.map(({ event }) => event.data)).toEqual([
+      expect.objectContaining({ resolutions: [expect.objectContaining({ requestId: "r-1" })] }),
+    ]);
+    expect(findTask(record(taskTable([research]), resolutions), research.id)?.input).toEqual([
+      batch([request("a-1", { kind: "tool-approval" })]),
+    ]);
+  });
+
+  it("ignores a dismissed workflow question", () => {
+    const pick = request("d-1", { dismissible: true, options: [{ id: "yes", label: "Yes" }] });
+    const deploy = waiting("deploy-bbbbbb", [pick], WORKFLOW);
+    const answers = plan([deploy], { payloads: [{ message: "What does this deploy?" }] }).answers;
+
+    expect(sentAnswerResolutions(answers[0]!)).toEqual([
+      { event: ignored(["d-1"]), taskId: deploy.id },
+    ]);
+  });
+});
 
 describe("planTaskAnswers", () => {
   it("routes a response to the task waiting on its request and keeps the rest", () => {

@@ -5,7 +5,10 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import type { InputRequest } from "#shared/input.js";
 import type { TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
+
+type AskRequest = InputRequest & Pick<TaskInputRequest, "dismissible">;
 
 export function workflowToolRunOutcomeToToolResult(
   message: WorkflowToolRunOutcomeMessage,
@@ -73,7 +76,7 @@ export function workflowAskInputEvent(
   if (typeof authored.prompt !== "string" || authored.prompt.length === 0) {
     throw new TypeError("A workflow tool run request needs a non-empty `prompt`.");
   }
-  const normalized: { -readonly [K in keyof TaskInputRequest]: TaskInputRequest[K] } = {
+  const normalized: { -readonly [K in keyof AskRequest]: AskRequest[K] } = {
     action: { callId: from.callId, input: from.input, kind: "tool-call", toolName: from.toolName },
     kind: "question",
     prompt: authored.prompt,

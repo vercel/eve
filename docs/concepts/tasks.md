@@ -139,7 +139,9 @@ A question or approval from an agent, local or remote, reaches the root session'
 
 A plain message from a person also answers an agent's question when it is the only pending question and the text matches one of its options or the question allows free text, the same rule as for a workflow tool's [`ctx.ask`](../tools/workflows#ask-a-human-ctxask). A plain message never answers an approval.
 
-The agent checks each answer and resolves the request itself. When it does, the root session's stream carries the agent's `input.resolved`, which names each request by its `requestId`. Cancelling the turn withdraws the requests of the calls it waited on; a background task's requests stay answerable.
+Once the answer to an agent's question reaches the agent, the root session's stream carries the question's `input.resolved`, and the question takes no other answer: a later message or response for it stays with the root session. An approval stays answerable until the agent resolves it, because the agent's [approval response policy](../human-in-the-loop#authorizing-approval-responses) may refuse the responder and keep the approval pending for another; the stream then carries the agent's `input.resolved`. Either event names each request by its `requestId`.
+
+A request is withdrawn when its task stops waiting on it for any other reason: the task is cancelled, times out, or finishes first. The root session's stream then carries `input.resolved` with `outcome: "ignored"` for the request, and an answer that arrives later stays with the root session. Cancelling a turn withdraws the requests of the calls it waited on; a background task's requests stay answerable.
 
 An answer that can never reach a remote agent fails its task: with `AGENT_SESSION_ENDED` when the agent's session is gone, and with `AGENT_UNREACHABLE` when the agent's deployment now uses another task protocol version. An answer that fails for a reason that may clear, such as a timeout, stays answerable.
 
@@ -173,7 +175,7 @@ Two settings bound a task, and they do different things:
 | `timeout` on `defineWorkflowTool`                 | Each call of the tool                  | None; the session's lifetime bounds it | The call fails with `TIMED_OUT`, and eve cancels the run          |
 | `detach: { timeout }` on `defineWorkflowTool`     | Waited calls in interactive root turns | None                                   | The call detaches and keeps working                               |
 
-Durations are milliseconds. `timeout: false` removes the limit, but the session's lifetime, `limits.sessionTimeoutMs`, still bounds every task. On the root agent, `timeout` applies to calls of the built-in `agent` tool. The clock stops while the task waits on a question or approval that reached the root session's channel, and resumes once every such request is resolved.
+Durations are milliseconds. `timeout: false` removes the limit, but the session's lifetime, `limits.sessionTimeoutMs`, still bounds every task. On the root agent, `timeout` applies to calls of the built-in `agent` tool. The clock stops while the task waits on a question or approval that reached the root session's channel, and resumes once every such request is resolved. A sign-in prompt does not stop the clock.
 
 A waited call that times out gets the `TIMED_OUT` error as its tool result, a background call delivers it as a failed task result, and `task.settled` reports `failed` with the same error. Before a call times out, eve checks its child once, so a child that finished but whose report was lost still settles the call with its result. For a remote agent, eve reads the remote session's result for that call. For a workflow tool, eve reads the run's status and the outcome the run returned; a run that failed before it reported fails the call with `EXECUTION_FAILED`. A local agent is not read, because it reports through the session's durable inbox, which eve does not hand off to another deployment while any task is working. A call with no time limit gets no such check: if its child's report never arrives, the call keeps waiting until the session ends. See [Limit a call with `timeout`](../tools/workflows#limit-a-call-with-timeout) and the subagent `timeout` in [What the parent sees](../subagents#what-the-parent-sees).
 
@@ -208,6 +210,7 @@ Consumers can rely on these rules:
 - Continuing an idle agent emits another `task.started` and `task.settled` pair with the same `taskId` and a new `callId`. A message that joins a working agent's call emits nothing new, unless the agent had already answered: it then runs the message as its next turn, reported as another `task.started` with the same `taskId` and `mode: "background"`.
 - A `sleep` that a steering message ends early settles with `status: "cancelled"`, while its `action.result` carries `{ waitedSeconds }`.
 - When the root session proxies a child's `input.requested`, `approval.candidate`, `approval.settled`, `authorization.required`, or `authorization.completed` event, the event carries the child's `taskId`. An `input.requested` event for a workflow tool call's own question or approval carries that call's `taskId`. The matching `input.resolved` carries no `taskId`; correlate it with the request through `requestId`.
+- A request withdrawn because its task settled gets its `input.resolved`, with `outcome: "ignored"`, before the task's `task.settled`.
 
 Follow an agent's own progress by passing its `task.started` event to [`session.streamSubagent()`](../guides/client/streaming#follow-a-subagent), which reads `child.streamPath`.
 

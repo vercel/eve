@@ -505,7 +505,7 @@ describe("answerTask", () => {
   };
   const answer = (
     child: TaskRecord["child"],
-    extra: { readonly dismissed?: readonly string[]; readonly callbackAlias?: string } = {},
+    extra: { readonly dismissed?: readonly string[] } = {},
   ) =>
     answerTask({
       answers: {
@@ -514,15 +514,15 @@ describe("answerTask", () => {
         record: createTaskRecord({ child, creator: encodeTaskCreator({ auth: ALICE }) }),
         responses,
       },
-      callbackAlias: extra.callbackAlias,
       ctx: contextWithBundle(),
       delivery,
+      ownerSessionId: "owner",
     });
 
   it("delivers a local agent's answers to its inbox as the answerer's delivery", async () => {
     vi.mocked(resumeHook).mockResolvedValueOnce({ runId: "child-run" } as never);
 
-    await answer(localChild);
+    await expect(answer(localChild)).resolves.toBe("delivered");
 
     expect(resumeHook).toHaveBeenCalledExactlyOnceWith(
       "eve:inbox:v1:eve:session:child-session:inbox",
@@ -535,7 +535,7 @@ describe("answerTask", () => {
   });
 
   it("answers where a remote agent runs, attributed to the principal that answered", async () => {
-    await answer(remoteChild);
+    await expect(answer(remoteChild)).resolves.toBe("delivered");
 
     // Bob answers Alice's agent: an approval policy there checks Bob, while the
     // agent, a delegated session, keeps acting as Alice.
@@ -552,7 +552,7 @@ describe("answerTask", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
 
-    await answer(remoteChild, { callbackAlias: "eve:task-callback:alias" });
+    await expect(answer(remoteChild)).resolves.toBe("retry");
 
     expect(resumeHook).not.toHaveBeenCalled();
     error.mockRestore();
@@ -579,9 +579,10 @@ describe("answerTask", () => {
     vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(cause);
     vi.mocked(isRetryableRemoteAgentContinueError).mockReturnValue(false);
 
-    await answer(remoteChild, { callbackAlias: "eve:task-callback:alias" });
+    await expect(answer(remoteChild)).resolves.toBe("failed");
 
-    expect(resumeHook).toHaveBeenCalledExactlyOnceWith("eve:inbox:v1:eve:task-callback:alias", {
+    // The owner's own inbox takes the failure, with or without a callback alias.
+    expect(resumeHook).toHaveBeenCalledExactlyOnceWith(ownerInboxHookToken("owner"), {
       kind: "runtime-action-result",
       results: [
         expect.objectContaining({
@@ -603,7 +604,7 @@ describe("answerTask", () => {
       .mockResolvedValueOnce(undefined as never)
       .mockRejectedValueOnce(new HookNotFoundError("ask-2"));
 
-    await answer(workflowChild, { dismissed: ["ask-2"] });
+    await expect(answer(workflowChild, { dismissed: ["ask-2"] })).resolves.toBe("delivered");
 
     // The ask's hook is its request ID; a run that already ended takes nothing.
     expect(vi.mocked(resumeHook).mock.calls).toEqual([

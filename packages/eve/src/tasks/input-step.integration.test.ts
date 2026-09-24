@@ -7,6 +7,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import {
@@ -14,7 +15,9 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { answerTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
+import type { InputRequest } from "#shared/input.js";
+import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
+import { answerTasksStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
 import type { TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
@@ -25,15 +28,19 @@ vi.mock("#context/serialize.js", () => ({
   serializeContext: vi.fn(),
 }));
 vi.mock("#tasks/transport.js", () => ({ answerTask: vi.fn() }));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  resumeHook: vi.fn(),
+}));
 
 const NOW = "2026-09-24T14:00:00.000Z";
 const TASK_ID = "research-abc234";
 const COORDINATES = { sequence: 4, stepIndex: 1, turnId: "child-turn" };
-const QUESTION: TaskInputRequest = {
+const STORED: TaskInputRequest = { kind: "question", requestId: "q-1" };
+const QUESTION: InputRequest = {
+  ...STORED,
   action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "pick_region" },
-  kind: "question",
   prompt: "Which region?",
-  requestId: "q-1",
 };
 
 const turnAgent = {
@@ -88,12 +95,16 @@ function ownerState(records: readonly TaskRecord[]): DurableSessionState {
   };
 }
 
+function writable() {
+  return new WritableStream<Uint8Array>({ write: (chunk) => void chunks.push(chunk) });
+}
+
 function surface(sessionState: DurableSessionState, event: TaskInputEvent) {
   return surfaceTaskInputStep({
     event,
     serializedContext: {},
     sessionState,
-    sessionWritable: new WritableStream({ write: (chunk) => void chunks.push(chunk) }),
+    sessionWritable: writable(),
     taskId: TASK_ID,
   });
 }
@@ -105,6 +116,35 @@ function published(): MessageStreamEvent[] {
 function record(state: DurableSessionState): TaskRecord | undefined {
   return getTaskTable(state.snapshot.session).records[0];
 }
+
+function resolution(outcome: "answered" | "ignored") {
+  return {
+    data: {
+      ...COORDINATES,
+      resolutions: [
+        outcome === "answered"
+          ? {
+              kind: "question" as const,
+              outcome,
+              requestId: "q-1",
+              response: { requestId: "q-1", text: "eu" },
+            }
+          : { kind: "question" as const, outcome, requestId: "q-1" },
+      ],
+    },
+    type: "input.resolved" as const,
+  };
+}
+
+const waiting = (overrides: Partial<TaskRecord> = {}) =>
+  createTaskRecord({
+    child: { continuationToken: "child-token", kind: "local", sessionId: "child" },
+    clockStoppedAt: NOW,
+    deadlineAt: "2026-09-24T15:00:00.000Z",
+    input: [{ ...COORDINATES, requests: [STORED] }],
+    status: "input_required",
+    ...overrides,
+  });
 
 describe("surfaceTaskInputStep", () => {
   it("surfaces a child's question with the task's ID, ends the turn's stream, and stops the clock", async () => {
@@ -140,7 +180,7 @@ describe("surfaceTaskInputStep", () => {
     expect(seen).toEqual([TASK_ID]);
     expect(record(result.sessionState)).toMatchObject({
       clockStoppedAt: NOW,
-      input: [{ ...COORDINATES, requests: [{ ...QUESTION, dismissible: true }] }],
+      input: [{ ...COORDINATES, from: "x-zzzzzz", requests: [{ ...STORED, dismissible: true }] }],
       status: "input_required",
     });
     expect(ctx.require(ChannelKey).state).toEqual({ pending: ["q-1"] });
@@ -150,36 +190,27 @@ describe("surfaceTaskInputStep", () => {
 
   it("repeats a child's resolution and resumes the task's clock without ending a turn", async () => {
     setup();
-    const waiting = createTaskRecord({
-      clockStoppedAt: NOW,
-      deadlineAt: "2026-09-24T15:00:00.000Z",
-      input: [{ ...COORDINATES, requests: [QUESTION] }],
-      status: "input_required",
-    });
     vi.setSystemTime(new Date("2026-09-24T14:10:00.000Z"));
-    const resolution = {
-      data: {
-        ...COORDINATES,
-        resolutions: [
-          {
-            kind: "question" as const,
-            outcome: "answered" as const,
-            requestId: "q-1",
-            response: { requestId: "q-1", text: "eu" },
-          },
-        ],
-      },
-      type: "input.resolved" as const,
-    };
 
-    const result = await surface(ownerState([waiting]), resolution);
+    const result = await surface(ownerState([waiting()]), resolution("answered"));
 
-    expect(published()).toEqual([expect.objectContaining(resolution)]);
+    expect(published()).toEqual([expect.objectContaining(resolution("answered"))]);
     expect(record(result.sessionState)).toMatchObject({
       deadlineAt: "2026-09-24T15:10:00.000Z",
       status: "working",
     });
     expect(record(result.sessionState)).not.toHaveProperty("input");
+  });
+
+  it("publishes nothing for a resolution of requests its task does not wait on", async () => {
+    setup();
+    const state = ownerState([createTaskRecord()]);
+
+    await expect(surface(state, resolution("answered"))).resolves.toEqual({
+      serializedContext: {},
+      sessionState: state,
+    });
+    expect(published()).toEqual([]);
   });
 
   it("attributes sign-in and approval events to the task; only sign-in ends the turn's stream", async () => {
@@ -211,82 +242,91 @@ describe("surfaceTaskInputStep", () => {
     ]);
     expect(events[0]).toMatchObject({ data: { name: "linear", taskId: TASK_ID } });
     expect(events[3]).toMatchObject({ data: { requestId: "a-1", taskId: TASK_ID } });
-    // Neither records a request: a sign-in completes against the child directly.
+    // Neither records a request: a sign-in does not stop the task's clock.
     expect(record(afterSignIn.sessionState)).not.toHaveProperty("input");
   });
 });
 
-describe("answerTaskInputStep", () => {
-  const delivery = { kind: "deliver" as const, payloads: [] };
+describe("publishTaskInputStep", () => {
+  it("passes an intermediate agent's withdrawal on to its own caller", async () => {
+    // Alice's research agent cancelled its billing task, which held a question.
+    setup({
+      kind: SUBAGENT_ADAPTER_KIND,
+      state: {
+        callId: "research-call",
+        parentContinuationToken: "eve:inbox:v1:eve:session:root:inbox",
+        parentSessionId: "root",
+        subagentName: "research",
+      },
+    });
+    const withdrawn = resolution("ignored");
 
-  function answer(
-    sessionState: DurableSessionState,
-    records: readonly TaskRecord[],
-    dismissed = false,
-  ) {
-    return answerTaskInputStep({
-      answers: records.map((task) => ({
-        deliveryMetadata: [],
-        dismissed: dismissed ? ["q-1"] : [],
-        record: task,
-        responses: dismissed ? [] : [{ requestId: "q-1", text: "eu" }],
-      })),
+    await publishTaskInputStep({
+      events: [{ event: withdrawn, taskId: TASK_ID }],
+      serializedContext: {},
+      sessionState: ownerState([createTaskRecord({ status: "cancelled" })]),
+      sessionWritable: writable(),
+    });
+
+    expect(published()).toEqual([expect.objectContaining(withdrawn)]);
+    expect(resumeHook).toHaveBeenCalledExactlyOnceWith("eve:inbox:v1:eve:session:root:inbox", {
+      callId: "research-call",
+      childSessionId: "owner",
+      event: withdrawn,
+      kind: "task.input",
+      subagentName: "research",
+    });
+  });
+});
+
+describe("answerTasksStep", () => {
+  const delivery = { kind: "deliver" as const, payloads: [] };
+  const answers = (task: TaskRecord) => ({
+    deliveryMetadata: [],
+    dismissed: [],
+    record: task,
+    responses: [{ requestId: "q-1", text: "eu" }],
+  });
+
+  it("returns the resolutions of the answers that reached a child, and publishes nothing", async () => {
+    setup();
+    const local = waiting();
+    const remote = waiting({ id: "billing-aaaaaa" });
+    vi.mocked(answerTask).mockResolvedValueOnce("delivered").mockResolvedValueOnce("retry");
+
+    const resolved = await answerTasksStep({
+      answers: [answers(local), answers(remote)],
       delivery,
       serializedContext: {},
-      sessionState,
-      sessionWritable: new WritableStream({ write: (chunk) => void chunks.push(chunk) }),
-    });
-  }
-
-  it("sends a child session its answers and leaves its requests until it resolves them", async () => {
-    setup();
-    const local = createTaskRecord({
-      child: { continuationToken: "child-token", kind: "local", sessionId: "child" },
-      input: [{ ...COORDINATES, requests: [QUESTION] }],
-      status: "input_required",
+      sessionId: "owner",
     });
 
-    await expect(answer(ownerState([local]), [local])).resolves.toEqual({});
-
-    expect(answerTask).toHaveBeenCalledExactlyOnceWith({
-      answers: expect.objectContaining({ record: local }),
-      callbackAlias: undefined,
+    expect(answerTask).toHaveBeenNthCalledWith(1, {
+      answers: answers(local),
       ctx,
       delivery,
+      ownerSessionId: "owner",
     });
+    // The remote answer may yet arrive, so its question stays answerable.
+    expect(resolved).toEqual([{ event: resolution("answered"), taskId: TASK_ID }]);
     expect(published()).toEqual([]);
   });
 
-  it.each([
-    ["answered", false, { outcome: "answered", response: { requestId: "q-1", text: "eu" } }],
-    ["dismissed", true, { outcome: "ignored" }],
-  ])(
-    "resolves a workflow run's %s question itself, at the question's coordinates",
-    async (_label, dismissed, resolution) => {
-      setup();
-      const workflow = createTaskRecord({
-        child: { commandToken: "control", kind: "workflow", runId: "run" },
-        clockStoppedAt: NOW,
-        input: [{ ...COORDINATES, requests: [{ ...QUESTION, dismissible: true }] }],
-        kind: "workflow",
-        status: "input_required",
-      });
+  it("resolves a question the owner answered, restarting its task's clock", async () => {
+    setup();
+    vi.setSystemTime(new Date("2026-09-24T14:10:00.000Z"));
 
-      const result = await answer(ownerState([workflow]), [workflow], dismissed);
+    const result = await publishTaskInputStep({
+      events: [{ event: resolution("answered"), taskId: TASK_ID }],
+      serializedContext: {},
+      sessionState: ownerState([waiting()]),
+      sessionWritable: writable(),
+    });
 
-      expect(answerTask).toHaveBeenCalledOnce();
-      expect(published()).toEqual([
-        expect.objectContaining({
-          data: {
-            ...COORDINATES,
-            resolutions: [{ kind: "question", requestId: "q-1", ...resolution }],
-          },
-          type: "input.resolved",
-        }),
-      ]);
-      expect(result.sessionState && record(result.sessionState)).toMatchObject({
-        status: "working",
-      });
-    },
-  );
+    expect(published()).toEqual([expect.objectContaining(resolution("answered"))]);
+    expect(record(result.sessionState)).toMatchObject({
+      deadlineAt: "2026-09-24T15:10:00.000Z",
+      status: "working",
+    });
+  });
 });
