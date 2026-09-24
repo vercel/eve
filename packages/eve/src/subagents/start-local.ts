@@ -44,7 +44,7 @@ export async function startLocalSubagent(input: {
     compiledArtifactsSource: input.bundle.compiledArtifactsSource,
     dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
-    ...(typeof action.input.model === "string" ? { sessionModelId: action.input.model } : {}),
+    sessionModelId: typeof action.input.model === "string" ? action.input.model : undefined,
   });
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
