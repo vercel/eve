@@ -317,6 +317,8 @@ Every subagent activation starts its own trace. The first child's `invoke_agent`
 
 Each `agent()` call inside an authored workflow has its own `agent.action` caller span, including sequential, parallel, and background calls. A workflow tool that coordinates one of those calls has an enclosing `invoke_workflow <tool>` span; a workflow tool without agent calls remains `agent.action`. The tool also keeps its `execute_tool <tool>` span. Only agent execution uses `invoke_agent`.
 
+Outbound MCP `tools/call` requests add MCP semantic attributes to the matching `execute_tool` span. When eve has no tool span to enrich, it creates a `CLIENT` `tools/call <tool>` span. Each `tools/list` discovery also has a `CLIENT` span. Configured OpenTelemetry propagation fields are injected into MCP `params._meta` for JSON-RPC bodies up to 1 MiB and propagation metadata up to 8 KiB; larger requests are sent unchanged. eve removes its audience and session-lineage baggage before forwarding, and keeps the input/output content-capture policy local.
+
 A durable conversation produces one bounded trace per turn. Worker replacements reuse the prepared context for the same turn, while a later turn or an independently replayed attempt starts a fresh trace. Passing the conversation ID shows every trace it produced, oldest first.
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
