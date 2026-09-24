@@ -17,6 +17,14 @@ describe("renderBlockLines", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
+  it("keeps a transient command invocation visible without a progress glyph", () => {
+    const block = { kind: "command", body: "/help", live: true } as const;
+    expect(renderBlockLines(block, 60, theme, { ...ctx, transientPanelOpen: true })).toEqual([
+      "│ /help",
+    ]);
+    expect(renderBlockLines(block, 60, theme, ctx)).toEqual(["▪ /help"]);
+  });
+
   it("marks rendered assistant Markdown with the brand triangle", () => {
     const lines = render({ kind: "assistant", body: "all done" });
     expect(lines).toEqual(["▲ all done"]);

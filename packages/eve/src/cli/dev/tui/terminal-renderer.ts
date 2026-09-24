@@ -2013,7 +2013,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Lets `/help` select a command without leaving a transcript row. */
   async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
     this.#start();
-    this.#settleCommandEcho();
     this.#inputActive = false;
     let state = typeaheadFor(commands, "/");
     this.#transientPanel = (width) => {
@@ -2054,7 +2053,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Shows local application metadata without retaining it in the transcript. */
   async showInfoPanel(text: string): Promise<void> {
     this.#start();
-    this.#settleCommandEcho();
     this.#inputActive = false;
     const plainText = stripAnsi(text);
     let scroll = 0;
@@ -2098,6 +2096,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #closeTransientPanel(): void {
     this.#transientPanel = undefined;
+    this.#removePendingCommandEcho();
     this.#consumeKey = undefined;
     this.#transientPanelClose = undefined;
     this.#detachInput();
@@ -2106,11 +2105,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** Removes an invocation whose command clears the current view. */
   dismissCommandInvocation(): void {
+    if (this.#removePendingCommandEcho()) this.#paint();
+  }
+
+  #removePendingCommandEcho(): boolean {
     const block = this.#pendingCommandEcho;
-    if (block === undefined) return;
+    if (block === undefined) return false;
     this.#pendingCommandEcho = undefined;
     this.#blocks = this.#blocks.filter((candidate) => candidate !== block);
-    this.#paint();
+    return true;
   }
 
   /**
@@ -3301,6 +3304,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (closeTransientPanel !== undefined) {
       this.#transientPanelClose = undefined;
       this.#transientPanel = undefined;
+      this.#removePendingCommandEcho();
       this.#consumeKey = undefined;
       closeTransientPanel();
     }
@@ -4448,6 +4452,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     };
     if (previous !== undefined) context.previous = previous;
     if (this.#setupFlow !== undefined) context.setupFlowOpen = true;
+    if (this.#transientPanel !== undefined) context.transientPanelOpen = true;
     const rows = renderBlockLines(block, width, this.#theme, context);
     if ((block.depth ?? 0) === 0 && leadsWithGap(block, previous)) {
       return ["", ...rows];

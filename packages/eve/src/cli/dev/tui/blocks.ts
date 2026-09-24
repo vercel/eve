@@ -150,6 +150,8 @@ export interface RenderBlockContext {
   activityPulse: string;
   /** An open setup panel owns the pulse, so a running command's gutter holds still. */
   setupFlowOpen?: boolean;
+  /** A transient panel keeps its command echo live without a progress glyph. */
+  transientPanelOpen?: boolean;
   /** Whether prose responses are parsed and styled as Markdown. */
   renderMarkdown?: boolean;
   /**
@@ -445,7 +447,7 @@ function renderCommand(block: Block, theme: Theme, context: RenderBlockContext):
     return [`${commandGutter(block, theme)} ${c.dim(block.result)}`];
   }
   const gutter =
-    block.live !== true
+    block.live !== true || context.transientPanelOpen === true
       ? commandGutter(block, theme)
       : context.setupFlowOpen === true
         ? c.gray(theme.glyph.square)

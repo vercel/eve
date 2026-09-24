@@ -5508,8 +5508,12 @@ describe("TerminalRenderer command typeahead", () => {
     input.send("\x1b");
     expect(await choice).toBeUndefined();
     expect(screen.snapshot()).not.toContain("Show available commands");
-    expect(screen.snapshot()).toContain("│ /help");
+    expect(screen.snapshot()).not.toContain("│ /help");
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
+    renderer.renderCommandResult("", "success", "Model set to anthropic/claude-opus-4.8");
     renderer.shutdown();
+    expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
+    expect(screen.snapshot()).not.toContain("/help");
   });
 
   it("lets /help choose a command without retaining the drawer", async () => {
@@ -5577,8 +5581,12 @@ describe("TerminalRenderer command typeahead", () => {
     input.send("\x1b");
     await panel;
     expect(screen.snapshot()).not.toContain("Application");
-    expect(screen.snapshot()).toContain("│ /info");
+    expect(screen.snapshot()).not.toContain("│ /info");
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
+    renderer.renderCommandResult("", "success", "Model set to anthropic/claude-opus-4.8");
     renderer.shutdown();
+    expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
+    expect(screen.snapshot()).not.toContain("/info");
   });
 
   it("closes the transient info panel without retaining its contents", async () => {
