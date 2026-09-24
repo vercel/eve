@@ -169,6 +169,8 @@ operation key when upserting records across replays.
 
 An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
 
+When an action invokes an agent, including a subagent or a background agent task, `action.completed` and `action.failed` include the `usage` that the parent settled for that agent before the action ended. `usage.costUsd` is the provider-reported model cost. It is absent when a settled agent turn reported no cost or when an agent turn had not settled by the time the action ended, such as a child still stopping after cancellation. Its presence does not prove that every model call was priced. `usage` is absent when no agent usage settled, and it never includes spend that settles after the terminal event.
+
 Handlers from different files run concurrently and are failure-isolated. Do
 not depend on execution order. Use `flush` to drain buffered records and
 `shutdown` to release resources.

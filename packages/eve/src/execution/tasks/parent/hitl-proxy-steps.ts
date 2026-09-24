@@ -21,7 +21,7 @@ import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { isInputRequest } from "#shared/input.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentHandleStore, hasClaimedAgentHandle } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { getBackgroundTasks, recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
@@ -121,7 +121,9 @@ export async function recordTerminalTaskViewsStep(input: {
   for (const view of input.views) {
     const entry = getBackgroundTasks(session.state).get(view.taskId)?.run;
     if (entry === undefined) continue;
-    const recorded = recordWorkflowTaskView(session.state, view);
+    const recorded = recordWorkflowTaskView(session.state, view, {
+      unsettledAgent: hasClaimedAgentHandle(session.state, view.taskId),
+    });
     session = { ...session, state: recorded.state };
     if (
       recorded.firstOutcome &&

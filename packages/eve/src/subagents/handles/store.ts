@@ -408,6 +408,18 @@ export function getAgentHandleStore(
   return parsed.data;
 }
 
+/** True while an agent invocation owned by `ownerId` has not reported its settlement. */
+export function hasClaimedAgentHandle(
+  state: SessionStateMap | undefined,
+  ownerId: string,
+): boolean {
+  return (
+    getAgentHandleStore(state)?.handles.some(
+      (handle) => handle.phase === "claimed" && handle.ownerId === ownerId,
+    ) ?? false
+  );
+}
+
 /** Writes the validated agent handle store under its single session-state key. */
 export function setAgentHandleStore(
   state: SessionStateMap | undefined,
