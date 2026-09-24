@@ -217,6 +217,41 @@ Every MCP operation reruns the configured auth policy. With authenticated polici
 
 With `none()`, every caller shares the anonymous principal, so the random invocation ID becomes a bearer capability. Keep it out of logs and URLs and treat it as usable until workflow retention expires. Responses include `expiresAt` when the workflow backend reports a retention deadline.
 
+## Expose tools and skills directly
+
+`mcpChannel` delegates whole tasks. When another agent should call your agent's tools one at a time instead, add `mcpCapabilitiesChannel`. It publishes the agent's own tools and skills as a stateless MCP server (protocol `2026-07-28`, JSON responses) at `/eve/v1/mcp-capabilities`:
+
+```ts title="agent/channels/mcp-capabilities.ts"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { mcpCapabilitiesChannel } from "eve/channels/mcp";
+
+export default mcpCapabilitiesChannel({
+  auth: vercelOidc({
+    subjects: [vercelSubject({ teamSlug: "acme", projectName: "orchestrator", environment: "*" })],
+  }),
+});
+```
+
+Authentication works as in `mcpChannel`, including `oauthResource(...)` metadata. Set `route` to publish somewhere else.
+
+- `tools/list` returns authored and extension tools. Each tool carries `_meta["eve.dev/owner"]` (the agent name) and `_meta["eve.dev/approval"]`. Framework tools such as `load_skill` and `bash`, workflow tools, and `execution: "background"` tools are not listed.
+- `tools/call` runs the tool's `execute` on your deployment, in the same context it gets in the model loop: `ctx.getSandbox()`, `ctx.getSkill()`, `ctx.getToken()`, and `ctx.session.auth` (the authenticated caller) all work. The result's `content` is the tool's `toModelOutput`, or its output as text or JSON. Object outputs also appear in `structuredContent`. A thrown error becomes an `isError` result.
+- `resources/list` returns one `skill://<agent>/<skill>` resource per skill, with supporting file paths in `_meta["eve.dev/files"]`. `resources/read` returns the skill instructions, or a supporting file at `skill://<agent>/<skill>/<path>`.
+
+### Sessions and sandboxes
+
+Send `eve-capability-session: <key>` (or `params._meta["eve.dev/session"]`) on every request of one caller conversation. eve derives the tool session ID as `sha256(principal + "\n" + key)`, so two callers cannot share a session by choosing the same key. Every call with the same key sees the same `ctx.session.id` and the same sandbox, including across function instances, because providers name the sandbox after the session ID. `server/discover` starts provisioning that sandbox in the background and reports `_meta["eve.dev/sandbox"]` as `"none"`, `"warming"`, or `"ready"`.
+
+Requests without a key get a one-off session, and eve deletes its sandbox after the request.
+
+On an instance that has not seen the session yet, eve runs your `defineSandbox()` function again against the existing sandbox, so keep sandbox setup idempotent.
+
+### Approvals and sign-in
+
+A tool that needs approval, or a `ctx.getToken()` call that needs the user to sign in, returns an MCP input-required result instead of running. Approval is a form elicitation with a boolean `approved` field. Sign-in is a URL elicitation. Retry `tools/call` with the same arguments, the `inputResponses`, and the returned `requestState`. eve rejects a `requestState` from a different session, tool, or argument set. Clients must declare `elicitation` (`form` and `url`) in their client capabilities to receive these requests.
+
+Sign-in callbacks arrive at `<route>/authorize/:name/:attemptId`. That route is public, so the provider's browser redirect can reach it.
+
 ## What to read next
 
 - [Authentication](../guides/auth-and-route-protection): configure inbound route authentication

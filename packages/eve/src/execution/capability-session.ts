@@ -179,12 +179,19 @@ export function resolveCapabilitySessionScope(
 interface CachedSandbox {
   readonly access: SandboxAccess;
   lastUsedAt: number;
+  readonly openedAt: number;
   ready: boolean;
   warming?: Promise<void>;
 }
 
 const SANDBOX_CACHE_MAX_ENTRIES = 256;
 const SANDBOX_CACHE_IDLE_MS = 30 * 60_000;
+/**
+ * Providers stop sandboxes on their own clock (Vercel: 30 minutes after
+ * start). Reopening is cheap because `start` reattaches to the same named
+ * sandbox and resumes it, so handles are refreshed well before that.
+ */
+const SANDBOX_HANDLE_MAX_AGE_MS = 10 * 60_000;
 const sandboxCache = new Map<string, CachedSandbox>();
 
 function sandboxCacheKey(runtime: CapabilityRuntime, sessionId: string): string {
@@ -210,16 +217,19 @@ async function acquireSandbox(
   scope: CapabilitySessionScope,
 ): Promise<CachedSandbox | undefined> {
   if (!runtime.hasSandbox) return undefined;
-  if (scope.ephemeral) {
-    return { access: await runtime.openSandbox(scope.id), lastUsedAt: Date.now(), ready: false };
-  }
-  const key = sandboxCacheKey(runtime, scope.id);
   const now = Date.now();
+  const open = async (): Promise<CachedSandbox> => ({
+    access: await runtime.openSandbox(scope.id),
+    lastUsedAt: now,
+    openedAt: now,
+    ready: false,
+  });
+  if (scope.ephemeral) return await open();
+  const key = sandboxCacheKey(runtime, scope.id);
   let entry = sandboxCache.get(key);
-  if (entry !== undefined) {
-    sandboxCache.delete(key);
-  } else {
-    entry = { access: await runtime.openSandbox(scope.id), lastUsedAt: now, ready: false };
+  sandboxCache.delete(key);
+  if (entry === undefined || now - entry.openedAt > SANDBOX_HANDLE_MAX_AGE_MS) {
+    entry = await open();
   }
   entry.lastUsedAt = now;
   sandboxCache.set(key, entry);
