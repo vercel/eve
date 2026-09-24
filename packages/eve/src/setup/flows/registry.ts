@@ -44,6 +44,8 @@ export async function runRegistryFlow(input: {
   signal?: AbortSignal;
   /** Registry item supplied by `/add <item>`, installed directly. */
   initialAddress?: string;
+  /** Forward a failed installer's buffered stderr to the local dev log capture. */
+  onInstallFailureOutput?: (stderr: string) => void;
   onScreen?: (input: { screen: "registry_install"; registrySelectedCount?: number }) => void;
   onItemStart?: (item: Item, index: number, total: number) => void;
   /** Gives each installation its own cancellation boundary without ending the batch. */
@@ -104,6 +106,7 @@ export async function runRegistryFlow(input: {
             silent: true,
             prompter: input.prompter,
             signal,
+            onInstallFailureOutput: input.onInstallFailureOutput,
           });
         const run = () => (input.runItem === undefined ? install() : input.runItem(install));
         const installed = await (input.prompter.withExclusiveTerminal?.(run) ?? run());

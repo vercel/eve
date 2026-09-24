@@ -649,6 +649,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     renderLine: (text, tone) => this.#renderFlowLine(text, tone),
     replaceContent: (content) => this.#replaceFlowContent(content),
     renderOutput: (text) => this.#renderFlowOutput(text),
+    captureInstallFailureOutput: (stderr) => this.#captureInstallFailureOutput(stderr),
     withInheritedStdio: (task) => this.#withInheritedStdio(task),
     withExclusiveTerminal: (task) => this.#withInheritedStdio(task),
     waitForInterrupt: (options) => this.#waitForFlowInterrupt(options),
@@ -3109,6 +3110,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  #captureInstallFailureOutput(stderr: string): void {
+    // shadcn buffers its child stderr instead of writing to process.stderr.
+    // Keep the tail bounded: an installer can emit arbitrarily much output.
+    const maxLength = 32_768;
+    const output =
+      stderr.length > maxLength
+        ? `… earlier installer output omitted\n${stderr.slice(-maxLength)}`
+        : stderr;
+    this.#handleForeignOutput("stderr", output.endsWith("\n") ? output : `${output}\n`, true);
+  }
+
   /** Gives an interactive subprocess a temporary screen, then restores the transcript. */
   async #withInheritedStdio<T>(task: () => Promise<T>): Promise<T> {
     // Setup questions can resolve from the first key in a buffered terminal
@@ -4918,7 +4930,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  #handleForeignOutput(source: "stdout" | "stderr", text: string): void {
+  #handleForeignOutput(source: "stdout" | "stderr", text: string, installFailure = false): void {
     const combined = (source === "stdout" ? this.#stdoutLogBuffer : this.#stderrLogBuffer) + text;
     if (source === "stdout" && parseDevRebuildLogLine(combined.trimEnd()) !== undefined) {
       this.#stdoutLogBuffer = "";
@@ -4954,7 +4966,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // sandbox and rebuild lines riding stdout — reaches the diagnostic log.
     this.#diagnostics?.append({ source, detail: content });
     if (source === "stdout") this.#handleCapturedStdout(content);
-    else this.#handleCapturedStderr(content);
+    else if (installFailure) {
+      this.#pushBlock({
+        kind: "log",
+        title: "stderr",
+        body: content,
+        logVisibility: "all-only",
+        live: true,
+      });
+    } else this.#handleCapturedStderr(content);
     this.#paint();
   }
 

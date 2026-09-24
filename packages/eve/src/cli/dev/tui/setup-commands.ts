@@ -34,7 +34,10 @@ export const SETUP_FLOW_CONFIG = {
 } satisfies Record<TuiSetupCommand, { title: string }>;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation" | "waitForInterrupt">;
+  Pick<
+    SetupFlowRenderer,
+    "readProviderPicker" | "setNavigation" | "waitForInterrupt" | "captureInstallFailureOutput"
+  >;
 
 type MuteableSetupRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation">;
@@ -300,6 +303,7 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
+          onInstallFailureOutput: input.renderer.captureInstallFailureOutput,
           onScreen: input.onOnboardingScreen,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,

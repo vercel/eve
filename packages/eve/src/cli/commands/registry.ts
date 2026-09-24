@@ -53,6 +53,8 @@ export interface AddCommandOptions {
   answers?: Record<string, unknown>;
   /** Suppresses the registry SDK's terminal-native progress output. */
   silent?: boolean;
+  /** Receives buffered installer stderr on failure in local dev TUI sessions. */
+  onInstallFailureOutput?: (stderr: string) => void;
 }
 
 /** Options shared by registry catalog commands. */
@@ -545,6 +547,7 @@ export async function runAddCommand(
       registryItem,
       nonInteractive: options.nonInteractive,
       logger,
+      onInstallFailureOutput: options.onInstallFailureOutput,
       install: async () => {
         await addRegistryItems([address], {
           config,

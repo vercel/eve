@@ -162,6 +162,31 @@ describe("runTuiSetupCommand", () => {
     expect(calls).toEqual(["suspend", "install", "resume"]);
   });
 
+  it("forwards buffered registry install failures to the renderer diagnostic sink", async () => {
+    const renderer = fakePanelRenderer();
+    renderer.captureInstallFailureOutput = vi.fn();
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(
+      async ({ onInstallFailureOutput }) => {
+        onInstallFailureOutput?.("ERR_PNPM_FETCH_404 package missing");
+        return registryResult({
+          outcomes: [
+            {
+              kind: "failed",
+              title: "channel/photon-imessage",
+              message: "Dependency installation failed.",
+            },
+          ],
+        });
+      },
+    );
+
+    await run({ command: "add", flows: fakeFlows({ runRegistryFlow }), renderer });
+
+    expect(renderer.captureInstallFailureOutput).toHaveBeenCalledWith(
+      "ERR_PNPM_FETCH_404 package missing",
+    );
+  });
+
   it("describes dependency installation while adding an item", async () => {
     const renderer = fakePanelRenderer();
     const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async (input) => {

@@ -3358,6 +3358,38 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("captures buffered registry installer stderr in diagnostics and reveals it with /loglevel all", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const stub = stubDiagnostics();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      logs: "stderr",
+      unicode: true,
+      diagnostics: stub.diagnostics,
+    });
+    renderer.renderCommandInvocation("/add channel/photon-imessage");
+    renderer.setupFlow.begin("");
+    const detail = "ERR_PNPM_FETCH_404 package missing\n  package manager detail";
+    renderer.setupFlow.captureInstallFailureOutput?.(detail);
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.renderCommandResult(
+      "Run `/loglevel all` to see the installer error.",
+      "error",
+      "Couldn't add channel/photon-imessage",
+    );
+
+    expect(stub.append).toHaveBeenCalledWith({ source: "stderr", detail });
+    expect(screen.snapshot()).not.toContain("package manager detail");
+    renderer.setLogDisplayMode("all");
+    expect(screen.snapshot()).toContain("package manager detail");
+    renderer.setLogDisplayMode("stderr");
+    expect(screen.snapshot()).not.toContain("package manager detail");
+    renderer.shutdown();
+  });
+
   it("subscribes the recorder to log records, displays them, and releases on shutdown", () => {
     const screen = new MockScreen({ columns: 120, rows: 30 });
     const input = new MockUserInput();

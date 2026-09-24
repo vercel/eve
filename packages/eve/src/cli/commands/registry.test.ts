@@ -321,10 +321,15 @@ describe("registry commands", () => {
       ),
     );
 
-    await runAddCommand(logger, "/project", "channel/photon-imessage", { silent: true });
+    const onInstallFailureOutput = vi.fn();
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+      onInstallFailureOutput,
+    });
 
+    expect(onInstallFailureOutput).toHaveBeenCalledWith("ERR_PNPM_FETCH_404 token=secret");
     expect(logger.errors).toEqual([
-      "Dependency installation failed (Package was not found in the registry (ERR_PNPM_FETCH_404) · exit code 1).",
+      "Dependency installation failed (Package was not found in the registry (ERR_PNPM_FETCH_404) · exit code 1). Run `/loglevel all` to see the installer error.",
     ]);
     expect(logger.errors.join("\n")).not.toContain("secret");
     expect(logger.errors.join("\n")).not.toContain("example.com");
@@ -337,8 +342,13 @@ describe("registry commands", () => {
     ]);
     addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
 
-    await runAddCommand(logger, "/project", "channel/photon-imessage", { silent: true });
+    const onInstallFailureOutput = vi.fn();
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+      onInstallFailureOutput,
+    });
 
+    expect(onInstallFailureOutput).not.toHaveBeenCalled();
     expect(logger.errors).toEqual([
       "Dependency installation failed; no safe diagnostic was available.",
     ]);

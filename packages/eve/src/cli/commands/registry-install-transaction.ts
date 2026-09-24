@@ -143,6 +143,8 @@ export async function installRegistryItemTransaction(input: {
   readonly registryItem: unknown;
   readonly nonInteractive: boolean | undefined;
   readonly logger: { log(message: string): void };
+  /** TUI diagnostic sink; absent for CLI and headless installs. */
+  readonly onInstallFailureOutput?: (stderr: string) => void;
   readonly install: () => Promise<void>;
 }): Promise<void> {
   const snapshot = await snapshotRegistryInstall(input.appRoot, input.registryItem);
@@ -152,6 +154,16 @@ export async function installRegistryItemTransaction(input: {
     const rollback = await rollbackRegistryInstall(input.appRoot, snapshot);
     const failureCode = registryInstallFailureCode(error);
     const message = registryInstallFailureMessage(failureCode);
+    const stderr =
+      typeof error === "object" && error !== null && "stderr" in error
+        ? (error as { stderr?: unknown }).stderr
+        : undefined;
+    const hasFailureOutput =
+      !input.nonInteractive &&
+      input.onInstallFailureOutput !== undefined &&
+      typeof stderr === "string" &&
+      stderr.trim().length > 0;
+    if (hasFailureOutput) input.onInstallFailureOutput?.(stderr);
     if (input.nonInteractive) {
       const failureEvent: Extract<HeadlessSetupEvent, { type: "failed" }> = {
         version: 1,
@@ -170,7 +182,7 @@ export async function installRegistryItemTransaction(input: {
         ? message
         : input.nonInteractive
           ? message
-          : interactiveInstallFailureMessage(error),
+          : `${interactiveInstallFailureMessage(error)}${hasFailureOutput ? " Run `/loglevel all` to see the installer error." : ""}`,
       { cause: error },
     );
   }
