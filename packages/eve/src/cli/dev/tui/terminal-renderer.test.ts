@@ -4574,7 +4574,7 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("commits toned flow lines to the transcript", () => {
+  it("commits flow lines to the transcript with a shared marker", () => {
     const { screen, renderer } = makeRenderer();
 
     renderer.setupFlow.renderLine("Connected the agent to the Vercel AI Gateway.", "success");
@@ -4582,8 +4582,8 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("✓ Connected the agent to the Vercel AI Gateway.");
-    expect(snapshot).toContain("· visit https://vercel.com/connect");
+    expect(snapshot).toContain("* Connected the agent to the Vercel AI Gateway.");
+    expect(snapshot).toContain("* visit https://vercel.com/connect");
   });
 });
 

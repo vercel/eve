@@ -455,43 +455,11 @@ function renderCommand(block: Block, theme: Theme, context: RenderBlockContext):
   return [`${gutter} ${block.result === undefined ? (block.body ?? "") : c.dim(block.result)}`];
 }
 
-/**
- * One persistent setup-flow line: progress the user must keep (the Slack
- * Connect URL, a written env file). The tone travels in `title`; info dims,
- * the other tones keep the body at full intensity behind their glyph.
- */
-function paintOutcomeMarker(
-  line: string,
-  theme: Theme,
-  source = line,
-  colors: "tone" | "gray" = "tone",
-): string {
-  const c = theme.colors;
-  const paint = (tone: (text: string) => string) => (colors === "gray" ? c.gray : tone);
-  const marker = source.trimStart().slice(0, 1);
-  if (marker === "✓") return line.replace(marker, paint(c.green)(theme.glyph.success));
-  if (marker === "⨯") return line.replace(marker, paint(c.red)(theme.glyph.error));
-  if (marker === "–") return line.replace(marker, paint(c.yellow)(theme.glyph.dash));
-  if (marker === "⚠") return line.replace(marker, paint(c.yellow)(theme.glyph.warning));
-  if (marker === "*") return line.replace(marker, c.gray("*"));
-  return line;
-}
-
+/** One persistent setup-flow line retained after a panel closes. */
 function renderFlow(block: Block, width: number, theme: Theme): string[] {
-  const c = theme.colors;
-  const tone = block.title ?? "info";
-  const glyph =
-    tone === "success"
-      ? c.green(theme.glyph.success)
-      : tone === "warning"
-        ? c.yellow(theme.glyph.warning)
-        : tone === "error"
-          ? c.red(theme.glyph.error)
-          : c.dim(theme.glyph.dot);
   const lines = wrap(block.body ?? "", width - 2);
-  const paint = (line: string): string =>
-    tone === "info" ? c.dim(line) : paintOutcomeMarker(line, theme);
-  return lines.map((line, index) => `${index === 0 ? glyph : " "} ${paint(line)}`);
+  const marker = theme.colors.dim("*");
+  return lines.map((line, index) => `${index === 0 ? marker : " "} ${line}`);
 }
 
 /**
@@ -506,10 +474,8 @@ function renderResult(block: Block, width: number, theme: Theme): string[] {
   // SGR 22 closes bold and dim together, so a result that bolds a span (the
   // /model reply's model name) would drop the rest of the line out of dim;
   // re-open dim after each close so the whole line stays quiet.
-  const dim = (line: string): string => {
-    const body = theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
-    return paintOutcomeMarker(body, theme, line, "gray");
-  };
+  const dim = (line: string): string =>
+    theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
   return lines.map((line, index) =>
     index === 0 ? `   ${marker}  ${dim(line)}` : `      ${dim(line)}`,
   );
