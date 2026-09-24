@@ -24,11 +24,7 @@ import { isInputRequest } from "#shared/input.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
-import {
-  recordWorkflowTaskView,
-  readWorkflowTaskView,
-  findBackgroundWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks, recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import type { TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.parent");
@@ -48,12 +44,9 @@ export async function recordTaskInputRequestStep(input: {
   "use step";
 
   const durableSession = readDurableSession(input.sessionState);
-  const entry = findBackgroundWorkflowToolRun(durableSession.state, input.request.taskId);
+  const task = getBackgroundTasks(durableSession.state).get(input.request.taskId);
   const requests = input.request.requests ?? [input.request.request];
-  if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
-    return { accepted: false, sessionState: input.sessionState };
-  }
-  if (readWorkflowTaskView(entry.task) !== undefined) {
+  if (task?.status !== "working" || requests.length === 0 || !requests.every(isInputRequest)) {
     return { accepted: false, sessionState: input.sessionState };
   }
 
@@ -109,6 +102,7 @@ export async function recordTerminalTaskViewsStep(input: {
 }): Promise<{
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** Newly recorded terminal outcomes eligible for model notification. */
   readonly views: readonly TaskView[];
   readonly subagentCompletions: readonly SubagentCompletedStreamEvent[];
 }> {
@@ -116,28 +110,32 @@ export async function recordTerminalTaskViewsStep(input: {
   const durableSession = readDurableSession(input.sessionState);
   let session = durableSession;
   const acceptedViews: TaskView[] = [];
+  const firstOutcomeViews: TaskView[] = [];
   const subagentCompletions: SubagentCompletedStreamEvent[] = [];
   for (const view of input.views) {
-    const entry = findBackgroundWorkflowToolRun(session.state, view.taskId);
+    const entry = getBackgroundTasks(session.state).get(view.taskId)?.run;
     if (entry === undefined) continue;
-    const state = recordWorkflowTaskView(session.state, view);
-    if (state !== session.state) {
-      session = { ...session, state };
-      if (entry.task.metadata.kind === "subagent" && view.status === "completed") {
-        subagentCompletions.push({
-          type: "subagent.completed",
-          data: {
-            callId: entry.callId,
-            subagentName: entry.toolName,
-            output:
-              typeof view.lastOutput.data === "string"
-                ? view.lastOutput.data
-                : JSON.stringify(view.lastOutput.data),
-          },
-        });
-      }
+    const recorded = recordWorkflowTaskView(session.state, view);
+    session = { ...session, state: recorded.state };
+    if (
+      recorded.firstOutcome &&
+      recorded.view.metadata.kind === "subagent" &&
+      recorded.view.status === "completed"
+    ) {
+      subagentCompletions.push({
+        type: "subagent.completed",
+        data: {
+          callId: entry.callId,
+          subagentName: entry.toolName,
+          output:
+            typeof recorded.view.lastOutput.data === "string"
+              ? recorded.view.lastOutput.data
+              : JSON.stringify(recorded.view.lastOutput.data),
+        },
+      });
     }
-    acceptedViews.push(readWorkflowTaskView(entry.task) ?? view);
+    acceptedViews.push(recorded.view);
+    if (recorded.firstOutcome) firstOutcomeViews.push(recorded.view);
     session = clearProxyInputRequestsForTask(session, view.taskId);
     session = applyTaskAgentHandleCommand(session, {
       kind: "release-owner",
@@ -153,7 +151,7 @@ export async function recordTerminalTaskViewsStep(input: {
     session === durableSession
       ? input.sessionState
       : replaceDurableSessionSnapshot({ session, state: input.sessionState });
-  return { serializedContext, sessionState, views: acceptedViews, subagentCompletions };
+  return { serializedContext, sessionState, views: firstOutcomeViews, subagentCompletions };
 }
 
 async function settleBackgroundTaskActions(input: {
@@ -166,8 +164,9 @@ async function settleBackgroundTaskActions(input: {
     const ctx = await deserializeContext(input.serializedContext);
     const observer = ctx.get(ActivityObserverKey);
     const settledAt = new Date().toISOString();
+    const tasks = getBackgroundTasks(input.session.state);
     const events = input.views.flatMap((view) => {
-      const entry = findBackgroundWorkflowToolRun(input.session.state, view.taskId);
+      const entry = tasks.get(view.taskId)?.run;
       return projectTaskActivity({
         activityObserver:
           observer === undefined

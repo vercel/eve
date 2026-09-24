@@ -1,15 +1,21 @@
 import { assert, describe, expect, it } from "vitest";
 import type { HarnessSession } from "#harness/types.js";
 import {
-  readWorkflowTaskView,
+  getBackgroundTasks,
   recordWorkflowTaskView,
-  findBackgroundWorkflowToolRun,
-  getBackgroundWorkflowToolRuns,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
-import { getTaskCohortId, getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 import type { TaskView } from "#tasks/types.js";
+import type { BackgroundTask } from "#harness/workflow-tool-runs.js";
+
+function views(tasks: readonly BackgroundTask[]): TaskView[] {
+  return tasks.map(({ cohortId: _cohortId, turnId: _turnId, run: _run, ...view }) => view);
+}
+
+function ids(tasks: readonly BackgroundTask[]): string[] {
+  return tasks.map((task) => task.taskId);
+}
 
 function createSession(state?: HarnessSession["state"]): HarnessSession {
   return {
@@ -33,8 +39,108 @@ describe("session task index", () => {
   };
   const dispatchContext = { auth: { current: null, initiator: null } } as const;
   it("returns an empty index when the key is absent", () => {
-    expect(getBackgroundWorkflowToolRuns({})).toEqual([]);
-    expect(getBackgroundWorkflowToolRuns(undefined)).toEqual([]);
+    expect(getBackgroundTasks({}).query()).toEqual([]);
+    expect(getBackgroundTasks(undefined).query()).toEqual([]);
+  });
+
+  it("queries restored background tasks by state across turns, excluding blocking runs", () => {
+    let session = registerWorkflowToolRun(createSession(), task("working", "turn-1"));
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      session = registerWorkflowToolRun(session, task(status, "turn-2"));
+      session = {
+        ...session,
+        state: recordWorkflowTaskView(session.state, terminal(status, status)).state,
+      };
+    }
+    session = registerWorkflowToolRun(session, {
+      callId: "blocking",
+      toolName: "research",
+      lifetime: "turn",
+      origin: { turnId: "turn-2", stepIndex: 0 },
+      address: { runId: "blocking", hookToken: "blocking" },
+    });
+
+    const backgroundTasks = getBackgroundTasks(JSON.parse(JSON.stringify(session.state)));
+    expect(views(backgroundTasks.query({ state: "working" }))).toEqual([
+      { taskId: "working", metadata, status: "working" },
+    ]);
+    expect(views(backgroundTasks.query({ state: "completed" }))).toEqual([
+      terminal("completed", "completed"),
+    ]);
+    expect(views(backgroundTasks.query({ state: "failed" }))).toEqual([
+      terminal("failed", "failed"),
+    ]);
+    expect(views(backgroundTasks.query({ state: "cancelled" }))).toEqual([
+      terminal("cancelled", "cancelled"),
+    ]);
+    expect(getBackgroundTasks(undefined).query({ state: "working" })).toEqual([]);
+  });
+
+  it("distinguishes a first terminal settlement from repeated and late reports", () => {
+    const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    const completed = terminal("task_a", "completed");
+    const first = recordWorkflowTaskView(session.state, completed);
+    expect(first.firstOutcome).toBe(true);
+    expect(first.view).toEqual(completed);
+
+    const repeated = recordWorkflowTaskView(first.state, completed);
+    expect(repeated.state).toBe(first.state);
+    expect(repeated.firstOutcome).toBe(false);
+    expect(repeated.view).toEqual(completed);
+
+    const late = recordWorkflowTaskView(repeated.state, terminal("task_a", "cancelled"));
+    expect(late.state).toBe(repeated.state);
+    expect(late.firstOutcome).toBe(false);
+    expect(late.view).toEqual(completed);
+  });
+
+  it("retains cancellation across restore and late outcomes without removing cohort membership", () => {
+    const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    const state = recordWorkflowTaskView(session.state, terminal("task_a", "cancelled")).state;
+    const replay = registerWorkflowToolRun(
+      createSession(JSON.parse(JSON.stringify(state))),
+      task("task_a", "turn-1"),
+    );
+    const late = recordWorkflowTaskView(replay.state, terminal("task_a", "completed")).state;
+    expect(views(getBackgroundTasks(late).query({ state: "cancelled" }))).toEqual([
+      terminal("task_a", "cancelled"),
+    ]);
+    expect(getBackgroundTasks(late).get("task_a")?.cohortId).toBe("task_a");
+  });
+
+  it("decodes only the tasks a read returns", () => {
+    const retained = task("task_old", "turn-1");
+    const tasks = getBackgroundTasks({
+      "eve.workflowTool": {
+        version: 3,
+        runs: [
+          { ...retained, task: { ...retained.task, outcome: { status: "completed" } } },
+          task("task_live", "turn-2"),
+        ],
+      },
+    });
+    // A corrupt retained outcome must not block reads of unrelated work.
+    expect(ids(tasks.query({ state: "working" }))).toEqual(["task_live"]);
+    expect(tasks.get("task_live")?.status).toBe("working");
+    expect(() => tasks.get("task_old")).toThrow("Corrupt workflow task result");
+    expect(() => tasks.query({ state: "completed" })).toThrow("Corrupt workflow task result");
+    expect(() => tasks.query()).toThrow("Corrupt workflow task result");
+  });
+
+  it("filters by starting turn, cohort, and a set of states", () => {
+    let session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
+    // Work started while task_a is open joins its cohort.
+    session = registerWorkflowToolRun(session, task("task_b", "turn-2"));
+    session = {
+      ...session,
+      state: recordWorkflowTaskView(session.state, terminal("task_a", "cancelled")).state,
+    };
+    const tasks = getBackgroundTasks(session.state);
+    expect(ids(tasks.query({ turnId: "turn-2" }))).toEqual(["task_b"]);
+    expect(ids(tasks.query({ cohortId: "task_a" }))).toEqual(["task_a", "task_b"]);
+    expect(ids(tasks.query({ state: ["working", "cancelled"] }))).toEqual(["task_a", "task_b"]);
+    expect(ids(tasks.query({ state: "working", turnId: "turn-1" }))).toEqual([]);
+    expect(tasks.get("task_b")).toMatchObject({ cohortId: "task_a", turnId: "turn-2" });
   });
 
   it("records a task and finds it by id", () => {
@@ -47,7 +153,7 @@ describe("session task index", () => {
       task: { dispatchContext, metadata, taskId: "task_a" },
     });
 
-    expect(findBackgroundWorkflowToolRun(session.state, "task_a")).toEqual({
+    expect(getBackgroundTasks(session.state).get("task_a")?.run).toEqual({
       callId: "task_a",
       toolName: metadata.name,
       lifetime: "session" as const,
@@ -55,7 +161,7 @@ describe("session task index", () => {
       address: { runId: "run-1", hookToken: "task:token-1" },
       task: { dispatchContext, metadata, taskId: "task_a" },
     });
-    expect(findBackgroundWorkflowToolRun(session.state, "task_other")).toBeUndefined();
+    expect(getBackgroundTasks(session.state).get("task_other")?.run).toBeUndefined();
   });
 
   it("keeps activity identity in the persisted task index", () => {
@@ -78,9 +184,9 @@ describe("session task index", () => {
     });
 
     const restoredState = JSON.parse(JSON.stringify(session.state));
-    expect(
-      findBackgroundWorkflowToolRun(restoredState, "task_a")?.task.activityWorkIdentity,
-    ).toEqual(activityWorkIdentity);
+    expect(getBackgroundTasks(restoredState).get("task_a")?.run.task.activityWorkIdentity).toEqual(
+      activityWorkIdentity,
+    );
   });
 
   it("keeps subagent metadata in the persisted task index", () => {
@@ -100,7 +206,7 @@ describe("session task index", () => {
       task: { dispatchContext, metadata: subagentMetadata, taskId: "task_a" },
     });
 
-    expect(findBackgroundWorkflowToolRun(session.state, "task_a")?.task.metadata).toEqual(
+    expect(getBackgroundTasks(session.state).get("task_a")?.run.task.metadata).toEqual(
       subagentMetadata,
     );
   });
@@ -130,7 +236,7 @@ describe("session task index", () => {
     });
     session = {
       ...session,
-      state: recordWorkflowTaskView(session.state, terminal("task_a", "completed")),
+      state: recordWorkflowTaskView(session.state, terminal("task_a", "completed")).state,
     };
     session = registerWorkflowToolRun(session, {
       callId: "task_a",
@@ -155,7 +261,7 @@ describe("session task index", () => {
       },
     });
 
-    expect(findBackgroundWorkflowToolRun(session.state, "task_a")).toMatchObject({
+    expect(getBackgroundTasks(session.state).get("task_a")?.run).toMatchObject({
       task: {
         activityWorkIdentity: { label: "Second label" },
         outcome: { status: "completed", lastOutput: { type: "result", data: "done" } },
@@ -181,7 +287,9 @@ describe("session task index", () => {
       task: { dispatchContext, metadata, taskId: "task_a" },
     });
 
-    const entries = getBackgroundWorkflowToolRuns(session.state);
+    const entries = getBackgroundTasks(session.state)
+      .query()
+      .map((task) => task.run);
     expect(entries).toHaveLength(1);
     expect(entries[0]?.address.runId).toBe("run-2");
   });
@@ -209,14 +317,15 @@ describe("session task index", () => {
     const initial = registerWorkflowToolRun(createSession(), first);
     const second = task("task_b", "turn-2");
     const session = registerWorkflowToolRun(initial, second);
-    const entries = getBackgroundWorkflowToolRuns(session.state);
-    expect(entries.map((entry) => getTaskCohortId(entry.task))).toEqual(["task_a", "task_a"]);
-    expect(entries.map((entry) => entry.origin.turnId)).toEqual(["turn-1", "turn-2"]);
-    expect(entries[0]?.task.cohortId).toBeUndefined();
-    expect(entries[1]?.task.cohortId).toBe("task_a");
+    const tasks = getBackgroundTasks(session.state).query();
+    expect(tasks.map((task) => task.cohortId)).toEqual(["task_a", "task_a"]);
+    expect(tasks.map((task) => task.turnId)).toEqual(["turn-1", "turn-2"]);
+    // A cohort's first task has no join target; later members store it.
+    expect(tasks[0]?.run.task.cohortId).toBeUndefined();
+    expect(tasks[1]?.run.task.cohortId).toBe("task_a");
     const restored = createSession(JSON.parse(JSON.stringify(initial.state)));
     expect(registerWorkflowToolRun(restored, second).state).toEqual(session.state);
-    expect(getBackgroundWorkflowToolRuns(initial.state)).toHaveLength(1);
+    expect(getBackgroundTasks(initial.state).query()).toHaveLength(1);
   });
 
   it.each(["completed", "failed", "cancelled"] as const)(
@@ -226,27 +335,26 @@ describe("session task index", () => {
       session = registerWorkflowToolRun(session, task("task_b", "turn-1"));
       session = {
         ...session,
-        state: recordWorkflowTaskView(session.state, terminal("task_a", status)),
+        state: recordWorkflowTaskView(session.state, terminal("task_a", status)).state,
       };
       session = registerWorkflowToolRun(session, task("task_c", "turn-2"));
       expect(
-        getBackgroundWorkflowToolRuns(session.state).map((entry) => getTaskCohortId(entry.task)),
+        getBackgroundTasks(session.state)
+          .query()
+          .map((task) => task.cohortId),
       ).toEqual(["task_a", "task_a", "task_a"]);
-      expect([...getSessionTaskCohorts(session.state).values()]).toEqual([
-        "task_a",
-        "task_a",
-        "task_a",
-      ]);
       for (const taskId of ["task_b", "task_c"]) {
         session = {
           ...session,
-          state: recordWorkflowTaskView(session.state, terminal(taskId, status)),
+          state: recordWorkflowTaskView(session.state, terminal(taskId, status)).state,
         };
       }
       // Even another creation in the same turn must not reopen a settled cohort.
       session = registerWorkflowToolRun(session, task("task_d", "turn-2"));
       expect(
-        getBackgroundWorkflowToolRuns(session.state).map((entry) => getTaskCohortId(entry.task)),
+        getBackgroundTasks(session.state)
+          .query()
+          .map((task) => task.cohortId),
       ).toEqual(["task_a", "task_a", "task_a", "task_d"]);
     },
   );
@@ -257,7 +365,7 @@ describe("session task index", () => {
     for (const taskId of ["task_a", "task_b"]) {
       session = {
         ...session,
-        state: recordWorkflowTaskView(session.state, terminal(taskId, "completed")),
+        state: recordWorkflowTaskView(session.state, terminal(taskId, "completed")).state,
       };
     }
     session = registerWorkflowToolRun(session, task("task_c", "turn-3"));
@@ -271,28 +379,28 @@ describe("session task index", () => {
       origin: { ...task("task_b", "turn-2").origin, stepIndex: 9 },
     });
     expect(
-      getBackgroundWorkflowToolRuns(session.state).map((entry) => ({
-        taskId: entry.task.taskId,
-        cohortId: getTaskCohortId(entry.task),
-        turnId: entry.origin.turnId,
-        stepIndex: entry.origin.stepIndex,
-        settled: entry.task.outcome !== undefined,
-      })),
+      getBackgroundTasks(session.state)
+        .query()
+        .map((task) => ({
+          taskId: task.taskId,
+          cohortId: task.cohortId,
+          turnId: task.turnId,
+          stepIndex: task.run.origin.stepIndex,
+          settled: task.status !== "working",
+        })),
     ).toEqual([
       { taskId: "task_a", cohortId: "task_a", turnId: "turn-1", stepIndex: 0, settled: true },
       { taskId: "task_b", cohortId: "task_a", turnId: "turn-2", stepIndex: 0, settled: true },
       { taskId: "task_c", cohortId: "task_c", turnId: "turn-3", stepIndex: 0, settled: false },
     ]);
-    expect(findBackgroundWorkflowToolRun(session.state, "task_a")?.address.runId).toBe(
-      "run-replayed",
-    );
+    expect(getBackgroundTasks(session.state).get("task_a")?.run.address.runId).toBe("run-replayed");
     session = registerWorkflowToolRun(session, task("task_d", "turn-4"));
-    expect(findBackgroundWorkflowToolRun(session.state, "task_d")?.task.cohortId).toBe("task_c");
+    expect(getBackgroundTasks(session.state).get("task_d")?.run.task.cohortId).toBe("task_c");
   });
 
   it.each(["", null, 42])("rejects an invalid additive cohort identity: %j", (cohortId) => {
     expect(() =>
-      getBackgroundWorkflowToolRuns({
+      getBackgroundTasks({
         "eve.workflowTool": {
           version: 3,
           runs: [
@@ -324,7 +432,7 @@ describe("session task index", () => {
       ...base,
       task: { ...base.task, outcome },
     });
-    expect(findBackgroundWorkflowToolRun(session.state, "task_a")?.task.outcome).toEqual(outcome);
+    expect(getBackgroundTasks(session.state).get("task_a")?.run.task.outcome).toEqual(outcome);
     for (const invalidOutcome of [
       { status: "working" },
       { status: "completed" },
@@ -342,15 +450,15 @@ describe("session task index", () => {
         status: "completed",
       },
     ]) {
-      const [entry] = getBackgroundWorkflowToolRuns({
+      const tasks = getBackgroundTasks({
         "eve.workflowTool": {
           version: 3,
           runs: [{ ...base, task: { ...base.task, outcome: invalidOutcome } }],
         },
       });
-      expect(entry?.address).toEqual(base.address);
-      assert(entry !== undefined);
-      expect(() => readWorkflowTaskView(entry.task)).toThrow("Corrupt workflow task result");
+      // The registry keeps the entry; only reading its view rejects the outcome.
+      expect(tasks.query({ state: "working" })).toEqual([]);
+      expect(() => tasks.get(base.task.taskId)).toThrow("Corrupt workflow task result");
       expect(() =>
         registerWorkflowToolRun(createSession(), {
           ...base,
@@ -366,34 +474,35 @@ describe("session task index", () => {
       const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
       const usage = { inputTokens: 3, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 };
       const first = { ...terminal("task_a", status), usage };
-      const state = recordWorkflowTaskView(session.state, first);
+      const state = recordWorkflowTaskView(session.state, first).state;
       for (const late of ["completed", "failed", "cancelled"] as const) {
-        expect(recordWorkflowTaskView(state, terminal("task_a", late))).toBe(state);
+        expect(recordWorkflowTaskView(state, terminal("task_a", late)).state).toBe(state);
       }
-      const entry = findBackgroundWorkflowToolRun(state, "task_a");
-      assert(entry !== undefined);
-      expect(entry.task.outcome).toEqual(
+      const recorded = getBackgroundTasks(state).get("task_a");
+      assert(recorded !== undefined);
+      expect(recorded.run.task.outcome).toEqual(
         status === "cancelled"
           ? { status, usage }
           : { status, usage, lastOutput: first.lastOutput },
       );
-      expect(readWorkflowTaskView(entry.task)).toEqual(first);
+      expect(views([recorded])).toEqual([first]);
     },
   );
 
   it("rejects an incoming result with metadata belonging to a different task", () => {
     const session = registerWorkflowToolRun(createSession(), task("task_a", "turn-1"));
-    expect(() =>
-      recordWorkflowTaskView(session.state, {
-        ...terminal("task_a", "cancelled"),
-        metadata: { kind: "tool", name: "other" },
-      }),
+    expect(
+      () =>
+        recordWorkflowTaskView(session.state, {
+          ...terminal("task_a", "cancelled"),
+          metadata: { kind: "tool", name: "other" },
+        }).state,
     ).toThrow("Task view metadata does not match");
   });
 
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
-      getBackgroundWorkflowToolRuns({
+      getBackgroundTasks({
         "eve.workflowTool": { version: 3, runs: [{ taskId: 42 }] },
       }),
     ).toThrow("Corrupt workflow tool run registry");
@@ -402,7 +511,7 @@ describe("session task index", () => {
   it("rejects missing creator context", () => {
     const entry = task("task_a", "turn-1");
     expect(() =>
-      getBackgroundWorkflowToolRuns({
+      getBackgroundTasks({
         "eve.workflowTool": {
           version: 3,
           runs: [{ ...entry, task: { ...entry.task, dispatchContext: undefined } }],
@@ -420,7 +529,7 @@ describe("session task index", () => {
 
   it("rejects unrecognized task dispatch context fields", () => {
     expect(() =>
-      getBackgroundWorkflowToolRuns({
+      getBackgroundTasks({
         "eve.workflowTool": {
           version: 3,
           runs: [
@@ -447,7 +556,7 @@ describe("session task index", () => {
 
   it("rejects an unsupported registry version", () => {
     expect(() =>
-      getBackgroundWorkflowToolRuns({
+      getBackgroundTasks({
         "eve.workflowTool": { version: 99, runs: [] },
       }),
     ).toThrow("Corrupt workflow tool run registry");

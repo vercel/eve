@@ -86,6 +86,7 @@ import {
   shouldCompact,
 } from "#harness/compaction.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
@@ -2888,8 +2889,8 @@ async function handleStepResult(input: {
 
   if (
     config.mode === "task" &&
-    contextStorage.getStore()?.get(ScheduleIdKey) !== undefined &&
-    contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true
+    (getBackgroundTasks(nextSession.state).query({ state: "working" }).length > 0 ||
+      contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true)
   ) {
     return deferTaskTurn({
       emissionState,
@@ -2925,7 +2926,7 @@ async function handleStepResult(input: {
   });
 }
 
-/** Keeps a scheduled task session open until its background work settles. */
+/** Keeps a task session open until its background work settles. */
 async function deferTaskTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];

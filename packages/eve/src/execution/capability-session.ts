@@ -98,6 +98,8 @@ export interface CapabilitySubagent {
     input: Parameters<RouteSessionCreator>[0],
     sandboxSessionId: string | undefined,
   ): Promise<RunHandle>;
+  /** Cancels the session's turn and every background task it owns, nested work included. */
+  cancel(sessionId: string): Promise<void>;
 }
 
 /** Builds the capability view of the root agent in a compiled bundle. */
@@ -154,6 +156,9 @@ function listExposedSubagents(bundle: CompiledRuntimeAgentBundle): CapabilitySub
     });
     return [
       {
+        async cancel(sessionId) {
+          await runtime.dispatchSession({ command: { kind: "cancel", tasks: true }, sessionId });
+        },
         createSession: async (input, sandboxSessionId) =>
           await runtime.createSession({
             ...input,
@@ -161,6 +166,8 @@ function listExposedSubagents(bundle: CompiledRuntimeAgentBundle): CapabilitySub
               ...HTTP_ADAPTER,
               state: inheritsSandbox && sandboxSessionId !== undefined ? { sandboxSessionId } : {},
             },
+            // Like a delegated child: answer once the background work it starts has all settled.
+            taskDeliveryPolicy: "cohort",
           }),
         description: definition.description,
         name: definition.name,

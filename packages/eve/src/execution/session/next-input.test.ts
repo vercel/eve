@@ -1,3 +1,5 @@
+import { applySessionCancellation } from "#execution/session/admission.js";
+import { recordWorkflowTaskView } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { assert, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -268,6 +270,50 @@ describe("nextTurnDelivery", () => {
     expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
       serializedContext: input.cursor.serializedContext,
       sessionState: input.cursor.sessionState,
+    });
+  });
+
+  it("discards a held completion when session cancellation records the remaining task", async () => {
+    const input = batchingInput(2);
+    const session = input.cursor.sessionState.snapshot.session;
+    const completed = recordWorkflowTaskView(session.state, {
+      taskId: "task_0",
+      metadata: { kind: "subagent", name: "worker" },
+      status: "completed",
+      lastOutput: { type: "result", data: "done" },
+    }).state;
+    await input.cursor.apply({
+      sessionState: {
+        ...input.cursor.sessionState,
+        snapshot: { session: { ...session, state: completed } },
+      },
+    });
+    input.queue.enqueueDelivery(report(completion("task_0")));
+    vi.mocked(cancelAllIndexedSessionTasksStep).mockImplementation(async ({ sessionState }) => ({
+      sessionState: {
+        ...sessionState,
+        snapshot: {
+          session: {
+            ...sessionState.snapshot.session,
+            state: recordWorkflowTaskView(sessionState.snapshot.session.state, {
+              taskId: "task_1",
+              metadata: { kind: "subagent", name: "worker" },
+              status: "cancelled",
+            }).state,
+          },
+        },
+      },
+    }));
+
+    await applySessionCancellation({ kind: "cancel", tasks: true }, input);
+
+    expect(input.queue.pendingCount).toBe(0);
+    expect(input.queue.isTaskCancelled("task_0")).toBe(false);
+    expect(input.queue.isTaskCancelled("task_1")).toBe(false);
+    input.inbox = createMockInbox([messageRead("New request")]);
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      kind: "turn",
+      delivery: { payloads: [{ message: "New request" }] },
     });
   });
 
@@ -632,7 +678,7 @@ describe("buffered task completion batching", () => {
       delivery: question,
     });
     expect(
-      input.queue.takeNext(new Map(), { taskDeliveryPolicy: "auto", deferDeliveries: true }),
+      input.queue.takeNext(undefined, { taskDeliveryPolicy: "auto", deferDeliveries: true }),
     ).toBeUndefined();
     expect(input.queue.pendingCount).toBe(2);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
@@ -852,18 +898,16 @@ describe("buffered task completion batching", () => {
     });
   });
 
-  it("waits for a recorded cancellation's notification before reporting its cohort", () => {
-    const queue = new SessionInputQueue();
-    const cohorts = new Map([
-      ["task_0", "cohort"],
-      ["task_1", "cohort"],
-    ]);
-    queue.enqueueDelivery(completion("task_0"));
-    expect(queue.takeNext(cohorts)).toBeUndefined();
-    queue.enqueueDelivery(terminalDelivery("task_1", "cancelled"));
-    expect(queue.takeNext(cohorts)).toMatchObject({ kind: "turn" });
-    expect(queue.pendingCount).toBe(0);
-    expect(queue.enqueueDelivery(completion("task_1"))).toBeUndefined();
+  it("releases a cohort when cancellation is already recorded without waiting for its echo", () => {
+    const input = batchingInput(2);
+    const state = recordWorkflowTaskView(input.cursor.sessionState.snapshot.session.state, {
+      taskId: "task_1",
+      metadata: { kind: "subagent", name: "worker" },
+      status: "cancelled",
+    }).state;
+    input.queue.enqueueDelivery(completion("task_0"));
+    expect(input.queue.takeNext(state)).toMatchObject({ kind: "turn" });
+    expect(input.queue.pendingCount).toBe(0);
   });
 
   it.each(["failed", "cancelled"] as const)(
@@ -879,7 +923,7 @@ describe("buffered task completion batching", () => {
         expect(queue.enqueueDelivery(first)).toBeDefined();
         expect(queue.enqueueDelivery(late)).toBeUndefined();
         expect(queue.pendingCount).toBe(1);
-        expect(queue.takeNext(new Map())).toBeDefined();
+        expect(queue.takeNext(undefined)).toBeDefined();
         expect(queue.enqueueDelivery(late)).toBeUndefined();
         expect(queue.pendingCount).toBe(0);
       }

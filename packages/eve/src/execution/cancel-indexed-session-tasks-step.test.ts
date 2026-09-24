@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import {
-  getBackgroundWorkflowToolRuns,
+  getBackgroundTasks,
   readWorkflowTaskView,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
@@ -44,9 +44,9 @@ describe("cancelAllIndexedSessionTasksStep", () => {
 
     expect(result.sessionState).toBeDefined();
     expect(
-      getBackgroundWorkflowToolRuns(result.sessionState?.snapshot.session.state).map((entry) =>
-        readWorkflowTaskView(entry.task),
-      ),
+      getBackgroundTasks(result.sessionState?.snapshot.session.state)
+        .query()
+        .map((task) => readWorkflowTaskView(task.run.task)),
     ).toEqual([cancelledView(task1), cancelledView(task2)]);
     expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
     expect(cancelOwnedTaskMock).toHaveBeenNthCalledWith(1, {
@@ -61,6 +61,19 @@ describe("cancelAllIndexedSessionTasksStep", () => {
       serializedContext: { context: "latest" },
       session: "runtime-session",
     });
+  });
+
+  it("leaves a task working when cancellation fails", async () => {
+    cancelOwnedTaskMock.mockRejectedValueOnce(new Error("Cancellation unavailable"));
+    const result = await cancelAllIndexedSessionTasksStep({
+      serializedContext: {},
+      sessionState: makeSessionState([indexedTask("failed-cancel"), indexedTask("cancelled")]),
+    });
+    expect(
+      getBackgroundTasks(result.sessionState?.snapshot.session.state)
+        .query()
+        .map((task) => task.status),
+    ).toEqual(["working", "cancelled"]);
   });
 
   it("does not require runtime context when no tasks are indexed", async () => {

@@ -316,7 +316,7 @@ async function runSessionLoop(
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-      } else if (action.settled !== undefined) {
+      } else if (action.settled?.notifyCaller === true) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,
@@ -353,8 +353,7 @@ async function runSessionLoop(
             sessionState: cursor.sessionState,
           });
           await settleCancelledTurn();
-          // Re-enter with `settled` cleared: the parked answer was already
-          // delivered to its caller before this wait.
+          // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
           continue;
         case "turn": {

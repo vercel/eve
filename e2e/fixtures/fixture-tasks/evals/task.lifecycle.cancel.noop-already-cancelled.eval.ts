@@ -5,7 +5,6 @@ import {
   requireTaskView,
   sendAndFollowQueuedTurn,
   waitForTaskInput,
-  waitForTaskStatus,
 } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
@@ -53,12 +52,10 @@ export default defineTaskEval({
       ),
     );
 
-    const still = await waitForTaskStatus(
+    const { turn: still } = await sendAndFollowQueuedTurn(
       t,
+      `TASK-CANCEL-VERIFY ${taskId}`,
       repeated.session,
-      "TASK-CANCEL-VERIFY",
-      taskId,
-      "cancelled",
     );
     still.expectOk();
     await t.require(

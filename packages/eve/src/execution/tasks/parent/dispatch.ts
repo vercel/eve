@@ -62,7 +62,7 @@ export async function executeTaskControlAction(input: {
       serializedContext: input.serializedContext,
       session,
     });
-    session = { ...session, state: recordWorkflowTaskView(session.state, view) };
+    session = { ...session, state: recordWorkflowTaskView(session.state, view).state };
     views.push(view);
   }
   return { result: createTaskViewsResult(action, views), session };

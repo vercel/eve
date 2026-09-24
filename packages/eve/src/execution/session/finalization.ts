@@ -8,6 +8,7 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { notifyDelegatedParentStep, notifyTurnCallerStep } from "#subagents/parent-notification.js";
 import {
@@ -58,7 +59,7 @@ export async function finalizeSession(
     });
   }
 
-  const settled = settledResult(outcome);
+  const settled = settledResult(outcome, context);
   if (context.mode === "task") {
     await fireSessionCallbackStep({
       error: settled.isError ? settled.output : undefined,
@@ -94,15 +95,31 @@ export async function finalizeSession(
         usage: outcome.action.usage,
         usageDelta: outcome.action.usageDelta,
       }
-    : { isError: settled.isError, output: settled.output };
+    : {
+        isError: settled.isError,
+        output: settled.output,
+        usage: settled.sessionUsage,
+        usageDelta: settled.turnUsage,
+      };
 }
 
-function settledResult(outcome: SessionTerminalOutcome): {
+function settledResult(
+  outcome: SessionTerminalOutcome,
+  context: SessionFinalizationContext,
+): {
   readonly isError: boolean;
   readonly output: unknown;
   readonly sessionUsage?: TokenUsage;
   readonly turnUsage?: TokenUsage;
 } {
+  const session = context.cursor.sessionState?.snapshot.session;
+  const usage =
+    session === undefined || context.caller === undefined
+      ? {}
+      : {
+          sessionUsage: toUsage(getSessionTokenUsage(session)),
+          turnUsage: takeSessionUsageDelta(session).delta,
+        };
   switch (outcome.kind) {
     case "done":
       return {
@@ -112,8 +129,14 @@ function settledResult(outcome: SessionTerminalOutcome): {
         turnUsage: outcome.action.usageDelta,
       };
     case "expired":
-      return { isError: false, output: "" };
+      return context.caller === undefined
+        ? { isError: false, output: "" }
+        : {
+            isError: true,
+            output: "The session ended before the delegated task completed.",
+            ...usage,
+          };
     case "failed":
-      return { isError: true, output: normalizeSerializableError(outcome.error) };
+      return { isError: true, output: normalizeSerializableError(outcome.error), ...usage };
   }
 }

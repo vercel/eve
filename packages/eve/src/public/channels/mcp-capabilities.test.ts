@@ -587,7 +587,42 @@ describe("mcpCapabilitiesChannel subagents", () => {
         ],
         isError: true,
       });
-      expect(started?.status).toBe("cancelled");
+      expect(harness.subagentCancels).toEqual([started?.runId]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits past an interim reply while the subagent's own background work runs", async () => {
+    vi.useFakeTimers();
+    try {
+      const harness = createHarness({
+        onSubagentStart: (run) => {
+          // The subagent's first turn yielded while its background task worked: its interim
+          // reply is on the stream, but the task-mode session is still open.
+          run.events = [
+            {
+              data: {
+                finishReason: "stop",
+                message: "The AI-text detection review is running on your pasted text now.",
+                sequence: 0,
+                stepIndex: 0,
+                turnId: "turn_0",
+              },
+              meta: { at: "2026-09-24T00:00:00.000Z", id: "evt_ack" },
+              type: "message.completed",
+            },
+          ];
+          setTimeout(() => complete("## AI pattern review\n\n**Verdict**: Blocked")(run), 5_000);
+        },
+      });
+      const pending = harness.callTool("review_ai", { message: "Review this." }, "v2:parent-1");
+      await vi.advanceTimersByTimeAsync(7_000);
+      const called = await pending;
+      expect(called.result).toMatchObject({
+        content: [{ text: "## AI pattern review\n\n**Verdict**: Blocked", type: "text" }],
+      });
+      expect(harness.subagentCancels).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
@@ -734,6 +769,7 @@ function createHarness(
     readonly input: Parameters<CapabilitySubagent["createSession"]>[0];
     readonly sandboxSessionId: string | undefined;
   }[] = [];
+  const subagentCancels: string[] = [];
   const reviewer: CapabilitySubagent = {
     async createSession(input, sandboxSessionId) {
       subagentStarts.push({ input, sandboxSessionId });
@@ -747,6 +783,10 @@ function createHarness(
       world.runs.set(run.runId, run);
       options.onSubagentStart?.(run);
       return { events: new ReadableStream(), sessionId: run.runId };
+    },
+    async cancel(sessionId) {
+      subagentCancels.push(sessionId);
+      world.runs.get(sessionId)!.status = "cancelled";
     },
     description: "Reviews prose for AI patterns.",
     name: "review_ai",
@@ -888,6 +928,7 @@ function createHarness(
     sandboxDeletes: () => deletes,
     sandboxOpens: () => opens,
     sessionKey,
+    subagentCancels,
     subagentStarts,
     waitUntil,
   };

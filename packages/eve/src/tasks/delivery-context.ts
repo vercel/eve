@@ -2,12 +2,8 @@ import type { TaskDeliveryPolicy, DeliverHookPayload } from "#channel/types.js";
 import { markFrameworkStepInput } from "#harness/messages.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
-import {
-  readWorkflowTaskView,
-  getBackgroundWorkflowToolRuns,
-  type BackgroundWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
-import { getTaskCohortId } from "#tasks/session-task-cohorts.js";
+import { getBackgroundTasks, type BackgroundTask } from "#harness/workflow-tool-runs.js";
+import { taskIdOfDelivery } from "#tasks/notification.js";
 
 export const TASK_DELIVERY_CONTEXT_LABEL = "[Task state]";
 
@@ -54,16 +50,15 @@ export function resolveTaskDeliveryContext(input: {
   | undefined {
   const firstDeliveryId = input.taskDeliveryIds[0];
   if (firstDeliveryId === undefined) return undefined;
-  const entries = getBackgroundWorkflowToolRuns(input.state);
-  const delivered = entries.find((entry) => firstDeliveryId.startsWith(`${entry.task.taskId}:`));
+  const tasks = getBackgroundTasks(input.state);
+  const delivered = tasks.get(taskIdOfDelivery(firstDeliveryId));
   if (delivered === undefined) return undefined;
-
-  const cohort = entries.filter(
-    (entry) => getTaskCohortId(entry.task) === getTaskCohortId(delivered.task),
-  );
   return {
-    ...projectTaskCohort(cohort, input.taskDeliveryPolicy === "auto"),
-    rootTurnId: delivered.origin.turnId,
+    ...projectTaskCohort(
+      tasks.query({ cohortId: delivered.cohortId }),
+      input.taskDeliveryPolicy === "auto",
+    ),
+    rootTurnId: delivered.turnId,
   };
 }
 
@@ -72,32 +67,29 @@ export function resolveInitiatingTaskContext(input: {
   readonly state: SessionStateMap | undefined;
   readonly turnId: string;
 }): { readonly context: string; readonly phase: "initiating" } | undefined {
-  const cohort = getBackgroundWorkflowToolRuns(input.state).filter(
-    (entry) => entry.origin.turnId === input.turnId,
-  );
-  if (!cohort.some((entry) => entry.task.outcome === undefined)) {
-    return undefined;
-  }
-  return { ...projectTaskCohort(cohort, false), phase: "initiating" };
+  const tasks = getBackgroundTasks(input.state);
+  if (tasks.query({ state: "working", turnId: input.turnId }).length === 0) return undefined;
+  return {
+    ...projectTaskCohort(tasks.query({ turnId: input.turnId }), false),
+    phase: "initiating",
+  };
 }
 
 function projectTaskCohort(
-  cohort: readonly BackgroundWorkflowToolRun[],
+  cohort: readonly BackgroundTask[],
   includePartialOutputs: boolean,
 ): {
   readonly context: string;
   readonly phase: "pending" | "settled";
 } {
-  const settled = cohort.every((entry) => entry.task.outcome !== undefined);
-  const tasks = cohort.map((entry) => {
-    const view = readWorkflowTaskView(entry.task);
-    return {
-      name: entry.task.metadata.name,
-      output: settled || includePartialOutputs ? view?.lastOutput : undefined,
-      status: view?.status ?? "pending",
-      taskId: entry.task.taskId,
-    };
-  });
+  const settled = cohort.every((task) => task.status !== "working");
+  const tasks = cohort.map((task) => ({
+    name: task.metadata.name,
+    output: settled || includePartialOutputs ? task.lastOutput : undefined,
+    // The model-facing projection names unsettled work "pending".
+    status: task.status === "working" ? "pending" : task.status,
+    taskId: task.taskId,
+  }));
 
   return {
     context: `${TASK_DELIVERY_CONTEXT_LABEL}\n${JSON.stringify({ tasks })}`,

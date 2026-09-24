@@ -22,7 +22,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
-import { findBackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import {
   createTaskInputRequestId,
   retireProxyInputRequests,
@@ -80,7 +80,7 @@ export async function routeProxiedDeliverStep(input: {
       allowRoute: (requestId, route) =>
         !resolvedQuestions.has(requestId) &&
         (route.taskId === undefined ||
-          findBackgroundWorkflowToolRun(durableSession.state, route.taskId) !== undefined),
+          getBackgroundTasks(durableSession.state).get(route.taskId) !== undefined),
       payload,
       resolveMessage,
       state: durableSession.state,
@@ -133,7 +133,7 @@ export async function routeProxiedDeliverStep(input: {
     // durable decision, so its view cannot claim the child resumed first.
     const taskId = child.taskId;
     if (taskId !== undefined) {
-      const entry = findBackgroundWorkflowToolRun(durableSession.state, taskId);
+      const entry = getBackgroundTasks(durableSession.state).get(taskId)?.run;
       if (entry === undefined) {
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;

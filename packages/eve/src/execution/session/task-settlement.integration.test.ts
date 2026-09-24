@@ -14,10 +14,7 @@ import {
   getProxyInputRequests,
   upsertProxyInputRequestState,
 } from "#harness/proxy-input-requests.js";
-import {
-  findBackgroundWorkflowToolRun,
-  registerWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -96,7 +93,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
           // The owner is about to wait for B; A must already be settled without a model turn.
           reads++;
           const current = cursor.sessionState.snapshot.session;
-          expect(findBackgroundWorkflowToolRun(current.state, "A")?.task.outcome).toEqual({
+          expect(getBackgroundTasks(current.state).get("A")?.run.task.outcome).toEqual({
             status: a.status,
             lastOutput: a.lastOutput,
             usage: a.usage,
@@ -160,8 +157,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
     };
     vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => {
       expect(
-        findBackgroundWorkflowToolRun(input.sessionState.snapshot.session.state, "task")?.task
-          .outcome,
+        getBackgroundTasks(input.sessionState.snapshot.session.state).get("task")?.run.task.outcome,
       ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
       return { serializedContext: input.serializedContext };
     });
@@ -195,7 +191,7 @@ it.each(["completed", "failed", "cancelled"] as const)(
       );
     }
     expect(
-      findBackgroundWorkflowToolRun(sessionState.snapshot.session.state, "task")?.task.outcome,
+      getBackgroundTasks(sessionState.snapshot.session.state).get("task")?.run.task.outcome,
     ).toEqual({ status: view.status, lastOutput: view.lastOutput, usage: view.usage });
   },
 );

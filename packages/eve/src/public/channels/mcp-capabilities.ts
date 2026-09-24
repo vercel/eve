@@ -498,9 +498,11 @@ interface SubagentCallInput extends Omit<ToolCallInput, "tool"> {
 
 /**
  * Runs a declared subagent to completion inside one `tools/call`, as the same
- * durable task invocation `mcpChannel` exposes. Its questions and sign-ins
- * come back as `input_required`, and the retry answers them. A subagent still
- * working after {@link SUBAGENT_WAIT_MS} is cancelled and reported.
+ * durable task invocation `mcpChannel` exposes. A turn that ends while the
+ * subagent's own background work runs only yields, so the call keeps waiting
+ * for the answer that follows. Questions and sign-ins come back as
+ * `input_required`, and the retry answers them. A subagent still working after
+ * {@link SUBAGENT_WAIT_MS} is cancelled with its nested work and reported.
  */
 async function callSubagent(input: SubagentCallInput) {
   const { request, scope, subagent } = input;
@@ -549,7 +551,10 @@ async function callSubagent(input: SubagentCallInput) {
     } else {
       const answers = readSubagentAnswers(input.inputResponses);
       if (answers === "declined") {
-        await execution.cancel({ auth, invocationId });
+        if ((await execution.read({ auth, invocationId })) === undefined) {
+          return subagentNotFound(subagent);
+        }
+        await subagent.cancel(invocationId);
         return toolError(`The user declined to answer ${subagent.name}, so it was cancelled.`);
       }
       if (answers.length > 0) {
@@ -592,7 +597,7 @@ async function callSubagent(input: SubagentCallInput) {
           resume,
         );
       case "working":
-        await execution.cancel({ auth, invocationId });
+        await subagent.cancel(invocationId);
         return toolError(
           `${subagent.name} did not finish within ${String(SUBAGENT_WAIT_MS / 1000)} seconds and was cancelled. Retry with a narrower task.`,
         );

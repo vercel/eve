@@ -1,11 +1,11 @@
+import type { SessionStateMap } from "#harness/types.js";
+import { getBackgroundTasks, type BackgroundTasks } from "#harness/workflow-tool-runs.js";
+import { hasRecordedTaskOutcome, taskIdOfDelivery } from "#tasks/notification.js";
 import type { TaskDeliveryPolicy, DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
-import type { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
-
-type TaskCohorts = ReturnType<typeof getSessionTaskCohorts>;
 
 export interface DeliveryAdmission {
   readonly delivery: DeliverHookPayload;
@@ -53,8 +53,7 @@ export type SessionInputSelection =
  * Ordered, admitted session input, plus the idempotency and cancellation
  * facts for task deliveries this owner has seen. Entries are private; callers
  * receive typed admission and selection values. Everything here is rebuilt
- * deterministically on replay, and a successor never inherits it because
- * handoff requires every indexed task to be terminal.
+ * deterministically on replay. Indexed task outcomes live in session state.
  */
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
@@ -66,17 +65,18 @@ export class SessionInputQueue {
     return this.entries.length;
   }
 
-  /** Admits a delivery unless it repeats or belongs to a cancelled task. */
-  enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
+  /** Drops notifications the model must not see; lifecycle envelopes are always admitted. */
+  enqueueDelivery(
+    delivery: DeliverHookPayload,
+    state?: SessionStateMap,
+  ): DeliveryAdmission | undefined {
+    if (isStaleNotification(delivery, state)) return undefined;
     const deliveryId = taskDeliveryId(delivery);
     if (deliveryId !== undefined) {
       const terminalId = terminalTaskId(delivery);
       // Competing outcomes for one task must not produce separate cohort reports.
       const deduplicationId = terminalId === undefined ? deliveryId : `${terminalId}:ready`;
-      if (
-        this.seenTaskDeliveryIds.has(deduplicationId) ||
-        this.isCancelledTaskDelivery(deliveryId)
-      ) {
+      if (this.seenTaskDeliveryIds.has(deduplicationId) || this.isCancelledNotification(delivery)) {
         return undefined;
       }
       this.seenTaskDeliveryIds.add(deduplicationId);
@@ -131,8 +131,7 @@ export class SessionInputQueue {
   taskDeliveries(): readonly DeliveryAdmission[] {
     return this.entries.filter(
       (entry): entry is QueuedDelivery =>
-        entry.kind === "delivery" &&
-        entry.delivery.payloads.some((payload) => payload.task !== undefined),
+        entry.kind === "delivery" && !isNotificationOnly(entry.delivery),
     );
   }
 
@@ -141,21 +140,22 @@ export class SessionInputQueue {
       (entry) => entry.kind === "delivery" && entry.sequence === sequence,
     );
     if (index < 0) return;
-    if (delivery === undefined) {
+    if (delivery === undefined || this.isCancelledNotification(delivery)) {
       this.entries.splice(index, 1);
       return;
     }
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
-  /** Drops queued notifications from a cancelled task and refuses later ones. */
+  /** Revokes model wakeups for a cancelled task; its lifecycle envelopes still reach routing. */
   cancelTask(taskId: string): void {
     this.cancelledTaskIds.add(taskId);
-    this.retain(
-      (entry) =>
-        entry.kind !== "delivery" ||
-        !isTaskDelivery(entry.delivery, (id) => id === taskId || id.startsWith(`${taskId}:`)),
-    );
+    this.discardDeliveries((delivery) => this.isCancelledNotification(delivery));
+  }
+
+  /** After cancellation records outcomes, queued notifications for those tasks are stale. */
+  discardStaleNotifications(state: SessionStateMap | undefined): void {
+    this.discardDeliveries((delivery) => isStaleNotification(delivery, state));
   }
 
   takeSteering(
@@ -179,7 +179,7 @@ export class SessionInputQueue {
   }
 
   takeNext(
-    cohorts: TaskCohorts,
+    state: SessionStateMap | undefined,
     options?: {
       readonly deferDeliveries?: boolean;
       readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
@@ -210,39 +210,45 @@ export class SessionInputQueue {
         };
       }
     }
+    const tasks = getBackgroundTasks(state);
+    // A cohort reports once every task is ready; a cancelled task's notification may never arrive.
+    const pendingCohorts = new Set(
+      tasks
+        .query({ state: "working" })
+        .filter(
+          ({ taskId }) =>
+            !this.seenTaskDeliveryIds.has(`${taskId}:ready`) && !this.cancelledTaskIds.has(taskId),
+        )
+        .map((task) => task.cohortId),
+    );
     const index = this.nextActionableIndex(
-      cohorts,
+      tasks,
+      pendingCohorts,
       options?.deferDeliveries === true,
       options?.taskDeliveryPolicy ?? "cohort",
     );
     if (index < 0) return undefined;
-    return this.takeSelectionAt(index, cohorts, options?.freshSequence);
+    return this.takeSelectionAt(index, tasks, options?.freshSequence);
   }
 
   private nextActionableIndex(
-    cohorts: TaskCohorts,
+    tasks: BackgroundTasks,
+    pendingCohorts: ReadonlySet<string>,
     deferDeliveries: boolean,
     taskDeliveryPolicy: TaskDeliveryPolicy,
   ): number {
-    const pendingCohorts = new Set<string>();
-    for (const [taskId, cohortId] of cohorts) {
-      // A control step can record cancellation before its notification is admitted.
-      // Wait for that notification too, so it cannot trigger a second cohort report.
-      if (!this.seenTaskDeliveryIds.has(`${taskId}:ready`) && !this.cancelledTaskIds.has(taskId)) {
-        pendingCohorts.add(cohortId);
-      }
-    }
     return this.entries.findIndex((entry) => {
       if (entry.kind === "control") return true;
       if (entry.kind === "authorization" || deferDeliveries) return false;
-      const cohort = terminalCohort(entry.delivery, cohorts);
+      if (this.isCancelledDelivery(entry.delivery)) return false;
+      const cohort = terminalCohort(entry.delivery, tasks);
       return taskDeliveryPolicy === "auto" || cohort === undefined || !pendingCohorts.has(cohort);
     });
   }
 
   private takeSelectionAt(
     index: number,
-    cohorts: TaskCohorts,
+    tasks: BackgroundTasks,
     freshSequence: number | undefined,
   ): SessionInputSelection {
     const selected = this.entries[index]!;
@@ -251,34 +257,38 @@ export class SessionInputQueue {
       if (selected.kind === "control") return { control: selected.control, kind: "control" };
       return { kind: "authorization-resume", payloads: [selected.payload] };
     }
-    const readyCohort = terminalCohort(selected.delivery, cohorts);
+    const readyCohort = terminalCohort(selected.delivery, tasks);
     if (readyCohort !== undefined) {
       const lastSibling = this.entries.findLastIndex(
         (entry) =>
-          entry.kind === "delivery" && terminalCohort(entry.delivery, cohorts) === readyCohort,
+          entry.kind === "delivery" &&
+          !this.isCancelledDelivery(entry.delivery) &&
+          terminalCohort(entry.delivery, tasks) === readyCohort,
       );
       const boundary = this.entries.findIndex(
         (entry, position) =>
           position > index &&
           position < lastSibling &&
-          (entry.kind !== "delivery" || terminalCohort(entry.delivery, cohorts) === undefined),
+          (entry.kind !== "delivery" ||
+            (!this.isCancelledDelivery(entry.delivery) &&
+              terminalCohort(entry.delivery, tasks) === undefined)),
       );
-      if (boundary >= 0) return this.takeSelectionAt(boundary, cohorts, freshSequence);
+      if (boundary >= 0) return this.takeSelectionAt(boundary, tasks, freshSequence);
     }
 
     const first = this.entries.splice(index, 1)[0]!;
     if (first.kind !== "delivery") throw new Error("Selected a non-delivery entry as a turn.");
     const turnEntries = [first];
-    const cohort = terminalCohort(first.delivery, cohorts);
+    const cohort = terminalCohort(first.delivery, tasks);
     if (cohort !== undefined) {
       const siblings = this.entries.filter(
         (entry): entry is QueuedDelivery =>
-          entry.kind === "delivery" && terminalCohort(entry.delivery, cohorts) === cohort,
+          entry.kind === "delivery" &&
+          !this.isCancelledDelivery(entry.delivery) &&
+          terminalCohort(entry.delivery, tasks) === cohort,
       );
       turnEntries.push(...siblings);
-      this.retain(
-        (entry) => entry.kind !== "delivery" || terminalCohort(entry.delivery, cohorts) !== cohort,
-      );
+      this.retain((entry) => entry.kind !== "delivery" || !siblings.includes(entry));
     } else {
       const authenticated =
         first.delivery.auth != null && first.delivery.auth.principalType !== "anonymous";
@@ -315,17 +325,37 @@ export class SessionInputQueue {
     };
   }
 
-  private isCancelledTaskDelivery(deliveryId: string): boolean {
-    for (const taskId of this.cancelledTaskIds) {
-      if (deliveryId === taskId || deliveryId.startsWith(`${taskId}:`)) return true;
-    }
-    return false;
+  private isCancelledDelivery(delivery: DeliverHookPayload): boolean {
+    const deliveryId = taskDeliveryId(delivery);
+    return deliveryId !== undefined && this.cancelledTaskIds.has(taskIdOfDelivery(deliveryId));
+  }
+
+  /** A cancelled task's notification never reaches the model. */
+  private isCancelledNotification(delivery: DeliverHookPayload): boolean {
+    return isNotificationOnly(delivery) && this.isCancelledDelivery(delivery);
+  }
+
+  private discardDeliveries(predicate: (delivery: DeliverHookPayload) => boolean): void {
+    this.retain((entry) => entry.kind !== "delivery" || !predicate(entry.delivery));
   }
 
   private retain(predicate: (entry: QueuedSessionInput) => boolean): void {
     const kept = this.entries.filter(predicate);
     this.entries.splice(0, this.entries.length, ...kept);
   }
+}
+
+/** Carries only model-facing text, without `payload.task` envelopes that routing must apply. */
+function isNotificationOnly(delivery: DeliverHookPayload): boolean {
+  return delivery.payloads.every((payload) => payload.task === undefined);
+}
+
+/** A notification for a task whose outcome the parent already recorded and reported. */
+function isStaleNotification(
+  delivery: DeliverHookPayload,
+  state: SessionStateMap | undefined,
+): boolean {
+  return isNotificationOnly(delivery) && hasRecordedTaskOutcome(delivery, state);
 }
 
 export function isSteeringDelivery(
@@ -362,17 +392,9 @@ function taskDeliveryId(delivery: DeliverHookPayload): string | undefined {
   return delivery.taskDeliveryId ?? delivery.caller?.taskId;
 }
 
-function isTaskDelivery(
-  delivery: DeliverHookPayload,
-  predicate: (deliveryId: string) => boolean,
-): boolean {
-  const deliveryId = taskDeliveryId(delivery);
-  return deliveryId !== undefined && predicate(deliveryId);
-}
-
-function terminalCohort(delivery: DeliverHookPayload, cohorts: TaskCohorts): string | undefined {
+function terminalCohort(delivery: DeliverHookPayload, tasks: BackgroundTasks): string | undefined {
   const taskId = terminalTaskId(delivery);
-  return taskId === undefined ? undefined : cohorts.get(taskId);
+  return taskId === undefined ? undefined : tasks.get(taskId)?.cohortId;
 }
 
 function terminalTaskId(delivery: DeliverHookPayload): string | undefined {

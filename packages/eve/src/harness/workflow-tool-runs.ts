@@ -7,6 +7,7 @@ import {
   sameTaskMetadata,
   type TaskMetadata,
   type TaskOutput,
+  type TaskStatus,
   type TaskUsage,
   type TaskView,
 } from "#tasks/types.js";
@@ -275,12 +276,69 @@ export function getWorkflowToolRuns(
   return readRegistry(state).runs;
 }
 
-export function getBackgroundWorkflowToolRuns(
-  state: SessionStateMap | undefined,
-): readonly BackgroundWorkflowToolRun[] {
-  return getWorkflowToolRuns(state).filter(
-    (entry): entry is BackgroundWorkflowToolRun => entry.lifetime === "session",
+/** Parent-observed lifecycle state. Input requests are tracked on the parent session instead. */
+export type BackgroundTaskState = Exclude<TaskStatus, "input_required">;
+
+/** A background run with its decoded lifecycle view. */
+export type BackgroundTask = TaskView & {
+  /** Overlapping work reported together; a task without a join target starts its own cohort. */
+  readonly cohortId: string;
+  /** The parent turn that started the task. */
+  readonly turnId: string;
+  readonly run: BackgroundWorkflowToolRun;
+};
+
+export interface BackgroundTaskFilter {
+  readonly state?: BackgroundTaskState | readonly BackgroundTaskState[];
+  readonly cohortId?: string;
+  readonly turnId?: string;
+}
+
+export interface BackgroundTasks {
+  get(taskId: string): BackgroundTask | undefined;
+  query(filter?: BackgroundTaskFilter): readonly BackgroundTask[];
+}
+
+/**
+ * Read-only parent view: a task without a recorded terminal outcome is working.
+ * Only returned tasks are decoded, so one corrupt retained outcome cannot block
+ * reads of unrelated tasks, and working-only reads never decode.
+ */
+export function getBackgroundTasks(state: SessionStateMap | undefined): BackgroundTasks {
+  const runs = getWorkflowToolRuns(state).filter(
+    (run): run is BackgroundWorkflowToolRun => run.lifetime === "session",
   );
+  return {
+    get(taskId) {
+      const run = runs.find((candidate) => candidate.task.taskId === taskId);
+      return run === undefined ? undefined : toBackgroundTask(run);
+    },
+    query(filter = {}) {
+      const states: readonly TaskStatus[] | undefined =
+        typeof filter.state === "string" ? [filter.state] : filter.state;
+      const admitsOutcomes = states === undefined || states.some((status) => status !== "working");
+      return runs.flatMap((run) => {
+        if (filter.cohortId !== undefined && cohortIdOf(run) !== filter.cohortId) return [];
+        if (filter.turnId !== undefined && run.origin.turnId !== filter.turnId) return [];
+        if (run.task.outcome !== undefined && !admitsOutcomes) return [];
+        const task = toBackgroundTask(run);
+        return states === undefined || states.includes(task.status) ? [task] : [];
+      });
+    },
+  };
+}
+
+function cohortIdOf(run: BackgroundWorkflowToolRun): string {
+  return run.task.cohortId ?? run.task.taskId;
+}
+
+function toBackgroundTask(run: BackgroundWorkflowToolRun): BackgroundTask {
+  const view = readWorkflowTaskView(run.task) ?? {
+    taskId: run.task.taskId,
+    metadata: run.task.metadata,
+    status: "working" as const,
+  };
+  return { ...view, cohortId: cohortIdOf(run), turnId: run.origin.turnId, run };
 }
 
 export function getBlockingWorkflowToolRuns(
@@ -291,13 +349,6 @@ export function getBlockingWorkflowToolRuns(
     (entry): entry is BlockingWorkflowToolRun =>
       entry.lifetime === "turn" && (turnId === undefined || entry.origin.turnId === turnId),
   );
-}
-
-export function findBackgroundWorkflowToolRun(
-  state: SessionStateMap | undefined,
-  taskId: string,
-): BackgroundWorkflowToolRun | undefined {
-  return getBackgroundWorkflowToolRuns(state).find((entry) => entry.task.taskId === taskId);
 }
 
 function writeRegistry(
@@ -379,11 +430,16 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
 }
 
-/** Task payloads remain available for the session lifetime, including after report delivery. */
+/** Records the first terminal outcome and distinguishes it from repeated or late reports. */
 export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
-): SessionStateMap | undefined {
+): {
+  readonly state: SessionStateMap | undefined;
+  readonly view: TaskView;
+  /** True only when this call recorded the task's first outcome. */
+  readonly firstOutcome: boolean;
+} {
   const { taskId, metadata, ...result } = view;
   const outcome = parseTaskOutcome(result);
   if (!isNonEmptyString(taskId) || !isTaskMetadata(metadata) || outcome === undefined)
@@ -394,12 +450,15 @@ export function recordWorkflowTaskView(
     (entry) => entry.lifetime === "session" && entry.task.taskId === taskId,
   );
   const entry = runs[index];
-  if (entry === undefined || entry.lifetime !== "session") return state;
+  if (entry === undefined || entry.lifetime !== "session")
+    return { state, view, firstOutcome: false };
   if (!sameTaskMetadata(entry.task.metadata, metadata))
     throw new Error(`Task view metadata does not match invocation "${view.taskId}".`);
   const previous = readWorkflowTaskView(entry.task);
   // Parent delivery order decides settlement. Replays and late outcomes cannot replace it.
-  if (previous !== undefined) return state;
+  if (previous !== undefined) {
+    return { state, view: previous, firstOutcome: false };
+  }
   runs[index] = {
     ...entry,
     task: {
@@ -407,7 +466,11 @@ export function recordWorkflowTaskView(
       outcome,
     },
   };
-  return writeRegistry(state, { ...registry, runs });
+  return {
+    state: writeRegistry(state, { ...registry, runs }),
+    view,
+    firstOutcome: true,
+  };
 }
 
 /** Removes only this turn's waiting calls. Session-owned task payloads are never pruned here. */

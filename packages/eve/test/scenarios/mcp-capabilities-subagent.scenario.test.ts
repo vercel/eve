@@ -66,6 +66,31 @@ export default defineAgent({
 
 export default askQuestion();
 `,
+    "agent/subagents/coordinator/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  description: "Hands the scan to its own scanner subagent in the background.",
+  model: mockModel((request) => {
+    const messages = JSON.stringify(request.messages);
+    if (messages.includes("NESTED-SCANNER-RESULT")) return "COORDINATOR-FINAL: NESTED-SCANNER-RESULT";
+    if (request.toolResults.some((result) => result.name === "scanner")) {
+      return "COORDINATOR-INTERIM-ACK";
+    }
+    return { toolCalls: [{ id: "scan-1", input: { message: "Scan the draft." }, name: "scanner" }] };
+  }),
+  modelContextWindowTokens: 32_000,
+});
+`,
+    "agent/subagents/coordinator/subagents/scanner/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  description: "Scans a draft.",
+  model: mockModel(() => "NESTED-SCANNER-RESULT"),
+  modelContextWindowTokens: 32_000,
+});
+`,
   },
   installDependencies: true,
   name: "mcp-capabilities-subagent",
@@ -73,7 +98,7 @@ export default askQuestion();
 
 describe("mcpCapabilitiesChannel subagents", () => {
   it(
-    "runs a declared subagent to completion and relays its question",
+    "runs declared subagents to completion, relaying questions and waiting out nested work",
     async () => {
       const app = await scenarioApp(SUBAGENT_CAPABILITY_DESCRIPTOR);
       // Run the authored mock models instead of eve dev's default model stand-in.
@@ -121,6 +146,19 @@ describe("mcpCapabilitiesChannel subagents", () => {
         expect(completed).toMatchObject({
           content: [{ text: "SUBAGENT-REVIEW-COMPLETE", type: "text" }],
         });
+
+        // The coordinator's first turn yields to its background scanner; the call returns the
+        // answer written after that nested work settles, not the interim acknowledgement.
+        const coordinated = await callTool(
+          server.url,
+          "alice",
+          { message: "Coordinate a scan of PASTED-DRAFT." },
+          {},
+          "coordinator",
+        );
+        expect(coordinated).toMatchObject({
+          content: [{ text: "COORDINATOR-FINAL: NESTED-SCANNER-RESULT", type: "text" }],
+        });
       } catch (error) {
         throw new Error(
           [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),
@@ -141,10 +179,11 @@ async function callTool(
   principal: string,
   args: Readonly<Record<string, unknown>>,
   retry: Readonly<Record<string, unknown>> = {},
+  name = "reviewer",
 ): Promise<unknown> {
   const response = await rpc(serverUrl, principal, "tools/call", {
     arguments: args,
-    name: "reviewer",
+    name,
     ...retry,
   });
   return response.result;

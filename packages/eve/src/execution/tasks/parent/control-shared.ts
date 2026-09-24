@@ -1,10 +1,7 @@
 import type { HarnessSession as RuntimeSession } from "#harness/types.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { taskViewsToJson } from "#tasks/json.js";
-import {
-  findBackgroundWorkflowToolRun,
-  type BackgroundWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks, type BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import type { TaskView } from "#tasks/types.js";
 
 /**
@@ -22,8 +19,9 @@ export function lookupTaskEntries(
   | { readonly kind: "unknown"; readonly unknown: string[] } {
   const entries: BackgroundWorkflowToolRun[] = [];
   const unknown: string[] = [];
+  const tasks = getBackgroundTasks(session.state);
   for (const taskId of taskIds) {
-    const entry = findBackgroundWorkflowToolRun(session.state, taskId);
+    const entry = tasks.get(taskId)?.run;
     if (entry === undefined) {
       unknown.push(taskId);
     } else {
