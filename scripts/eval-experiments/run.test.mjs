@@ -3,31 +3,52 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runSchedule, selectShard } from "./run.mjs";
+import { runSchedule, selectShard, shardIndices } from "./run.mjs";
 
-test("shards preserve scheduled order for each eval without overlap", () => {
+test("shards preserve scheduled order for each eval and repetition without overlap", () => {
   const plan = {
-    fixtures: [{ name: "fixture", evals: ["slow", "fast"] }],
+    fixtures: [
+      { name: "fixture", evals: ["slow", "fast"] },
+      { name: "other", evals: ["slow"] },
+    ],
+    sampling: { repetitions: 2 },
     schedule: [
       { fixture: "fixture", eval: "slow", repetition: 0, configuration: "a" },
       { fixture: "fixture", eval: "fast", repetition: 0, configuration: "a" },
+      { fixture: "other", eval: "slow", repetition: 0, configuration: "a" },
       { fixture: "fixture", eval: "slow", repetition: 0, configuration: "b" },
       { fixture: "fixture", eval: "fast", repetition: 0, configuration: "b" },
+      { fixture: "other", eval: "slow", repetition: 0, configuration: "b" },
       { fixture: "fixture", eval: "slow", repetition: 1, configuration: "b" },
       { fixture: "fixture", eval: "fast", repetition: 1, configuration: "b" },
+      { fixture: "other", eval: "slow", repetition: 1, configuration: "b" },
     ],
   };
+  assert.deepEqual(shardIndices(plan), [0, 1, 2, 3, 4, 5]);
+  const shards = shardIndices(plan).map((index) => selectShard(plan, index));
   assert.deepEqual(
-    selectShard(plan, 0),
-    plan.schedule.filter((cell) => cell.eval === "slow"),
+    shards[0],
+    plan.schedule.filter(
+      (cell) => cell.fixture === "fixture" && cell.eval === "slow" && cell.repetition === 0,
+    ),
   );
   assert.deepEqual(
-    selectShard(plan, 1),
-    plan.schedule.filter((cell) => cell.eval === "fast"),
+    shards[1],
+    plan.schedule.filter(
+      (cell) => cell.fixture === "fixture" && cell.eval === "slow" && cell.repetition === 1,
+    ),
   );
-  assert.throws(() => selectShard(plan, -1), /Invalid eval shard/);
-  assert.throws(() => selectShard(plan, 2), /Invalid eval shard/);
-  assert.throws(() => selectShard(plan, NaN), /Invalid eval shard/);
+  assert.deepEqual(
+    shards[4],
+    plan.schedule.filter((cell) => cell.fixture === "other" && cell.repetition === 0),
+  );
+  assert(shards.every((cells) => cells.length > 0));
+  assert.deepEqual(
+    shards.flat().sort((a, b) => plan.schedule.indexOf(a) - plan.schedule.indexOf(b)),
+    plan.schedule,
+  );
+  for (const invalid of [-1, 6, NaN, 0.5])
+    assert.throws(() => selectShard(plan, invalid), /Invalid eval\/repetition shard/);
 });
 
 test("runs scheduled source/configuration cells and records eval exit outcomes", async () => {
@@ -66,6 +87,7 @@ test("runs scheduled source/configuration cells and records eval exit outcomes",
       ],
       configurations: [{ label: "config", settings: { parent: { model: "provider/model" } } }],
       fixtures: [{ name: "agent-self-modification", evals: ["other", "case"] }],
+      sampling: { repetitions: 1 },
       schedule: [
         {
           source: "base",

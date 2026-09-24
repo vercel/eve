@@ -69,15 +69,25 @@ export async function runSchedule({
   return records;
 }
 
+export function shardIndices(plan) {
+  const count = plan.fixtures.reduce((total, fixture) => total + fixture.evals.length, 0);
+  return Array.from({ length: count * plan.sampling.repetitions }, (_, index) => index);
+}
+
 export function selectShard(plan, shard) {
   const evals = plan.fixtures.flatMap((fixture) =>
     fixture.evals.map((evalId) => ({ fixture: fixture.name, eval: evalId })),
   );
-  if (!Number.isInteger(shard) || shard < 0 || shard >= evals.length)
-    throw new Error(`Invalid eval shard: ${shard}`);
-  const selected = evals[shard];
+  const repetitions = plan.sampling.repetitions;
+  if (!Number.isInteger(shard) || shard < 0 || shard >= evals.length * repetitions)
+    throw new Error(`Invalid eval/repetition shard: ${shard}`);
+  const selected = evals[Math.floor(shard / repetitions)];
+  const repetition = shard % repetitions;
   return plan.schedule.filter(
-    (cell) => cell.fixture === selected.fixture && cell.eval === selected.eval,
+    (cell) =>
+      cell.fixture === selected.fixture &&
+      cell.eval === selected.eval &&
+      cell.repetition === repetition,
   );
 }
 
@@ -315,7 +325,9 @@ function appendBounded(current, chunk) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [planPath, checkoutsPath, outputDir, shardArg] = process.argv.slice(2);
   if (!planPath || !checkoutsPath || !outputDir)
-    throw new Error("Usage: node run.mjs <plan.json> <checkouts.json> <output-dir> [shard-index]");
+    throw new Error(
+      "Usage: node run.mjs <plan.json> <checkouts.json> <output-dir> [eval-repetition-shard-index]",
+    );
   const plan = JSON.parse(await readFile(planPath, "utf8"));
   const checkouts = JSON.parse(await readFile(checkoutsPath, "utf8"));
   try {

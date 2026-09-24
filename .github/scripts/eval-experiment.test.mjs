@@ -31,6 +31,20 @@ test("checkout and analysis use the same immutable experiment revision", () => {
   assert.doesNotMatch(workflow, /\$\{GITHUB_SHA\}/u);
 });
 
+test("execution uses eight-way isolated eval/repetition shards", () => {
+  assert.match(workflow, /shardIndices\(JSON\.parse\(readFileSync\("plan\.json"\)\)\)/u);
+  assert.match(workflow, /max-parallel: 8/u);
+  assert.match(
+    workflow,
+    /run\.mjs plan\.json checkouts\.json execution "\$\{\{ matrix\.shard \}\}"/u,
+  );
+  assert.match(
+    workflow,
+    /eval-experiment-shard-\$\{\{ github\.run_id \}\}-\$\{\{ matrix\.shard \}\}/u,
+  );
+  assert.match(workflow, /merge-multiple: true/u);
+});
+
 test("notification is PR-only, separately permissioned and does not execute PR code", () => {
   const notify = workflow.split("\n  notify:\n")[1];
   const before = workflow.split("\n  notify:\n")[0];
