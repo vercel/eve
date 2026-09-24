@@ -13,6 +13,8 @@ import type {
 } from "#public/definitions/channel.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
+export type { ForwardedAssertion, TrustedForwarders } from "#channel/forwarded-principal.js";
+
 /**
  * Event-handler channel context exposed by `eveChannel({ events })`. The default eve HTTP channel
  * has no platform-specific state, so handlers receive optional continuation routing here and the
@@ -114,11 +116,16 @@ export interface EveChannelInput {
    * The trusted-forwarders policy: which transport-authenticated callers may
    * assert a forwarded principal, callback-marked public trace audience, or
    * remote parent lineage. The predicate receives the *verified* route-auth
-   * principal of the forwarder — who is asserting, never what is asserted —
-   * and must match it precisely (for example `(forwarder) =>
-   * forwarder.subject === vercelSubject({ teamSlug, projectName })`). A
-   * permissive predicate lets any authenticated forwarder assert any principal,
+   * principal of the forwarder and must match it precisely (for example
+   * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
+   * A permissive predicate lets any authenticated forwarder assert any principal,
    * public trace audience, or remote lineage.
+   *
+   * The second argument carries what the forwarder asserts. `assertion.principal`
+   * holds the stamped `current` and `initiator` contexts the request would install,
+   * so a receiver can limit a forwarder to the identities it may speak for, such as
+   * one authenticator and issuer. It is absent when the predicate decides remote
+   * parent lineage for a request that forwards no principal.
    *
    * When a trusted forwarder's assertion is accepted on session creation, the
    * forwarded principal replaces `session.auth.current` and

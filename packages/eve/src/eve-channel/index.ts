@@ -179,7 +179,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             let accepted = forwarded.accepted;
             if (!accepted && input.trustedForwarders !== undefined) {
               try {
-                accepted = await input.trustedForwarders(authResult);
+                accepted = await input.trustedForwarders(authResult, {});
               } catch (error) {
                 const errorId = logError(log, "trustedForwarders handler failed", error, {
                   forwarder: authResult.principalId,

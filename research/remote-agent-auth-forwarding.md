@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/604
 status: implemented
-last_updated: "2026-08-20"
+last_updated: "2026-09-24"
 ---
 
 # Forwarding end-user identity across remote agent hops
@@ -90,11 +90,19 @@ export default eveChannel({
 });
 ```
 
-- `trustedForwarders?: (caller: SessionAuthContext) => boolean | Promise<boolean>`. The
-  predicate authorizes the _verified transport principal_ (who is asserting), not the forwarded
-  identity (what is asserted). The route's `auth` walk has already authenticated the request; the
-  forwarding decision is authorization over its result, so there is no second token verification
-  and no new auth machinery.
+- `trustedForwarders?: (caller: SessionAuthContext, assertion: ForwardedAssertion) => boolean | Promise<boolean>`.
+  The predicate authorizes the _verified transport principal_ (who is asserting) and what it
+  asserts. The route's `auth` walk has already authenticated the request; the forwarding decision
+  is authorization over its result, so there is no second token verification and no new auth
+  machinery.
+- `assertion.principal` is `{ current, initiator }`: the stamped contexts the request would
+  install, with `initiator` defaulting to `current`. It is absent when the predicate decides parent
+  lineage for a request that forwards no principal. Without this argument, a trusted forwarder
+  could assert any authenticator, issuer, and attributes, so a receiver whose tools gate on Slack,
+  GitHub, or app principals could not trust a forwarder that should speak only for its own users.
+  Checking consumers individually does not scale; the assertion is decided once at the boundary,
+  before the session or `onMessage` sees it. `onMessage` cannot substitute: it sees only `current`,
+  while a forwarded `initiator` is installed directly.
 - A predicate — rather than a second `AuthFn` walk — makes the Vercel OIDC always-on
   current-project bypass structurally irrelevant: the bypass lives inside `vercelOidc()` closures
   and cannot be disabled from the outside, and with a predicate the author must write an explicit

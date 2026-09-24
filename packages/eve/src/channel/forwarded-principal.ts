@@ -25,11 +25,33 @@ export interface ForwardedPrincipal {
 }
 
 /**
- * Authorizes which transport-authenticated forwarders may assert a forwarded
- * principal. Receives the *verified* route-auth principal (who is asserting),
- * never the forwarded identity (what is asserted).
+ * What a forwarder asks the receiving deployment to adopt, passed to
+ * {@link TrustedForwarders} next to the verified forwarder.
  */
-export type TrustedForwarders = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
+export interface ForwardedAssertion {
+  /**
+   * The session principals the request would install, present when it forwards
+   * a principal and absent when only remote parent lineage is being trusted.
+   * Both contexts are already stamped with {@link FORWARDED_BY_ATTRIBUTE}, and
+   * `initiator` is `current` when the sender omitted it. Continuation requests
+   * keep the session's pinned initiator, so only `current` takes effect there.
+   */
+  readonly principal?: {
+    readonly current: SessionAuthContext;
+    readonly initiator: SessionAuthContext;
+  };
+}
+
+/**
+ * Authorizes a transport-authenticated forwarder to supply eve delegation
+ * context. Receives the *verified* route-auth principal (who is asserting) and
+ * the principals it asserts, so a receiver can limit each forwarder to the
+ * identities it may speak for.
+ */
+export type TrustedForwarders = (
+  forwarder: SessionAuthContext,
+  assertion: ForwardedAssertion,
+) => boolean | Promise<boolean>;
 
 export type ForwardedPrincipalParseResult =
   | {
@@ -88,8 +110,8 @@ const forwardedPrincipalSchema = z
  * Gates the `forwardedPrincipal` body field and resolves the
  * effective session principals. Returns the failure `Response` on rejection:
  * 403 when the channel accepts no forwarded principal or the predicate
- * refuses the forwarder, 400 on a malformed payload, 500 when the authored
- * predicate throws. Accepted contexts are stamped with
+ * refuses the forwarder or what it asserts, 400 on a malformed payload, 500
+ * when the authored predicate throws. Accepted contexts are stamped with
  * {@link FORWARDED_BY_ATTRIBUTE} before they are returned, so a custom
  * `onMessage` always sees the transport forwarder on the replaced principal.
  */
@@ -113,9 +135,17 @@ export async function resolveForwardedPrincipal(input: {
     return Response.json({ error: parsed.message, ok: false }, { status: 400 });
   }
 
+  const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
+  const initiator =
+    parsed.forwardedPrincipal.initiator === undefined
+      ? current
+      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
+
   let accepted: boolean;
   try {
-    accepted = await input.trustedForwarders(input.forwarder);
+    accepted = await input.trustedForwarders(input.forwarder, {
+      principal: { current, initiator },
+    });
   } catch (error) {
     const errorId = logError(log, "trustedForwarders handler failed", error, {
       forwarder: input.forwarder.principalId,
@@ -132,11 +162,6 @@ export async function resolveForwardedPrincipal(input: {
     );
   }
 
-  const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
-  const initiator =
-    parsed.forwardedPrincipal.initiator === undefined
-      ? current
-      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
   return { accepted: true, auth: current, initiatorAuth: initiator };
 }
 

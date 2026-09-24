@@ -6,7 +6,7 @@ import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
-import { eveChannel } from "#public/channels/eve.js";
+import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
 
 function route(
   method: "GET" | "POST",
@@ -348,7 +348,7 @@ describe("eve ID-addressed session routes", () => {
         sessionId: "wrun_A",
       });
       const args = attachRouteSessionCreator(createArgs(), createSession);
-      const trustedForwarders = vi.fn(() => trusted);
+      const trustedForwarders = vi.fn<TrustedForwarders>(() => trusted);
       const parent = {
         callId: "call-1",
         rootSessionId: "root-session",
@@ -381,6 +381,8 @@ describe("eve ID-addressed session routes", () => {
 
       expect(response.status).toBe(202);
       expect(trustedForwarders).toHaveBeenCalledTimes(1);
+      // Lineage-only requests assert no principal.
+      expect(trustedForwarders).toHaveBeenCalledWith(expect.anything(), {});
       expect(createSession).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: trusted ? parent : undefined,
