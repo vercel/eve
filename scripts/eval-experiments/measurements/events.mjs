@@ -3,7 +3,7 @@ export function unavailable(reason) {
   return { status: "unavailable", reason };
 }
 
-/** Validate and deduplicate event identities before selecting measurement evidence. */
+/** Merge repeated session captures and validate event identities before selecting measurement evidence. */
 export function captureSessions(sessions) {
   if (!Array.isArray(sessions)) return undefined;
 
@@ -13,9 +13,7 @@ export function captureSessions(sessions) {
   for (const session of sessions) {
     if (typeof session?.sessionId !== "string" || !Array.isArray(session.events))
       throw new Error("Unsupported session capture shape.");
-    if (bySession.has(session.sessionId))
-      throw new Error(`Duplicate session capture: ${session.sessionId}`);
-    const events = [];
+    const events = bySession.get(session.sessionId) ?? [];
     for (const event of session.events) {
       if (!event || typeof event.type !== "string" || typeof event.meta?.id !== "string")
         throw new Error("Unsupported event capture shape or missing event identity.");

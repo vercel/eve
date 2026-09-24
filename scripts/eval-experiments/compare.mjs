@@ -177,7 +177,7 @@ export function renderMarkdown(report) {
   const lines = [
     "## Eval experiment",
     "",
-    `**Execution:** ${report.completeness.executionComplete ? "complete" : "incomplete"} (${report.completeness.executionComplete}/${report.completeness.planned})`,
+    `**Execution:** ${report.executionComplete ? "complete" : "incomplete"} (${report.completeness.executionComplete}/${report.completeness.planned})`,
     `**Analysis:** ${report.analysisComplete ? "complete" : "errors"} (${report.completeness.analysisErrors} errors)`,
     `**Correctness regressions:** ${report.correctnessRegressions.length}`,
     "",

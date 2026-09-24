@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compareExperiment } from "./compare.mjs";
+import { compareExperiment, renderMarkdown } from "./compare.mjs";
 
 const plan = {
   planHash: "hash",
@@ -63,6 +63,12 @@ test("pairs by provenance, preserves zero metrics and units, and keeps compariso
   assert.equal(report.comparisons[0].metrics["timing.count"].positiveValueRatios.length, 0);
   assert.equal(report.comparisons[0].metrics["timing.elapsed"].unit, "ms");
   assert.equal(report.samples.length, 4);
+});
+
+test("renders incomplete execution when completed rows remain", () => {
+  const report = compareExperiment(plan, [sample("base", 0, 0, 100)]);
+  assert.equal(report.executionComplete, false);
+  assert.match(renderMarkdown(report), /\*\*Execution:\*\* incomplete \(1\/4\)/);
 });
 
 test("compares configurations while holding each source fixed", () => {

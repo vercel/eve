@@ -16,10 +16,13 @@ const turn = (id, start, end) => [
 
 test("indexes captures, deduplicates identical events, and selects exact data fields", () => {
   const start = event("turn.started", "start", 0, { turnId: "turn" });
+  const later = event("turn.completed", "completed", 1, { turnId: "turn" });
   const capture = captureSessions([
     { sessionId: "session", events: [start, structuredClone(start)] },
+    { sessionId: "session", events: [structuredClone(start), later] },
   ]);
-  assert.deepEqual(capture.events, [start]);
+  assert.deepEqual(capture.events, [start, later]);
+  assert.deepEqual(capture.bySession.get("session"), [start, later]);
   assert.deepEqual(selectEvents(capture.events, "turn.started", { turnId: "turn" }), [start]);
   assert.deepEqual(selectEvents(capture.events, "turn.started", { turnId: "other" }), []);
   assert.equal(capture.sessionId(start), "session");
@@ -33,10 +36,9 @@ test("rejects malformed or ambiguous capture identities", () => {
   const session = { sessionId: "session", events: [start] };
   for (const [sessions, message] of [
     [[{}], /Unsupported session capture/],
-    [[session, session], /Duplicate session capture/],
     [[{ ...session, events: [{ type: "turn.started" }] }], /Unsupported event capture/],
     [
-      [{ ...session, events: [start, { ...start, data: { changed: true } }] }],
+      [session, { ...session, events: [{ ...start, data: { changed: true } }] }],
       /Conflicting event identity/,
     ],
     [[session, { ...session, sessionId: "other" }], /Ambiguous session evidence/],
