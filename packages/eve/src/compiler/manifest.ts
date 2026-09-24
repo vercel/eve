@@ -55,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 51;
+export const COMPILED_AGENT_MANIFEST_VERSION = 52;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -160,10 +160,13 @@ export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
   (
     | {
         readonly model: CompiledRuntimeModelReference;
+        /** Models a caller may select for a new session; the first is `model`. */
+        readonly modelChoices?: readonly CompiledRuntimeModelReference[];
         readonly dynamicModel?: never;
       }
     | {
         readonly model?: never;
+        readonly modelChoices?: never;
         readonly dynamicModel: CompiledDynamicModelDefinition;
       }
   );
@@ -618,6 +621,7 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
     .object({
       ...compiledAgentConfigBaseFields,
       model: compiledRuntimeModelReferenceSchema,
+      modelChoices: z.array(compiledRuntimeModelReferenceSchema).min(1).optional(),
     })
     .strict(),
   z
@@ -1216,6 +1220,9 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
   return {
     ...base,
     model: cloneCompiledRuntimeModelReference(config.model),
+    ...(config.modelChoices === undefined
+      ? {}
+      : { modelChoices: config.modelChoices.map(cloneCompiledRuntimeModelReference) }),
   };
 }
 

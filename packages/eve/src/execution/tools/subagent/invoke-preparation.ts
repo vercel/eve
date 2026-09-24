@@ -32,6 +32,7 @@ import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import {
   createRecursiveAgentRootOnlyResult,
+  createInvalidModelChoiceResult,
   createUnavailableDynamicSubagentResult,
   getSubagentName,
 } from "#execution/dispatch-action-failures.js";
@@ -113,8 +114,16 @@ export function planAgentDispatch(input: {
   const rawAgentId = input.action.input.agentId;
   const agentId =
     typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
+  const resumes =
+    agentId !== undefined && isAgentHandleAction(input.action) && knownAgentIds.has(agentId);
+  const modelRejection = rejectInvalidModelChoice({
+    action: input.action,
+    bundle: input.bundle,
+    resumes,
+  });
+  if (modelRejection !== undefined) return modelRejection;
   if (agentId !== undefined && isAgentHandleAction(input.action)) {
-    if (knownAgentIds.has(agentId)) {
+    if (resumes) {
       const dynamicSubagentSelection =
         input.bundle.subagentRegistry.dynamicNodeIds?.has(input.action.nodeId) === true
           ? getDynamicSubagentSelection(input.ctx, input.action.nodeId)
@@ -135,6 +144,40 @@ export function planAgentDispatch(input: {
     });
   }
   return classifyFreshStart(input);
+}
+
+/** Checks a caller's `model` against the models the target's `agent.ts` lists. */
+function rejectInvalidModelChoice(input: {
+  readonly action: RuntimeAgentDispatchRequest;
+  readonly bundle: CompiledBundle;
+  readonly resumes: boolean;
+}): Extract<OwnerAgentDispatchPlanEntry, { kind: "reject" }> | undefined {
+  const { action } = input;
+  const model = action.input.model;
+  if (model === undefined) return undefined;
+  const reject = (message: string) => ({
+    kind: "reject" as const,
+    result: createInvalidModelChoiceResult(action, message),
+  });
+  if (input.resumes) {
+    return reject(
+      'The "model" field only applies when starting a new agent. Omit it when continuing an agent with "agentId".',
+    );
+  }
+  const definition =
+    action.kind === "subagent-call"
+      ? input.bundle.subagentRegistry.subagentsByNodeId.get(action.nodeId)?.definition
+      : undefined;
+  const choices = definition?.kind === "subagent" ? definition.modelChoices : undefined;
+  if (choices === undefined) {
+    return reject(`Subagent "${getSubagentName(action)}" does not accept a "model" choice.`);
+  }
+  if (typeof model !== "string" || !choices.includes(model)) {
+    return reject(
+      `Subagent "${getSubagentName(action)}" accepts one of these models: ${choices.join(", ")}.`,
+    );
+  }
+  return undefined;
 }
 
 function classifyFreshStart(input: {
@@ -272,9 +315,11 @@ export function resolveAgentInvocationAction(input: {
   const actionInput: {
     agentId?: string;
     message: string;
+    model?: string;
     outputSchema?: JsonObject;
   } = { message: input.input.message };
   if (input.input.agentId !== undefined) actionInput.agentId = input.input.agentId;
+  if (input.input.model !== undefined) actionInput.model = input.input.model;
   if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;
   const common = {
     callId: input.invocationId,

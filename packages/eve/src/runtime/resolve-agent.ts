@@ -291,6 +291,16 @@ function createResolvedAgentConfig(
   const model = manifest.config.model;
   return {
     ...config,
+    ...(manifest.config.modelChoices === undefined
+      ? {}
+      : {
+          modelChoices: manifest.config.modelChoices.map((choice) => ({
+            contextWindowTokens: choice.contextWindowTokens,
+            id: choice.id,
+            maxOutputTokens: choice.maxOutputTokens,
+            providerOptions: choice.providerOptions,
+          })),
+        }),
     model:
       model.source === undefined
         ? {

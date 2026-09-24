@@ -111,6 +111,27 @@ A mounted extension can also contribute declared subagents from `extension/subag
 
 Local `eve dev` makes the bundled `self-modification__agent` subagent available by default. Bundled development extensions are not included in production builds. See [Self-Modification](/docs/guides/self-modification) for the local workflow.
 
+### Let the parent choose the model
+
+Set `model` to an array of AI Gateway model ids to let the caller pick one when it starts a child. The first entry is the default:
+
+```ts title="agent/subagents/researcher/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  description: "Investigate ambiguous questions before the parent agent responds.",
+  model: ["anthropic/claude-sonnet-5", "anthropic/claude-opus-5.5"],
+});
+```
+
+The subagent's tool then accepts an optional `model` field limited to those ids, and `ctx.agent("researcher", { message, model })` accepts the same field. The choice behaves like a `session.started` [dynamic model](./agent-config#choose-the-model-dynamically) selection: it applies to the new child for its whole lifetime, and compaction follows the chosen model's context window.
+
+- Omitting `model` uses the first entry.
+- An unlisted id, or `model` sent to a subagent without choices, is rejected as a tool error.
+- `model` with the `agentId` of an existing child is rejected; the child keeps its model.
+- Every entry must be a Gateway model id with catalog metadata. An array does not accept sibling `modelContextWindowTokens` or `modelOptions`.
+- The array applies only to declared local subagents. A root agent uses its first entry, and dynamic subagent configs must return one static model.
+
 ### Vercel workspace peers
 
 In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent`. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
@@ -251,6 +272,7 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 {
   message: string;       // all context the child needs; it never sees the parent's history
   agentId?: string;      // continue or steer an existing child
+  model?: string;        // only for subagents whose `model` is an array; new children only
   outputSchema?: object; // require structured output for this turn
 }
 ```

@@ -29,6 +29,20 @@ export function getSubagentName(
   return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
 }
 
+export function createInvalidModelChoiceResult(
+  action: RuntimeSubagentDispatchRequest | RuntimeRemoteAgentDispatchRequest,
+  message: string,
+): RuntimeSubagentDispatchFailure {
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    origin: "dispatch",
+    output: { code: "SUBAGENT_MODEL_INVALID", message },
+    subagentName: getSubagentName(action),
+  };
+}
+
 export function createRemoteAgentStartFailureResult(input: {
   readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly error: unknown;

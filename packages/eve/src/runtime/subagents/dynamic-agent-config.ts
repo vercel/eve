@@ -5,6 +5,7 @@ import { resolveRuntimeModelSelection } from "#runtime/agent/resolve-model.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   isDynamicModelDefinition,
+  isModelChoicesDefinition,
   type AgentLimitsDefinition,
   type AgentReasoningDefinition,
 } from "#shared/agent-definition.js";
@@ -47,8 +48,8 @@ export async function normalizeDynamicSubagentAgentConfig(input: {
   if (definition.experimental !== undefined) {
     throw new Error(`${message} The "experimental" field cannot be selected at runtime.`);
   }
-  if (isDynamicModelDefinition(definition.model)) {
-    throw new Error(`${message} The returned "model" must be static.`);
+  if (isDynamicModelDefinition(definition.model) || isModelChoicesDefinition(definition.model)) {
+    throw new Error(`${message} The returned "model" must be one static model.`);
   }
 
   const config: {

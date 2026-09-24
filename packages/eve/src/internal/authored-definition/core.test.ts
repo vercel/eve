@@ -99,6 +99,32 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"compaction.model" does not support defineDynamic');
   });
 
+  it("accepts a model array", () => {
+    expect(
+      normalizeAgentDefinition(
+        { model: ["anthropic/claude-sonnet-5", "openai/gpt-5.5"] },
+        FAILURE_MESSAGE,
+      ).model,
+    ).toEqual(["anthropic/claude-sonnet-5", "openai/gpt-5.5"]);
+  });
+
+  it.each([
+    [[], "at least one"],
+    [["openai/gpt-5.5", 42], "non-empty AI Gateway model id"],
+    [["openai/gpt-5.5", "openai/gpt-5.5"], 'lists "openai/gpt-5.5" more than once'],
+  ])("rejects an invalid model array %j", (model, error) => {
+    expect(() => normalizeAgentDefinition({ model }, FAILURE_MESSAGE)).toThrow(error);
+  });
+
+  it("rejects definition-level model metadata for a model array", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        { model: ["openai/gpt-5.5"], modelContextWindowTokens: 128_000 },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/model" array.*modelContextWindowTokens/);
+  });
+
   it("rejects unsupported reasoning effort", () => {
     expect(() =>
       normalizeAgentDefinition(

@@ -279,10 +279,13 @@ export type ResolvedRuntimeSubagentNode = Readonly<
       | {
           description: string;
           dynamic?: never;
+          /** Caller-selectable Gateway model ids; the first is the default. */
+          modelChoices?: readonly string[];
         }
       | {
           description?: never;
           dynamic: ResolvedDynamicSubagentDefinition;
+          modelChoices?: never;
         }
     )
 >;
@@ -334,10 +337,13 @@ export type ResolvedAgentDefinition = Readonly<
       | {
           dynamicModel?: never;
           model: InternalAgentDefinition["model"];
+          /** Models a caller may select for a new session; the first is `model`. */
+          modelChoices?: readonly InternalAgentDefinition["model"][];
         }
       | {
           dynamicModel: RuntimeDynamicModelReference;
           model?: never;
+          modelChoices?: never;
         }
     )
 >;

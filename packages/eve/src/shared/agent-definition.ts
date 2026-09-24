@@ -92,10 +92,23 @@ export function isDynamicModelDefinition(
 }
 
 /**
+ * AI Gateway model ids a subagent's caller may choose from. The first id is
+ * the default. Behaves like a `session.started` dynamic model selection.
+ */
+export type PublicAgentModelChoicesDefinition = readonly [string, ...string[]];
+
+export function isModelChoicesDefinition(
+  value: unknown,
+): value is PublicAgentModelChoicesDefinition {
+  return Array.isArray(value);
+}
+
+/**
  * The model handle you assign to an agent's `model` field.
  */
 export type PublicAgentModelDefinition =
   | PublicAgentStaticModelDefinition
+  | PublicAgentModelChoicesDefinition
   | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
@@ -391,6 +404,15 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         /** Optional context-window override for the static model. */
         readonly modelContextWindowTokens?: number;
         readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /**
+         * AI Gateway model ids the caller may choose from when it starts this
+         * agent as a subagent. The first id is the default.
+         */
+        readonly model: PublicAgentModelChoicesDefinition;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
       }
     | {
         /** Resolver that must select a concrete model before model-dependent work. */

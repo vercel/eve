@@ -113,7 +113,7 @@ export default workflow({ maxSubagents: 20 });
 ```
 
 The model supplies an async function body through the tool's `js` input. Its only host capability is
-`ctx.agent(name, { message, agentId?, outputSchema? })`. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
+`ctx.agent(name, { message, agentId?, model?, outputSchema? })`. `model` picks one of a subagent's [listed models](../subagents#let-the-parent-choose-the-model) for a new child. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
 
 ```js
 const [triage, review] = await Promise.all([

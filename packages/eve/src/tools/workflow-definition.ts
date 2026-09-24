@@ -22,6 +22,8 @@ export interface TaskReceipt {
 export interface AgentInput {
   readonly agentId?: string;
   readonly message: string;
+  /** Model for a new agent, from the models listed in its `agent.ts`. */
+  readonly model?: string;
   readonly outputSchema?: JsonObject;
 }
 

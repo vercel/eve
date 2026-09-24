@@ -3,6 +3,8 @@ import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
 import {
+  MODEL_CHOICE_SCENARIO,
+  MODEL_CHOICE_SELECTED,
   SCHEDULED_REMOTE_CHILD_SCENARIO,
   SCHEDULED_REMOTE_ROOT_SCENARIO,
   WORKSPACE_FORWARDING_MARKER,
@@ -38,6 +40,30 @@ const hiddenSubagentProbe = mockModel({
 });
 
 const base = e2eAgentConfig();
+const modelChoiceDispatcher = mockModel({
+  modelId: "model-choice-dispatcher",
+  respond(request) {
+    if (request.toolResults.some((result) => result.name === "report-writer")) {
+      return "The report was requested.";
+    }
+    const tool = request.tools.find((candidate) => candidate.name === "report-writer");
+    const choices = JSON.stringify(tool?.inputSchema ?? null);
+    if (!choices.includes(`"enum":["openai/gpt-5.4-mini","${MODEL_CHOICE_SELECTED}"]`)) {
+      throw new Error(`report-writer does not offer its model choices: ${choices}`);
+    }
+    return {
+      toolCalls: [
+        {
+          name: "report-writer",
+          input: {
+            message: "Summarize Alice's weekly update: the release shipped on schedule.",
+            model: MODEL_CHOICE_SELECTED,
+          },
+        },
+      ],
+    };
+  },
+});
 const { model, modelContextWindowTokens, ...agentConfig } = base;
 const defaultModel = typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
 const workspaceReader = mockModel({
@@ -165,6 +191,9 @@ export default defineAgent({
         // Both models must reach the real authorization boundary, including denied lookups.
         if (messages.includes(WORKSPACE_LOOKUP_MESSAGE)) {
           return { model: workspaceReader, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.includes(MODEL_CHOICE_SCENARIO)) {
+          return { model: modelChoiceDispatcher, modelContextWindowTokens: 1_000_000 };
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };

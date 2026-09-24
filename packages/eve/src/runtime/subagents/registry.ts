@@ -6,7 +6,10 @@ import type {
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
-import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import {
+  createSubagentToolInputSchema,
+  SUBAGENT_TOOL_INPUT_SCHEMA,
+} from "#tools/framework/agent-contract.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 
@@ -78,9 +81,13 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
+      const modelChoices =
+        subagentDefinition.kind === "subagent" ? subagentDefinition.modelChoices : undefined;
       const prepared = createPreparedRuntimeSubagentTool(
         subagentDefinition,
-        SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+        modelChoices === undefined
+          ? SUBAGENT_TOOL_INPUT_JSON_SCHEMA
+          : serializeInputSchema(createSubagentToolInputSchema(modelChoices)),
       );
       registeredSubagent = {
         definition: subagentDefinition,

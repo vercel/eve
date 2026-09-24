@@ -18,6 +18,7 @@ import {
 } from "#internal/authored-module.js";
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
+  isModelChoicesDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import {
@@ -83,6 +84,15 @@ export function normalizeAgentDefinition(
     );
   }
 
+  if (
+    isModelChoicesDefinition(definition.model) &&
+    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
+  ) {
+    throw new Error(
+      `${message} A "model" array does not support sibling "modelContextWindowTokens" or "modelOptions" fields. eve resolves each model's limits from the AI Gateway catalog.`,
+    );
+  }
+
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
   }
@@ -145,6 +155,10 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
+  if (Array.isArray(value)) {
+    return normalizeModelChoices(value, message);
+  }
+
   if (!isDynamicSentinel(value)) {
     return value as NormalizedAgentDefinition["model"];
   }
@@ -164,6 +178,28 @@ function normalizeAgentModelDefinition(
     events,
     kind: record.kind,
   } as NormalizedAgentDefinition["model"];
+}
+
+function normalizeModelChoices(
+  value: readonly unknown[],
+  message: string,
+): NormalizedAgentDefinition["model"] {
+  if (value.length === 0) {
+    throw new Error(`${message} A "model" array must list at least one AI Gateway model id.`);
+  }
+  const choices = value.map((choice) => {
+    if (typeof choice !== "string" || choice.trim() === "") {
+      throw new Error(
+        `${message} Every entry in a "model" array must be a non-empty AI Gateway model id string.`,
+      );
+    }
+    return choice;
+  });
+  const duplicate = choices.find((choice, index) => choices.indexOf(choice) !== index);
+  if (duplicate !== undefined) {
+    throw new Error(`${message} The "model" array lists "${duplicate}" more than once.`);
+  }
+  return choices as unknown as NormalizedAgentDefinition["model"];
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

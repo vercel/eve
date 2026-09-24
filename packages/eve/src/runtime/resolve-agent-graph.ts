@@ -242,14 +242,23 @@ async function resolveRuntimeSubagent(input: {
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const variant:
-    | { readonly description: string; readonly dynamic?: never; readonly tool?: boolean }
+    | {
+        readonly description: string;
+        readonly dynamic?: never;
+        readonly modelChoices?: readonly string[];
+        readonly tool?: boolean;
+      }
     | {
         readonly description?: never;
         readonly dynamic: ResolvedDynamicSubagentDefinition;
         readonly tool?: never;
       } =
     input.sourceRef.configResolver === undefined
-      ? { description: input.sourceRef.description, tool: input.sourceRef.agent.config.tool }
+      ? {
+          description: input.sourceRef.description,
+          modelChoices: input.sourceRef.agent.config.modelChoices?.map((choice) => choice.id),
+          tool: input.sourceRef.agent.config.tool,
+        }
       : {
           dynamic: await resolveDynamicSubagentDefinition({
             definition: input.sourceRef.configResolver,

@@ -11,6 +11,7 @@ interface JsonObject {
 export interface SubagentWorkflowInput {
   readonly agentId?: string | null;
   readonly message: string;
+  readonly model?: string;
   readonly outputSchema?: Record<string, unknown>;
 }
 
@@ -25,6 +26,7 @@ export async function subagentToolExecuteWorkflow(
       ? { agentId: input.agentId }
       : {}),
     message: input.message,
+    ...(input.model === undefined ? {} : { model: input.model }),
     outputSchema: input.outputSchema as JsonObject | undefined,
     target: ctx.toolName,
   };

@@ -21,6 +21,7 @@ import {
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import {
   isDynamicModelDefinition,
+  isModelChoicesDefinition,
   type AgentModelOptionsDefinition,
   type PublicAgentDynamicModelDefinition,
   type PublicAgentDynamicModelResult,
@@ -104,7 +105,7 @@ async function loadSourceBackedRuntimeModelReference(
     );
   }
 
-  if (isDynamicModelDefinition(model)) {
+  if (isDynamicModelDefinition(model) || isModelChoicesDefinition(model)) {
     throw new Error(
       `Expected the authored agent config export "${reference.source.exportName ?? "default"}" from "${reference.source.logicalPath}" to provide a static runtime model.`,
     );

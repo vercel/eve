@@ -12,6 +12,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicModelDefinition,
+  isModelChoicesDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import type { DynamicToolEventName } from "#dynamic/definition.js";
@@ -59,8 +60,20 @@ export async function compileAgentConfig(
   const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
     ? definition.model
     : undefined;
+  const modelChoices = isModelChoicesDefinition(definition.model)
+    ? await Promise.all(
+        definition.model.map((choice) =>
+          normalizeAuthoredModelReference({
+            modelCatalog: context.modelCatalog,
+            purpose: "the model choice",
+            value: choice,
+          }),
+        ),
+      )
+    : undefined;
   const model =
-    dynamicModelDefinition === undefined
+    modelChoices?.[0] ??
+    (dynamicModelDefinition === undefined
       ? await normalizeAuthoredModelReference({
           modelCatalog: context.modelCatalog,
           purpose: "the primary compaction trigger model",
@@ -70,7 +83,7 @@ export async function compileAgentConfig(
           sourcePath: configModulePath,
           value: definition.model as PublicAgentStaticModelDefinition,
         })
-      : undefined;
+      : undefined);
   const compaction: {
     model?: CompiledRuntimeModelReference;
     thresholdPercent?: number;
@@ -175,7 +188,9 @@ export async function compileAgentConfig(
     throw new Error("Expected a static agent model to compile to a concrete model reference.");
   }
 
-  return { ...compiledConfig, model };
+  return modelChoices === undefined
+    ? { ...compiledConfig, model }
+    : { ...compiledConfig, model, modelChoices };
 }
 
 function normalizeExperimentalDefinition(
