@@ -12,13 +12,9 @@ export default defineEval({
   async test(t) {
     const parent = await t.send(MODEL_CHOICE_SCENARIO);
     parent.expectOk();
-    const called =
-      parent.events.find(
-        (event) => event.type === "subagent.called" && event.data.name === "report-writer",
-      ) ??
-      (await t.target
-        .watchTurn(parent.sessionId, { startIndex: parent.session.state.streamIndex })
-        .waitForEvent("subagent.called", { data: { name: "report-writer" } }));
+    const called = parent.events.find(
+      (event) => event.type === "subagent.called" && event.data.name === "report-writer",
+    );
     if (called?.type !== "subagent.called") throw new Error("report-writer was not called.");
 
     const child = await t.target.watchTurn(called.data.childSessionId).result();

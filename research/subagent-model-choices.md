@@ -18,33 +18,46 @@ twice.
 when it starts a child. It mirrors `auto`: `auto` asks an evaluation model to
 pick; `choice` hands the pick to the parent.
 
+A list of Gateway slugs:
+
 ```ts title="agent/subagents/researcher/agent.ts"
-import { anthropic } from "@ai-sdk/anthropic";
 import { defineAgent } from "eve";
 import { choice } from "eve/models";
 
 export default defineAgent({
   description: "Investigate ambiguous questions.",
-  model: choice({
-    options: {
-      "openai/gpt-6-luna": "Routine lookups where speed matters",
-      "openai/gpt-6-sol": "Hard reasoning and engineering questions",
-      careful_anthropic: {
-        model: anthropic("sonnet-5"),
-        description: "Long documents that need careful reading",
-        reasoning: "low",
-      },
-    },
-  }),
+  model: choice(["openai/gpt-6-luna", "openai/gpt-6-sol"]),
 });
 ```
 
-Options use the `auto` option shape:
+A mapping from slug to a description, or to `{ description, modelOptions }`:
 
-- A string value describes the Gateway model whose id is the key.
-- `{ model, description, reasoning? }` selects a Gateway id or a provider
-  `LanguageModel` under any key, with an optional reasoning override.
-- The first key is the default.
+```ts
+model: choice({
+  "openai/gpt-6-luna": "Routine lookups where speed matters",
+  "openai/gpt-6-sol": {
+    description: "Hard reasoning and engineering questions",
+    modelOptions: { providerOptions: { gateway: { models: ["anthropic/claude-opus-5.5"] } } },
+  },
+});
+```
+
+List entries can mix slugs and objects. An object names its model with
+`model`, which may also be a provider `LanguageModel`:
+
+```ts
+model: choice([
+  { model: openai("gpt-6-luna-fast"), description: "Quick drafts" },
+  "openai/gpt-6-sol",
+]);
+```
+
+- The first entry is the default.
+- The key the parent sends is the slug. For a `LanguageModel` it is the
+  resolved Gateway slug, or `provider/modelId` when the catalog does not list it.
+- Slugs must be unique.
+- `modelOptions` applies to that choice only, so AI Gateway fallback composes
+  with `choice` instead of competing with it.
 
 ## What the parent sees
 
@@ -53,44 +66,44 @@ The subagent's tool gains an optional `model` field:
 ```json
 "model": {
   "type": "string",
-  "enum": ["openai/gpt-6-luna", "openai/gpt-6-sol", "careful_anthropic"],
+  "enum": ["openai/gpt-6-luna", "openai/gpt-6-sol"],
   "default": "openai/gpt-6-luna",
-  "description": "Model for a new agent. Defaults to openai/gpt-6-luna. openai/gpt-6-luna: Routine lookups where speed matters. ..."
+  "description": "Model for a new agent. Defaults to openai/gpt-6-luna.\n- openai/gpt-6-luna: Routine lookups where speed matters\n- openai/gpt-6-sol: Hard reasoning and engineering questions"
 }
 ```
 
-`ctx.agent(name, { message, model })` accepts the same keys, and
-`ctx.agents[name].models` maps each key to its description. Like `auto`, the
-parent only sees keys and descriptions, never provider instances.
+`ctx.agent(name, { message, model })` accepts the same slugs, and
+`ctx.agents[name].models` lists each slug with its description. The parent
+never sees provider instances or `modelOptions`.
 
 ## Semantics
 
-- The chosen option is the child's session model for its whole lifetime. It is
+- The chosen entry is the child's session model for its whole lifetime. It is
   stored in the durable slot a `session.started` dynamic model fills, so model
   resolution, restart recovery, and compaction thresholds follow the existing
   dynamic-model path.
-- `model` is rejected with `SUBAGENT_MODEL_INVALID` when the key is unknown,
+- `model` is rejected with `SUBAGENT_MODEL_INVALID` when the slug is unknown,
   when the target does not use `choice`, or when it comes with the `agentId` of
   an existing child.
-- Context windows come from the Gateway catalog. A provider model the catalog
-  does not know fails at build, as a static `model` does today.
+- Context windows come from the Gateway catalog. A model the catalog does not
+  list fails at build, as a static `model` without `modelContextWindowTokens`
+  does today.
 - `choice` is only valid on declared local subagents. A root agent has no caller
   to pick, so the compiler rejects it there. Dynamic subagent configs and
   `defineDynamic` resolvers must still return one static model. Remote
   subagents and the root-copy `agent` tool are unchanged.
-- `choice` is not a fallback list. Gateway fallback stays in `modelOptions`.
 
 ## Data flow
 
 ```text
-agent.ts model: choice({ options })
-  -> manifest: default model + ordered options { key, description, reasoning?, model ref }
-  -> parent tool schema: model enum of keys, default first key
-  -> dispatch validates the key
+agent.ts model: choice(entries)
+  -> manifest: default model + ordered choices { slug, description?, model ref }
+  -> parent tool schema: model enum of slugs, default first
+  -> dispatch validates the slug
   -> child runtime seeds the session model slot with the chosen reference
 ```
 
-A `LanguageModel` option compiles to a source-backed reference that the runtime
-reloads from `agent.ts` by key, the same way a direct static `model` reloads
-today. The manifest keeps options as data because the parent needs the keys
+A `LanguageModel` entry compiles to a source-backed reference that the runtime
+reloads from `agent.ts` by slug, the same way a direct static `model` reloads
+today. The manifest keeps choices as data because the parent needs the slugs
 and descriptions at build time to render its tool schema.

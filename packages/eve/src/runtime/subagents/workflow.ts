@@ -26,7 +26,7 @@ export async function subagentToolExecuteWorkflow(
       ? { agentId: input.agentId }
       : {}),
     message: input.message,
-    model: input.model,
+    ...(input.model === undefined ? {} : { model: input.model }),
     outputSchema: input.outputSchema as JsonObject | undefined,
     target: ctx.toolName,
   };

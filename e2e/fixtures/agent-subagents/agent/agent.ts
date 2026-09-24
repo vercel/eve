@@ -171,19 +171,6 @@ export default defineAgent({
   ...agentConfig,
   model: defineDynamic({
     events: {
-      "turn.started": (_event, ctx) => {
-        const messages = ctx.messages.flatMap((message) => {
-          if (message.role !== "user") return [];
-          return [
-            typeof message.content === "string"
-              ? message.content
-              : message.content.map((part) => (part.type === "text" ? part.text : "")).join(""),
-          ];
-        });
-        return messages.some((message) => message.includes(MODEL_CHOICE_SCENARIO))
-          ? { model: "openai/gpt-5.4-mini", modelContextWindowTokens: 1_000_000 }
-          : { model: defaultModel, modelContextWindowTokens };
-      },
       "step.started": (_event, ctx) => {
         const messages = ctx.messages.flatMap((message) => {
           if (message.role !== "user") return [];
