@@ -45,7 +45,8 @@ export class OptimisticMessageSubmissions<TData> {
   }
 
   apply(event: MessageStreamEvent): ReconciledSubmissions | undefined {
-    if (event.type !== "message.received") {
+    // Task results are authored by eve, so they never confirm a submission.
+    if (event.type !== "message.received" || event.data.kind === "task.result") {
       this.#projection.append(event);
       return undefined;
     }
@@ -71,7 +72,7 @@ export class OptimisticMessageSubmissions<TData> {
     const pending = this.#pending.find((candidate) => candidate.id === submissionId);
     if (pending === undefined) return undefined;
     for (const event of events.slice(pending.eventStartIndex)) {
-      if (event.type !== "message.received") continue;
+      if (event.type !== "message.received" || event.data.kind === "task.result") continue;
       const matching = this.#matching(event);
       if (matching.some((candidate) => candidate.id === submissionId)) {
         return this.#reconcile(matching, event, true);

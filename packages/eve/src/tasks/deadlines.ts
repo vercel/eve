@@ -16,9 +16,10 @@ import {
   type TaskOwnerUpdate,
   type WorkflowCallerReply,
 } from "#tasks/owner.js";
-import type { TaskDeadlineSignal, TaskError } from "#tasks/protocol.js";
+import type { TaskDeadlineSignal, TaskError, TaskOutcome } from "#tasks/protocol.js";
 import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { holdTaskResult } from "#tasks/results.js";
 import { readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
 import {
   applyTaskMessage,
@@ -77,6 +78,8 @@ export async function applyTaskDeadlines(input: {
   const events: UnstampedMessageStreamEvent[] = [];
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
+  // Background results are delivered by a later model step, not to a caller.
+  const held: { readonly outcome: TaskOutcome; readonly record: TaskRecord }[] = [];
   for (const effect of evaluated.effects) {
     if (effect.kind === "hard-stop") {
       await hardStop(effect);
@@ -96,6 +99,10 @@ export async function applyTaskDeadlines(input: {
     events.push(...settledEvents(transition.effects));
     for (const settled of transition.effects) {
       if (settled.kind !== "settled" || settled.outcome.status !== "failed") continue;
+      if (settled.record.mode === "background" && settled.record.workflowCaller === undefined) {
+        held.push({ outcome: settled.outcome, record: settled.record });
+        continue;
+      }
       // The result goes straight to whoever waits on the call, so it is delivered now.
       table = markTaskDelivered(table, settled.record.id, settled.record.generation);
       resolveCaller(settled.record, settled.outcome.error, { replies, results });
@@ -108,6 +115,7 @@ export async function applyTaskDeadlines(input: {
   const timer = armed !== undefined && Date.parse(armed.wakeAt) > nowMs ? armed : undefined;
   // Always written, so an unreadable record is removed and cannot block handoff.
   session = setTaskTable({ ...session, state: writeTaskTimer(session.state, timer) }, table);
+  for (const { outcome, record } of held) session = holdTaskResult(session, record, outcome);
   return {
     events,
     replies,

@@ -34,6 +34,7 @@ import {
   startPendingAgentTasks,
   syncTaskTimer,
 } from "#tasks/owner-body.js";
+import { hasPendingBackgroundWork } from "#tasks/results.js";
 import { isWorkflowTaskResult } from "#tasks/state.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -162,7 +163,10 @@ export class SessionExecution {
         const canPark =
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
-          this.input.mode === "conversation";
+          this.input.mode === "conversation" ||
+          // A task-mode run waits for its background tasks, then a result turn ends it.
+          (result.settled !== undefined &&
+            hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state));
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
@@ -220,25 +224,16 @@ export class SessionExecution {
 
       const next = await input.turn.nextRuntimeEvent();
       if (next === "cancelled") return next;
-      if (next.kind === "runtime-action-result") {
-        const snapshot = this.input.cursor.sessionState.snapshot.session;
-        const accepted = next.trusted
-          ? next.results
-          : next.results.filter(
-              (result) => result.kind === "tool-result" && isWorkflowTaskResult(snapshot, result),
-            );
-        if (accepted.length > 0) {
-          const acceptedAtMs = Date.now();
-          results.push(...accepted);
-          for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
-        }
-        continue;
-      }
-
-      const result = await this.handleWorkflowMessage(next.message);
-      if (result !== undefined) {
-        results.push(result);
-        acceptedAtMsByCallId.set(result.callId, Date.now());
+      const snapshot = this.input.cursor.sessionState.snapshot.session;
+      const accepted = next.trusted
+        ? next.results
+        : next.results.filter(
+            (result) => result.kind === "tool-result" && isWorkflowTaskResult(snapshot, result),
+          );
+      if (accepted.length > 0) {
+        const acceptedAtMs = Date.now();
+        results.push(...accepted);
+        for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
       }
     }
   }
@@ -251,7 +246,6 @@ type RuntimeEvent =
       /** Produced by the owner's own task table rather than read from the inbox. */
       readonly trusted?: boolean;
     }
-  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | "cancelled";
 
 /**
@@ -350,7 +344,7 @@ class ActiveTurn {
     return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
   }
 
-  /** Next runtime result or workflow message, admitting inbox traffic while waiting. */
+  /** Next runtime result, admitting inbox traffic while waiting. */
   async nextRuntimeEvent(): Promise<RuntimeEvent> {
     while (true) {
       if (this.signal.aborted) return "cancelled";
@@ -394,9 +388,22 @@ class ActiveTurn {
         }
         return;
       }
-      case "workflow":
-        this.runtimeResults.push({ kind: "workflow", message: admitted.message });
+      case "workflow": {
+        // Handled on admission, even between model steps: a background run's
+        // outcome, question, or progress must not wait for a foreground wait.
+        const result = await handleWorkflowToolRunMessage({
+          cursor: this.input.cursor,
+          message: admitted.message,
+        });
+        if (result !== undefined) {
+          this.runtimeResults.push({
+            kind: "runtime-action-result",
+            results: [result],
+            trusted: true,
+          });
+        }
         return;
+      }
       case "task-report":
         await this.applyTaskReport(admitted.payload);
         return;

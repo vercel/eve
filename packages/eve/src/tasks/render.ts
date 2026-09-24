@@ -4,6 +4,7 @@ import { truncateHead } from "#execution/sandbox/truncate-output.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskKind, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
 
 // Every string the model reads about tasks lives in this module.
 
@@ -184,6 +185,31 @@ export const BACKGROUND_TASKS_INSTRUCTION = [
 
 export function renderTooManyBackgroundTasks(ids: readonly string[], limit: number): string {
   return `${limit} background tasks are already running (${ids.join(", ")}). Wait for one to report, stop one with task_cancel, or call without background.`;
+}
+
+/** Framework continuation for a result turn that ended without a reply. */
+export const RESULT_TURN_REPLY_PROMPT =
+  "You received the task results above but did not reply. Reply to the user about them now, in one line if they no longer matter.";
+
+/** Error message for a delegated call whose agent session ended before it replied. */
+export const AGENT_SESSION_ENDED_MESSAGE = "The agent's session ended before it replied.";
+
+/** Body of a `<task_result>` block projected from a definition's `toModelOutput`. */
+export function renderModelOutputBody(output: ToolModelOutput): string {
+  switch (output.type) {
+    case "text":
+      return output.value;
+    case "json":
+      return JSON.stringify(output.value, null, 2) ?? "null";
+    case "content":
+      return output.value
+        .map((part) =>
+          part.type === "text"
+            ? part.text
+            : `[file: ${part.filename ?? part.mediaType} (${part.mediaType})]`,
+        )
+        .join("\n");
+  }
 }
 
 function stringifyOutput(output: JsonValue): string {

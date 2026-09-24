@@ -70,8 +70,14 @@ import {
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveTasksAnnouncement } from "#tasks/render.js";
+import { BACKGROUND_TASKS_INSTRUCTION, resolveTasksAnnouncement } from "#tasks/render.js";
+import { hasPendingBackgroundWork, supportsBackgroundTasks } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
+import {
+  createResultTurnReplyPrompt,
+  needsResultTurnReply,
+  takeTaskResultMessage,
+} from "#harness/task-results.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -102,6 +108,7 @@ import {
   emitRecoverableFailedTurn,
   emitStepStarted,
   emitStreamContent,
+  emitTurnCompleted,
   emitTurnEpilogue,
   emitTurnPreamble,
   getHarnessEmissionState,
@@ -168,6 +175,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createMessageCompletedEvent,
+  createMessageReceivedEvent,
   createStepStartedEvent,
 } from "#protocol/message.js";
 import {
@@ -478,6 +486,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     stepInstrumentation?: InstrumentationStepScope<HarnessSession>,
   ): Promise<StepResult> {
     let session = initialSession;
+    // Background results are delivered in a result turn's first step, or at a
+    // tool-step boundary inside a turn, never at the start of a user turn.
+    const resultTurn = input?.taskResults === true;
+    const withinTurn = !isHarnessBetweenTurns(initialSession);
     const prepareHistory = createHistoryViewPreparer({
       previous: config.historyView,
       projector: config.historyProjector,
@@ -1015,7 +1027,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
-    if (emit && (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput))) {
+    if (
+      emit &&
+      (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput) || resultTurn)
+    ) {
       if (store !== undefined) {
         prepareDynamicInstructionPreamble(
           store,
@@ -1094,6 +1109,29 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return continuation.result;
     }
     session = continuation.session;
+
+    // Deliver held background results as one message after any tool results,
+    // never between an approval response and its tool call. Marking the
+    // records delivered first drops them from the note below.
+    if ((resultTurn || withinTurn) && !hasUnansweredToolCall(messages)) {
+      const delivery = await takeTaskResultMessage({
+        principal: store?.get(AuthKey) ?? null,
+        session,
+        tools: config.tools,
+      });
+      if (delivery !== undefined) {
+        session = delivery.session;
+        preparedTurnInput.unshift(delivery.message);
+        await emit?.(
+          createMessageReceivedEvent({
+            message: delivery.message.content,
+            sequence: emissionState.sequence,
+            taskIds: delivery.taskIds,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
+    }
 
     // Announce the task listing as framework-injected user-role content,
     // before any new user input so a message present on this step stays the
@@ -1282,15 +1320,25 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     ): ModelMessage[] =>
       note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
 
+    // Static per session, so the system prefix stays stable for the prompt cache.
+    const backgroundTasksInstruction = supportsBackgroundTasks({
+      interactiveRoot: config.mode === "conversation" && !hasDelegatedCaller,
+      tools: config.tools.values(),
+    })
+      ? BACKGROUND_TASKS_INSTRUCTION
+      : undefined;
     const prepareModelInstructions = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
         ? [{ role: "system" as const, content: extraSystemNote }]
         : [];
-      const baseSystemEntry: SystemModelMessage[] = session.agent.system
-        ? [{ role: "system" as const, content: session.agent.system }]
-        : [];
+      const baseSystemEntry: SystemModelMessage[] = [
+        session.agent.system,
+        backgroundTasksInstruction,
+      ].flatMap((content) => (content ? [{ role: "system" as const, content }] : []));
       const rawInstructions =
-        currentMessages.systemMessages.length > 0 || extraSystemEntry.length > 0
+        currentMessages.systemMessages.length > 0 ||
+        extraSystemEntry.length > 0 ||
+        backgroundTasksInstruction !== undefined
           ? [...extraSystemEntry, ...baseSystemEntry, ...currentMessages.systemMessages]
           : undefined;
       const markedInstructions =
@@ -1460,6 +1508,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session = compaction.session;
       if (compaction.compacted) {
         messages = compaction.messages;
+        // Compaction can summarize the latest task listing away; restore it
+        // ahead of the current input so the model still sees its tasks.
+        const restoredNote = hasUnansweredToolCall(messages)
+          ? undefined
+          : resolveTasksAnnouncement({
+              messages: projectHistory(messages, session.state),
+              records: getTaskTable(session).records,
+            });
+        if (restoredNote !== undefined) {
+          const inputIndex = messages.findIndex((message) =>
+            preparedTurnInput.includes(message as UserModelMessage),
+          );
+          const note = createFrameworkUserMessage("context.state", restoredNote);
+          messages =
+            inputIndex < 0
+              ? [...messages, note]
+              : [...messages.slice(0, inputIndex), note, ...messages.slice(inputIndex)];
+        }
         if (turnClientContext !== undefined && clientContextTailLength !== undefined) {
           turnClientContext = {
             ...turnClientContext,
@@ -2828,8 +2894,26 @@ async function handleStepResult(input: {
     return { next: runStep, session: nextSession };
   }
 
+  // A result turn must reply: ask once, then accept whatever comes.
+  if (
+    stepOutput === null &&
+    nextSession.outputSchema === undefined &&
+    needsResultTurnReply(updatedHistory)
+  ) {
+    nextSession = {
+      ...nextSession,
+      history: [...updatedHistory, createResultTurnReplyPrompt()],
+    };
+    if (emit) {
+      emissionState = advanceStep(emissionState);
+      nextSession = setHarnessEmissionState(nextSession, emissionState);
+    }
+    return { next: runStep, session: nextSession };
+  }
+
   if (config.mode === "task") {
     return finishTaskTurn({
+      awaitingTasks: hasPendingBackgroundWork(nextSession.state),
       emissionState,
       emit,
       history: promptMessages,
@@ -2911,6 +2995,8 @@ async function emitStructuredResult(
  * structured value — or the plain assistant text — is the run's output.
  */
 async function finishTaskTurn(input: {
+  /** Background work is still out: the run waits for it instead of completing. */
+  readonly awaitingTasks: boolean;
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly HarnessModelMessage[];
@@ -2922,6 +3008,17 @@ async function finishTaskTurn(input: {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
   session = clearTurnClientContextState(session);
+
+  // A task-mode run ends only when quiescent. The result turn that delivers
+  // the outstanding results produces the run's output, and the schema stays
+  // on the session for it.
+  if (input.awaitingTasks) {
+    if (emit) {
+      emissionState = await emitTurnCompleted(emit, emissionState);
+      session = setHarnessEmissionState(session, emissionState);
+    }
+    return { next: null, session, settledTurn: { output: stepOutput ?? "" } };
+  }
 
   if (schema === undefined) {
     if (emit) {

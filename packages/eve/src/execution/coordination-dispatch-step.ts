@@ -44,6 +44,7 @@ export async function dispatchCoordinationStep(
   for (const request of prepared.plan) {
     if (isAgentTaskRequest(request)) continue;
     const started = await startWorkflowTask({
+      creator: prepared.creator,
       now,
       request,
       session: nextSession,

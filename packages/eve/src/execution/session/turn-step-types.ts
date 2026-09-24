@@ -2,6 +2,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /** Trusted runtime-action results collected by the session owner. */
@@ -19,6 +20,8 @@ export interface TurnStepPayload {
   readonly control?: "clear" | "compact";
   readonly delivery?: DeliverHookPayload;
   readonly runtimeResults?: RuntimeActionResultStepInput;
+  /** Starts a result turn that runs as the tasks' creator and delivers their held results. */
+  readonly taskResults?: { readonly creator?: JsonObject };
 }
 
 /** Input for one atomic, session-owner-executed turn step. */

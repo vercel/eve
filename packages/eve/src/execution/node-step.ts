@@ -220,6 +220,7 @@ function resolveHarnessToolDefinition(input: {
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
+      detach: input.tool.task.detach,
       nodeId: input.tool.task.nodeId,
       workflowId: input.tool.task.workflowId,
     });

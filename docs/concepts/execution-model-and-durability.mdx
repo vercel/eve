@@ -159,6 +159,26 @@ Once eve publishes an input request or begins publishing turn completion or fail
 
 Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
 
+## Background tasks
+
+A [workflow tool](../tools/workflows#return-a-receipt-with-detach) defined with `detach: true` runs
+in the background: its call returns a receipt, and the turn continues without waiting. When the run
+finishes, eve holds its result in durable session state and delivers it as typed session input, not
+as a channel message. The model reads one `task.result` message per delivery, with a
+`<task_result>` block for each result.
+
+An idle session starts a result turn for the result. A running turn from the same principal
+receives it at its next tool step; a turn from a different principal never sees it, and the result
+waits for its own result turn. Results from one principal that are ready together share a result
+turn, which runs with the auth of the call that started the tasks. Until its result reaches
+history, a background task stays listed in the `[Tasks]` note, including after compaction or a
+context clear.
+
+A session is quiescent when it is idle and no background result is outstanding. A delegated
+subagent answers its caller only when quiescent, and a task-mode run ends only when quiescent, so
+each returns the reply it gives after seeing its background results. Ending a session cancels
+every working task, and eve delivers nothing afterward.
+
 ## Subagents
 
 A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result. A call that is still working after 2 hours of active time fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).

@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 58,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 58],
+    current: 59,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 59],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -61,12 +61,13 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       57: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
+      58: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   dynamicTool: {
-    current: 56,
+    current: 57,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 56,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 57,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -99,11 +100,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       53: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       54: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       55: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      56: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   channel: {
-    current: 33,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 33],
+    current: 34,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 34],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -119,20 +121,22 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       30: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       31: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       32: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      33: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   schedule: {
-    current: 17,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17],
+    current: 18,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       15: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       16: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      17: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   subagent: {
-    current: 21,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 21],
+    current: 22,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 22],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -141,11 +145,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       19: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       20: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      21: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   connection: {
-    current: 28,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 28],
+    current: 29,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 29],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -153,11 +158,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       25: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       26: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       27: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      28: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   hook: {
-    current: 29,
-    supported: [20, 21, 22, 23, 25, 29],
+    current: 30,
+    supported: [20, 21, 22, 23, 25, 30],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -182,26 +188,29 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       26: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       27: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       28: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      29: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   skill: { current: 2, supported: [1, 2], dropped: {} },
   dynamicSkill: {
-    current: 23,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 23],
+    current: 24,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 24],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       21: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       22: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      23: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 24,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 24],
+    current: 25,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 25],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       22: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       23: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
+      24: "Workflow tools accept detach, and background task results arrive as task.result messages.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

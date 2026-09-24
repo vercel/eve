@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession, SettledTurn } from "#harness/types.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 
 function session(): HarnessSession {
   return {
@@ -50,6 +51,19 @@ describe("delegated turn completion", () => {
       action: "park",
       settled: { isError: true, output: "Model failed" },
     });
+  });
+
+  it("folds a turn's usage into the later settlement while background work is out", () => {
+    const working = createTaskRecord({ kind: "workflow", mode: "background", name: "remind" });
+    const current = withUsage({ ...session(), state: taskTableState([working]) }, 100);
+    const settled = endTurn(current, { output: "Started the reminder." });
+
+    expect(settled).toMatchObject({ action: "park", settled: { usage: { inputTokens: 100 } } });
+    // The caller is not answered yet, so the next settlement still reports this spend.
+    expect(
+      takeSessionUsageDelta({ ...current, state: settled.sessionState.snapshot.session.state })
+        .delta.inputTokens,
+    ).toBe(100);
   });
 
   it("keeps usage unreported when a turn parks without settling", () => {

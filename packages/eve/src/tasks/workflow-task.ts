@@ -22,6 +22,18 @@ import type { TaskOwnerUpdate } from "#tasks/owner.js";
 import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
 import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
+import {
+  renderBackgroundReceipt,
+  renderTooManyBackgroundTasks,
+  type TaskReceipt,
+} from "#tasks/render.js";
+import {
+  encodeTaskCreator,
+  holdTaskResult,
+  MAX_BACKGROUND_TASKS,
+  type TaskCreator,
+  workingBackgroundTaskIds,
+} from "#tasks/results.js";
 import { findWorkflowTask, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
 
@@ -35,10 +47,15 @@ const log = createLogger("tasks.workflow");
  * the run starts, so the task has its identity first; a replayed call whose
  * record exists starts nothing. A start failure settles the task
  * `START_FAILED` and returns the call's error result at once.
+ *
+ * A `detach: true` call starts in the background and resolves at once with
+ * a receipt; its result is delivered later as a task result. Over the
+ * background cap it does not start and fails `TOO_MANY_BACKGROUND_TASKS`.
  */
 export async function startWorkflowTask<
   T extends { readonly sessionId: string; readonly state?: SessionStateMap },
 >(input: {
+  readonly creator?: TaskCreator;
   readonly now: string;
   readonly request: RuntimeWorkflowTaskRequest;
   readonly session: T;
@@ -50,17 +67,48 @@ export async function startWorkflowTask<
   readonly session: T;
 }> {
   const { now, request, session } = input;
-  const started = startTask(readTasks(session), {
+  // `{ timeout }` waits like `false` until timed detach lands.
+  const background = request.detach === true;
+  const table = readTasks(session);
+  const existing = table.records.find(
+    (record) => record.callId === request.callId && record.turnId === input.turnId,
+  );
+  if (background && existing === undefined) {
+    const working = workingBackgroundTaskIds(table);
+    if (working.length >= MAX_BACKGROUND_TASKS) {
+      return {
+        events: [],
+        result: {
+          callId: request.callId,
+          isError: true,
+          kind: "tool-result",
+          output: {
+            code: "TOO_MANY_BACKGROUND_TASKS",
+            message: renderTooManyBackgroundTasks(working, MAX_BACKGROUND_TASKS),
+          },
+          toolName: request.toolName,
+        },
+        session,
+      };
+    }
+  }
+  const started = startTask(table, {
     callId: request.callId,
+    creator: input.creator === undefined ? undefined : encodeTaskCreator(input.creator),
     kind: "workflow",
-    mode: "foreground",
+    mode: background ? "background" : "foreground",
     name: request.toolName,
     now,
     ownerId: session.sessionId,
     turnId: input.turnId,
   });
   // The replayed call's run already started; its outcome settles this record.
-  if (started.kind === "existing") return { events: [], session };
+  // A background call still owes the turn its receipt.
+  if (started.kind === "existing") {
+    return started.record.mode === "background"
+      ? { events: [], result: receiptResult(started.record), session }
+      : { events: [], session };
+  }
   if (started.kind !== "started") {
     throw new Error(`Workflow tool call "${request.callId}" cannot continue an agent.`);
   }
@@ -116,15 +164,23 @@ export async function startWorkflowTask<
     { child, generation: record.generation, kind: "task.started", taskId: record.id },
     now,
   );
+  const adoptedRecord = findTask(adopted.table, record.id)!;
   return {
-    events: [
-      taskStartedEvent({
-        child,
-        ownerSessionId: session.sessionId,
-        record: findTask(adopted.table, record.id)!,
-      }),
-    ],
+    events: [taskStartedEvent({ child, ownerSessionId: session.sessionId, record: adoptedRecord })],
+    result: background ? receiptResult(adoptedRecord) : undefined,
     session: setTaskTable(session, adopted.table),
+  };
+}
+
+/** The immediate tool result of a background call: clients read the receipt, the model reads its text. */
+function receiptResult(record: TaskRecord): RuntimeToolResultActionResult {
+  const receipt: TaskReceipt = { status: "working", taskId: record.id };
+  return {
+    callId: record.callId,
+    kind: "tool-result",
+    modelOutput: renderBackgroundReceipt(record),
+    output: { ...receipt },
+    toolName: record.name,
   };
 }
 
@@ -175,20 +231,26 @@ export function settleWorkflowTask(input: {
     },
     input.now,
   );
-  const settled = applied.effects.some((effect) => effect.kind === "settled");
-  // The result goes straight to the waiting turn, so it is delivered now.
-  const next = settled
-    ? markTaskDelivered(applied.table, record.id, record.generation)
-    : applied.table;
+  const settled = applied.effects.find((effect) => effect.kind === "settled");
+  const background = settled !== undefined && record.mode === "background";
+  // A waited call's result goes straight to the turn, so it is delivered now;
+  // a background result is held until a model step delivers it.
+  let next = setTaskTable(
+    session,
+    settled !== undefined && !background
+      ? markTaskDelivered(applied.table, record.id, record.generation)
+      : applied.table,
+  );
+  if (background) next = holdTaskResult(next, settled.record, settled.outcome);
   return {
     events: settledEvents(applied.effects),
     replies: [],
-    results: settled ? [result] : [],
+    results: settled !== undefined && !background ? [result] : [],
     serializedContext: input.serializedContext,
     sessionState: replaceDurableSessionSnapshot({
       // Withdraw the finished run's unanswered requests so a late answer cannot reach it.
       session: clearProxyInputRequestsWhere(
-        setTaskTable(session, next),
+        next,
         (route) => route.answerHook?.runId === from.runId,
       ),
       state: input.sessionState,

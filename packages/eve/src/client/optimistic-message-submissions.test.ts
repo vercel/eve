@@ -43,6 +43,28 @@ describe("OptimisticMessageSubmissions", () => {
     expect(projection.data.messages.some((message) => message.metadata?.optimistic)).toBe(false);
   });
 
+  it("never confirms a pending submission with delivered task results", () => {
+    const { projection, submissions } = setup();
+    submissions.submit({ message: "Remind me at 10" }, 0);
+    const results = createMessageReceivedEvent({
+      message:
+        '<task_result id="remind-q4x1ze" name="remind" status="completed">\nDone\n</task_result>',
+      sequence: 1,
+      taskIds: ["remind-q4x1ze"],
+      turnId: "turn_1",
+    });
+
+    const reconciled = submissions.apply({
+      ...results,
+      meta: { at: new Date().toISOString(), id: "event_results" },
+    });
+
+    expect(reconciled).toBeUndefined();
+    expect(projection.data.messages).toEqual([
+      expect.objectContaining({ metadata: expect.objectContaining({ optimistic: true }) }),
+    ]);
+  });
+
   it("reconciles events that arrive before the POST response", () => {
     const { projection, submissions } = setup();
     const id = submissions.submit({ message: "Hello" }, 0)!;

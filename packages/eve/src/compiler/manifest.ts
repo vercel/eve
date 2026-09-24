@@ -821,6 +821,9 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .strict(),
         z
           .object({
+            detach: z
+              .union([z.boolean(), z.object({ timeout: z.number().positive() }).strict()])
+              .optional(),
             kind: z.literal("workflow-tool"),
             workflowId: z.string(),
           })

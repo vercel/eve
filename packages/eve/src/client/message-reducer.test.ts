@@ -1367,6 +1367,27 @@ describe("defaultMessageReducer", () => {
     const userMessage = data.messages.find((message) => message.role === "user");
     expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
   });
+
+  it("does not render delivered task results as a user message", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageReceivedEvent({
+        message:
+          '<task_result id="remind-q4x1ze" name="remind" status="completed">\nDone\n</task_result>',
+        sequence: 2,
+        taskIds: ["remind-q4x1ze"],
+        turnId: "turn_2",
+      }),
+      createMessageCompletedEvent({
+        message: "Your reminder fired.",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+    ]);
+
+    expect(data.messages.map((message) => message.role)).toEqual(["assistant"]);
+  });
 });
 
 function findToolPart(

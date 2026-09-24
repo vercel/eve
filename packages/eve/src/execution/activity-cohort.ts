@@ -46,6 +46,16 @@ export function updateActivityRootForDelivery(input: {
   );
 }
 
+/** A result turn's activity attaches to the activity root of the turn that started its tasks. */
+export function updateActivityRootForTaskResults(input: {
+  readonly ctx: ContextContainer;
+  readonly rootTurnId: string | undefined;
+}): void {
+  if (!input.ctx.has(ActivityObserverKey) || input.rootTurnId === undefined) return;
+  input.ctx.set(ActivityRootTurnIdKey, input.rootTurnId);
+  input.ctx.delete(ActivityPendingBlockersKey);
+}
+
 export function restoreAuthorizationActivity(input: {
   readonly ctx: ContextContainer;
   readonly matches: readonly MatchedAuthorizationCallback[];

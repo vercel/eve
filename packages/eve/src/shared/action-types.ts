@@ -130,6 +130,8 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
+    // Only `true` changes behavior today; `{ timeout }` waits like `false` until timed detach lands.
+    detach: z.union([z.boolean(), z.object({ timeout: z.number() }).strict()]).optional(),
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
@@ -216,6 +218,11 @@ const runtimeToolResultActionResultSchema = z
     callId: z.string(),
     isError: z.boolean().optional(),
     kind: z.literal("tool-result"),
+    /**
+     * Text the model reads in place of `output`. Set on receipts, whose
+     * `output` is the structured receipt clients read.
+     */
+    modelOutput: z.string().optional(),
     output: jsonValueSchema,
     toolName: z.string(),
   })

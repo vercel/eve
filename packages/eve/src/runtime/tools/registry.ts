@@ -86,11 +86,11 @@ async function createPreparedRuntimeTool(
   const isSelfAgent =
     definition.behavior?.handling?.kind === "dispatch" &&
     definition.behavior.handling.action === "self-agent";
-  const workflowId = isSelfAgent
-    ? AGENT_TASK_WORKFLOW_ID
-    : definition.behavior?.handling?.kind === "workflow-tool"
-      ? definition.behavior.handling.workflowId
+  const workflowHandling =
+    definition.behavior?.handling?.kind === "workflow-tool"
+      ? definition.behavior.handling
       : undefined;
+  const workflowId = isSelfAgent ? AGENT_TASK_WORKFLOW_ID : workflowHandling?.workflowId;
   return {
     availableInSubagents: definition.availableInSubagents,
     behavior: prepareToolBehavior(
@@ -116,7 +116,9 @@ async function createPreparedRuntimeTool(
 
               workflowId,
             }
-          : { workflowId },
+          : workflowHandling?.detach === undefined
+            ? { workflowId }
+            : { detach: workflowHandling.detach, workflowId },
   };
 }
 

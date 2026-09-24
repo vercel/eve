@@ -7,6 +7,8 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
+import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { getTaskTable, readTaskTimer } from "#tasks/state.js";
 import { cancelTaskTimer } from "#tasks/timer-steps.js";
 
@@ -15,8 +17,9 @@ const log = createLogger("execution.terminate-child-sessions");
 /**
  * Terminates every child session the owner has an address for when the
  * owner session ends, and its task timer. Local children are stopped; remote
- * children are retired through the authenticated session-reset route. A task
- * whose child never reported its address has nothing to stop.
+ * children are retired through the authenticated session-reset route; a
+ * working workflow tool run is asked to cancel. A task whose child never
+ * reported its address has nothing to stop.
  */
 export async function terminateChildSessionsStep(input: {
   readonly serializedContext?: Record<string, unknown>;
@@ -69,6 +72,11 @@ export async function terminateChildSessionsStep(input: {
         await cancelRun(await getWorld(), child.sessionId, {
           cancelReason: "Parent session ended",
         });
+      } else if (!isTerminalTaskStatus(record.status)) {
+        await cancelWorkflowToolRun(
+          { hookToken: child.commandToken, runId: child.runId },
+          "Parent session ended",
+        );
       }
     } catch (error) {
       logError(log, "failed to terminate child session", error, {

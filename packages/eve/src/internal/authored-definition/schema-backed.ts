@@ -1,4 +1,8 @@
-import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
+import {
+  isWorkflowToolDefinition,
+  normalizeWorkflowToolDetach,
+  type WorkflowToolDetach,
+} from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
@@ -37,6 +41,7 @@ import {
 type NormalizedAuthoredTool = Readonly<
   Omit<InternalToolDefinition, "name"> & {
     readonly behavior?: CompiledToolBehavior;
+    readonly detach?: WorkflowToolDetach;
     readonly execute?: ToolExecuteFn;
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
@@ -114,6 +119,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "label",
       "auth",
       "description",
+      "detach",
       "execute",
       "inputSchema",
       "approval",
@@ -123,6 +129,12 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     ],
     message,
   );
+  if (record.detach !== undefined && !isWorkflowToolDefinition(value)) {
+    throw new Error(
+      `${message} "detach" is only supported on defineWorkflowTool(); other tools run inside the model step that calls them.`,
+    );
+  }
+  const detach = normalizeWorkflowToolDetach(record.detach, message);
   const inputSchema =
     record.inputSchema === undefined
       ? null
@@ -147,6 +159,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   };
   if (behavior !== undefined) {
     definition.behavior = behavior;
+  }
+  if (detach !== undefined) {
+    definition.detach = detach;
   }
   if (workflowProgram !== undefined) {
     definition.workflowProgram = workflowProgram;

@@ -56,11 +56,11 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("session finalization with an unsettled caller", () => {
   it.each([
-    { kind: "expired" as const },
-    { kind: "failed" as const, error: new Error("Owner failed") },
+    { code: { errorCode: "AGENT_SESSION_ENDED" }, outcome: { kind: "expired" as const } },
+    { code: {}, outcome: { error: new Error("Owner failed"), kind: "failed" as const } },
   ])(
-    "reports terminal failure and only unreported usage when the owner is $kind",
-    async (outcome) => {
+    "reports terminal failure and only unreported usage when the owner is $outcome.kind",
+    async ({ code, outcome }) => {
       const caller = {
         callId: "delegate",
         subagentName: "detector",
@@ -83,6 +83,7 @@ describe("session finalization with an unsettled caller", () => {
         lifecycle: "terminal",
         sessionId: "detector",
         settled: {
+          ...code,
           isError: true,
           output: result.output,
           usage: expect.objectContaining({ inputTokens: 150 }),

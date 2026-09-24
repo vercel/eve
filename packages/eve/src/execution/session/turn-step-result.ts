@@ -5,6 +5,7 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { hasPendingBackgroundWork } from "#tasks/results.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
@@ -42,7 +43,13 @@ export function resolveSessionStepResult(
   if (stepResult.next === null) {
     const pending = derivePendingState(stepResult.session);
     if (stepResult.settledTurn !== undefined) {
-      const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
+      const taken = takeSessionUsageDelta(stepResult.session);
+      const { delta } = taken;
+      // A caller held for background work is settled by a later turn; leaving
+      // the usage unreported folds this turn's spend into that settlement.
+      const reportedSession = hasPendingBackgroundWork(stepResult.session.state)
+        ? stepResult.session
+        : taken.session;
       return {
         action: "park",
         ...pending,

@@ -143,6 +143,12 @@ flattened compatibility summary, while `message.received.data.parts` carries ren
 file metadata. File parts never include raw bytes or internal sandbox paths; `url` appears only for
 client-resolvable `http(s)` and `data:` URLs.
 
+A `message.received` event with `data.kind: "task.result"` is not a user message. eve emits it when
+it delivers [background task results](../../tools/workflows#return-a-receipt-with-detach) to the
+model, and `data.taskIds` names the delivered tasks. The default message reducer skips it and never
+uses it to confirm an optimistic submission. A custom renderer should skip it too, and show the
+assistant reply that follows.
+
 ## Authorization pauses
 
 `authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.

@@ -202,9 +202,17 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
+    /**
+     * Present when eve authored the input instead of a channel participant.
+     * `task.result` delivers background task results to the model; clients
+     * must not render it as a user message.
+     */
+    kind?: "task.result";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
+    /** With `kind: "task.result"`: the tasks whose results the message delivers. */
+    taskIds?: readonly string[];
     turnId: string;
   };
   type: "message.received";
@@ -929,9 +937,11 @@ export function createTurnStartedEvent(input: {
 export function createMessageReceivedEvent(input: {
   readonly message: string | UserContent;
   readonly sequence: number;
+  /** Task results delivered by eve rather than a channel participant. */
+  readonly taskIds?: readonly string[];
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
-  return {
+  const event: MessageReceivedStreamEvent = {
     data: {
       message: summarizeUserContent(input.message),
       parts: projectUserContentParts(input.message),
@@ -940,6 +950,8 @@ export function createMessageReceivedEvent(input: {
     },
     type: "message.received",
   };
+  if (input.taskIds === undefined) return event;
+  return { ...event, data: { ...event.data, kind: "task.result", taskIds: [...input.taskIds] } };
 }
 
 function summarizeUserContent(message: string | UserContent): string {
@@ -1339,7 +1351,7 @@ export function createActionResultEvent(input: {
     data: {
       error: outcome.error,
       ...optionalPresentation(input.presentation),
-      result: input.result,
+      result: withoutModelOutput(input.result),
       sequence: input.sequence,
       status: outcome.status,
       stepIndex: input.stepIndex,
@@ -1347,6 +1359,13 @@ export function createActionResultEvent(input: {
     },
     type: "action.result",
   };
+}
+
+/** A receipt's model text is for the model; clients read its structured `output`. */
+function withoutModelOutput(result: RuntimeActionResult): RuntimeActionResult {
+  if (result.kind !== "tool-result" || result.modelOutput === undefined) return result;
+  const { modelOutput: _modelOutput, ...rest } = result;
+  return rest;
 }
 
 /** Creates an `action.partial` event for one preliminary tool-result snapshot. */

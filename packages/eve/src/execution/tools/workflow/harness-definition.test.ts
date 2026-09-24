@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { jsonSchema } from "ai";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import {
+  createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
   parseWorkflowToolInput,
 } from "./harness-definition.js";
@@ -21,6 +22,22 @@ describe("createWorkflowToolHarnessDefinition", () => {
         workflowId: AGENT_TASK_WORKFLOW_ID,
       }),
     ).toMatchObject({ nodeId: "subagents/research" });
+  });
+});
+
+describe("createPreparedWorkflowToolHarnessDefinition", () => {
+  it("carries a workflow tool's detach option to the harness", () => {
+    expect(
+      createPreparedWorkflowToolHarnessDefinition({
+        description: "Remind Alice later.",
+        inputSchema: { type: "object" },
+        kind: "authored-tool",
+        logicalPath: "tools/remind.ts",
+        name: "remind",
+        sourceId: "agent",
+        task: { detach: true, workflowId: "workflow//./agent/tools/remind//execute" },
+      } as never),
+    ).toMatchObject({ detach: true, workflowId: "workflow//./agent/tools/remind//execute" });
   });
 });
 

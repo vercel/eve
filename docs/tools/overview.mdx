@@ -129,7 +129,9 @@ receive only the projected text.
 ### Tool calls finish inside the turn
 
 Every tool call resolves inside the turn that made it. The model sees the tool's output as the
-tool result before it continues.
+tool result before it continues. The one exception is a workflow tool defined with `detach: true`:
+its call resolves at once with a receipt, and the workflow's result arrives later in its own message.
+See [Return a receipt with `detach`](/docs/tools/workflows#return-a-receipt-with-detach).
 
 | Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
 | -------------------- | -------------------------------------------------------- | ---------------------------------- |

@@ -230,19 +230,29 @@ export async function emitTurnEpilogue(
   state: HarnessEmissionState,
   mode: RunMode,
 ): Promise<HarnessEmissionState> {
+  const next = await emitTurnCompleted(emitFn, state);
+  if (mode === "conversation") {
+    await emitFn(createSessionWaitingEvent());
+  } else {
+    await emitFn(createSessionCompletedEvent());
+  }
+  return next;
+}
+
+/**
+ * Emits only `turn.completed`, for a task-mode turn whose run continues
+ * until its background tasks report. Returns the between-turns state.
+ */
+export async function emitTurnCompleted(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
       sequence: state.sequence,
       turnId: state.turnId,
     }),
   );
-
-  if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
-  } else {
-    await emitFn(createSessionCompletedEvent());
-  }
-
   return {
     sessionStarted: state.sessionStarted,
     sequence: state.sequence + 1,

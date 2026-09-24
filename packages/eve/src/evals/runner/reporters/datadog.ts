@@ -485,7 +485,7 @@ function resolveResultTags(
 
 function resolveInput(result: EveEvalResult, evaluation: EveEval | undefined): unknown {
   for (const event of result.result.events) {
-    if (event.type !== "message.received") continue;
+    if (event.type !== "message.received" || event.data.kind === "task.result") continue;
     return event.data.message;
   }
 

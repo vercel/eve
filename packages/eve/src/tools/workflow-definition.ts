@@ -99,6 +99,12 @@ export type WorkflowToolContext = Pick<
 
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
 
+/**
+ * Whether a call waits for the tool's result. `true` returns a receipt at
+ * once and delivers the result later in its own message.
+ */
+export type WorkflowToolDetach = boolean | { readonly timeout: number };
+
 /** A static tool whose executor runs as a durable workflow. Its executor must start with "use workflow". */
 export interface WorkflowToolDefinition<
   TInput = unknown,
@@ -107,7 +113,47 @@ export interface WorkflowToolDefinition<
   readonly [WORKFLOW_TOOL_BRAND]: true;
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
+  /**
+   * `true` returns a receipt to the model at once; the run's result arrives
+   * later as a task result. Defaults to `false`: the call waits.
+   */
+  detach?: WorkflowToolDetach;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
+}
+
+/**
+ * Validates an authored `detach` value. `{ timeout }` is accepted and stored,
+ * but until timed detach lands it behaves like `false`.
+ */
+export function normalizeWorkflowToolDetach(
+  value: unknown,
+  factory: string,
+): WorkflowToolDetach | undefined {
+  if (value === undefined || typeof value === "boolean") return value;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const keys = Object.keys(value);
+    const timeout = (value as { readonly timeout?: unknown }).timeout;
+    if (
+      keys.length === 1 &&
+      keys[0] === "timeout" &&
+      typeof timeout === "number" &&
+      Number.isFinite(timeout) &&
+      timeout > 0
+    ) {
+      return { timeout };
+    }
+  }
+  throw new Error(
+    `${factory}: "detach" must be true, false, or { timeout } with a positive number of milliseconds, received ${describeDetach(value)}.`,
+  );
+}
+
+function describeDetach(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
@@ -156,6 +202,7 @@ export function defineWorkflowTool<TInput, TOutput>(
   definition: Unbranded<WorkflowToolDefinition<TInput, TOutput>>,
 ): WorkflowToolDefinition<TInput, TOutput> {
   rejectRemovedExecutionOption(definition, "defineWorkflowTool");
+  normalizeWorkflowToolDetach(definition.detach, "defineWorkflowTool");
   stampToolDefinition(definition, "defineWorkflowTool");
   return Object.assign(definition, { [WORKFLOW_TOOL_BRAND]: true as const });
 }

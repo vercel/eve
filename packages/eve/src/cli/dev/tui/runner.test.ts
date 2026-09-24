@@ -934,6 +934,18 @@ describe("EveTUIRunner idle session follow", () => {
     const idleEvents: AgentTUIStreamEvent[] = [];
     const wakeEvents = [
       { type: "turn.started", data: { sequence: 1, turnId: "wake-turn" } },
+      // The result turn's input is eve-authored and never shown as a user message.
+      {
+        type: "message.received",
+        data: {
+          kind: "task.result",
+          message:
+            '<task_result id="review-q4x1ze" name="review" status="completed">\nReady\n</task_result>',
+          sequence: 1,
+          taskIds: ["review-q4x1ze"],
+          turnId: "wake-turn",
+        },
+      },
       {
         type: "step.started",
         data: { modelId: "test-model", sequence: 1, stepIndex: 0, turnId: "wake-turn" },
@@ -997,6 +1009,7 @@ describe("EveTUIRunner idle session follow", () => {
         id: "text:wake-turn:0",
         text: "Alice's background review is ready for Bob.",
       });
+      expect(JSON.stringify(idleEvents)).not.toContain("task_result");
       expect(send).not.toHaveBeenCalled();
     } finally {
       prompt.resolve(undefined);

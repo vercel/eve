@@ -79,6 +79,8 @@ export async function notifyDelegatedParentStep(input: {
 export interface SettledTurnNotification {
   readonly output: unknown;
   readonly isError?: boolean;
+  /** Task error code for a failed settlement; defaults to the generic execution failure. */
+  readonly errorCode?: string;
   /** Usage accumulated since the previous caller settlement, including yielded turns. */
   readonly usage?: TokenUsage;
 }
@@ -179,7 +181,7 @@ function createSettledTurnResult(input: {
 
   if (input.settled.isError === true) {
     const error = {
-      code: SUBAGENT_EXECUTION_FAILED,
+      code: input.settled.errorCode ?? SUBAGENT_EXECUTION_FAILED,
       message: toErrorMessage(input.settled.output),
     };
     return {

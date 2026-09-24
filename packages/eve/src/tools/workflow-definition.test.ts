@@ -120,6 +120,51 @@ describe("defineWorkflowTool", () => {
     );
   });
 
+  it.each([true, false, { timeout: 120_000 }])("accepts detach: %j and compiles it", (detach) => {
+    const execute = Object.assign(async () => 1, { workflowId: "workflow//remind//execute" });
+    const definition = defineWorkflowTool({
+      description: "Remind Alice later.",
+      detach,
+      execute,
+      inputSchema: {},
+    });
+
+    const entry = normalizeToolDefinition(definition, "Invalid tool.");
+
+    expect(entry).toMatchObject({ definition: { detach }, kind: "tool" });
+  });
+
+  it.each([
+    ["a string", "always"],
+    ["a zero timeout", { timeout: 0 }],
+    ["a negative timeout", { timeout: -5 }],
+    ["an infinite timeout", { timeout: Number.POSITIVE_INFINITY }],
+    ["a timeout in seconds as a string", { timeout: "30s" }],
+    ["an unknown key", { timeout: 1_000, after: 5 }],
+  ])("rejects detach given %s", (_label, detach) => {
+    expect(() =>
+      defineWorkflowTool({
+        description: "Remind Alice later.",
+        detach: detach as never,
+        async execute() {
+          "use workflow";
+          return 1;
+        },
+        inputSchema: {},
+      }),
+    ).toThrow(
+      'defineWorkflowTool: "detach" must be true, false, or { timeout } with a positive number of milliseconds',
+    );
+  });
+
+  it("rejects detach on a tool that is not a workflow tool", () => {
+    const definition = { description: "Ordinary", detach: true, execute: async () => 1 };
+
+    expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
+      '"detach" is only supported on defineWorkflowTool()',
+    );
+  });
+
   it.each(["defineTool", "bare object"])("rejects a workflow executor in %s", (kind) => {
     const execute = Object.assign(async () => 1, { workflowId: "workflow//test//execute" });
     const definition = { description: "Ordinary", inputSchema: {}, execute };

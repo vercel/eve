@@ -304,6 +304,7 @@ export function createCoordinationRequestFromToolCall(input: {
   if (definition?.workflowId !== undefined) {
     return {
       callId: input.toolCall.toolCallId,
+      detach: definition.detach,
       executeInput: definition.executeInput?.(inputObject),
       input: inputObject,
       kind: "workflow-task",
@@ -353,11 +354,15 @@ function parseJsonStringInput(value: string): unknown {
   return JSON.parse(value);
 }
 
-/** Errors bypass `toModelOutput`, as they do for local execution. */
+/**
+ * Errors bypass `toModelOutput`, as they do for local execution. A receipt
+ * carries its own model text: its `output` is not the tool's output.
+ */
 async function projectToolResultOutput(
   result: Extract<RuntimeActionResult, { kind: "tool-result" }>,
   definition: HarnessToolDefinition | undefined,
 ): Promise<ToolResultPart["output"]> {
+  if (result.modelOutput !== undefined) return { type: "text", value: result.modelOutput };
   if (result.isError === true || definition?.toModelOutput === undefined) {
     return toToolResultOutput(result);
   }

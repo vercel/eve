@@ -9,7 +9,8 @@ import {
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
-import { cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
+import { cancelTasks, cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
+import { hasPendingBackgroundWork } from "#tasks/results.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -114,6 +115,8 @@ export async function runPreparedSession(
       result = await handoff.awaitAnchoredResult();
       return result;
     }
+    // Session end cancels every working task; nothing is delivered afterwards.
+    if (loop.outcome.kind === "expired") await cancelTasks(cursor, { kind: "all" });
     result = await finalizeSession(loop.outcome, {
       caller: progress.caller,
       cursor,
@@ -219,7 +222,12 @@ async function runSessionLoop(
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
-        deferDeliveries: boot.mode === "task" && expectedAttemptIds.size > 0,
+        // A task-mode run takes no follow-up input while it waits for an
+        // authorization or for its background tasks to report.
+        deferDeliveries:
+          boot.mode === "task" &&
+          (expectedAttemptIds.size > 0 ||
+            hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)),
         expectedAttemptIds,
         inbox,
         queue,
@@ -264,6 +272,10 @@ async function runSessionLoop(
     progress.caller = undefined;
     return settled;
   };
+  const runResultTurn = async (
+    next: Extract<NextTurnInstruction, { kind: "task-results" }>,
+  ): Promise<TurnOutcome> =>
+    await runTurn({ taskResults: next.creator === undefined ? {} : { creator: next.creator } });
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
       const next = await nextParkedActivity(new Set());
@@ -275,6 +287,8 @@ async function runSessionLoop(
         case "clear":
         case "compact":
           continue;
+        case "task-results":
+          return { action: await runResultTurn(next), kind: "action" };
         case "turn":
           return await runDeliveredTurn(next);
         case "cancel-turn":
@@ -312,13 +326,20 @@ async function runSessionLoop(
 
       if (action.cancelled === true) {
         const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
+        // A cancelled agent also stops its own background tasks.
+        if (progress.caller !== undefined) await cancelTasks(cursor, { kind: "all" });
         const settled = await settleCancelledTurn();
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-      } else if (action.settled !== undefined) {
+      } else if (
+        action.settled !== undefined &&
+        // A delegated call settles only when this session is quiescent: the
+        // caller waits for the result turn that reports the background work.
+        !hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)
+      ) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,
@@ -349,8 +370,13 @@ async function runSessionLoop(
         case "compact":
           action = await runTurn({ control: next.kind });
           continue;
+        case "task-results":
+          action = await runResultTurn(next);
+          continue;
         case "cancel-turn":
           await cancelTurnDescendants(cursor);
+          // A caller held for background work cancels that work too.
+          if (progress.caller !== undefined) await cancelTasks(cursor, { kind: "all" });
           await settleCancelledTurn();
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };

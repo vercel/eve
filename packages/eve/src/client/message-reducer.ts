@@ -112,6 +112,8 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "message.received":
+      // eve delivered task results to the model; no participant sent them.
+      if (event.data.kind === "task.result") return data;
       return upsertMessage(data, {
         id: `${receivedMessageEventId(event)}:user`,
         metadata: {

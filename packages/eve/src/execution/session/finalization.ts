@@ -7,6 +7,7 @@ import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { AGENT_SESSION_ENDED_MESSAGE } from "#tasks/render.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import { fireSessionCallbackStep } from "#subagents/callback-step.js";
@@ -76,11 +77,17 @@ export async function finalizeSession(
       usage: settled.sessionUsage,
     });
   } else if (context.caller !== undefined) {
-    const notification: { isError?: boolean; output: unknown; usage?: TokenUsage } = {
+    const notification: {
+      errorCode?: string;
+      isError?: boolean;
+      output: unknown;
+      usage?: TokenUsage;
+    } = {
       output: settled.output,
       usage: settled.turnUsage,
     };
     if (settled.isError) notification.isError = true;
+    if (settled.errorCode !== undefined) notification.errorCode = settled.errorCode;
     await notifyTurnCallerStep({
       caller: context.caller,
       lifecycle: "terminal",
@@ -107,6 +114,7 @@ function settledResult(
   outcome: SessionTerminalOutcome,
   context: SessionFinalizationContext,
 ): {
+  readonly errorCode?: string;
   readonly isError: boolean;
   readonly output: unknown;
   readonly sessionUsage?: TokenUsage;
@@ -132,8 +140,9 @@ function settledResult(
       return context.caller === undefined
         ? { isError: false, output: "" }
         : {
+            errorCode: "AGENT_SESSION_ENDED",
             isError: true,
-            output: "The session ended before the delegated task completed.",
+            output: AGENT_SESSION_ENDED_MESSAGE,
             ...usage,
           };
     case "failed":

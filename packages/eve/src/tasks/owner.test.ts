@@ -22,6 +22,7 @@ import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { SessionStateMap } from "#harness/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   applyTaskReport,
@@ -113,6 +114,7 @@ beforeEach(() => {
         bundle,
         capabilities: undefined,
         channelMetadata: undefined,
+        creator: { auth: null },
         fanoutSize: input.fanoutSize ?? 1,
         initiatorAuth: null,
         plan: input.plan({
@@ -846,6 +848,42 @@ describe("cancelTasksStep", () => {
     ]);
   });
 
+  it("leaves background tasks and a background run's agent calls out of a turn cancel", async () => {
+    const reminder = createTaskRecord({
+      child: { commandToken: "control-hook", kind: "workflow", runId: "run-remind" },
+      id: "remind-aaaaaa",
+      kind: "workflow",
+      mode: "background",
+      name: "remind",
+    });
+    const reminderAgent = createTaskRecord({
+      callId: "call-2",
+      id: "research-bbbbbb",
+      workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
+    });
+    const waited = createTaskRecord({ callId: "call-3", id: "research-cccccc" });
+
+    const turn = await cancelTasksStep({
+      selector: { kind: "active-turn" },
+      serializedContext: {},
+      sessionState: ownerState([reminder, reminderAgent, waited]),
+    });
+
+    expect(settledTaskIds(turn.events)).toEqual([waited.id]);
+
+    const all = await cancelTasksStep({
+      selector: { kind: "all" },
+      serializedContext: {},
+      sessionState: turn.sessionState,
+    });
+
+    expect(settledTaskIds(all.events)).toEqual([reminder.id, reminderAgent.id]);
+    expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
+      { hookToken: "control-hook", runId: "run-remind" },
+      expect.any(String),
+    );
+  });
+
   it("cancels the turn's workflow tool calls through each run's control hook", async () => {
     const workflowCall = createTaskRecord({
       child: { commandToken: "control-hook", kind: "workflow", runId: "run-1" },
@@ -960,6 +998,10 @@ describe("cancelTasksStep", () => {
     expect(confirmed).toMatchObject({ events: [], replies: [], results: [] });
   });
 });
+
+function settledTaskIds(events: readonly UnstampedMessageStreamEvent[]): string[] {
+  return events.flatMap((event) => (event.type === "task.settled" ? [event.data.taskId] : []));
+}
 
 function modelCall(
   input: { readonly agentId?: string; readonly message?: string; readonly target?: string } = {},

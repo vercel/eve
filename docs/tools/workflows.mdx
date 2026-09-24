@@ -8,9 +8,11 @@ A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/too
 `"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
 delegate work to subagents, or coordinate retryable steps over a long period.
 
-A workflow tool call resolves inside the turn that made it. The turn waits for the workflow's
-result, and the model sees that result as the tool result. While the body waits durably, the
-workflow holds no compute.
+By default, a workflow tool call resolves inside the turn that made it. The turn waits for the
+workflow's result, and the model sees that result as the tool result. While the body waits durably,
+the workflow holds no compute. A tool defined with `detach: true` returns a receipt at once and
+delivers its result later in its own message; see
+[Return a receipt with `detach`](#return-a-receipt-with-detach).
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
@@ -459,6 +461,78 @@ export default defineWorkflowTool({
 Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 [yield and return](/docs/tools#yield-and-return) for the final-output rules.
 
+## Return a receipt with `detach`
+
+Set `detach: true` when the point of a tool is a later result, such as a reminder. The call returns
+a receipt at once, the turn continues without waiting, and the workflow's result arrives later as a
+task result:
+
+```ts title="agent/tools/remind.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { sleep } from "workflow";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Remind the user after a delay.",
+  inputSchema: z.object({ note: z.string(), delay: z.string() }),
+  detach: true,
+  async execute({ note, delay }) {
+    "use workflow";
+    await sleep(delay);
+    return { reminder: note }; // Delivered later as a task result.
+  },
+  toModelOutput(output) {
+    return { type: "text", value: `Reminder: ${output.reminder}` };
+  },
+});
+```
+
+The model reads a receipt such as `Task remind-q4x1ze is working in the background.` Clients read
+the structured receipt on `action.result`: `output` is `{ status: "working", taskId }`. The task
+starts with `mode: "background"` on `task.started`. Without `detach: true`, the call waits.
+
+When the run finishes, eve delivers its outcome to the model as one user-role message of kind
+`task.result`, with one `<task_result>` block per result:
+
+```text
+<task_result id="remind-q4x1ze" name="remind" status="completed">
+Reminder: stand-up at 10
+</task_result>
+```
+
+The block body is the definition's `toModelOutput(output)` when it has one, and the output
+otherwise. A failed task carries `status="failed"`, a `code` attribute, and the error message.
+Background results share the tool-result truncation limit: 50 KB and 2,000 lines.
+
+Each result belongs to the principal whose call started the task. Two principals match when their
+authenticator, principal type, and principal ID match. eve delivers results by these rules:
+
+- **Idle session.** The result starts a result turn, and the model replies to it.
+- **Running turn from the same principal.** The result is added at the turn's next tool step, where
+  the model is called again. If the turn is already finishing, it ends normally and a result turn
+  follows, so each turn produces one reply.
+- **Running turn from a different principal.** The result waits for its own result turn. A result
+  never appears in another principal's turn.
+- **Several results.** Results from the same principal that are ready together share one message
+  and one result turn.
+
+A result turn runs with the auth of the call that started the task, and its activity attaches to
+the originating turn. A result turn must produce a reply: if the model ends one without replying,
+eve asks it once more and accepts whatever it returns.
+
+Until its result reaches history, a background task appears in the `[Tasks]` note that eve adds to
+the conversation, with its current status. The note drops the task once its result is delivered.
+
+A session holds at most 10 working background tasks. A `detach: true` call over that limit does not
+start and fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background run still publish
+`action.partial` for the originating call and never wake the model. Cancelling a turn does not
+cancel background tasks it started, and when the session ends, eve cancels every working task and
+delivers nothing afterward.
+
+A subagent session and a task-mode run wait for their own background tasks before they finish. A
+subagent answers its caller with the reply it gives after it has seen the results, and a task-mode
+run returns the output of the result turn that delivers the last result.
+
 ## Cancel and clean up: `ctx.abortSignal`
 
 `ctx.abortSignal` aborts when the run is cancelled, for example when the turn that made the call is
@@ -578,21 +652,24 @@ the tool result.
 
 ## Semantics
 
-One call, one result. A workflow tool's call resolves once, with the return value, the error, or a
-cancellation.
+One call, one result. A waited workflow tool call resolves once, with the return value, the error,
+or a cancellation. A `detach: true` call resolves once with its receipt, and its task delivers the
+result once.
 
 Every workflow tool call is a task. When its run starts, the session stream emits `task.started`
-with `kind: "workflow"`, the tool `name`, and no `child`. The call's first outcome emits one
-`task.settled`, and a run that fails to start settles with `error.code` `START_FAILED`. Progress
+with `kind: "workflow"`, the tool `name`, `mode` (`"background"` for `detach: true`, otherwise
+`"foreground"`), and no `child`. The call's first outcome emits one `task.settled`, and a run that
+fails to start settles with `error.code` `START_FAILED`. Progress
 stays on `action.partial` and the result on `action.result`. Agent calls emit the same events with
 `kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
 [Sessions, runs and streaming](/docs/concepts/sessions-runs-and-streaming#stream-a-session) for the
 event fields.
 
-While a workflow tool runs, the turn waits for it. A message with `turnPolicy: "queue"` waits until
-the turn settles. A message with `turnPolicy: "steer"` (the default) is applied after the tool call
-resolves, in the same turn, so the model sees it before continuing. Steering does not cancel the
-run. Input responses never steer. Cancelling the turn cancels the run, which withdraws its requests.
+While a waited workflow tool runs, the turn waits for it. A message with `turnPolicy: "queue"` waits
+until the turn settles. A message with `turnPolicy: "steer"` (the default) is applied after the tool
+call resolves, in the same turn, so the model sees it before continuing. Steering does not cancel
+the run. Input responses never steer. Cancelling the turn cancels the waited run, which withdraws
+its requests.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the tool invocation.

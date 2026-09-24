@@ -12,9 +12,14 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 A subagent call is an ordinary tool call. The parent turn waits for the subagent's answer, and the
 answer becomes the tool result. Several subagent calls in one model step run in parallel, and the
 turn waits for all of them. If the child session expires, resets, or closes before replying, the
-call fails and reports the usage accumulated since the child's previous answer. This applies to
-root-agent copies, declared local subagents, and remote subagents. The subagent session remains
-available for later calls.
+call fails with `AGENT_SESSION_ENDED` and reports the usage accumulated since the child's previous
+answer. This applies to root-agent copies, declared local subagents, and remote subagents. The
+subagent session remains available for later calls.
+
+A subagent answers only when its session is quiescent. If the subagent calls a workflow tool
+defined with `detach: true`, its turn can end while that task still works; the parent's call stays
+open until the task reports, and the call's result is the reply the subagent gives in the result
+turn that delivers the task's result. An interim reply never settles the call.
 
 ## The built-in `agent` tool
 
@@ -246,7 +251,7 @@ A child parks after answering instead of terminating, keeping its session and co
 
 A child that is still working on another call returns `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
 
-Whenever the set of parked (idle) children changes, eve appends a framework-injected note labeled `[Tasks]` to the conversation. Its `<idle_agents>` block lists each child's id, name, and a one-line summary of its last answer, most recent first, up to 10 children. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and a child that is working does not appear until it parks again.
+Whenever the set of parked (idle) children changes, eve appends a framework-injected note labeled `[Tasks]` to the conversation. Its `<idle_agents>` block lists each child's id, name, and a one-line summary of its last answer, most recent first, up to 10 children. Its `<tasks>` block lists each [background task](./tools/workflows#return-a-receipt-with-detach) whose result has not reached history yet, with its status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and a child that is working does not appear until it parks again.
 
 The parent keeps its children only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 

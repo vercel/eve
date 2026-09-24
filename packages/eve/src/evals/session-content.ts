@@ -7,7 +7,8 @@ export function formatEvalTranscript(events: readonly MessageStreamEvent[]): str
   const messages: string[] = [];
   for (const event of events) {
     if (event.type === "message.received") {
-      messages.push(`User:\n${event.data.message}`);
+      if (event.data.kind === "task.result") messages.push(`Task results:\n${event.data.message}`);
+      else messages.push(`User:\n${event.data.message}`);
     } else if (event.type === "message.completed" && event.data.message !== null) {
       messages.push(`Assistant:\n${event.data.message}`);
     }

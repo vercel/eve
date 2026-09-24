@@ -4,9 +4,11 @@ import type { TaskRecord } from "#tasks/record.js";
 import {
   renderBackgroundReceipt,
   renderDetachedReceipt,
+  renderModelOutputBody,
   renderSleepEndedEarly,
   renderTaskResults,
   renderTasksNote,
+  resolveTasksAnnouncement,
 } from "#tasks/render.js";
 
 function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
@@ -115,5 +117,52 @@ describe("renderTasksNote", () => {
 
   it("returns nothing when there is nothing to list", () => {
     expect(renderTasksNote([record({ mode: "foreground" })])).toBeUndefined();
+  });
+});
+
+describe("resolveTasksAnnouncement", () => {
+  const working = record({ id: "remind-q4x1ze", kind: "workflow", name: "remind" });
+
+  it("lists a background task again once compaction or a clear removed the latest note", () => {
+    const note = renderTasksNote([working])!;
+    const compacted = [{ content: "Summary of the earlier conversation.", role: "user" as const }];
+
+    expect(resolveTasksAnnouncement({ messages: [], records: [working] })).toBe(note);
+    expect(resolveTasksAnnouncement({ messages: compacted, records: [working] })).toBe(note);
+    expect(
+      resolveTasksAnnouncement({
+        messages: [...compacted, { content: note, role: "user" }],
+        records: [working],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("drops a task once its result is delivered", () => {
+    const note = renderTasksNote([working])!;
+
+    expect(
+      resolveTasksAnnouncement({
+        messages: [{ content: note, role: "user" }],
+        records: [{ ...working, delivered: true, status: "completed" }],
+      }),
+    ).toBe(["[Tasks]", "<tasks>", "</tasks>", "<idle_agents>", "</idle_agents>"].join("\n"));
+  });
+});
+
+describe("renderModelOutputBody", () => {
+  it("projects each toModelOutput shape to task result text", () => {
+    expect(renderModelOutputBody({ type: "text", value: "Stand-up at 10." })).toBe(
+      "Stand-up at 10.",
+    );
+    expect(renderModelOutputBody({ type: "json", value: { ok: true } })).toBe('{\n  "ok": true\n}');
+    expect(
+      renderModelOutputBody({
+        type: "content",
+        value: [
+          { text: "Screenshot:", type: "text" },
+          { data: { data: "AA==", type: "data" }, mediaType: "image/png", type: "file" },
+        ],
+      }),
+    ).toBe("Screenshot:\n[file: image/png (image/png)]");
   });
 });

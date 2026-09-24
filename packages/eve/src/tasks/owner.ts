@@ -64,6 +64,7 @@ import {
 } from "#tasks/state.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { readTasks } from "#tasks/read.js";
+import { encodeTaskCreator, holdTaskResult } from "#tasks/results.js";
 import {
   applyTaskMessage,
   cancelTask,
@@ -229,6 +230,7 @@ export async function startAgentTasks(input: {
     const started = startTask(table, {
       agentId,
       callId: call.callId,
+      creator: encodeTaskCreator(prepared.creator),
       kind: "agent",
       mode: "foreground",
       name,
@@ -473,10 +475,13 @@ export async function applyTaskReport(input: {
       const settled = settledEvents(applied.effects);
       if (settled.length === 0) continue;
       events.push(...settled);
+      // A waited call's result is delivered now; a background one is held for delivery.
+      const background = record.mode === "background" && record.workflowCaller === undefined;
       let next = setTaskTable(
         session,
-        markTaskDelivered(applied.table, record.id, record.generation),
+        background ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
       );
+      if (background) next = holdTaskResult(next, findTask(applied.table, record.id)!, outcome);
       if (childEnded && record.child?.kind === "local") {
         next = clearProxyInputRequestsForChild(next, record.child.continuationToken);
       }
@@ -497,7 +502,7 @@ export async function applyTaskReport(input: {
       );
       if (record.workflowCaller !== undefined) {
         replies.push({ replyTo: record.workflowCaller.replyTo, result });
-      } else {
+      } else if (!background) {
         results.push(toToolResult(record, result, outcome));
       }
     }
@@ -520,8 +525,11 @@ export async function applyTaskReport(input: {
 
 /** Which working tasks {@link cancelTasksStep} cancels. */
 export type TaskCancelSelector =
-  /** The turn the session is running or parked in. */
-  { readonly kind: "active-turn" } | { readonly kind: "workflow-run"; readonly runId: string };
+  /** The waited tasks of the turn the session is running or parked in. */
+  | { readonly kind: "active-turn" }
+  /** Every working task: the session ends, or its delegated caller cancels it. */
+  | { readonly kind: "all" }
+  | { readonly kind: "workflow-run"; readonly runId: string };
 
 /**
  * Records cancellation for every working task the selector picks, reports
@@ -544,11 +552,20 @@ export async function cancelTasksStep(input: {
   const turnId =
     getPendingCoordinationBatch(durable.state)?.event.turnId ??
     activeTurnId(input.sessionState.emissionState);
+  // A background run's own agent calls belong to that run, not to any turn.
+  const backgroundRuns = new Set(
+    initial.records.flatMap((record) =>
+      record.mode === "background" && record.child?.kind === "workflow" ? [record.child.runId] : [],
+    ),
+  );
   for (const record of initial.records) {
     const selected =
-      input.selector.kind === "active-turn"
-        ? record.turnId === turnId
-        : record.workflowCaller?.runId === input.selector.runId;
+      input.selector.kind === "all" ||
+      (input.selector.kind === "active-turn"
+        ? record.turnId === turnId &&
+          record.mode === "foreground" &&
+          !backgroundRuns.has(record.workflowCaller?.runId ?? "")
+        : record.workflowCaller?.runId === input.selector.runId);
     if (!selected || isTerminalTaskStatus(record.status)) continue;
     const cancelled = cancelTask(table, record.id, now);
     table = cancelled.table;

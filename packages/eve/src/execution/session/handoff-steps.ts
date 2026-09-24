@@ -10,6 +10,7 @@ import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { isObject } from "#shared/guards.js";
+import { TASK_RESULTS_STATE_KEY } from "#tasks/results.js";
 import { hasWorkingTasks } from "#tasks/state.js";
 import { readTaskTable } from "#tasks/table.js";
 
@@ -25,6 +26,8 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
     "eve.runtime.pendingCoordinationBatch",
     "eve.runtime.deferredStepInput",
     "eve.harness.pendingWorkflowInterrupt",
+    // Background results waiting for delivery.
+    TASK_RESULTS_STATE_KEY,
   ];
   if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
   const batches = state?.["eve.runtime.pendingInputBatches"];

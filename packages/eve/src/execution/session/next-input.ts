@@ -10,11 +10,15 @@ import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import type { JsonObject } from "#shared/json.js";
 import { applyTaskDeadline, applyTaskReport } from "#tasks/owner-body.js";
+import { nextTaskResultTurn } from "#tasks/results.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] }
+  /** Held background results start a result turn that runs as their creator. */
+  | { readonly kind: "task-results"; readonly creator?: JsonObject }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
@@ -26,6 +30,10 @@ export type NextTurnInstruction =
  * resume the challenge once every expected attempt has reported; ordinary
  * deliveries keep starting turns in the meantime. Fully routed descendant
  * deliveries leave nothing for the parent, so the wait continues.
+ *
+ * Background results never coalesce with deliveries: once queued input is
+ * handled and no turn is open, each creator's held results start their own
+ * result turn.
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
@@ -51,6 +59,13 @@ export async function nextTurnDelivery(input: {
       if (routed.kind === "cancel-turn") return routed;
       if (routed.kind === "consumed") continue;
       return routed;
+    }
+    // A turn parked mid-way (on a question or approval) is still open; its
+    // results wait for its next tool-step boundary or its end.
+    const state = cursor.sessionState.snapshot.session.state;
+    if (cursor.sessionState.emissionState.turnId === "" && !hasOpenTurnWork(state)) {
+      const resultTurn = nextTaskResultTurn(state);
+      if (resultTurn !== undefined) return { kind: "task-results", ...resultTurn };
     }
 
     // A delivery may already be in the pump queue by the time the owner exits
@@ -97,4 +112,19 @@ export async function nextTurnDelivery(input: {
         break;
     }
   }
+}
+
+// Read raw so the workflow body does not import the harness.
+const OPEN_TURN_STATE_KEYS = [
+  "eve.runtime.pendingInputBatch",
+  "eve.runtime.pendingCoordinationBatch",
+  "eve.runtime.deferredStepInput",
+  "eve.harness.pendingWorkflowInterrupt",
+];
+
+/** Whether a turn still waits on answers or actions, even though its stream turn closed. */
+function hasOpenTurnWork(state: Record<string, unknown> | undefined): boolean {
+  if (OPEN_TURN_STATE_KEYS.some((key) => state?.[key] !== undefined)) return true;
+  const batches = state?.["eve.runtime.pendingInputBatches"];
+  return Array.isArray(batches) && batches.length > 0;
 }

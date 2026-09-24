@@ -169,6 +169,11 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+  /**
+   * Starts a result turn: the step delivers the pending background results
+   * of the turn's principal. Internal to the execution/harness boundary.
+   */
+  readonly taskResults?: true;
 }
 
 /**

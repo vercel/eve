@@ -1,4 +1,5 @@
 import type { WebSearchProvider } from "#shared/web-search.js";
+import type { WorkflowToolDetach } from "#tools/workflow-definition.js";
 
 /** Session facts that can hide a selected tool without changing source composition. */
 export type ToolAvailabilityCondition = "root-session";
@@ -7,7 +8,11 @@ export type ToolAvailabilityCondition = "root-session";
 export type CompiledToolHandling =
   | { readonly kind: "dispatch"; readonly action: "self-agent" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
-  | { readonly kind: "workflow-tool"; readonly workflowId: string };
+  | {
+      readonly kind: "workflow-tool";
+      readonly workflowId: string;
+      readonly detach?: WorkflowToolDetach;
+    };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */
 export interface ToolExecutionShape {

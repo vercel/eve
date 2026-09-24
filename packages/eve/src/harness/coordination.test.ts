@@ -234,6 +234,26 @@ describe("createCoordinationRequestFromToolCall", () => {
     });
   });
 
+  it("carries a workflow tool's detach option onto its task", () => {
+    expect(
+      createCoordinationRequestFromToolCall({
+        toolCall: { ...toolCall, toolName: "remind" },
+        tools: new Map([
+          [
+            "remind",
+            {
+              description: "Remind Alice later.",
+              detach: true,
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "remind",
+              workflowId: "workflow//./agent/tools/remind//execute",
+            },
+          ],
+        ]),
+      }),
+    ).toMatchObject({ detach: true, toolName: "remind" });
+  });
+
   it("rejects a deferred tool without a workflow", () => {
     expect(() => createCoordinationRequestFromToolCall({ toolCall, tools: new Map() })).toThrow(
       'Deferred tool "researcher" has no workflow task.',
@@ -406,6 +426,77 @@ describe("resolvePendingCoordination", () => {
     expect(toolMessage?.role).toBe("tool");
     expect(JSON.stringify(toolMessage?.content)).toContain("deployed to https://api.example");
     expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
+  });
+
+  it("shows the model a receipt's text instead of projecting its output", async () => {
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-1",
+          detach: true,
+          input: {},
+          kind: "workflow-task",
+          toolName: "remind",
+          workflowId: "workflow//./agent/tools/remind//execute",
+        },
+      ],
+    });
+    const emitted: unknown[] = [];
+
+    const resolved = await resolvePendingCoordination({
+      emit: async (event) => {
+        emitted.push(event);
+      },
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "tool-result",
+            modelOutput: "Task remind-q4x1ze is working.",
+            output: { status: "working", taskId: "remind-q4x1ze" },
+            toolName: "remind",
+          },
+        ],
+      },
+      tools: new Map([
+        [
+          "remind",
+          {
+            description: "Remind.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "remind",
+            toModelOutput: () => toolOutput.text("never applied to a receipt"),
+          },
+        ],
+      ]),
+    });
+
+    expect(resolved.messages.at(-1)?.content).toEqual([
+      {
+        output: { type: "text", value: "Task remind-q4x1ze is working." },
+        toolCallId: "call-1",
+        toolName: "remind",
+        type: "tool-result",
+      },
+    ]);
+    // Clients read the structured receipt; the model text stays off the stream.
+    expect(emitted).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          result: {
+            callId: "call-1",
+            kind: "tool-result",
+            output: { status: "working", taskId: "remind-q4x1ze" },
+            toolName: "remind",
+          },
+        }),
+        type: "action.result",
+      }),
+    ]);
   });
 
   it("accepts a dispatch-origin failure result by callId", async () => {
