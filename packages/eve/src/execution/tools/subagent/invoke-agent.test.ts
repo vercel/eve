@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { RuntimeActionResultHookPayload } from "#channel/types.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
-import {
-  agent,
-  type AgentInvocationReply,
-  validateAgentInput,
-} from "#execution/tools/subagent/invoke-agent.js";
+import { agent, validateAgentInput } from "#execution/tools/subagent/invoke-agent.js";
+import type { JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 
 const mocks = vi.hoisted(() => ({
@@ -65,6 +63,49 @@ describe("agent invocation input", () => {
   });
 });
 
+const from: WorkflowToolRunRef = {
+  callId: "call-1",
+  input: { message: "Find it" },
+  runId: "run-1",
+  sequence: 0,
+  stepIndex: 0,
+  toolName: "research",
+  turnId: "turn-1",
+};
+
+function createWorkflowContext(signal?: AbortSignal): ToolContext {
+  const ctx = { abortSignal: signal, callId: "call-1" } as ToolContext;
+  attachWorkflowToolRunContext(ctx, { from, owner: { inbox: "owner-inbox" } });
+  return ctx;
+}
+
+function replyHook(token: string, replies: RuntimeActionResultHookPayload[]) {
+  return {
+    [Symbol.asyncIterator]: () => ({
+      next: async () =>
+        replies.length > 0
+          ? { done: false as const, value: replies.shift()! }
+          : { done: true as const, value: undefined },
+    }),
+    token,
+  };
+}
+
+function childResult(callId: string, output: JsonValue) {
+  return {
+    callId,
+    kind: "subagent-result" as const,
+    origin: "child" as const,
+    outcome: {
+      kind: "parked" as const,
+      result: { kind: "succeeded" as const, output },
+      usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+    },
+    output,
+    subagentName: "research",
+  };
+}
+
 describe("workflow agent invocation routing", () => {
   it("stops waiting when the workflow body is cancelled", async () => {
     const controller = new AbortController();
@@ -72,23 +113,10 @@ describe("workflow agent invocation routing", () => {
       [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
       token: "agent-reply",
     });
-    const ctx = { abortSignal: controller.signal, callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from: {
-        callId: "call-1",
-        input: { message: "Find it" },
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
 
-    const result = agent(ctx, "research", { message: "Find it" });
+    const result = agent(createWorkflowContext(controller.signal), "research", {
+      message: "Find it",
+    });
     await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
     controller.abort(new Error("run cancelled"));
 
@@ -96,67 +124,26 @@ describe("workflow agent invocation routing", () => {
     expect(mocks.disposeHook).toHaveBeenCalledOnce();
   });
 
-  it("sends the invocation through the workflow owner", async () => {
-    const result = {
-      callId: "call-1:agent-reply",
-      kind: "subagent-result" as const,
-      origin: "child" as const,
-      outcome: {
-        kind: "parked" as const,
-        result: { kind: "succeeded" as const, output: { findings: ["available"] } },
-        usageDelta: {
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-        },
-      },
-      output: { findings: ["available"] },
-      subagentName: "research",
-    };
-    const replies: AgentInvocationReply[] = [
-      { kind: "runtime-action-result", results: [result] },
-      { kind: "agent-settled", callId: result.callId },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const from: WorkflowToolRunRef = {
-      callId: "call-1",
-      input: { message: "Find it" },
-      runId: "run-1",
-      sequence: 0,
-      stepIndex: 0,
-      toolName: "research",
-      turnId: "turn-1",
-    };
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from,
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
-
+  it("sends only the invocation to the owner and returns the settled result", async () => {
+    const output = { findings: ["available"] };
+    mocks.createHook.mockReturnValue(
+      replyHook("agent-reply", [
+        { kind: "runtime-action-result", results: [childResult("call-1:agent-reply", output)] },
+      ]),
+    );
     const outputSchema = {
       properties: { findings: { items: { type: "string" }, type: "array" } },
       required: ["findings"],
       type: "object",
     };
-    await expect(agent(ctx, "research", { message: "Find it", outputSchema })).resolves.toEqual({
-      findings: ["available"],
-    });
 
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
-      kind: "request",
+    await expect(
+      agent(createWorkflowContext(), "research", { message: "Find it", outputSchema }),
+    ).resolves.toEqual(output);
+
+    expect(mocks.resumeHook).toHaveBeenCalledExactlyOnceWith("owner-inbox", {
       from,
+      kind: "request",
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", outputSchema, target: "research" },
@@ -164,49 +151,31 @@ describe("workflow agent invocation routing", () => {
         kind: "agent-invoke",
       },
     });
+    expect(mocks.disposeHook).toHaveBeenCalledOnce();
+  });
+
+  it("ignores results for other invocations", async () => {
+    mocks.createHook.mockReturnValue(
+      replyHook("agent-reply", [
+        { kind: "runtime-action-result", results: [childResult("call-1:other", "stale")] },
+        { kind: "runtime-action-result", results: [childResult("call-1:agent-reply", "done")] },
+      ]),
+    );
+
+    await expect(agent(createWorkflowContext(), "research", { message: "Find it" })).resolves.toBe(
+      "done",
+    );
   });
 
   it("derives unique invocation ids for repeated parallel calls", async () => {
     for (const token of ["reply-1", "reply-2"]) {
-      const replies: AgentInvocationReply[] = [
-        {
-          kind: "runtime-action-result",
-          results: [
-            {
-              callId: `call-1:${token}`,
-              kind: "subagent-result",
-              origin: "child",
-              output: token,
-              subagentName: "research",
-            } as never,
-          ],
-        },
-        { kind: "agent-settled", callId: `call-1:${token}` },
-      ];
-      mocks.createHook.mockReturnValueOnce({
-        [Symbol.asyncIterator]: () => ({
-          next: async () =>
-            replies.length > 0
-              ? { done: false as const, value: replies.shift()! }
-              : { done: true as const, value: undefined },
-        }),
-        token,
-      });
+      mocks.createHook.mockReturnValueOnce(
+        replyHook(token, [
+          { kind: "runtime-action-result", results: [childResult(`call-1:${token}`, token)] },
+        ]),
+      );
     }
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from: {
-        callId: "call-1",
-        input: {},
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: { inbox: "owner-inbox" },
-    });
+    const ctx = createWorkflowContext();
 
     await expect(
       Promise.all([
@@ -215,139 +184,13 @@ describe("workflow agent invocation routing", () => {
       ]),
     ).resolves.toEqual(["reply-1", "reply-2"]);
 
-    const requests = mocks.resumeHook.mock.calls
-      .map(([, message]) => message.request)
-      .filter((request) => request.kind === "agent-invoke");
-    expect(requests.map((request) => request.invocationId)).toEqual([
+    expect(mocks.resumeHook.mock.calls.map(([, message]) => message.request.invocationId)).toEqual([
       "call-1:reply-1",
       "call-1:reply-2",
     ]);
   });
 
-  it("waits for agent calls inside a blocking workflow tool", async () => {
-    const result = {
-      callId: "call-1:agent-reply",
-      kind: "subagent-result" as const,
-      origin: "child" as const,
-      outcome: {
-        kind: "parked" as const,
-        result: { kind: "succeeded" as const, output: "inline" },
-        usageDelta: {
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-        },
-      },
-      output: "inline",
-      subagentName: "research",
-    };
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: vi
-          .fn()
-          .mockResolvedValueOnce({
-            done: false,
-            value: { kind: "runtime-action-result", results: [result] },
-          })
-          .mockResolvedValueOnce({
-            done: false,
-            value: { kind: "agent-settled", callId: "call-1:agent-reply" },
-          })
-          .mockResolvedValue({ done: true }),
-      }),
-      token: "agent-reply",
-    });
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from: {
-        callId: "call-1",
-        input: { message: "Find it" },
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
-
-    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("inline");
-    expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
-    expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-inbox", {
-      kind: "request",
-      from: expect.objectContaining({ runId: "run-1" }),
-      replyTo: "agent-reply",
-      request: {
-        input: { message: "Find it", target: "research" },
-        invocationId: "call-1:agent-reply",
-        kind: "agent-invoke",
-      },
-    });
-  });
-
-  it.each([false, true])(
-    "waits for settlement acknowledgement before returning a child result (error=%s)",
-    async (isError) => {
-      const acknowledgement = Promise.withResolvers<IteratorResult<AgentInvocationReply>>();
-      const childResult = {
-        callId: "call-1:agent-reply",
-        kind: "subagent-result",
-        origin: "child",
-        isError,
-        output: isError ? "failed" : "done",
-        subagentName: "research",
-      };
-      const next = vi
-        .fn()
-        .mockResolvedValueOnce({
-          done: false,
-          value: { kind: "runtime-action-result", results: [childResult] },
-        })
-        .mockImplementationOnce(() => acknowledgement.promise);
-      mocks.createHook.mockReturnValue({
-        token: "agent-reply",
-        [Symbol.asyncIterator]: () => ({ next }),
-      });
-      const ctx = { callId: "call-1" } as ToolContext;
-      attachWorkflowToolRunContext(ctx, {
-        from: {
-          callId: "call-1",
-          input: {},
-          runId: "run-1",
-          sequence: 0,
-          stepIndex: 0,
-          toolName: "research",
-          turnId: "turn-1",
-        },
-        owner: { inbox: "owner" },
-      });
-      const returned = vi.fn();
-      const output = agent(ctx, "research", { message: "Find it" }).then(
-        (value) => {
-          returned();
-          return value;
-        },
-        (error) => {
-          returned();
-          return error;
-        },
-      );
-      await vi.waitFor(() => expect(next).toHaveBeenCalledTimes(2));
-      expect(returned).not.toHaveBeenCalled();
-      expect(mocks.disposeHook).not.toHaveBeenCalled();
-      acknowledgement.resolve({
-        done: false,
-        value: { kind: "agent-settled", callId: childResult.callId },
-      });
-      expect(await output).toBe(childResult.output);
-      expect(mocks.disposeHook).toHaveBeenCalledOnce();
-    },
-  );
-
-  it("rejects dispatch failures without reporting a child settlement", async () => {
+  it("rejects with the output of a failed invocation", async () => {
     const failure = {
       callId: "call-1:agent-reply",
       isError: true as const,
@@ -359,220 +202,21 @@ describe("workflow agent invocation routing", () => {
       },
       subagentName: "research",
     };
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: vi
-          .fn()
-          .mockResolvedValueOnce({
-            done: false,
-            value: { kind: "runtime-action-result", results: [failure] },
-          })
-          .mockResolvedValueOnce({
-            done: false,
-            value: { kind: "agent-settled", callId: "call-1:agent-reply" },
-          })
-          .mockResolvedValue({ done: true }),
-      }),
-      token: "agent-reply",
-    });
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from: {
-        callId: "call-1",
-        input: { message: "Find it" },
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
-
-    await expect(agent(ctx, "research", { message: "Find it" })).rejects.toEqual(failure.output);
-    expect(mocks.resumeHook).toHaveBeenCalledTimes(1);
-    expect(mocks.resumeHook).not.toHaveBeenCalledWith(
-      "owner-inbox",
-      expect.objectContaining({ request: expect.objectContaining({ kind: "agent-settled" }) }),
+    mocks.createHook.mockReturnValue(
+      replyHook("agent-reply", [{ kind: "runtime-action-result", results: [failure] }]),
     );
+
+    await expect(
+      agent(createWorkflowContext(), "research", { message: "Find it" }),
+    ).rejects.toEqual(failure.output);
+    expect(mocks.resumeHook).toHaveBeenCalledOnce();
   });
 
-  it.each([false, true])(
-    "preserves child HITL coordinates and routes advertised inboxes: %s",
-    async (advertiseInbox) => {
-      const childRequest = (input: {
-        readonly requestId: string;
-        readonly stepIndex: number;
-      }): AgentInvocationReply => ({
-        callId: "call-1",
-        childContinuationToken: "child-continuation",
-        childSessionId: "child-1",
-        childSessionInbox: advertiseInbox ? { sessionId: "child-1" } : undefined,
-        event: {
-          requests: [
-            {
-              action: {
-                callId: input.requestId,
-                input: {},
-                kind: "tool-call",
-                toolName: "approval_gate",
-              },
-              kind: "tool-approval",
-              prompt: "Approve?",
-              requestId: input.requestId,
-            },
-          ],
-          sequence: 3,
-          stepIndex: input.stepIndex,
-          turnId: "turn-child",
-        },
-        kind: "subagent-input-request",
-        subagentName: "research",
-      });
-      const replies: AgentInvocationReply[] = [
-        childRequest({ requestId: "approval-1", stepIndex: 1 }),
-        childRequest({ requestId: "approval-2", stepIndex: 2 }),
-        {
-          kind: "runtime-action-result",
-          results: [
-            {
-              callId: "call-1:agent-reply",
-              kind: "subagent-result",
-              origin: "child",
-              output: "done",
-              subagentName: "research",
-            } as never,
-          ],
-        },
-        { kind: "agent-settled", callId: "call-1:agent-reply" },
-      ];
-      mocks.createHook.mockReturnValue({
-        [Symbol.asyncIterator]: () => ({
-          next: async () =>
-            replies.length > 0
-              ? { done: false as const, value: replies.shift()! }
-              : { done: true as const, value: undefined },
-        }),
-        token: "agent-reply",
-      });
-      mocks.resumeHook.mockImplementation(async () => undefined);
-      const from: WorkflowToolRunRef = {
-        callId: "call-1",
-        input: { message: "Find it" },
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-parent",
-      };
-      const ctx = { callId: "call-1" } as ToolContext;
-      attachWorkflowToolRunContext(ctx, {
-        from,
-        owner: {
-          inbox: "owner-inbox",
-        },
-      });
+  it("fails when the reply hook closes without a result", async () => {
+    mocks.createHook.mockReturnValue(replyHook("agent-reply", []));
 
-      await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
-
-      expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
-        kind: "request",
-        from,
-        replyTo: advertiseInbox ? "eve:inbox:v1:eve:session:child-1:inbox" : "child-continuation",
-        request: {
-          kind: "input-batch",
-          requests: [expect.objectContaining({ requestId: "approval-1" })],
-        },
-        requestCoordinates: { sequence: 3, stepIndex: 1, turnId: "turn-child" },
-      });
-      expect(mocks.resumeHook).toHaveBeenNthCalledWith(3, "owner-inbox", {
-        kind: "request",
-        from,
-        replyTo: advertiseInbox ? "eve:inbox:v1:eve:session:child-1:inbox" : "child-continuation",
-        request: {
-          kind: "input-batch",
-          requests: [expect.objectContaining({ requestId: "approval-2" })],
-        },
-        requestCoordinates: { sequence: 3, stepIndex: 2, turnId: "turn-child" },
-      });
-    },
-  );
-
-  it("forwards child authorization as an owner authorization request", async () => {
-    const replies: AgentInvocationReply[] = [
-      {
-        callId: "call-1",
-        childSessionId: "child-1",
-        event: {
-          data: {
-            description: "Authorize Linear",
-            name: "linear",
-            sequence: 1,
-            stepIndex: 2,
-            turnId: "turn-child",
-          },
-          type: "authorization.required",
-        },
-        kind: "subagent-authorization-event",
-        subagentName: "research",
-      },
-      {
-        kind: "runtime-action-result",
-        results: [
-          {
-            callId: "call-1:agent-reply",
-            kind: "subagent-result",
-            origin: "child",
-            output: "done",
-            subagentName: "research",
-          } as never,
-        ],
-      },
-      { kind: "agent-settled", callId: "call-1:agent-reply" },
-    ];
-    mocks.createHook.mockReturnValue({
-      [Symbol.asyncIterator]: () => ({
-        next: async () =>
-          replies.length > 0
-            ? { done: false as const, value: replies.shift()! }
-            : { done: true as const, value: undefined },
-      }),
-      token: "agent-reply",
-    });
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const from: WorkflowToolRunRef = {
-      callId: "call-1",
-      input: { message: "Find it", target: "research" },
-      runId: "run-1",
-      sequence: 0,
-      stepIndex: 2,
-      toolName: "research",
-      turnId: "turn-1",
-    };
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from,
-      owner: {
-        inbox: "owner-inbox",
-      },
-    });
-
-    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
-
-    expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
-      kind: "request",
-      from,
-      replyTo: "agent-reply",
-      request: {
-        event: expect.objectContaining({ kind: "subagent-authorization-event" }),
-        kind: "authorization-request",
-      },
-    });
-    expect(mocks.resumeHook).not.toHaveBeenCalledWith(
-      "owner-inbox",
-      expect.objectContaining({ kind: "report" }),
-    );
+    await expect(
+      agent(createWorkflowContext(), "research", { message: "Find it" }),
+    ).rejects.toThrow('Agent "research" closed without a result.');
   });
 });

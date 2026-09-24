@@ -2,7 +2,7 @@ import type { LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 
 import { markMockModel } from "#internal/mock-model-identity.js";
-import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
+import { TASKS_NOTE_LABEL } from "#tasks/render.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 
 type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
@@ -179,7 +179,7 @@ function createRequest(options: GenerateOptions): MockModelRequest {
 
 function isFrameworkScaffolding(message: string): boolean {
   const text = message.trim();
-  return text.startsWith(AGENTS_SNIPPET_LABEL) || isPendingApprovalsSnippet(text);
+  return text.startsWith(TASKS_NOTE_LABEL) || isPendingApprovalsSnippet(text);
 }
 
 function extractMessageText(message: GenerateOptions["prompt"][number]): string {

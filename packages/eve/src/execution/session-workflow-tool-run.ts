@@ -7,8 +7,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
-import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/cancel-owner.js";
-import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
+import { cancelTasksStep } from "#tasks/owner.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   workflowToolRunOutcomeToToolResult,
@@ -65,21 +64,14 @@ async function handleWorkflowToolRunOutcome(
 
   const result = workflowToolRunOutcomeToToolResult(message);
 
-  // A failed or cancelled workflow may leave an agent invocation unfinished.
-  await cancelAgentInvocationOwnerStep({
-    ownerId: message.from.runId,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
-  const released = await releaseAgentInvocationOwnerStep({
-    cancelled: message.result.status === "cancelled",
-    ownerId: message.from.runId,
-    sessionState: cursor.sessionState,
-  });
-  await cursor.apply({
-    serializedContext: cursor.serializedContext,
-    sessionState: released.sessionState,
-  });
+  // A workflow run that ends cancels the agent tasks it still owns.
+  await cursor.apply(
+    await cancelTasksStep({
+      selector: { kind: "workflow-run", runId: message.from.runId },
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    }),
+  );
 
   return isInboxToolResultFromRecordedWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,
@@ -93,42 +85,34 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  if (message.request.kind === "agent-invoke" || message.request.kind === "agent-settled") {
+  if (message.request.kind === "agent-invoke") {
     const recorded = findBlockingWorkflowToolRun(
       cursor.sessionState.snapshot.session.state,
       message.from.callId,
       message.from.turnId,
     );
     if (recorded?.address.runId !== message.from.runId) {
-      if (message.request.kind === "agent-invoke") {
-        await resumeHookStep(message.replyTo, {
-          kind: "runtime-action-result",
-          results: [
-            {
-              callId: message.request.invocationId,
-              isError: true,
-              kind: "subagent-result",
-              origin: "dispatch",
-              output: {
-                code: "AGENT_INVOCATION_NOT_ADMITTED",
-                message: "The workflow tool run no longer owns this agent invocation.",
-              },
-              subagentName: message.request.input.target,
+      await resumeHookStep(message.replyTo, {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: message.request.invocationId,
+            isError: true,
+            kind: "subagent-result",
+            origin: "dispatch",
+            output: {
+              code: "AGENT_INVOCATION_NOT_ADMITTED",
+              message: "The workflow tool run no longer owns this agent invocation.",
             },
-          ],
-        });
-      }
+            subagentName: message.request.input.target,
+          },
+        ],
+      });
       return;
     }
-    await cursor.apply(
-      await applyAgentRequest(
-        {
-          ownerId: message.from.runId,
-          replyTo: message.replyTo,
-          request: message.request,
-        },
-        requestContext(input),
-      ),
+    await applyAgentRequest(
+      { ownerId: message.from.runId, replyTo: message.replyTo, request: message.request },
+      cursor,
     );
     return;
   }
@@ -169,13 +153,5 @@ function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHo
       ...(options !== undefined && { options: [...options] }),
     },
     runId: message.from.runId,
-  };
-}
-
-function requestContext(input: HandlerInput<unknown>) {
-  return {
-    sessionWritable: input.cursor.sessionWritable,
-    serializedContext: input.cursor.serializedContext,
-    sessionState: input.cursor.sessionState,
   };
 }

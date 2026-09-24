@@ -108,11 +108,11 @@ const scheduledRemoteModel = mockModel({
   },
 });
 
-/** Reads a continuable child's id from the framework-injected `[Agents]` note. */
+/** Reads a continuable child's id from the framework-injected `[Tasks]` note. */
 function listedAgentId(messages: readonly MockModelMessage[], name: string): string | undefined {
   const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`, "u");
   for (const message of [...messages].reverse()) {
-    if (message.role !== "user" || !message.text.startsWith("[Agents]")) continue;
+    if (message.role !== "user" || !message.text.startsWith("[Tasks]")) continue;
     return pattern.exec(message.text)?.[1];
   }
   return undefined;

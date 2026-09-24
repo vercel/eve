@@ -31,6 +31,7 @@ import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
@@ -367,7 +368,7 @@ describe("compileAgentManifest source graph", () => {
       rootOnly: true,
       task: {
         nodeId: "__root__",
-        workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
+        workflowId: AGENT_TASK_WORKFLOW_ID,
       },
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({

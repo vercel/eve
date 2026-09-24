@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { isSessionStateIdleForHandoff } from "#execution/session/handoff-steps.js";
-import type { AgentHandle, AgentHandlePhase } from "#subagents/handles/store.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 
 const turnRun = {
   callId: "call",
@@ -19,51 +19,21 @@ const backgroundRun = {
     dispatchContext: { auth: { current: null, initiator: null } },
   },
 };
+const child = {
+  continuationToken: "subagent:parent:call",
+  kind: "local" as const,
+  sessionId: "child-session",
+};
 function checkpoint(state: Record<string, unknown>) {
   const value = createTestSessionState();
   return { ...value, snapshot: { session: { ...value.snapshot.session, state } } };
 }
-const identity = { id: "ag_researcher:operation", name: "researcher", nodeId: "agent" };
-const address = {
-  continuationToken: "subagent:parent:call",
-  kind: "agent/local" as const,
-  sessionId: "child-session",
-};
-const startOperation = {
-  callId: "call",
-  id: "operation",
-  kind: "start" as const,
-  parentTurnId: "turn",
-};
-
-function handle(phase: AgentHandlePhase): AgentHandle {
-  switch (phase) {
-    case "starting":
-      return {
-        identity,
-        operation: startOperation,
-        phase,
-        target: { continuationToken: address.continuationToken, kind: "agent/local" },
-      };
-    case "running":
-      return { address, identity, operation: startOperation, phase };
-    case "parked":
-      return { address, identity, lastStatus: "Research complete", phase };
-    case "reserved":
-      return { identity, operationId: "operation", ownerId: "task", phase };
-    case "claimed":
-      return { address, identity, operationId: "operation", ownerId: "task", phase };
-    case "available":
-      return { address, identity, phase };
-  }
-}
-
 describe("handoff state inspection", () => {
   it("accepts additive framework metadata and opaque authored state", () => {
     expect(
       isSessionStateIdleForHandoff(
         checkpoint({
-          "eve.agent.handles": { handles: [], futureStore: true },
+          "eve.taskTable": { records: [], futureIndex: true },
           authored: { version: "anything", values: [null, false] },
           "eve.workflowTool": { version: 3, runs: [], futureIndex: true },
         }),
@@ -84,36 +54,20 @@ describe("handoff state inspection", () => {
       ),
     ).toBe(true);
   });
-  it.each(["parked", "available"] as const)(
-    "allows an idle %s agent handle to cross a handoff",
-    (phase) => {
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "allows an idle agent whose last task %s to cross a handoff",
+    (status) => {
       expect(
         isSessionStateIdleForHandoff(
-          checkpoint({ "eve.agent.handles": { handles: [handle(phase)] } }),
+          checkpoint(taskTableState([createTaskRecord({ child, delivered: true, status })])),
         ),
       ).toBe(true);
     },
   );
-  it.each(["starting", "running", "reserved", "claimed"] as const)(
-    "refuses an active %s agent handle",
-    (phase) => {
-      expect(
-        isSessionStateIdleForHandoff(
-          checkpoint({ "eve.agent.handles": { handles: [handle(phase)] } }),
-        ),
-      ).toBe(false);
-    },
-  );
-  it("parses idle handles before accepting them", () => {
-    expect(() =>
-      isSessionStateIdleForHandoff(
-        checkpoint({
-          "eve.agent.handles": {
-            handles: [{ ...handle("parked"), address: { ...address, sessionId: "" } }],
-          },
-        }),
-      ),
-    ).toThrow("Corrupt agent handle store");
+  it.each(["working", "input_required"] as const)("refuses a %s agent task", (status) => {
+    expect(
+      isSessionStateIdleForHandoff(checkpoint(taskTableState([createTaskRecord({ status })]))),
+    ).toBe(false);
   });
   it.each([
     ["eve.runtime.pendingAuthorization", false],

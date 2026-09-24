@@ -5,7 +5,10 @@ import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
+import {
+  reportTaskStartedStep,
+  resolveInitialTurnCallerStep,
+} from "#subagents/parent-notification.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
@@ -126,13 +129,23 @@ async function bootInitialOwner(
       await inbox.dispose();
       return undefined;
     }
+    const caller = hasDelegatedCallerContext(serializedContext)
+      ? await resolveInitialTurnCallerStep({ serializedContext })
+      : undefined;
+    // The owner assigned this child's identity; now that the claims above
+    // made this run the only one, report the address it can be reached at.
+    if (caller?.replyTo.kind === "hook") {
+      await reportTaskStartedStep({
+        callId: caller.callId,
+        child: { continuationToken, sessionId },
+        token: caller.replyTo.token,
+      });
+    }
     return {
       inbox,
       session: {
         anchor: { kind: "self" },
-        caller: hasDelegatedCallerContext(serializedContext)
-          ? await resolveInitialTurnCallerStep({ serializedContext })
-          : undefined,
+        caller,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         initialInput: createInitialDelivery(input, serializedContext),

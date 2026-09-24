@@ -1,3 +1,5 @@
+import type { ModelMessage } from "ai";
+
 import { truncateHead } from "#execution/sandbox/truncate-output.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskKind, TaskOutcome } from "#tasks/protocol.js";
@@ -10,6 +12,14 @@ export const TASKS_NOTE_LABEL = "[Tasks]";
 
 /** Idle agents listed in the `[Tasks]` note, most recent first. */
 const MAX_IDLE_AGENTS = 10;
+
+const EMPTY_TASKS_NOTE = [
+  TASKS_NOTE_LABEL,
+  "<tasks>",
+  "</tasks>",
+  "<idle_agents>",
+  "</idle_agents>",
+].join("\n");
 
 /** Structured receipt returned to clients for a background call. */
 export interface TaskReceipt {
@@ -80,6 +90,30 @@ export function renderOutcomeBody(outcome: TaskOutcome): string {
     case "cancelled":
       return "The task was cancelled.";
   }
+}
+
+/**
+ * Returns a `[Tasks]` note to append when the listing differs from the
+ * latest note in history, or `undefined` when it is unchanged. A session
+ * that never listed anything gets no note.
+ */
+export function resolveTasksAnnouncement(input: {
+  readonly messages: readonly ModelMessage[];
+  readonly records: readonly TaskRecord[];
+}): string | undefined {
+  const latest = input.messages.findLast(
+    (message) =>
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      message.content.startsWith(TASKS_NOTE_LABEL),
+  );
+  const rendered = renderTasksNote(input.records);
+  if (rendered === undefined) {
+    return latest === undefined || latest.content === EMPTY_TASKS_NOTE
+      ? undefined
+      : EMPTY_TASKS_NOTE;
+  }
+  return latest?.content === rendered ? undefined : rendered;
 }
 
 /**

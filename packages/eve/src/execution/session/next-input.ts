@@ -9,6 +9,8 @@ import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { applyTaskReport } from "#tasks/owner-body.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
@@ -65,10 +67,25 @@ export async function nextTurnDelivery(input: {
     switch (admitted.kind) {
       case "workflow":
         return { kind: "workflow", message: admitted.message };
+      case "task-report":
+        // A child that reports after its turn ended may still owe it a held cancel.
+        await applyTaskReport(cursor, admitted.payload);
+        break;
+      case "runtime-action-result": {
+        // Waited results only resolve inside their turn; applying a late one
+        // here settles its task record, and a cancelled task drops it.
+        const results = admitted.payload.results.filter(
+          (result): result is RuntimeSubagentChildResult =>
+            result.kind === "subagent-result" && result.origin === "child",
+        );
+        if (results.length > 0) {
+          await applyTaskReport(cursor, { kind: "runtime-action-result", results });
+        }
+        break;
+      }
       case "cancel":
       case "delivery":
       case "consumed":
-      case "runtime-action-result":
         break;
     }
   }

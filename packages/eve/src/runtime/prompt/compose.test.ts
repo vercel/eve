@@ -9,7 +9,8 @@ describe("composeRuntimeBasePrompt", () => {
     });
 
     expect(prompt).toContainEqual(expect.stringContaining("agentId"));
-    expect(prompt).toContainEqual(expect.stringContaining("<agents>"));
+    expect(prompt).toContainEqual(expect.stringContaining("`[Tasks]`"));
+    expect(prompt).toContainEqual(expect.stringContaining("<idle_agents>"));
   });
 
   it("describes subagent calls as blocking until the agent answers", () => {
@@ -30,7 +31,7 @@ describe("composeRuntimeBasePrompt", () => {
       subagentsAvailable: false,
     });
 
-    expect(prompt).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
-    expect(prompt).not.toContainEqual(expect.stringContaining("<agents>"));
+    expect(prompt).not.toContainEqual(expect.stringContaining("agentId"));
+    expect(prompt).not.toContainEqual(expect.stringContaining("[Tasks]"));
   });
 });

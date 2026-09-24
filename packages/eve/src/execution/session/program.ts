@@ -9,7 +9,7 @@ import {
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
+import { cancelTurnDescendants } from "#tasks/owner-body.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -347,10 +347,7 @@ async function runSessionLoop(
           action = await runTurn({ control: next.kind });
           continue;
         case "cancel-turn":
-          await cancelDescendantTurnsStep({
-            serializedContext: cursor.serializedContext,
-            sessionState: cursor.sessionState,
-          });
+          await cancelTurnDescendants(cursor);
           await settleCancelledTurn();
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };

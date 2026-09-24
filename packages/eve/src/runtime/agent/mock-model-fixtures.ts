@@ -1,8 +1,5 @@
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
-import {
-  getPromptContentText,
-  isAgentsAnnouncementText,
-} from "#runtime/agent/bootstrap-model-utils.js";
+import { getPromptContentText, isTasksNoteText } from "#runtime/agent/bootstrap-model-utils.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
@@ -142,9 +139,9 @@ function getTrailingUserText(prompt: BootstrapPrompt): string {
     if (message.role === "system") continue;
     if (message.role !== "user") break;
     const text = getPromptContentText(message.content);
-    // Framework-injected [Agents] announcements are scaffolding, not part
+    // Framework-injected [Tasks] notes are scaffolding, not part
     // of the turn's authored ask.
-    if (isAgentsAnnouncementText(text.trim())) continue;
+    if (isTasksNoteText(text.trim())) continue;
     texts.unshift(text);
   }
 

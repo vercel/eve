@@ -7,7 +7,7 @@ import type {
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
-import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -161,7 +161,7 @@ export function createPreparedRuntimeSubagentTool(
     sourceId: definition.sourceId,
     task: {
       nodeId: definition.nodeId,
-      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+      workflowId: AGENT_TASK_WORKFLOW_ID,
     },
   };
 }

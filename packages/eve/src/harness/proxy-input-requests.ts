@@ -122,10 +122,10 @@ export function upsertProxyInputRequestState(input: {
  * Removes every entry for `childContinuationToken`. Called when a
  * child subagent finishes so stale clicks no longer route to it.
  */
-export function clearProxyInputRequestsForChild(
-  session: HarnessSession,
+export function clearProxyInputRequestsForChild<T extends { readonly state?: SessionStateMap }>(
+  session: T,
   childContinuationToken: string,
-): HarnessSession {
+): T {
   return clearProxyInputRequestsWhere(
     session,
     (route) => route.childContinuationToken === childContinuationToken,

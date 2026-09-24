@@ -1,6 +1,10 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { RuntimeActionResultHookPayload, SessionCommand } from "#channel/types.js";
+import type {
+  RuntimeActionResultHookPayload,
+  SessionCommand,
+  TaskStartedHookPayload,
+} from "#channel/types.js";
 import type { DeliveryAdmission, SessionInputQueue } from "#execution/session/input-queue.js";
 import { isWorkflowMessage, type SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import {
@@ -10,7 +14,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { findRunningAgentHandle } from "#subagents/handles/query.js";
+import { getTaskTable } from "#tasks/state.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
@@ -21,6 +25,7 @@ export type SessionAdmission =
   | { readonly command: SessionCancellation; readonly kind: "cancel" }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
+  | { readonly kind: "task-report"; readonly payload: TaskStartedHookPayload }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
 /**
@@ -42,13 +47,17 @@ export async function admitSessionInboxPayload(
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };
   }
+  if (value.kind === "task.started") return { kind: "task-report", payload: value };
   if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
-    const handle = findRunningAgentHandle(input.cursor.sessionState.snapshot.session.state, {
-      callId: value.callId,
-    });
+    const task = getTaskTable(input.cursor.sessionState.snapshot.session).records.find(
+      (record) =>
+        record.callId === value.callId &&
+        (record.status === "working" || record.status === "input_required"),
+    );
     if (
-      handle?.identity.name === value.subagentName &&
-      handle.address.sessionId === value.childSessionId
+      task?.name === value.subagentName &&
+      (task.child === undefined ||
+        (task.child.kind === "local" && task.child.sessionId === value.childSessionId))
     ) {
       await input.cursor.apply(
         await runProxySubagentEventStep({

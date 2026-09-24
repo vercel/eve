@@ -1,4 +1,4 @@
-/** Starts workflow-tool runs and framework controls for pending coordination. */
+/** Starts workflow-tool runs for pending coordination. Agent calls start as tasks instead. */
 
 import {
   prepareCoordinationDispatch,
@@ -8,6 +8,7 @@ import {
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { isAgentTaskRequest } from "#tasks/agent-tool.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
   readonly action: "park";
@@ -34,6 +35,7 @@ export async function dispatchCoordinationStep(
   const results: RuntimeActionResult[] = [];
 
   for (const task of prepared.plan) {
+    if (isAgentTaskRequest(task)) continue;
     const started = await startWorkflowTask({
       agents: prepared.workflowAgents,
       auth: prepared.auth,

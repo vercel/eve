@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { jsonSchema } from "ai";
+import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import {
   createWorkflowToolHarnessDefinition,
   parseWorkflowToolInput,
@@ -17,7 +18,7 @@ describe("createWorkflowToolHarnessDefinition", () => {
           name: "research",
         },
         nodeId: "subagents/research",
-        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+        workflowId: AGENT_TASK_WORKFLOW_ID,
       }),
     ).toMatchObject({ nodeId: "subagents/research" });
   });

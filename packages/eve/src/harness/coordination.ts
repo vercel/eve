@@ -1,6 +1,6 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
-import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createActionResultEvent } from "#protocol/message.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type {
   RuntimeActionRequest,
@@ -9,24 +9,13 @@ import type {
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
-import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#subagents/handles/query.js";
-import { settleAgentTurn } from "#subagents/handles/transitions.js";
-import {
-  clearProxyInputRequestsForChild,
-  clearProxyInputRequestsWhere,
-} from "#harness/proxy-input-requests.js";
+import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import {
   findBlockingWorkflowToolRun,
   removeBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import {
-  accumulateSessionUsage,
-  getTurnUsageState,
-  setTurnUsageState,
-} from "#harness/turn-tag-state.js";
 import type {
   HarnessEmitFn,
   HarnessSession,
@@ -38,17 +27,6 @@ import type {
 const PENDING_COORDINATION_BATCH_KEY = "eve.runtime.pendingCoordinationBatch";
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
-
-/**
- * Lifecycle outcome from a subagent result. Only `child`-origin results
- * carry one; parent-synthesized dispatch failures never do, and their type
- * omits the field entirely.
- */
-function readSubagentResultOutcome(
-  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
-): AgentTurnOutcome | undefined {
-  return result.origin === "child" ? result.outcome : undefined;
-}
 
 /**
  * Serializable event coordinates for one pending coordination batch.
@@ -190,7 +168,7 @@ function resolveResultsForCoordinationBatch(input: {
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForCallIds({
     pendingCallIds: input.batch.tasks.map((request) => request.callId),
-    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
+    results: input.results,
   });
 }
 
@@ -199,8 +177,8 @@ function resolveResultsForCoordinationBatch(input: {
  *
  * When all expected runtime action results are present, this appends the
  * stored assistant tool-call messages plus synthesized tool-result messages to
- * history, clears the pending batch, and emits `subagent.completed` and
- * `action.result` events back onto the parent stream.
+ * history, clears the pending batch, and emits `action.result` events back
+ * onto the parent stream.
  */
 export async function resolvePendingCoordination(input: {
   readonly emit?: HarnessEmitFn;
@@ -232,39 +210,7 @@ export async function resolvePendingCoordination(input: {
     };
   }
 
-  // Settle each bound child result against its running handle from the
-  // outcome the child engine reported: `parked` keeps the handle (the child
-  // is idle and resumable), `terminal` deletes it. Before a terminal
-  // deletion the proxy-input entry keyed by the child's continuation token
-  // is cleared (the handle is the only record of that token) so future
-  // deliveries don't route responses to a dead child.
   let nextSession: HarnessSession = input.session;
-  for (const result of readyResults) {
-    // Dispatch failures never settle handles: the dispatch step already
-    // rejected (deleted) the handle when it synthesized the failure.
-    if (result.kind !== "subagent-result" || result.origin !== "child") {
-      continue;
-    }
-    const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
-    if (handle === undefined) {
-      continue;
-    }
-    const outcome = readSubagentResultOutcome(result);
-    if (outcome === undefined) {
-      continue;
-    }
-    if (outcome.kind === "terminal" && "continuationToken" in handle.address) {
-      nextSession = clearProxyInputRequestsForChild(nextSession, handle.address.continuationToken);
-    }
-    const settled = settleAgentTurn(nextSession, {
-      operationId: handle.operation.id,
-      outcome,
-    });
-    if (settled.kind === "settled") {
-      nextSession = settled.session;
-    }
-  }
-
   // Drop a finished run's unanswered requests so a late click cannot reach it.
   for (const result of readyResults) {
     if (result.kind !== "tool-result") continue;
@@ -291,48 +237,8 @@ export async function resolvePendingCoordination(input: {
     state: Object.keys(state).length > 0 ? state : undefined,
   };
 
-  // Draw settled child spend down against the parent's session totals so
-  // the session token limits and the remaining-quota budget granted to later
-  // delegations account for what the tree has already spent. Every outcome
-  // carries the child turn's `usageDelta`, folded exactly once per settled
-  // result (each batch resolves once), so repeated turns of a persistent
-  // child never double-count earlier turns. Only child-produced results
-  // carry an outcome; parent-side dispatch failures never do.
-  for (const result of readyResults) {
-    if (result.kind !== "subagent-result") {
-      continue;
-    }
-    const outcome = readSubagentResultOutcome(result);
-    if (outcome === undefined) {
-      continue;
-    }
-    nextSession = setTurnUsageState(
-      nextSession,
-      accumulateSessionUsage({
-        previous: getTurnUsageState(nextSession.state),
-        usage: outcome.usageDelta,
-      }),
-    );
-  }
-
   if (input.emit !== undefined) {
     for (const result of readyResults) {
-      if (
-        result.kind === "subagent-result" &&
-        result.origin === "child" &&
-        result.outcome.result.kind === "succeeded"
-      ) {
-        const data = {
-          callId: result.callId,
-          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-          subagentName: result.subagentName,
-        };
-        await input.emit({
-          data,
-          type: "subagent.completed",
-        } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
-      }
-
       await input.emit(
         createActionResultEvent({
           result,

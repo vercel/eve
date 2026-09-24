@@ -7,6 +7,7 @@ import {
 } from "../src/runtime/subagents/registry.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA as subagentToolInputSchema } from "../src/tools/framework/agent-contract.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
+import { AGENT_TASK_WORKFLOW_ID } from "../src/tasks/agent-tool.js";
 
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
@@ -14,7 +15,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
     agentId: {
       type: ["string", "null"],
       description:
-        "The id of an existing agent from the <agents> list, to give it more work in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
+        "The id of an idle agent from the latest [Tasks] note, to give it more work in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
     },
     message: {
       type: "string",
@@ -95,7 +96,7 @@ describe("createRuntimeSubagentRegistry", () => {
     ).toThrowError(RuntimeRegistryError);
   });
 
-  it("prepares subagent tools as blocking workflow tools", () => {
+  it("marks subagent tools as agent tasks the owner starts", () => {
     const definition = createResolvedRuntimeSubagentNode({
       description: "Investigate one task in depth.",
       logicalPath: "subagents/researcher",
@@ -109,7 +110,7 @@ describe("createRuntimeSubagentRegistry", () => {
     expect(prepared).not.toHaveProperty("execution");
     expect(prepared.task).toEqual({
       nodeId: definition.nodeId,
-      workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
+      workflowId: AGENT_TASK_WORKFLOW_ID,
     });
   });
 });

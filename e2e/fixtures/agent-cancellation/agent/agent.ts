@@ -67,9 +67,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
       ],
     };
   }
-  if (message.includes("[Agents] listing")) {
+  if (message.includes("[Tasks] note")) {
     return (
-      [...request.messages].reverse().find((entry) => entry.text.startsWith("[Agents]"))?.text ??
+      [...request.messages].reverse().find((entry) => entry.text.startsWith("[Tasks]"))?.text ??
       "No agents listed."
     );
   }

@@ -357,7 +357,19 @@ export type HookPayload =
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
   | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload;
+  | SubagentInputRequestHookPayload
+  | TaskStartedHookPayload;
+
+/**
+ * Sent by a local child session to its owner once it has claimed its
+ * addresses, so the owner learns the child's session ID without waiting.
+ */
+export interface TaskStartedHookPayload {
+  readonly kind: "task.started";
+  /** The call that started the child's current generation. */
+  readonly callId: string;
+  readonly child: { readonly continuationToken: string; readonly sessionId: string };
+}
 
 /**
  * Initial caller callback attached to a delegated session at creation.

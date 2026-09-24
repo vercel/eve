@@ -30,7 +30,6 @@ describe("startSubagent", () => {
         callbackBaseUrl: "https://parent.example",
         capabilities: undefined,
         channelMetadata: undefined,
-        currentSession: {} as never,
         fanoutSize: 1,
         initiatorAuth: null,
         parentContinuationToken: "parent-token",

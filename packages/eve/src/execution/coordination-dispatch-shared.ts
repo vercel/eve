@@ -24,7 +24,6 @@ import {
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueCoordinationCallIds,
@@ -96,7 +95,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
 
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
- * deserialization, handle-store validation, and batch planning — before
+ * deserialization, and batch planning — before
  * the caller acquires the parent stream writer, so a preflight failure
  * never leaks the writer lock. Returns undefined when no actions are
  * pending.
@@ -183,9 +182,8 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
   const adapter = ctx.require(ChannelKey);
 
-  // A corrupt handle store and rejected actions must resolve before sandbox
-  // initialization, which can provision provider resources and run preparation.
-  getAgentHandleStore(durableSession.state);
+  // Rejected actions must resolve before sandbox initialization, which can
+  // provision provider resources and run preparation.
   const plan = input.plan({
     bundle,
     ctx,

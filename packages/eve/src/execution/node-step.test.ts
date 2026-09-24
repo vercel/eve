@@ -28,6 +28,7 @@ import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.j
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
+import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import { defineTool } from "#tools/definition.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { toInputSchema } from "#tools/schema.js";
@@ -284,7 +285,7 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.workflowId).toBeUndefined();
   });
 
-  it("executes compiled local and remote delegation tools as workflow tools", async () => {
+  it("defers compiled local and remote delegation tools as agent tasks", async () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
       createPreparedRuntimeSubagentTool({
         description: "Delegate local research.",
@@ -317,7 +318,7 @@ describe("createNodeHarnessTools", () => {
       expect(tools.get(name)).not.toHaveProperty("execution");
       expect(tools.get(name)?.execute).toBeUndefined();
       expect(tools.get(name)?.nodeId).toEqual(expect.any(String));
-      expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
+      expect(tools.get(name)?.workflowId).toBe(AGENT_TASK_WORKFLOW_ID);
     }
   });
 

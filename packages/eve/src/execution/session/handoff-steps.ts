@@ -11,12 +11,12 @@ import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
 import { isObject } from "#shared/guards.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { hasWorkingTasks } from "#tasks/state.js";
+import { readTaskTable } from "#tasks/table.js";
 
 /** Parses retained work with this deployment's code before deciding whether it can move. */
 export function isSessionStateIdleForHandoff(sessionState: DurableSessionState): boolean {
   const { state } = readDurableSession(sessionState);
-  const handles = getAgentHandleStore(state);
 
   // These registries are deleted when work settles. Their ordinary readers
   // tolerate malformed values as absent; that must not authorize a handoff.
@@ -36,13 +36,9 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
     (!isObject(proxyRequests) || Object.keys(proxyRequests).length > 0)
   )
     return false;
-  return (
-    (handles === undefined ||
-      handles.handles.every(
-        (handle) => handle.phase === "parked" || handle.phase === "available",
-      )) &&
-    getBlockingWorkflowToolRuns(state).length === 0
-  );
+  // An unreadable task record may be a working task this deployment cannot see.
+  if (readTaskTable(state).lost.length > 0) return false;
+  return !hasWorkingTasks({ state }) && getBlockingWorkflowToolRuns(state).length === 0;
 }
 
 /** Reads durable work using the source deployment's handoff contract. */

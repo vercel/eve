@@ -91,31 +91,6 @@ describe("applyWorkflowTransform", () => {
     );
   });
 
-  it("keeps the shared subagent tool workflow stable", async () => {
-    const filename = "src/runtime/subagents/workflow.ts";
-    const transformed = await applyWorkflowTransform(
-      filename,
-      [
-        "export async function subagentToolExecuteWorkflow(): Promise<void> {",
-        '  "use workflow";',
-        "}",
-        "",
-      ].join("\n"),
-      "workflow",
-      resolvePackageSourceFilePath(filename),
-      resolvePackageRoot(),
-    );
-
-    expect(transformed.workflowManifest.workflows?.[filename]?.subagentToolExecuteWorkflow).toEqual(
-      {
-        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
-      },
-    );
-    expect(transformed.code).toContain(
-      'globalThis.__private_workflows.set("workflow//eve//subagentToolExecuteWorkflow", subagentToolExecuteWorkflow);',
-    );
-  });
-
   it("stamps versioned package workflow metadata without consuming the framework body", async () => {
     const filename = "src/execution/tools/sleep.ts";
     const transformed = await applyWorkflowTransform(

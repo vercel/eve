@@ -58,17 +58,16 @@ export default defineEval({
     followUp.notEvent("turn.cancelled");
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
 
-    // The cancelled child must survive in the parent's model-visible
-    // [Agents] listing as a parked "(cancelled)" handle. A handle leaked as
-    // `running` never re-enters the listing, so this catches the abandoned
-    // cancelled batch regressing to a permanent leak.
+    // The cancelled child stays available, so it must appear among the idle
+    // agents in the parent's [Tasks] note. A task left `working` never
+    // appears there, which catches cancellation regressing to a leak.
     const listing = await session.send(
-      "Look at the [Agents] listing in your context and reply with the sleeper agent's entry verbatim, including its status.",
+      "Look at the [Tasks] note in your context and reply with the sleeper agent's entry verbatim, including its status.",
     );
     listing.expectOk();
     listing.notEvent("turn.cancelled");
     listing.messageIncludes(/sleeper/i);
-    listing.messageIncludes(/\(cancelled\)/);
+    listing.messageIncludes(/Cancelled\./);
 
     const resumed = await session.send(
       [

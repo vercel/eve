@@ -1,28 +1,21 @@
 import { deserializeContext } from "#context/serialize.js";
-import type { ContextContainer } from "#context/container.js";
-import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
   resetRemoteAgentSession,
-  resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
 } from "#subagents/remote-dispatch.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import { getTaskTable } from "#tasks/state.js";
 
 const log = createLogger("execution.terminate-child-sessions");
 
 /**
- * Terminates children the parent holds handles to when the parent session
- * ends.
- *
- * Every nonterminal `agent/local`/`agent/self` handle is covered: `running`
- * and `parked` handles carry a confirmed address; a `starting` handle has
- * no session id yet (the child may not exist), so it is skipped with a
- * debug log rather than guessed at. Remote handles are retired through the
- * authenticated session-reset route.
+ * Terminates every child session the owner has an address for when the
+ * owner session ends. Local children are stopped; remote children are
+ * retired through the authenticated session-reset route. A task whose child
+ * never reported its address has nothing to stop.
  */
 export async function terminateChildSessionsStep(input: {
   readonly serializedContext?: Record<string, unknown>;
@@ -40,87 +33,44 @@ export async function terminateChildSessionsStep(input: {
     return;
   }
 
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  const hasRemoteHandle = handles.some(
-    (handle) => "address" in handle && handle.address.kind === "agent/remote",
-  );
-  let runtimeContext:
-    | {
-        readonly bundle: CompiledBundle;
-        readonly ctx: ContextContainer;
-      }
-    | undefined;
-  if (hasRemoteHandle) {
+  const records = getTaskTable(session).records.filter((record) => record.child !== undefined);
+  if (records.length === 0) return;
+  let bundle: CompiledBundle | undefined;
+  if (records.some((record) => record.child?.kind === "remote")) {
     if (input.serializedContext === undefined) {
       throw new Error("Child finalization requires serialized runtime context.");
     }
-    const ctx = await deserializeContext(input.serializedContext);
-    runtimeContext = { bundle: ctx.require(BundleKey), ctx };
+    bundle = (await deserializeContext(input.serializedContext)).require(BundleKey);
   }
 
-  if (handles.length === 0) {
-    return;
-  }
-
-  for (const handle of handles) {
-    if (!("address" in handle)) {
-      log.debug("skipping unaddressed child", {
-        agentId: handle.identity.id,
-        parentSessionId: session.sessionId,
-      });
-      continue;
-    }
+  for (const record of records) {
+    const child = record.child!;
     try {
-      if (handle.address.kind === "agent/remote") {
-        if (handle.address.credentialResolver !== undefined) {
-          const resolverId = handle.address.credentialResolver.resolverId;
-          const headers =
-            resolverId === undefined
-              ? {}
-              : await resolveRemoteAgentStreamHeaders({
-                  bundle: runtimeContext!.bundle,
-                  name: handle.identity.name,
-                  resolverId,
-                  url: handle.address.url,
-                });
-          await resetRemoteAgentSession({
-            headers,
-            remote: { name: handle.identity.name, url: handle.address.url },
-            sessionId: handle.address.sessionId,
-          });
-        } else {
-          // Compatibility for handles written before resolver identity was persisted.
-          const selection = getDynamicSubagentSelection(
-            runtimeContext!.ctx,
-            handle.identity.nodeId,
-          );
-          const remote = resolveRemoteAgentForAction({
-            dynamicRemoteAgent: selection?.kind === "remote" ? selection.remoteAgent : undefined,
-            nodeId: handle.identity.nodeId,
-            registry: runtimeContext!.bundle.subagentRegistry.subagentsByNodeId,
-            remoteAgentName: handle.identity.name,
-          });
-          if (remote.url === handle.address.url) {
-            await resetRemoteAgentSession({ remote, sessionId: handle.address.sessionId });
-          } else {
-            await resetRemoteAgentSession({
-              headers: {},
-              remote: { name: handle.identity.name, url: handle.address.url },
-              sessionId: handle.address.sessionId,
-            });
-          }
-        }
-      } else {
-        await cancelRun(await getWorld(), handle.address.sessionId, {
+      if (child.kind === "remote") {
+        const headers =
+          child.credentialResolver === undefined
+            ? {}
+            : await resolveRemoteAgentStreamHeaders({
+                bundle: bundle!,
+                name: record.name,
+                resolverId: child.credentialResolver,
+                url: child.url,
+              });
+        await resetRemoteAgentSession({
+          headers,
+          remote: { name: record.name, url: child.url },
+          sessionId: child.sessionId,
+        });
+      } else if (child.kind === "local") {
+        await cancelRun(await getWorld(), child.sessionId, {
           cancelReason: "Parent session ended",
         });
       }
     } catch (error) {
       logError(log, "failed to terminate child session", error, {
-        agentId: handle.identity.id,
-        childSessionId: handle.address.sessionId,
-        kind: handle.address.kind,
+        childKind: child.kind,
         parentSessionId: session.sessionId,
+        taskId: record.id,
       });
     }
   }

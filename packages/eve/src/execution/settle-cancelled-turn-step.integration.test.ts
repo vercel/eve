@@ -11,13 +11,9 @@ import {
   registerWorkflowToolRun,
   type BlockingWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import {
-  AGENT_HANDLES_STATE_KEY,
-  deriveAgentId,
-  getAgentHandleStore,
-  type AgentHandle,
-} from "#subagents/handles/store.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import type { TaskRecord } from "#tasks/record.js";
+import { getTaskTable } from "#tasks/state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
@@ -32,82 +28,10 @@ vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
   };
 });
 
-/**
- * The cancellation epilogue is the last write that can move a cancelled
- * child's handle: `cancelDescendantTurnsStep` only requests cancellation,
- * and the turn inbox a child settlement would resume is torn down with the
- * cancelled turn. These tests pin the persisted handle store the epilogue
- * leaves behind — a `running` handle surviving here would be permanent.
- */
-
 const PARENT_SESSION_ID = "parent-session-cancel-handles";
 const CONTINUATION_TOKEN = "http:settle-cancel-handles";
 
-const RUNNING_OPERATION_ID = deriveAgentOperationId({
-  callId: "call-1",
-  parentSessionId: PARENT_SESSION_ID,
-  parentTurnId: "turn-1",
-});
-
-const RUNNING_HANDLE: AgentHandle = {
-  address: {
-    continuationToken: "subagent:child-running",
-    kind: "agent/local",
-    sessionId: "child-session-running",
-  },
-  identity: {
-    id: deriveAgentId("research", RUNNING_OPERATION_ID),
-    name: "research",
-    nodeId: "subagents/research",
-  },
-  operation: {
-    callId: "call-1",
-    id: RUNNING_OPERATION_ID,
-    kind: "start",
-    parentTurnId: "turn-1",
-  },
-  phase: "running",
-};
-
-const PARKED_OPERATION_ID = deriveAgentOperationId({
-  callId: "call-0",
-  parentSessionId: PARENT_SESSION_ID,
-  parentTurnId: "turn-0",
-});
-
-const PARKED_HANDLE: AgentHandle = {
-  address: {
-    continuationToken: "subagent:child-parked",
-    kind: "agent/local",
-    sessionId: "child-session-parked",
-  },
-  identity: {
-    id: deriveAgentId("writer", PARKED_OPERATION_ID),
-    name: "writer",
-    nodeId: "subagents/writer",
-  },
-  lastStatus: "draft ready",
-  phase: "parked",
-};
-
-const CLAIMED_HANDLE: AgentHandle = {
-  address: {
-    continuationToken: "subagent:child-claimed",
-    kind: "agent/local",
-    sessionId: "child-session-claimed",
-  },
-  callId: "workflow-call",
-  identity: {
-    id: "ag_research:workflow",
-    name: "research",
-    nodeId: "subagents/research",
-  },
-  operationId: "workflow-operation",
-  ownerId: "workflow-run",
-  phase: "claimed",
-};
-
-function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSession {
+function createCancelledTurnSession(records: readonly TaskRecord[] = []): HarnessSession {
   return setHarnessEmissionState(
     {
       agent: { modelReference: { id: "openai/gpt-5.4" }, system: "", tools: [] },
@@ -116,7 +40,7 @@ function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSes
       history: [],
       outputSchema: { type: "object" },
       sessionId: PARENT_SESSION_ID,
-      state: { [AGENT_HANDLES_STATE_KEY]: { handles } },
+      state: records.length === 0 ? undefined : taskTableState(records),
     },
     { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn-1" },
   );
@@ -133,31 +57,26 @@ function buildSerializedContext(): Record<string, unknown> {
   };
 }
 
-describe("settleCancelledTurnStep handle store", () => {
-  it("parks abandoned running handles as cancelled and keeps parked ones", async () => {
+describe("settleCancelledTurnStep", () => {
+  it("clears the turn's output schema and leaves the task table to the owner", async () => {
     bindSessionInstrumentationSpy.mockClear();
     const runtime = await createTestRuntime({ agent: { name: "settle-cancel-handles" } });
+    const cancelled = createTaskRecord({
+      child: { continuationToken: "subagent:child", kind: "local", sessionId: "child-session" },
+      delivered: true,
+      status: "cancelled",
+    });
 
     await runtime.run(async () => {
       const result = await settleCancelledTurnStep({
         sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
         serializedContext: buildSerializedContext(),
         sessionState: createDurableSessionState({
-          session: createCancelledTurnSession([RUNNING_HANDLE, PARKED_HANDLE]),
+          session: createCancelledTurnSession([cancelled]),
         }),
       });
 
-      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
-        handles: [
-          {
-            address: RUNNING_HANDLE.address,
-            identity: RUNNING_HANDLE.identity,
-            lastStatus: "(cancelled)",
-            phase: "parked",
-          },
-          PARKED_HANDLE,
-        ],
-      });
+      expect(getTaskTable(result.sessionState.snapshot.session).records).toEqual([cancelled]);
       expect(result.sessionState.snapshot.session.outputSchema).toBeUndefined();
       expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
         expect.objectContaining({ agentName: "settle-cancel-handles" }),
@@ -165,35 +84,6 @@ describe("settleCancelledTurnStep handle store", () => {
     });
   });
 
-  it("releases a cancelled workflow claim with a resumable cancelled status", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "settle-cancel-claim" } });
-
-    await runtime.run(async () => {
-      const session = registerWorkflowToolRun(createCancelledTurnSession([CLAIMED_HANDLE]), {
-        callId: "workflow-call",
-        toolName: "Workflow",
-        lifetime: "turn" as const,
-        origin: { turnId: "turn-1", stepIndex: 0 },
-        address: { runId: "workflow-run", hookToken: "workflow-hook" },
-      });
-      const result = await settleCancelledTurnStep({
-        sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
-        serializedContext: buildSerializedContext(),
-        sessionState: createDurableSessionState({ session }),
-      });
-
-      expect(getAgentHandleStore(result.sessionState.snapshot.session.state)).toEqual({
-        handles: [
-          {
-            address: CLAIMED_HANDLE.address,
-            identity: CLAIMED_HANDLE.identity,
-            lastStatus: "(cancelled)",
-            phase: "parked",
-          },
-        ],
-      });
-    });
-  });
   it.each([false, true])(
     "removes only the cancelled turn's workflow runs (paused=%s)",
     async (paused) => {
@@ -206,7 +96,7 @@ describe("settleCancelledTurnStep handle store", () => {
           origin: { turnId: "turn-0", stepIndex: 0 },
           address: { runId: "earlier-run", hookToken: "earlier-hook" },
         };
-        let session = registerWorkflowToolRun(createCancelledTurnSession([]), earlier);
+        let session = registerWorkflowToolRun(createCancelledTurnSession(), earlier);
         session = registerWorkflowToolRun(session, {
           callId: "waiting-call",
           toolName: "research",

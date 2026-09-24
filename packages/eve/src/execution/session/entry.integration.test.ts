@@ -1559,23 +1559,8 @@ describe("workflowEntry integration", () => {
                   Object.assign(session, {
                     state: {
                       ...session.state,
-                      "eve.agent.handles": {
-                        handles: [
-                          {
-                            address: {
-                              continuationToken: "child-token",
-                              kind: "agent/local",
-                              sessionId: "",
-                            },
-                            identity: {
-                              id: "ag_research:operation",
-                              name: "research",
-                              nodeId: "subagents/research",
-                            },
-                            lastStatus: "Research complete",
-                            phase: "parked",
-                          },
-                        ],
+                      "eve.taskTable": {
+                        records: [{ id: "research-aaaaaa", name: "research", v: 99 }],
                       },
                     },
                   });

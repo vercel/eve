@@ -1,9 +1,8 @@
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
-import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
@@ -17,7 +16,11 @@ type DynamicSubagentAgentConfig = Parameters<
   typeof createWorkflowRuntime
 >[0]["dynamicSubagentAgentConfig"];
 
-/** Starts one local subagent after dispatch planning has selected its target. */
+/**
+ * Starts one local subagent after dispatch planning has selected its target.
+ * It does not wait for the child: the child claims its continuation address
+ * (so a duplicate start exits) and then reports to its owner.
+ */
 export async function startLocalSubagent(input: {
   readonly action: RuntimeSubagentDispatchRequest;
   readonly auth: Parameters<typeof buildSubagentRunInput>[0]["auth"];
@@ -27,7 +30,6 @@ export async function startLocalSubagent(input: {
   readonly inheritedConversation?: Parameters<
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
-  readonly currentSession: RuntimeSession;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
@@ -44,7 +46,7 @@ export async function startLocalSubagent(input: {
     dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
   });
-  const { childContinuationToken, runInput } = buildSubagentRunInput({
+  const { runInput } = buildSubagentRunInput({
     action,
     auth: input.auth,
     capabilities: input.capabilities,
@@ -61,14 +63,10 @@ export async function startLocalSubagent(input: {
     source,
   });
 
-  const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
-  let childSessionId: string;
   try {
     await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
       childRuntime.createSession(runInput),
     );
-    childSessionId = (await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken)))
-      .runId;
   } catch (error) {
     logError(log, "local subagent start failed", error, {
       callId: action.callId,
@@ -88,21 +86,7 @@ export async function startLocalSubagent(input: {
         },
         subagentName: action.subagentName,
       },
-      session: input.currentSession,
     };
   }
-
-  const address = {
-    continuationToken: childContinuationToken,
-    kind: targetKind,
-    sessionId: childSessionId,
-  } as const;
-  return {
-    address,
-    callId: action.callId,
-    kind: "called",
-    name: action.name,
-    session: input.currentSession,
-    toolName: action.subagentName,
-  };
+  return { kind: "started" };
 }

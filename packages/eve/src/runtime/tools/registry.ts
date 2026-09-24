@@ -4,7 +4,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
+import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import type {
   CompiledToolBehavior,
   PreparedToolBehavior,
@@ -87,7 +87,7 @@ async function createPreparedRuntimeTool(
     definition.behavior?.handling?.kind === "dispatch" &&
     definition.behavior.handling.action === "self-agent";
   const workflowId = isSelfAgent
-    ? subagentToolExecuteWorkflowReference.workflowId
+    ? AGENT_TASK_WORKFLOW_ID
     : definition.behavior?.handling?.kind === "workflow-tool"
       ? definition.behavior.handling.workflowId
       : undefined;
@@ -96,7 +96,7 @@ async function createPreparedRuntimeTool(
     behavior: prepareToolBehavior(
       definition.behavior,
       nodeId,
-      isSelfAgent ? subagentToolExecuteWorkflowReference.workflowId : undefined,
+      isSelfAgent ? AGENT_TASK_WORKFLOW_ID : undefined,
     ),
     description: definition.description,
     inputSchema: serializeInputSchema(definition.inputSchema),

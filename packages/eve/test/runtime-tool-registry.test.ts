@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import { subagentToolExecuteWorkflowReference } from "../src/runtime/subagents/workflow-reference.js";
 import { createRuntimeToolRegistry } from "../src/runtime/tools/registry.js";
+import { AGENT_TASK_WORKFLOW_ID } from "../src/tasks/agent-tool.js";
 import type { ResolvedToolDefinition } from "../src/runtime/types.js";
 import { toInputSchema } from "../src/tools/schema.js";
 
@@ -139,7 +139,7 @@ describe("createRuntimeToolRegistry", () => {
     const prepared = registry.preparedTools[0];
     expect(prepared?.task).toEqual({
       nodeId: "__root__",
-      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+      workflowId: AGENT_TASK_WORKFLOW_ID,
     });
     expect(prepared?.behavior?.handling).toEqual({
       kind: "dispatch",

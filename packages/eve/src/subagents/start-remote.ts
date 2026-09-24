@@ -1,7 +1,7 @@
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
-import { mintStartOperation } from "#execution/dispatch-start-operation.js";
+import { deriveAgentOperationId } from "#subagents/operation-id.js";
 import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
@@ -19,7 +19,6 @@ export async function startRemoteSubagent(input: {
   readonly auth: Parameters<typeof startRemoteAgentSession>[0]["auth"];
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
-  readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
   >;
@@ -59,26 +58,18 @@ export async function startRemoteSubagent(input: {
       nodeId: action.nodeId,
       callId: action.callId,
     });
-    return {
-      kind: "error",
-      result: createRemoteAgentStartFailureResult({ action, error }),
-      session: input.currentSession,
-    };
+    return { kind: "error", result: createRemoteAgentStartFailureResult({ action, error }) };
   }
 
-  const { operation } = mintStartOperation({
+  const operationId = deriveAgentOperationId({
     callId: action.callId,
-    name: action.remoteAgentName,
-    nodeId: action.nodeId,
     parentSessionId: input.session.sessionId,
     parentTurnId: input.parent.lineage.turn.id,
   });
-  const credentialResolver = {
-    resolverId:
-      input.dynamicRemoteAgent === undefined
-        ? action.nodeId
-        : input.dynamicRemoteAgent.credentialsStepId,
-  };
+  const credentialResolver =
+    input.dynamicRemoteAgent === undefined
+      ? action.nodeId
+      : input.dynamicRemoteAgent.credentialsStepId;
   try {
     const child = await startRemoteAgentSession({
       action,
@@ -86,26 +77,20 @@ export async function startRemoteSubagent(input: {
       callbackBaseUrl,
       originAudience: input.parent.originAudience,
       initiatorAuth: input.initiatorAuth,
-      operationId: operation.id,
+      operationId,
       parent: input.parent,
       activityObserver,
       remote: resolvedRemote,
       session: input.session,
     });
-    const address = {
-      callbackBaseUrl,
-      credentialResolver,
-      kind: "agent/remote",
-      sessionId: child.sessionId,
-      url: resolvedRemote.url,
-    } as const;
     return {
-      address,
-      callId: action.callId,
-      kind: "called",
-      name: action.name,
-      session: input.currentSession,
-      toolName: action.remoteAgentName,
+      kind: "started",
+      remote: {
+        callbackBaseUrl,
+        credentialResolver,
+        sessionId: child.sessionId,
+        url: resolvedRemote.url,
+      },
     };
   } catch (error) {
     logError(log, "remote agent start failed", error, {
@@ -113,10 +98,6 @@ export async function startRemoteSubagent(input: {
       nodeId: action.nodeId,
       callId: action.callId,
     });
-    return {
-      kind: "error",
-      result: createRemoteAgentStartFailureResult({ action, error }),
-      session: input.currentSession,
-    };
+    return { kind: "error", result: createRemoteAgentStartFailureResult({ action, error }) };
   }
 }

@@ -152,6 +152,7 @@ export interface StartTaskInput {
   readonly agentId?: string;
   /** Message and schema forwarded when `agentId` names a working agent. */
   readonly steering?: { readonly message: string; readonly outputSchema?: JsonObject };
+  readonly workflowCaller?: TaskRecord["workflowCaller"];
 }
 
 /**
@@ -225,6 +226,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
       startedAt: input.now,
       status: "working",
       turnId: input.turnId,
+      workflowCaller: input.workflowCaller,
     });
     return { kind: "started", record: next, table: replace(table, next) };
   }
@@ -251,6 +253,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     status: "working",
     turnId: input.turnId,
     v: TASK_RECORD_VERSION,
+    workflowCaller: input.workflowCaller,
   });
   return { kind: "started", record, table: { records: [...table.records, record] } };
 }
@@ -300,7 +303,9 @@ export function applyTaskMessage(
     }
     case "task.settled": {
       if (isTerminalTaskStatus(record.status)) return { effects: [], table };
-      const next = settleRecord(record, message.outcome);
+      const settled = settleRecord(record, message.outcome);
+      const next =
+        message.childEnded === true ? withoutUndefined({ ...settled, child: undefined }) : settled;
       return {
         effects: [
           withoutUndefined({
@@ -330,6 +335,7 @@ export function cancelTask(table: TaskTable, taskId: string, now: string): TaskT
     deadlineAt: undefined,
     // The owner already knows the outcome; there is nothing left to deliver.
     delivered: true,
+    lastStatus: summarizeOutcome({ status: "cancelled" }),
     status: "cancelled" as const,
   });
   return issueCommand(replace(table, cancelled), cancelled, { kind: "cancel" });

@@ -43,6 +43,8 @@ export interface TaskRecord {
   readonly inputSeq?: number;
   /** One-line summary of an idle agent's last answer. */
   readonly lastStatus?: string;
+  /** Set when a workflow tool body started the current generation; its result goes to this reply hook. */
+  readonly workflowCaller?: { readonly runId: string; readonly replyTo: string };
   /** The current generation's result reached history. */
   readonly delivered: boolean;
 }
@@ -174,6 +176,13 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
     return fail("invalid inputSeq");
   if (value.lastStatus !== undefined && typeof value.lastStatus !== "string")
     return fail("invalid lastStatus");
+  if (
+    value.workflowCaller !== undefined &&
+    (!isRecordObject(value.workflowCaller) ||
+      !isString(value.workflowCaller.runId) ||
+      !isString(value.workflowCaller.replyTo))
+  )
+    return fail("invalid workflowCaller");
   if (typeof value.delivered !== "boolean") return fail("invalid delivered");
   const fields: Partial<Record<keyof TaskRecord, unknown>> = value;
   return { ok: true, record: fields as TaskRecord };

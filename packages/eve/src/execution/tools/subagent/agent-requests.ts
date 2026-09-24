@@ -1,93 +1,27 @@
-import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
-import type {
-  AgentInvocationRequest,
-  AgentSettlementRequest,
-} from "#execution/tools/subagent/invoke-agent.js";
-import {
-  dispatchAgentInvocationStep,
-  settleAgentInvocationStep,
-} from "#execution/tools/subagent/invoke-step.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
+import { startAgentTasks } from "#tasks/owner-body.js";
 
 export interface AgentRequestDelivery {
   readonly ownerId: string;
   readonly replyTo: string;
-  readonly request: AgentInvocationRequest | AgentSettlementRequest;
-}
-
-export interface AgentRequestContext {
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
-export interface AppliedAgentRequest {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
+  readonly request: AgentInvocationRequest;
 }
 
 /**
- * Applies one workflow-owned agent request to the parent session: `agent-invoke`
- * spawns the child with parent-owned material and `agent-settled` releases the
- * handle.
+ * Starts the agent a workflow tool body asked for with `ctx.agent`. The
+ * session owns the task because it holds the auth, capabilities, and
+ * sandbox the child needs; the result goes to the body's reply hook.
  */
 export async function applyAgentRequest(
   delivery: AgentRequestDelivery,
-  ctx: AgentRequestContext,
-): Promise<AppliedAgentRequest> {
-  const { request } = delivery;
-  switch (request.kind) {
-    case "agent-settled": {
-      const settled = await settleAgentInvocationStep({
-        ownerId: delivery.ownerId,
-        result: request.result,
-        serializedContext: ctx.serializedContext,
-        sessionState: ctx.sessionState,
-      });
-      let serializedContext = settled.serializedContext;
-      let sessionState = settled.sessionState;
-      if (settled.completion !== undefined) {
-        const emitted = await emitSubagentEventStep({
-          event: settled.completion,
-          sessionWritable: ctx.sessionWritable,
-          serializedContext,
-          sessionState: settled.sessionState,
-        });
-        serializedContext = emitted.serializedContext;
-        sessionState = emitted.sessionState;
-      }
-      await resumeHookStep(
-        delivery.replyTo,
-        { kind: "agent-settled", callId: request.result.callId },
-        { ifPresent: true },
-      );
-      return { serializedContext, sessionState };
-    }
-    case "agent-invoke": {
-      const dispatched = await dispatchAgentInvocationStep({
-        ownerId: delivery.ownerId,
-        replyTo: delivery.replyTo,
-        request,
-        serializedContext: ctx.serializedContext,
-        sessionState: ctx.sessionState,
-      });
-      if (dispatched.kind === "dispatched") {
-        return await emitSubagentEventStep({
-          event: dispatched.event,
-          sessionWritable: ctx.sessionWritable,
-          serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
-          sessionState: dispatched.sessionState,
-        });
-      }
-      await resumeHookStep(delivery.replyTo, {
-        kind: "runtime-action-result",
-        results: [dispatched.result],
-      });
-      return {
-        serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
-        sessionState: dispatched.sessionState,
-      };
-    }
-  }
+  cursor: SessionStateCursor,
+): Promise<void> {
+  await startAgentTasks(cursor, [
+    {
+      callId: delivery.request.invocationId,
+      input: delivery.request.input,
+      workflowCaller: { replyTo: delivery.replyTo, runId: delivery.ownerId },
+    },
+  ]);
 }

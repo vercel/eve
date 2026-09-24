@@ -70,8 +70,8 @@ import {
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveAgentsAnnouncement } from "#subagents/handles/prompt.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { resolveTasksAnnouncement } from "#tasks/render.js";
+import { getTaskTable } from "#tasks/state.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -1095,17 +1095,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    // Announce the parked-agents listing as framework-injected user-role
-    // content, before any new user input so a message present on this step
-    // stays the turn's focus. On a no-input settle resume it trails the tool
-    // results, keeping the request user-final for providers that reject
-    // assistant-final histories. See resolveAgentsAnnouncement for the role
-    // rationale (assistant-final rejection, prompt-cache preservation).
-    const agentStore = getAgentHandleStore(session.state);
+    // Announce the task listing as framework-injected user-role content,
+    // before any new user input so a message present on this step stays the
+    // turn's focus. On a no-input settle resume it trails the tool results,
+    // keeping the request user-final for providers that reject
+    // assistant-final histories. Appending instead of rewriting keeps the
+    // prompt-cache prefix stable.
     if (!hasUnansweredToolCall(messages)) {
-      const announcement = resolveAgentsAnnouncement({
+      const announcement = resolveTasksAnnouncement({
         messages: projectHistory(messages, session.state),
-        store: agentStore,
+        records: getTaskTable(session).records,
       });
       if (announcement !== undefined) {
         messages.push(createFrameworkUserMessage("context.state", announcement));

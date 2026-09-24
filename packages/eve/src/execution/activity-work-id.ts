@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/operation-id.js";
 
 export function deriveRootTurnActivityWorkId(input: {
   readonly sessionId: string;

@@ -1,8 +1,5 @@
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import type {
-  AgentInvocationRequest,
-  AgentSettlementRequest,
-} from "#execution/tools/subagent/invoke-agent.js";
+import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolInputRequest } from "#tools/definition.js";
@@ -11,11 +8,8 @@ export interface WorkflowToolRunOwner {
   readonly inbox: string;
 }
 
-/**
- * Requests the owner must apply on the run's behalf because they touch
- * owner-held state: spawning an agent and releasing its handle afterwards.
- */
-export type WorkflowToolAgentRequest = AgentInvocationRequest | AgentSettlementRequest;
+/** Starting an agent needs owner-held state, so the owner applies it on the run's behalf. */
+export type WorkflowToolAgentRequest = AgentInvocationRequest;
 
 /**
  * A child authorization event the owner should display. Unlike input requests

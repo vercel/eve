@@ -25,7 +25,7 @@ export default defineEval({
 
     const continued = await started.session.send(
       [
-        "Message that same remote-loopback agent again: call it with the agentId shown in the latest <agents> block",
+        "Message that same remote-loopback agent again: call it with the agent id shown in the latest [Tasks] note",
         'and the message: "What exact fact did I ask you to remember? Reply with only the fact."',
         "Do not state the fact yourself.",
         "When it returns, reply with the agent's exact output and no other text.",

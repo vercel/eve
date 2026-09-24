@@ -81,6 +81,8 @@ export type TaskMessage =
       readonly generation: number;
       readonly outcome: TaskOutcome;
       readonly usage?: TokenUsage;
+      /** The child session ended with this generation, so the agent cannot be given more work. */
+      readonly childEnded?: boolean;
     }
   | {
       /** Signals that a deadline or cancellation confirmation window may have passed. */

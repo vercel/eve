@@ -6,7 +6,7 @@
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
-import type { TurnCaller } from "#channel/types.js";
+import type { TaskStartedHookPayload, TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
 import {
@@ -213,6 +213,27 @@ function createSettledTurnResult(input: {
   // Legacy per-result usage projection (usage spans); the parent folds
   // `outcome.usageDelta`, never this field, when an outcome is present.
   return input.settled.usage === undefined ? result : { ...result, usage: input.settled.usage };
+}
+
+/** Tells the owner that this child claimed its addresses and can be reached. */
+export async function reportTaskStartedStep(input: {
+  readonly callId: string;
+  readonly child: TaskStartedHookPayload["child"];
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+
+  const payload: TaskStartedHookPayload = {
+    callId: input.callId,
+    child: input.child,
+    kind: "task.started",
+  };
+  try {
+    await resumeHook(input.token, payload);
+  } catch (error) {
+    if (!HookNotFoundError.is(error)) throw error;
+    log.warn("task owner no longer exists", { callId: input.callId });
+  }
 }
 
 /** Resolves the caller that created a delegated conversation session. */

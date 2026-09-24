@@ -11,6 +11,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { cancelTasksStep } from "#tasks/owner.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -26,6 +27,12 @@ vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
 }));
 vi.mock("#execution/route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
+}));
+vi.mock("#tasks/owner.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  cancelTasksStep: vi.fn(async (input: { readonly sessionState: DurableSessionState }) => ({
+    sessionState: input.sessionState,
+  })),
 }));
 
 beforeEach(() => {
@@ -386,7 +393,12 @@ describe("SessionExecution turn checkpoints", () => {
     ).resolves.toMatchObject({ cancelled: true, kind: "park" });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
-    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
+    expect(cancelTasksStep).toHaveBeenCalledWith({
+      selector: { kind: "active-turn" },
+      serializedContext: {},
+      sessionState,
+    });
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ sessionState });
   });
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {

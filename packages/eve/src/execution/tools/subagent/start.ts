@@ -40,7 +40,6 @@ export async function startSubagent(input: {
   readonly inheritedConversation?: Parameters<
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
-  readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   /** Inherited originating-client metadata for the dev-TUI hint. */
@@ -79,7 +78,6 @@ export async function startSubagent(input: {
         capabilities: input.capabilities,
         channelMetadata: input.channelMetadata,
         inheritedConversation: input.inheritedConversation,
-        currentSession: input.currentSession,
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
@@ -96,7 +94,6 @@ export async function startSubagent(input: {
         auth: input.auth,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
-        currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,
         parent,

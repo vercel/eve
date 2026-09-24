@@ -27,15 +27,8 @@ import {
   getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
-import {
-  abandonAgentInvocationOwners,
-  abandonRunningAgentTurns,
-} from "#subagents/handles/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
-import {
-  removeBlockingWorkflowToolRuns,
-  getBlockingWorkflowToolRuns,
-} from "#harness/workflow-tool-runs.js";
+import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import {
@@ -141,29 +134,16 @@ export async function settleCancelledTurnStep(input: {
   // discarded turn state). The pre-model gate re-raises the prompt while the
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
-  //
-  // Descendant cancellation already ran and the cancelled turn's inbox is
-  // gone, so a child settlement can never reach this store again. This is the
-  // last write that can park turn-owned `running` and workflow-owned `claimed`
-  // handles.
   const owningTurnId =
     getPendingCoordinationBatch(session.state)?.event.turnId ??
     input.sessionState.emissionState.turnId;
-  const workflowToolRuns = getBlockingWorkflowToolRuns(session.state, owningTurnId);
-  session = abandonAgentInvocationOwners(
-    session,
-    new Set(workflowToolRuns.map((run) => run.address.runId)),
-  );
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingCoordinationBatch(
-            removeBlockingWorkflowToolRuns(
-              abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
-              owningTurnId,
-            ),
+            removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
           ),
         ),
       ),

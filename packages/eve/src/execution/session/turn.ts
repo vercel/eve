@@ -1,7 +1,6 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
@@ -28,10 +27,14 @@ import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
-import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
+import {
+  applyTaskReport,
+  cancelTurnDescendants,
+  startPendingAgentTasks,
+} from "#tasks/owner-body.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 const REMOTE_CALLER_WAIT_ERROR_MESSAGE =
@@ -123,12 +126,16 @@ export class SessionExecution {
           serializedContext: cursor.serializedContext,
           sessionState: cursor.sessionState,
         });
-        const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
         await cursor.apply(dispatchResult);
+        const initialResults = [
+          ...dispatchResult.results,
+          ...(await startPendingAgentTasks(cursor)),
+        ];
+        const initialAcceptedAtMs = initialResults.length === 0 ? undefined : Date.now();
 
         const runtimeResults = await this.waitForRuntimeActionResults({
           initialAcceptedAtMs,
-          initialResults: dispatchResult.results,
+          initialResults,
           pendingCallIds,
           turn,
         });
@@ -176,10 +183,7 @@ export class SessionExecution {
 
   private async finishCancelledTurn(): Promise<TurnOutcome> {
     const { cursor } = this.input;
-    await cancelDescendantTurnsStep({
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-    });
+    await cancelTurnDescendants(cursor);
     return { cancelled: true, kind: "park" };
   }
 
@@ -214,15 +218,13 @@ export class SessionExecution {
       if (next === "cancelled") return next;
       if (next.kind === "runtime-action-result") {
         const snapshot = this.input.cursor.sessionState.snapshot.session.state;
-        const accepted = next.results.filter((result) => {
-          if (result.kind === "tool-result") {
-            return isInboxToolResultFromRecordedWorkflowToolRun(snapshot, result);
-          }
-          if (result.kind !== "subagent-result") return false;
-          return (
-            result.origin === "child" && isInboxSubagentResultFromRunningHandle(snapshot, result)
-          );
-        });
+        const accepted = next.trusted
+          ? next.results
+          : next.results.filter(
+              (result) =>
+                result.kind === "tool-result" &&
+                isInboxToolResultFromRecordedWorkflowToolRun(snapshot, result),
+            );
         if (accepted.length > 0) {
           const acceptedAtMs = Date.now();
           results.push(...accepted);
@@ -241,7 +243,12 @@ export class SessionExecution {
 }
 
 type RuntimeEvent =
-  | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
+  | {
+      readonly kind: "runtime-action-result";
+      readonly results: readonly RuntimeActionResult[];
+      /** Produced by the owner's own task table rather than read from the inbox. */
+      readonly trusted?: boolean;
+    }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | "cancelled";
 
@@ -367,14 +374,25 @@ class ActiveTurn {
       case "delivery":
         this.admitted.add(admitted.admission.sequence);
         return;
-      case "runtime-action-result":
+      case "runtime-action-result": {
+        const childResults = admitted.payload.results.filter(
+          (result): result is RuntimeSubagentChildResult =>
+            result.kind === "subagent-result" && result.origin === "child",
+        );
         this.runtimeResults.push({
           kind: "runtime-action-result",
-          results: admitted.payload.results,
+          results: admitted.payload.results.filter((result) => result.kind === "tool-result"),
         });
+        if (childResults.length > 0) {
+          await this.applyTaskReport({ kind: "runtime-action-result", results: childResults });
+        }
         return;
+      }
       case "workflow":
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
+        return;
+      case "task-report":
+        await this.applyTaskReport(admitted.payload);
         return;
       case "cancel":
         if (!this.cancelsThisTurn(value)) return;
@@ -382,6 +400,17 @@ class ActiveTurn {
         return;
       case "consumed":
         return;
+    }
+  }
+
+  /**
+   * Task reports apply as soon as they are admitted, even between model
+   * steps, so a held cancel reaches a late-starting child.
+   */
+  private async applyTaskReport(payload: Parameters<typeof applyTaskReport>[1]): Promise<void> {
+    const results = await applyTaskReport(this.input.cursor, payload);
+    if (results.length > 0) {
+      this.runtimeResults.push({ kind: "runtime-action-result", results, trusted: true });
     }
   }
 
