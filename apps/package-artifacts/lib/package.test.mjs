@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   packageArtifactPath,
+  packageDependencySpecifier,
   packageDependencyUrl,
   packageManifestPath,
   packagePointerPath,
@@ -22,8 +23,10 @@ describe("package artifacts", () => {
     expect(packageManifestPath(sha)).toBe(`packages/${sha}/manifest.json`);
     expect(packagePointerPath("main")).toBe("packages/refs/main.json");
     expect(packagePointerPath("123")).toBe("packages/refs/pr/123.json");
-    expect(packageDependencyUrl("https://packages.example.com", sha)).toBe(
-      `https://packages.example.com/${sha}/eve.tgz`,
+    const tarball = `https://packages.example.com/${sha}/eve.tgz`;
+    expect(packageDependencyUrl("https://packages.example.com", sha)).toBe(tarball);
+    expect(packageDependencySpecifier(tarball, "sha512-integrity")).toBe(
+      `${tarball}#sha512-integrity`,
     );
   });
 
