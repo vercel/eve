@@ -697,7 +697,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (batch?.event !== undefined) await config.prepareApprovalTurn?.(batch.event);
       if (approvalContext !== undefined) {
         await config.resolveStepDynamicTools?.({
-          requiredToolNames: batch?.requests.map((request) => request.action.toolName),
           ctx: approvalContext,
           event: createStepStartedEvent({
             modelId: session.agent.modelReference?.id ?? "dynamic",

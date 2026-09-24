@@ -70,8 +70,9 @@ check, then prepares the complete batch selected for tool replay. Keep connectio
 resolvers idempotent because restoration can run them again.
 
 Restoration uses current resolver results, not a historical connection snapshot.
-If the tool or its required response policy is unavailable, eve refuses the
-response and leaves the request pending. Before replay, eve checks that the
+If the tool is absent from the persisted tool metadata, or its required response
+policy is unavailable, eve refuses the response and leaves the request pending.
+eve does not reconstruct missing tool metadata from earlier turns. Before replay, eve checks that the
 approved tool is still available and that its connection identity has not
 changed since the call requested approval. A missing or changed connection
 fails the replay rather than sending the call to a replacement destination.

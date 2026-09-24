@@ -382,49 +382,68 @@ describe("turn connection approval restoration", () => {
     },
   );
 
-  it("checks both older and newer tool names, then refuses replay when the older connection is missing", async () => {
-    const fixture = setup("turn.started", false, "name");
-    await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
-    });
-    await fixture.step();
-    fixture.doStream
-      .mockImplementationOnce(() => modelResponse("connection_search", "search-2", "second-notes"))
-      .mockImplementationOnce(() => modelResponse("second-notes__saveNote", "save-2"));
-    await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
-    });
-    const second = await fixture.step();
-    const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
-    expect(batches).toHaveLength(2);
-    expect(batches.map((batch) => batch.requests[0]!.action.toolName)).toEqual([
-      "notes__saveNote",
-      "second-notes__saveNote",
-    ]);
-    clearDurableDynamicCallbacks(sessionId);
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        auth: bob,
-        payloads: [
-          {
-            inputResponses: batches.flatMap((batch) =>
-              batch.requests.map((request) => ({
-                requestId: request.requestId,
-                optionId: "approve",
-              })),
-            ),
-          },
-        ],
-      },
-    });
-    clearDurableDynamicCallbacks(sessionId);
-    await expect(fixture.step()).rejects.toThrow(
-      "connection for this tool call changed or is unavailable",
-    );
-    expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
-    expect(fixture.fetch).not.toHaveBeenCalled();
-  });
+  it.each([false, true])(
+    "refuses an older tool missing from persisted metadata while approving an available tool (cold: %s)",
+    async (cold) => {
+      const fixture = setup("turn.started", false, "name");
+      await fixture.step({
+        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
+      });
+      await fixture.step();
+      fixture.doStream
+        .mockImplementationOnce(() =>
+          modelResponse("connection_search", "search-2", "second-notes"),
+        )
+        .mockImplementationOnce(() => modelResponse("second-notes__saveNote", "save-2"));
+      await fixture.step({
+        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
+      });
+      const second = await fixture.step();
+      const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
+      expect(batches).toHaveLength(2);
+      expect(batches.map((batch) => batch.requests[0]!.action.toolName)).toEqual([
+        "notes__saveNote",
+        "second-notes__saveNote",
+      ]);
+      if (cold) clearDurableDynamicCallbacks(sessionId);
+      await fixture.step({
+        delivery: {
+          kind: "deliver",
+          auth: bob,
+          payloads: [
+            {
+              inputResponses: batches.flatMap((batch) =>
+                batch.requests.map((request) => ({
+                  requestId: request.requestId,
+                  optionId: "approve",
+                })),
+              ),
+            },
+          ],
+        },
+      });
+      if (cold) clearDurableDynamicCallbacks(sessionId);
+      const resumed = await fixture.step();
+      const state = readDurableSession(resumed.sessionState).state;
+      const older = batches[0]!.requests[0]!;
+      const newer = batches[1]!.requests[0]!;
+      expect(fixture.policyTurns).toEqual([batches[1]!.event!.turnId]);
+      expect(getApprovalAuditState(state).candidateHistory).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            requestId: older.requestId,
+            status: "failed",
+            reason: "Approval authorization is temporarily unavailable. Please try again.",
+          }),
+        ]),
+      );
+      expect(getApprovalAuditState(state).settlements).toEqual([
+        expect.objectContaining({ requestId: newer.requestId, outcome: "allowed" }),
+      ]);
+      expect(getPendingInputBatches(state).flatMap((batch) => batch.requests)).toEqual([older]);
+      expect(fixture.fetch).toHaveBeenCalledOnce();
+    },
+  );
 
   it("rejects a missing connection before replay even without a response policy", async () => {
     const fixture = setup("turn.started", false, "request-only");
