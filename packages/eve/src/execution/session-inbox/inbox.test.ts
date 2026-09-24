@@ -213,6 +213,79 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("ends a taken reader quietly and keeps what it accepted before the takeover", async () => {
+    const taken = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        token: "stable",
+        reads: [Promise.resolve(resolved(send("before takeover"))), taken.promise],
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    taken.reject(forceClaimed("stable"));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("before takeover")));
+    await expect(readResult(inbox)).resolves.toEqual({ done: true, value: undefined });
+    await inbox.dispose();
+  });
+
+  it("returns unread payloads from disposal", async () => {
+    installHooks(
+      createMockHook({ reads: [Promise.resolve(resolved(send("unread")))], token: "stable" }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
+    await expect(inbox.dispose()).resolves.toEqual([send("unread")]);
+  });
+
+  it("force-claims fresh hooks that supersede held ones in claim order", async () => {
+    const superseded = createDeferred<IteratorResult<SessionInboxPayload>>();
+    const stable = createMockHook({
+      token: "stable",
+      reads: [Promise.resolve(resolved(send("held"))), superseded.promise],
+    });
+    const alias = createMockHook({ token: "alias" });
+    const retaken = createMockHook({
+      token: "stable",
+      reads: [Promise.resolve(resolved(send("retaken")))],
+    });
+    installHooks(stable, alias, retaken);
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHooks(["stable", "alias"]);
+    await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
+
+    await inbox.takeSessionHooks(["stable"]);
+    superseded.reject(forceClaimed("stable"));
+
+    expect(createHookMock).toHaveBeenLastCalledWith({
+      experimental_force: true,
+      metadata: { sessionId: "session-1" },
+      token: sessionInboxHookToken("stable"),
+    });
+    expect(hookTokens(inbox)).toEqual(["stable", "alias"]);
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("held")));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("retaken")));
+    await inbox.dispose();
+    expect(stable.dispose).not.toHaveBeenCalled();
+    expect(retaken.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the held hook when a forced claim is refused", async () => {
+    const stable = createMockHook({ token: "stable" });
+    const refused = createMockHook({ conflict: { runId: "wrun_owner" }, token: "stable" });
+    installHooks(stable, refused);
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+
+    await expect(inbox.takeSessionHooks(["stable"])).rejects.toMatchObject({
+      name: "HookConflictError",
+    });
+    expect(hookTokens(inbox)).toEqual(["stable"]);
+    await inbox.dispose();
+    expect(stable.dispose).toHaveBeenCalledOnce();
+  });
+
   it("accounts for an accepted unread command before releasing ownership", async () => {
     installHooks(
       createMockHook({
@@ -471,6 +544,12 @@ function installHooks(...hooks: readonly MockHook[]): void {
 
 function send(message: string): SessionInboxPayload {
   return { kind: "send", payload: { message } };
+}
+
+function forceClaimed(token: string): Error {
+  return Object.assign(new Error(`Hook token "${token}" was force-claimed`), {
+    name: "HookForceClaimedError",
+  });
 }
 
 function resolved(value: SessionInboxPayload): IteratorResult<SessionInboxPayload> {

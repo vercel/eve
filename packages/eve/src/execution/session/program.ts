@@ -18,7 +18,11 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
-import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
+import {
+  SessionHandoff,
+  sessionAnchorToken,
+  type SessionHandoffProtocol,
+} from "#execution/session/handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -47,6 +51,7 @@ export interface SessionBoot {
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
+  readonly handoffProtocol: SessionHandoffProtocol;
   readonly initialInput: DeliverHookPayload | undefined;
   /** Parks on the inbox before any session-scoped lifecycle work. */
   readonly awaitFirstMessage: boolean;
@@ -99,6 +104,7 @@ export async function runPreparedSession(
     deploymentId: boot.deploymentId,
     inbox,
     isInitialOwner: boot.anchor.kind === "self",
+    protocol: boot.handoffProtocol,
     sessionId: boot.sessionId,
   });
   let result: WorkflowEntryResult = { output: "", isError: true };

@@ -1,3 +1,4 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { getBackgroundTasks, getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
@@ -6,6 +7,11 @@ import {
   type SessionCheckpoint,
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -96,6 +102,26 @@ export async function validateSessionCheckpointStep(input: {
   }
   if (!isSessionStateIdleForHandoff(checkpoint.sessionState)) {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
+  }
+}
+
+/**
+ * Delivers, in acceptance order, what the previous owner accepted before a
+ * successor took its hooks. A session that already ended has no one to receive it.
+ */
+export async function forwardSessionInputStep(input: {
+  readonly payloads: readonly SessionInboxPayload[];
+  readonly sessionId: string;
+}): Promise<void> {
+  "use step";
+  const token = sessionInboxHookToken(sessionCommandHookToken(input.sessionId));
+  for (const payload of input.payloads) {
+    try {
+      await resumeHook(token, payload);
+    } catch (error) {
+      if (HookNotFoundError.is(error)) return;
+      throw error;
+    }
   }
 }
 

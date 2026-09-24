@@ -59,6 +59,8 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       caller: undefined,
       capabilities: prepared.input.capabilities,
       deploymentId: prepared.deploymentId,
+      // The pre-cutover driver started this run on a spec that cannot be taken from.
+      handoffProtocol: "release",
       initialInput:
         prepared.input.delivery === undefined
           ? undefined

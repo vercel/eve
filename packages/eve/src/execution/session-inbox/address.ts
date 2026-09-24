@@ -39,7 +39,10 @@ export function sessionInboxHookToken(token: string): string {
   return `eve:inbox:v1:${token}`;
 }
 
-/** Marker a releasing owner leaves so ingress can tell "handoff in progress" from "no session". */
+/**
+ * Marker a legacy release-first owner leaves so ingress can tell "handoff in
+ * progress" from "no session". Takeover handoffs never leave one.
+ */
 export function sessionHandoffMarkerToken(token: string): string {
   return `eve:inbox:handoff:${token}`;
 }

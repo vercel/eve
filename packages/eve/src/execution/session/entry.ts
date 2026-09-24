@@ -19,10 +19,9 @@ import {
   SESSION_INBOX_CONTEXT_KEY,
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
-import {
-  signalSessionOwnerActivationStep,
-  validateSessionCheckpointStep,
-} from "#execution/session/handoff-steps.js";
+import { signalSessionOwnerActivationStep } from "#execution/session/handoff-steps.js";
+import { takeOverSession } from "#execution/session/handoff.js";
+import { adoptReleasedSession, isLegacyHandoff } from "#execution/session/legacy-handoff.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
@@ -136,6 +135,7 @@ async function bootInitialOwner(
           : undefined,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
+        handoffProtocol: "takeover",
         initialInput: createInitialDelivery(input, serializedContext),
         awaitFirstMessage: input.input.message === undefined,
         mode,
@@ -164,26 +164,40 @@ async function bootInitialOwner(
   }
 }
 
-/** Validates, claims the exact hook set, then tells the previous owner it may exit. */
+/**
+ * Validates, owns the exact hook set, then tells the previous owner it may
+ * exit. A version 1 source released its hooks and started this run on a spec
+ * that cannot be taken from, so both its claim and this owner's own later
+ * handoffs stay on the legacy release-first path.
+ */
 async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
   const { checkpoint, sessionId } = input;
   const serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
   const inbox = createSessionInbox(sessionId);
+  const tokens = sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState });
+  const legacy = isLegacyHandoff(input);
   try {
-    await validateSessionCheckpointStep({ checkpoint });
-    await inbox.claimSessionHooks(
-      sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
-    );
+    if (legacy) {
+      await adoptReleasedSession(input, inbox, tokens);
+    } else if (!(await takeOverSession(input, inbox, tokens))) {
+      return undefined;
+    }
     await signalSessionOwnerActivationStep({
       activation: { kind: "active" },
       token: input.activationToken,
     });
   } catch (error) {
+    const releasedTokens = inbox.claimedTokens;
     const payloads = await inbox.release();
     await signalSessionOwnerActivationStep({
-      activation: { error: normalizeSerializableError(error), kind: "failed", payloads },
+      activation: {
+        error: normalizeSerializableError(error),
+        kind: "failed",
+        payloads,
+        releasedTokens,
+      },
       token: input.activationToken,
     });
     return undefined;
@@ -195,6 +209,7 @@ async function bootHandoffOwner(
       caller: input.delivery.caller,
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
+      handoffProtocol: legacy ? "release" : "takeover",
       initialInput: input.delivery,
       awaitFirstMessage: false,
       mode: checkpoint.mode,

@@ -3,7 +3,11 @@ import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import {
+  claimHookOwnership,
+  disposeHook,
+  isHookForceClaimedError,
+} from "#execution/hook-ownership.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 /** All session addresses accept the same protocol. Callback routes construct
@@ -58,8 +62,19 @@ export interface SessionInboxOwnership {
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
-  dispose(): Promise<void>;
-  /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
+  /**
+   * Force-claims every token with a fresh hook, taking it from whichever run
+   * holds it, including this one. A superseded reader still delivers what its
+   * hook accepted before the takeover. Settles like `claimSessionHooks`.
+   */
+  takeSessionHooks(tokens: readonly string[]): Promise<void>;
+  /**
+   * Disposes every hook and returns each payload they accepted that the owner
+   * never read. Hooks may accept more until disposal commits, so the result is
+   * complete only for hooks a forced claim already took; otherwise use `release()`.
+   */
+  dispose(): Promise<SessionInboxPayload[]>;
+  /** Like `dispose()`, but commits disposal durably first so the result is complete. */
   release(): Promise<SessionInboxPayload[]>;
 }
 
@@ -105,7 +120,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         notify();
       }
     } catch (error) {
-      if (!source.stopping) failure = { error };
+      // A forced claim ends a reader only after it delivered everything its
+      // hook accepted; the claiming hook answers the token from then on.
+      if (!source.stopping && !isHookForceClaimedError(error)) failure = { error };
     } finally {
       source.closed = true;
       notify();
@@ -122,42 +139,55 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     return accepted;
   };
 
-  const claimSessionHook = async (token: string): Promise<void> => {
+  const claimSessionHook = async (token: string, force = false): Promise<void> => {
     if (!token) throw new Error("A session alias requires a nonempty continuation token.");
     const existing = sources.find((source) => source.token === token);
-    if (existing !== undefined) return await existing.registered;
-    if (sources.length >= 256) throw new Error("A session may claim at most 256 addresses.");
+    if (existing !== undefined && !force) return await existing.registered;
+    if (existing === undefined && sources.length >= 256)
+      throw new Error("A session may claim at most 256 addresses.");
     const source: Source = {
       token,
       hook: createHook<SessionInboxPayload>({
         token: sessionInboxHookToken(token),
         metadata: { sessionId },
+        ...(force && { experimental_force: true }),
       }),
       stopping: false,
       closed: false,
     };
     // Reserve the slot before awaiting registration: parallel claims retain
-    // deterministic order and duplicate calls cannot create another hook.
-    sources.push(source);
+    // deterministic order and duplicate calls cannot create another hook. A
+    // superseded source keeps pumping until the takeover ends its reader.
+    if (existing === undefined) sources.push(source);
+    else sources[sources.indexOf(existing)] = source;
     try {
       source.registered = claimHookOwnership(source.hook);
       await source.registered;
       void pump(source);
     } catch (error) {
-      sources.splice(sources.indexOf(source), 1);
+      const index = sources.indexOf(source);
+      if (index !== -1) {
+        if (existing === undefined) sources.splice(index, 1);
+        else sources[index] = existing;
+      }
       throw error;
     }
+  };
+
+  const claimAll = async (tokens: readonly string[], force: boolean): Promise<void> => {
+    const outcomes = await Promise.allSettled(
+      [...new Set(tokens)].map((token) => claimSessionHook(token, force)),
+    );
+    for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
   };
 
   return {
     get claimedTokens() {
       return sources.map(({ token }) => token);
     },
-    claimSessionHook,
-    async claimSessionHooks(tokens) {
-      const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
-      for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
-    },
+    claimSessionHook: (token) => claimSessionHook(token),
+    claimSessionHooks: (tokens) => claimAll(tokens, false),
+    takeSessionHooks: (tokens) => claimAll(tokens, true),
     async next() {
       while (true) {
         if (failure !== undefined) throw failure.error;
@@ -192,10 +222,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       queue.unshift(...payloads);
       notify();
     },
-    async dispose() {
-      // Accepted-but-unread payloads are dropped: disposal ends the session.
-      await stop();
-    },
+    dispose: stop,
     async release() {
       // Commit disposal durably before the readers stop: the SDK delivers every
       // hook event accepted before that commit to the iterators first, so the

@@ -89,6 +89,9 @@ export function createDevelopmentWorkflowWorld(): World {
   const forwarded = buildForwardedOperations();
   const world = {
     specVersion: 8 as SpecVersion,
+    // Hook writes land in the parent's local World, which serializes forced
+    // takeovers. Session handoffs force-claim hooks across reloads.
+    capabilities: { hookForceClaim: true },
     async getDeploymentId() {
       // Inside a pinned delivery, steps and child runs must record the
       // delivery's generation — not whatever is active — so replay after a

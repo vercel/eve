@@ -3,14 +3,21 @@ import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
-import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
+import type {
+  HandoffWorkflowEntryInput,
+  WorkflowEntryResult,
+} from "#execution/session/entry-input.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
-import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
-import { isSessionIdleForHandoffStep } from "#execution/session/handoff-steps.js";
+import {
+  forwardSessionInputStep,
+  isSessionIdleForHandoffStep,
+  validateSessionCheckpointStep,
+} from "#execution/session/handoff-steps.js";
+import { transferReleasedSession } from "#execution/session/legacy-handoff.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
 
@@ -33,6 +40,14 @@ export interface SessionCheckpoint {
   readonly sessionTimeoutMs: number | false;
 }
 
+/**
+ * How an owner moves its hooks to a successor, fixed by the Workflow spec its
+ * run was started on. `takeover`: the successor force-claims them while this
+ * owner still holds them, so the session is never unowned. `release`: the run
+ * predates forced claims and cannot be taken from, so it releases them first.
+ */
+export type SessionHandoffProtocol = "takeover" | "release";
+
 export type SessionOwnerActivation =
   | { readonly kind: "active" }
   | {
@@ -40,6 +55,8 @@ export type SessionOwnerActivation =
       readonly error: unknown;
       /** Commands accepted by partial successor claims before startup failed. */
       readonly payloads: readonly SessionInboxPayload[];
+      /** Tokens the successor claimed and released again; absent before takeover handoffs. */
+      readonly releasedTokens?: readonly string[];
     };
 
 export type SessionTransferOutcome =
@@ -55,11 +72,21 @@ export type SessionTransferOutcome =
         | "activation-failed";
     };
 
+/** One attempt to start a successor on the triggering delivery's deployment. */
+export interface SessionCandidate {
+  readonly checkpoint: SessionCheckpoint;
+  readonly delivery: DeliverHookPayload;
+  readonly targetDeploymentId: string;
+  /** The exact hook set the successor claims, derived from the checkpoint. */
+  readonly tokens: readonly string[];
+}
+
 export interface SessionHandoffInput {
   readonly checkpoint: Omit<SessionCheckpoint, "serializedContext" | "sessionState" | "version">;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;
   readonly isInitialOwner: boolean;
+  readonly protocol: SessionHandoffProtocol;
   readonly sessionId: string;
 }
 
@@ -70,7 +97,6 @@ export function sessionAnchorToken(sessionId: string): string {
 /**
  * The sole boundary for moving an idle session to another exact deployment.
  * Constructed once per owner; `tryTransfer()` is attempted per eligible selection.
- * When the upstream atomic hook-handoff primitive lands, only this class changes.
  */
 export class SessionHandoff {
   private readonly input: SessionHandoffInput;
@@ -97,44 +123,19 @@ export class SessionHandoff {
     if (!(await isSessionIdleForHandoffStep(state)))
       return { kind: "retained", reason: "not-idle" };
 
-    const checkpoint: SessionCheckpoint = {
-      ...this.input.checkpoint,
-      ...state,
-      version: SESSION_CHECKPOINT_VERSION,
+    const candidate: SessionCandidate = {
+      checkpoint: { ...this.input.checkpoint, ...state, version: SESSION_CHECKPOINT_VERSION },
+      delivery: selection.delivery,
+      targetDeploymentId,
+      tokens: sessionHookTokens(state),
     };
-    const tokens = sessionHookTokens(state);
     await this.ensureAnchor();
-
-    // Markers let ingress distinguish a session mid-handoff from an address
-    // nobody owns, so a concurrent channel delivery retries instead of
-    // creating a replacement session on the released alias.
-    const markers = tokens.map((token) =>
-      createHook<never>({ token: sessionHandoffMarkerToken(token) }),
-    );
-    await Promise.all(markers.map((marker) => claimHookOwnership(marker)));
-    try {
-      const acceptedDuringRelease = await inbox.release();
-      if (acceptedDuringRelease.length > 0) {
-        await this.recover(tokens, acceptedDuringRelease);
-        return { kind: "retained", reason: "accepted-during-release" };
-      }
-      let acceptedByFailedCandidate: readonly SessionInboxPayload[] = [];
-      try {
-        const activation = await this.startAndActivate(
-          checkpoint,
-          selection.delivery,
-          targetDeploymentId,
-        );
-        if (activation.kind === "active") return { kind: "transferred" };
-        acceptedByFailedCandidate = activation.payloads;
-      } catch {
-        // The current owner remains authoritative until activation.
-      }
-      await this.recover(tokens, acceptedByFailedCandidate);
-      return { kind: "retained", reason: "activation-failed" };
-    } finally {
-      await Promise.all(markers.map((marker) => disposeHook(marker)));
+    if (this.input.protocol === "release") {
+      return await transferReleasedSession(candidate, inbox, () =>
+        this.startAndActivate(candidate),
+      );
     }
+    return await this.transferByTakeover(candidate);
   }
 
   /** After a transfer, the original run parks until the final owner reports the session result. */
@@ -154,12 +155,33 @@ export class SessionHandoff {
     await disposeHook(anchor);
   }
 
+  /** Keeps every hook while the successor force-claims them in place. */
+  private async transferByTakeover(candidate: SessionCandidate): Promise<SessionTransferOutcome> {
+    const { inbox, sessionId } = this.input;
+    // A backlog is never transferred to salvage a handoff.
+    if (inbox.hasPending()) return { kind: "retained", reason: "busy" };
+    const activation = await this.startAndActivate(candidate).catch(
+      (error: unknown): SessionOwnerActivation => ({ error, kind: "failed", payloads: [] }),
+    );
+    if (activation.kind === "active") {
+      // The takeover ended every reader after it delivered what its hook had
+      // accepted, so this is exactly what arrived before the successor owned
+      // the session. It trails anything already sent to the successor directly.
+      const accepted = await inbox.dispose();
+      if (accepted.length > 0) {
+        // The successor owns the session now; failing here must not end it.
+        await forwardSessionInputStep({ payloads: accepted, sessionId }).catch(() => {});
+      }
+      return { kind: "transferred" };
+    }
+    // What the failed candidate accepted arrived after everything still queued here.
+    inbox.restore([...inbox.drain(), ...activation.payloads]);
+    await inbox.takeSessionHooks(activation.releasedTokens ?? []);
+    return { kind: "retained", reason: "activation-failed" };
+  }
+
   /** Starts the candidate and waits for it to activate or fail. */
-  private async startAndActivate(
-    checkpoint: SessionCheckpoint,
-    delivery: DeliverHookPayload,
-    targetDeploymentId: string,
-  ): Promise<SessionOwnerActivation> {
+  private async startAndActivate(candidate: SessionCandidate): Promise<SessionOwnerActivation> {
     const activation = createHook<SessionOwnerActivation>({
       token: `${getWorkflowMetadata().workflowRunId}:handoff`,
     });
@@ -168,23 +190,14 @@ export class SessionHandoff {
       await startSessionOwnerStep({
         activationToken: activation.token,
         anchorRunId: this.input.sessionId,
-        checkpoint,
-        delivery,
-        targetDeploymentId,
+        checkpoint: candidate.checkpoint,
+        delivery: candidate.delivery,
+        targetDeploymentId: candidate.targetDeploymentId,
       });
       return await activation;
     } finally {
       await disposeHook(activation);
     }
-  }
-
-  /** Reclaims the exact hook set and replays payloads accepted while it was released. */
-  private async recover(
-    tokens: readonly string[],
-    payloads: readonly SessionInboxPayload[],
-  ): Promise<void> {
-    await this.input.inbox.claimSessionHooks(tokens);
-    this.input.inbox.restore(payloads);
   }
 
   private async ensureAnchor(): Promise<void> {
@@ -195,4 +208,34 @@ export class SessionHandoff {
     });
     await claimHookOwnership(this.anchor);
   }
+}
+
+/**
+ * Force-claims every session hook for a successor whose source supports
+ * forced claims. The source may still hold them; the takeover is atomic per
+ * token, so the session never goes unowned. Returns false when a duplicate
+ * start of this same attempt won the fence and will report to the source.
+ */
+export async function takeOverSession(
+  input: HandoffWorkflowEntryInput,
+  inbox: Pick<SessionInboxHandle, "takeSessionHooks">,
+  tokens: readonly string[],
+): Promise<boolean> {
+  // Forced claims cannot tell two starts of one attempt apart, so a plain
+  // claim fences them first. The source's activation token plus its trigger
+  // is unique per attempt, and validation runs alongside at no extra latency.
+  const fence = createHook<never>({
+    token: `${input.activationToken}:${input.delivery.deliveryMetadata?.[0]?.deliveryId ?? ""}`,
+  });
+  const [validation, fenced] = await Promise.allSettled([
+    validateSessionCheckpointStep({ checkpoint: input.checkpoint }),
+    claimHookOwnership(fence),
+  ]);
+  if (fenced.status === "rejected") {
+    if (isHookConflictError(fenced.reason)) return false;
+    throw fenced.reason;
+  }
+  if (validation.status === "rejected") throw validation.reason;
+  await inbox.takeSessionHooks(tokens);
+  return true;
 }

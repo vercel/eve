@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: implemented
-last_updated: "2026-09-15"
+last_updated: "2026-09-24"
 ---
 
 # Single-workflow sessions with ingress-driven upgrades
@@ -34,8 +34,9 @@ outcome of the design, while shared turn and harness behavior stays intact.
 
 The tradeoff is explicit. Ordinary turns lose the cross-run overhead. The first eligible turn after
 a deployment pays for the handoff, and a session with live work stays on its current deployment
-until it is idle again. The first version ships with a known no-owner interval during handoff and
-requests an atomic handoff primitive from Workflow in parallel.
+until it is idle again. The first version shipped with a known no-owner interval during handoff;
+successors now force-claim hooks in place, so the session is never unowned (see
+[The no-owner interval](#the-no-owner-interval)).
 
 ## Former topology
 
@@ -192,28 +193,38 @@ ids do not need to identify a Workflow run.
 
 ## Handoff
 
-The first version releases hooks before starting the successor. This avoids a claim race between
-two live owners; it does not provide atomic transfer (see [Open questions](#open-questions-and-upstream-request)).
+The owner keeps every hook while the successor takes them over with
+`createHook({ token, experimental_force: true })`. Each forced claim moves one token atomically, so
+every address always resolves to a live owner.
 
 1. Stage the checkpoint and the triggering delivery. The old run stays alive for recovery and
-   starts no further turn work.
-2. Dispose the session inbox hooks and account for every payload accepted up to disposal. If any
-   other command arrived before release completed, abandon the upgrade, reclaim the inbox, and
-   process the accepted commands there in order. A backlog is never transferred to salvage an
-   upgrade.
-3. After release and a final safety check, start a candidate on the triggering delivery's
-   deployment with the checkpoint, the stable session identity, and the original stream. The
-   checkpoint names the stable inbox and every continuation hook claimed during the session.
-   The candidate validates and hydrates, then registers that exact set as one batch.
-   It performs no model or tool work until it owns every hook.
-4. The candidate activates and processes the triggering delivery before any later arrival.
-5. Once activation is confirmed, the old owner exits, or parks as the stream anchor if it is the
-   original run. Recovery after activation belongs to the successor.
+   starts no further turn work. If any other command is already queued, keep the session: a
+   backlog is never transferred to salvage an upgrade.
+2. Start a candidate on the triggering delivery's deployment with the checkpoint, the stable
+   session identity, and the original stream. The checkpoint names the stable inbox and every
+   continuation hook claimed during the session.
+3. The candidate claims a fence unique to this attempt (the activation token plus the trigger's
+   delivery id) while it validates the checkpoint. Forced claims cannot tell two starts of one
+   attempt apart, so a duplicate start that loses the fence exits without touching the session.
+4. The candidate force-claims that exact hook set and activates. It performs no model or tool work
+   until it owns every hook, and processes the triggering delivery before any later arrival.
+5. On activation the old owner's readers have already delivered everything their hooks accepted
+   before the takeover. The old owner forwards those commands to the successor in acceptance
+   order, then exits, or parks as the stream anchor if it is the original run. Forwarded commands
+   trail anything that reached the successor directly in the moment between takeover and
+   forwarding.
 
-On failure before activation, the old owner reclaims the hooks and processes the triggering
-delivery itself, but only after confirming the candidate cannot activate and has released any
-partial claims. Uncertain start or activation is resolved before retrying or recovering; two owners
-never run at once.
+On failure before activation, the candidate releases anything it took and reports those tokens with
+the commands it accepted. The old owner re-takes only those tokens and processes the triggering
+delivery itself, replaying its own queued commands ahead of the candidate's.
+
+The handoff version decides which protocol applies. A successor started by a version 2 source (or
+later) runs on a Workflow spec that can be taken from, and uses the takeover above for its own
+handoffs. A successor of a version 1 source, or an imported pre-cutover session, was started by an
+older SDK: the World refuses to take hooks from such a run. Those owners use the isolated
+release-first path in `session/legacy-handoff.ts` (see [The no-owner interval](#the-no-owner-interval)),
+and a version 1 successor claims without force. A takeover source whose successor cannot force-claim,
+such as an older target during a rollback, fails activation and keeps the session.
 
 ## Stream lifetime
 
@@ -245,10 +256,10 @@ which drains released step stream writers before recording `step_completed`;
 the `persists model output before settlement…` integration test in
 `session/entry.integration.test.ts` covers it.
 
-The existing [hook helpers](../packages/eve/src/execution/hook-ownership.ts)
-dispose and claim in separate durable commits, so handoff steps 2–3 leave an
-interval with no hook owner spanning candidate startup and hydration. eve
-closes the observable consequences of that interval without an upstream
+Forced hook claims close this interval for takeover handoffs. It remains only
+on the legacy release-first path, which releases every hook before starting the
+successor, so candidate startup and hydration run with no hook owner. That path
+closes the observable consequences of the interval without an upstream
 primitive:
 
 - **Handoff markers.** Before releasing, the owner claims
@@ -266,16 +277,9 @@ primitive:
   the retained owner or handed to the successor.
 
 Two guarantees hold: accepted commands are never silently dropped, and two
-owners never activate. When `createHook(token, { force: true })` lands, the
-successor claims with `force`; `SessionHandoff` drops the marker and release
-stages and `resumeSessionInbox` drops its retry loop. Nothing else changes.
-
-Upstream request, made in parallel and not a prerequisite for starting: an atomic,
-replay-idempotent hook handoff. Inputs: expected owner, handoff id, successor, hook set, and inbox
-position. Guarantees: fence the old owner, preserve every accepted payload, resolve tokens
-continuously, and return the same activation result on replay across the whole multiplexed inbox,
-with uncertain activation resolvable by handoff id. When available it replaces the release/start
-gap inside the handoff boundary without touching ordinary execution.
+owners never activate. Once no owner can have been started by a version 1
+source or a pre-cutover driver, delete `session/legacy-handoff.ts`, the markers,
+and the ingress retry loop.
 
 ## Internal boundaries
 
@@ -295,7 +299,8 @@ The owner program lives in `execution/session/`:
 | `next-input.ts`                  | Waits for the next input a parked owner must act on.                                                                                                                                                   |
 | `state-cursor.ts`                | The one mutable context/state pair; claims every hook the state names before publishing a transition.                                                                                                  |
 | `hook-tokens.ts`                 | Derives the full hook claim set from committed state. Used by boot, every transition, handoff, and legacy import.                                                                                      |
-| `handoff.ts`, `handoff-steps.ts` | `SessionHandoff.tryTransfer` as one transaction: markers, release, start, activate, recover.                                                                                                           |
+| `handoff.ts`, `handoff-steps.ts` | `SessionHandoff.tryTransfer` as one transaction: start, forced takeover, activate, then forward or recover.                                                                                            |
+| `legacy-handoff.ts`              | The isolated release-first path for owners started by a version 1 source or a pre-cutover driver: markers, release, start, activate, recover.                                                          |
 | `finalization.ts`                | The single terminal path for done, expired, and failed sessions.                                                                                                                                       |
 | `event-sink.ts`                  | Binds adapter context, dynamic connections, and event fan-out to one step's stream writer.                                                                                                             |
 | `timeout*.ts`                    | The durable deadline timer, stamped with the arming owner so a successor ignores a predecessor's wake.                                                                                                 |
@@ -352,8 +357,8 @@ running step aborts immediately; its durable side effects apply when the
 queued command is admitted at the next boundary. Authorization callbacks are
 ordinary queue entries keyed by attempt; the queue resumes a challenge once
 every expected attempt has reported and drops callbacks for replaced attempts.
-Handoff releases the entire claim set and transfers accepted, unconsumed
-payloads with the exact tokens.
+Handoff moves the entire claim set and forwards accepted, unconsumed payloads
+to the successor.
 
 `TurnRouting` admits input from the session's one queue only against committed state.
 `steer` preserves completed work, turn identity, and accumulated usage.
