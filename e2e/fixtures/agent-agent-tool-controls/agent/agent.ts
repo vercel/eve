@@ -1,4 +1,4 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, waitForTasks } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
@@ -7,7 +7,8 @@ export default defineAgent({
   description: "Coordinate specialist work and delegate focused subtasks.",
   model: mockModel({
     modelId: "root-agent-tool-disabled",
-    respond(request) {
+    // The workflow tools start detached tasks; the script reads their results.
+    respond: waitForTasks((request) => {
       const internalCopy = request.userMessages.some((message) =>
         message.includes("E2E_INTERNAL_ROOT_COPY"),
       );
@@ -23,7 +24,7 @@ export default defineAgent({
       return result === undefined
         ? { toolCalls: [{ name: toolName, input: {} }] }
         : JSON.stringify(result.output);
-    },
+    }),
   }),
   modelContextWindowTokens: 1_000_000,
   tool: false,

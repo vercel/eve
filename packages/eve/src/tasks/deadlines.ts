@@ -75,7 +75,7 @@ export async function applyTaskDeadlines(input: {
   let serializedContext = reconciled.serializedContext;
   const results: RuntimeToolResultActionResult[] = [...reconciled.results];
   const replies: WorkflowCallerReply[] = [...reconciled.replies];
-  // Background results are delivered by a later model step, not to a caller.
+  // Detached results go to a live wait or a later model step, not to a caller.
   const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
   for (const effect of evaluated.effects) {
     if (effect.kind === "unconfirmed") {
@@ -100,7 +100,7 @@ export async function applyTaskDeadlines(input: {
       serializedContext,
       sessionId: session.sessionId,
     });
-    if (record.mode === "background" && record.workflowCaller === undefined) {
+    if (record.mode === "detached" && record.workflowCaller === undefined) {
       held.push({ outcome, record });
       continue;
     }
@@ -138,7 +138,7 @@ export async function applyTaskDeadlines(input: {
 /**
  * Fails each task whose record could not be read with `STATE_LOST`, through
  * the same routes as any outcome: a waited call's tool result, a `ctx.agent`
- * caller's reply, or a held background result. The session continues.
+ * caller's reply, or a held detached result. The session continues.
  */
 function reportLostTasks(
   session: { readonly state?: SessionStateMap },
@@ -164,7 +164,7 @@ function reportLostTasks(
     if (callId !== undefined) {
       events.push(createTaskSettledEvent({ callId, error, status: "failed", taskId: id }));
     }
-    if (task.replyTo !== undefined || task.mode === "foreground") {
+    if (task.replyTo !== undefined || task.mode === "attached") {
       // Only the call that waits on the task can take its outcome.
       if (callId === undefined) continue;
       resolveCaller(

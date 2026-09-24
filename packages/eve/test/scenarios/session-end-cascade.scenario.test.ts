@@ -73,7 +73,7 @@ export default defineAgent({
   model: mockModel(({ toolResults }) => {
     if (toolResults.length === 0) {
       return {
-        toolCalls: [{ name: "writer", input: { background: true, message: "Draft the note." } }],
+        toolCalls: [{ name: "writer", input: { message: "Draft the note." } }],
       };
     }
     return "Started the draft.";
@@ -139,7 +139,7 @@ export default defineWorkflowTool({
         });
         await response.result();
 
-        // A background child reports task.started on its own, possibly after the turn ended.
+        // A detached child reports task.started on its own, possibly after the turn ended.
         const root = await collectUntil(
           session.stream(),
           (events) => startedTask(events, "writer") !== undefined,
@@ -196,6 +196,10 @@ export default defineAgent({
     if (toolResults.length === 0) {
       return { toolCalls: [{ name: "writer", input: { message: "Draft the note." } }] };
     }
+    if (toolResults.length === 1) {
+      const taskId = /writer-[0-9a-z]{6}/u.exec(String(toolResults[0].output))?.[0];
+      return { toolCalls: [{ name: "task_wait", input: { taskId } }] };
+    }
     return "Draft ready.";
   }),
   modelContextWindowTokens: 32_000,
@@ -210,6 +214,10 @@ export default defineAgent({
   model: mockModel(({ toolResults }) => {
     if (toolResults.length === 0) {
       return { toolCalls: [{ name: "helper", input: { message: "Gather the notes." } }] };
+    }
+    if (toolResults.length === 1) {
+      const taskId = /helper-[0-9a-z]{6}/u.exec(String(toolResults[0].output))?.[0];
+      return { toolCalls: [{ name: "task_wait", input: { taskId } }] };
     }
     return "Draft with notes.";
   }),

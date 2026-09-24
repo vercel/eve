@@ -36,8 +36,6 @@ export interface TaskRecord {
   readonly startedAt: string;
   /** Auth and dynamic selections captured at start, replayed for result turns. */
   readonly creator?: JsonObject;
-  /** Tasks detached by the same steering message share one group. */
-  readonly detachGroup?: string;
   /** ISO time the current generation times out. Absent means only the session lifetime bounds it. */
   readonly deadlineAt?: string;
   /** The current generation's time limit in milliseconds of active time, present with `deadlineAt`. */
@@ -94,7 +92,7 @@ export type TaskRecordDecodeResult =
   | ({ readonly ok: false; readonly reason: string } & RecoveredTaskFields);
 
 const KINDS = new Set<TaskKind>(["agent", "workflow"]);
-const MODES = new Set<TaskMode>(["foreground", "background"]);
+const MODES = new Set<TaskMode>(["attached", "detached"]);
 const STATUSES = new Set<TaskStatus>([
   "working",
   "input_required",
@@ -208,7 +206,6 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   if (value.child !== undefined && !isChildAddress(value.child)) return fail("invalid child");
   if (!isIsoTime(value.startedAt)) return fail("invalid startedAt");
   if (value.creator !== undefined && !isRecordObject(value.creator)) return fail("invalid creator");
-  if (!isOptionalString(value.detachGroup)) return fail("invalid detachGroup");
   if (
     !isOptionalIsoTime(value.deadlineAt) ||
     !isOptionalIsoTime(value.clockStoppedAt) ||

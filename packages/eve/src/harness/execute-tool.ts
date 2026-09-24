@@ -15,7 +15,7 @@ export interface HarnessToolDefinition {
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;
-  /** Workflow tools only: a steering message never moves a call to the background. */
+  /** Workflow tools only: the call holds its turn instead of starting a detached task. */
   readonly attached?: boolean;
   /** Workflow tools only: the time limit for each call. */
   readonly timeout?: TaskTimeout;

@@ -421,30 +421,16 @@ export interface TaskStartedStreamEvent {
     /** Absent when the task runs no child session. */
     child?: TaskChildStream;
     kind: "agent" | "workflow";
-    /** Whether the calling turn waits for the result. */
-    mode: "foreground" | "background";
+    /**
+     * `detached`: the call returned a receipt and the task keeps working on
+     * its own. `attached`: the calling turn, or a workflow body, awaits it.
+     */
+    mode: "attached" | "detached";
     name: string;
     taskId: string;
     turnId: string;
   };
   type: "task.started";
-}
-
-/**
- * Stream event emitted when a waited task moves to the background because a
- * steering message arrived during the wait (`steer`). eve no longer emits
- * `timeout`. The call's `action.result`
- * carries a receipt, and the task keeps working; its `task.settled` follows
- * later. Tasks detached by one steering message deliver their results
- * together.
- */
-export interface TaskDetachedStreamEvent {
-  data: {
-    callId: string;
-    reason: "steer" | "timeout";
-    taskId: string;
-  };
-  type: "task.detached";
 }
 
 /**
@@ -824,7 +810,6 @@ export type UnstampedMessageStreamEvent =
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
   | SubagentChildEventStreamEvent
-  | TaskDetachedStreamEvent
   | TaskSettledStreamEvent
   | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
@@ -1453,16 +1438,6 @@ export function createTaskStartedEvent(input: {
           };
   }
   return { data, type: "task.started" };
-}
-
-/** Creates the `task.detached` event for one waited task that moved to the background. */
-export function createTaskDetachedEvent(
-  data: TaskDetachedStreamEvent["data"],
-): TaskDetachedStreamEvent {
-  return {
-    data: { callId: data.callId, reason: data.reason, taskId: data.taskId },
-    type: "task.detached",
-  };
 }
 
 /** Creates the `task.settled` event for one task generation's first terminal outcome. */

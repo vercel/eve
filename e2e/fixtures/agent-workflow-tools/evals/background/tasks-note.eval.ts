@@ -1,34 +1,28 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { receiptTaskIds, waitForStarts } from "./helpers";
+import { receiptTaskIds } from "./helpers";
 
 /**
- * Alice's thanks moves her waited reminder to the background. While it is
- * still working, her follow-up turn sees it in the `[Tasks]` note, and the
- * note is still there after the session compacts.
+ * Alice's reminder starts as a detached task. While it is still working, her
+ * follow-up turn sees it in the `[Tasks]` note, and the note is still there
+ * after the session compacts.
  */
 export default defineEval({
   description:
     "A follow-up turn sees working tasks in the [Tasks] note, including after compaction.",
   timeoutMs: 180_000,
   async test(t) {
-    const session = await t.session();
-    const live = await session.start(
+    const first = await t.send(
       "Alice would like a reminder about the office plants. BG-NOTE-START",
     );
-    await waitForStarts(t, live, "remind_later", 1);
-    const thanks = await live.session.start("Alice says thanks and will check back. BG-PING", {
-      turnPolicy: "steer",
-    });
-    const first = await live.result();
-    await thanks.result();
     first.expectOk();
+    first.messageIncludes("BG-STARTED");
     const [taskId] = await t.require(
       receiptTaskIds(first, "remind_later"),
       satisfies(
         (taskIds: readonly string[]) => taskIds.length === 1,
-        "the reminder moved to the background with one receipt",
+        "the reminder started as a detached task with one receipt",
       ),
     );
     const listed = new RegExp(`<task id="${taskId}" name="remind_later" status="working"`, "u");

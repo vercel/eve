@@ -7,7 +7,6 @@ import type {
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import { formatConnectionsSection } from "#runtime/prompt/connections.js";
-import { AGENT_MESSAGING_INSTRUCTION } from "#tasks/render.js";
 
 const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
@@ -20,7 +19,6 @@ interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
   skills?: readonly ResolvedSkillDefinition[];
-  subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
   workspaceSpec?: WorkspaceRuntimeSpec;
 }
@@ -34,7 +32,6 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...(input.subagentsAvailable ? [AGENT_MESSAGING_INSTRUCTION] : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];

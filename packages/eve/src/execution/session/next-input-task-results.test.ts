@@ -49,7 +49,7 @@ function heldResultState(input: {
     creator: encodeTaskCreator({ auth: ALICE }),
     id: "remind-q4x1ze",
     kind: "workflow",
-    mode: "background",
+    mode: "detached",
     name: "remind",
     status: "completed",
   });

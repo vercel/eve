@@ -122,7 +122,7 @@ function taskStarted(
         streamPath: `/eve/v1/session/child_${callId}/stream`,
       },
       kind: "agent",
-      mode: "foreground",
+      mode: "attached",
       name: "researcher",
       taskId: `researcher-${callId}`,
       turnId,

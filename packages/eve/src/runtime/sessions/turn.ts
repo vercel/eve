@@ -16,7 +16,7 @@ export interface PreparedRuntimeWorkflowTask {
   readonly nodeId?: string;
   /** Registered workflow definition to execute. */
   readonly workflowId: string;
-  /** Authored workflow tools only: a steering message never moves a call to the background. */
+  /** Authored workflow tools only: the call holds its turn instead of starting a detached task. */
   readonly attached?: boolean;
   /** Authored workflow tools only: the time limit for each call. */
   readonly timeout?: TaskTimeout;

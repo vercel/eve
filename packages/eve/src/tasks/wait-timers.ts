@@ -4,8 +4,15 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 // built-ins.
 
 /**
- * The timers of one foreground wait: one durable sleep per timed call, such
- * as a `task_wait` timeout. A timer still pending when the wait ends is
+ * How long a call whose question a steering message dismissed may keep the
+ * turn waiting. A call still working then is stopped like any other
+ * attached call, so the model sees the message without waiting on it.
+ */
+export const DISMISSED_CALL_GRACE_MS = 10_000;
+
+/**
+ * The timers of one runtime wait: one durable sleep per timed call, such
+ * as a `task_wait` timeout or a dismissed call's grace period. A timer still pending when the wait ends is
  * abandoned: it no longer affects the turn, though its durable sleep may
  * still wake the run once when it elapses.
  */

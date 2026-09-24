@@ -11,13 +11,13 @@ const REQUEST = [
 ].join(" ");
 
 /**
- * Work the user does not need to wait on runs in the background: the first
- * turn ends with a short reply, and a later result turn reports the draft
- * without polling or delegating again.
+ * Work the user does not need to wait on is not waited on: the writer's call
+ * returns a receipt, the first turn ends with a short reply, and a later
+ * result turn reports the draft without polling or delegating again.
  */
 export default defineEval({
   description:
-    "A no-rush request runs the writer in the background and reports the draft when it arrives.",
+    "A no-rush request leaves the writer's task running and reports the draft when it arrives.",
   tags: ["real-model"],
   timeoutMs: 300_000,
   async test(t) {
@@ -27,7 +27,7 @@ export default defineEval({
       receiptTaskIds(first, "launch-writer"),
       satisfies(
         (taskIds: readonly string[]) => taskIds.length === 1,
-        "one launch-writer call that returned a background receipt",
+        "one launch-writer call that returned a receipt",
       ),
     );
     first.notEvent("message.received", { data: { kind: "task.result" } });
@@ -58,8 +58,8 @@ export default defineEval({
       taskStarts(events, "launch-writer"),
       satisfies(
         (calls: ReturnType<typeof taskStarts>) =>
-          calls.length === 1 && calls[0]?.taskId === taskId && calls[0].mode === "background",
-        "one background delegation, never repeated",
+          calls.length === 1 && calls[0]?.taskId === taskId && calls[0].mode === "detached",
+        "one detached delegation, never repeated",
       ),
     );
     t.check(
@@ -67,6 +67,7 @@ export default defineEval({
         .length,
       satisfies((count: number) => count === 1, "the writer is never called again to check on it"),
     );
+    first.notCalledTool("task_wait");
     result.notCalledTool("task_cancel");
     result.noFailedActions();
   },

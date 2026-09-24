@@ -9,6 +9,7 @@ import { createTaskRecord, taskTableState } from "#internal/testing/task-records
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
 import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
+import { MAX_WORKING_TASKS } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runCommands } from "#tasks/transport.js";
 
@@ -24,7 +25,7 @@ const REMINDER = createTaskRecord({
   child: { commandToken: "control-hook", kind: "workflow", runId: "run-remind" },
   id: "remind-q4x1ze",
   kind: "workflow",
-  mode: "background",
+  mode: "detached",
   name: "remind",
   turnId: "turn-0",
 });
@@ -89,7 +90,7 @@ it("applies a task_cancel call as the owner and returns its result at once", asy
   ]);
 });
 
-it("returns how the turn waits: sleeps end on steer, and attached calls never detach", async () => {
+it("starts a workflow tool call detached with its receipt unless its tool is attached", async () => {
   const base = createTestSessionState({ sessionId: "parent" });
   const session = {
     ...base.snapshot.session,
@@ -105,7 +106,6 @@ it("returns how the turn waits: sleeps end on steer, and attached calls never de
     workflowId: "workflow//eve@0.66.1//executeSleepTool",
   };
   const lookup = {
-    attached: true,
     callId: "call-lookup",
     input: {},
     kind: "workflow-task" as const,
@@ -113,30 +113,99 @@ it("returns how the turn waits: sleeps end on steer, and attached calls never de
     workflowId: "workflow//./agent/tools/lookup//execute",
   };
   vi.mocked(startWorkflowToolRun).mockResolvedValue({ hookToken: "control", runId: "run-1" });
-  const dispatch = async (interactiveRootTurn: boolean) => {
-    vi.mocked(prepareCoordinationDispatch).mockResolvedValue({
-      batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [sleep, lookup] },
-      interactiveRootTurn,
-      plan: [sleep, lookup],
-      session,
-      sessionState: base,
-    } as never);
-    return await dispatchCoordinationStep({
-      action: "park",
-      serializedContext: {},
-      sessionState: base,
-      sessionWritable: new WritableStream(),
-      workflowToolRunOwner: { inbox: "owner-inbox" },
-    });
-  };
+  vi.mocked(prepareCoordinationDispatch).mockResolvedValue({
+    batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [sleep, lookup] },
+    plan: [sleep, lookup],
+    session,
+    sessionState: base,
+  } as never);
 
-  await expect(dispatch(true)).resolves.toMatchObject({
-    taskWaits: [],
-    wait: { attachedCallIds: ["call-lookup"], detachable: true, sleepCallIds: ["call-sleep"] },
+  const update = await dispatchCoordinationStep({
+    action: "park",
+    serializedContext: {},
+    sessionState: base,
+    sessionWritable: new WritableStream(),
+    workflowToolRunOwner: { inbox: "owner-inbox" },
   });
-  await expect(dispatch(false)).resolves.toMatchObject({
-    wait: { attachedCallIds: ["call-lookup"], detachable: false, sleepCallIds: ["call-sleep"] },
+
+  const records = getTaskTable(readDurableSession(update.sessionState)).records;
+  expect(records.map(({ callId, mode }) => ({ callId, mode }))).toEqual([
+    { callId: "call-sleep", mode: "attached" },
+    { callId: "call-lookup", mode: "detached" },
+  ]);
+  // The attached sleep resolves with its run's outcome; the lookup's receipt resolves it now.
+  expect(update.results).toEqual([
+    expect.objectContaining({
+      callId: "call-lookup",
+      output: { status: "working", taskId: records[1]?.id },
+      toolName: "lookup",
+    }),
+  ]);
+  expect(update.taskWaits).toEqual([]);
+  expect(startWorkflowToolRun).toHaveBeenCalledTimes(2);
+});
+
+it("rejects a detached start at the working-task cap, but still starts an attached call", async () => {
+  const base = createTestSessionState({ sessionId: "parent" });
+  const working = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
+    createTaskRecord({
+      callId: `call-remind-${index}`,
+      id: `remind-${String(index).padStart(6, "0")}`,
+      kind: "workflow",
+      mode: "detached",
+      name: "remind",
+      turnId: "turn-0",
+    }),
+  );
+  const durable = { ...base.snapshot.session, state: taskTableState(working) };
+  const sessionState = { ...base, snapshot: { session: durable } };
+  const session = {
+    ...durable,
+    agent: { dynamicModel: true as const, system: "", tools: [] },
+    compaction: { recentWindowSize: 5, threshold: 10_000 },
+  };
+  const lookup = {
+    callId: "call-lookup",
+    input: {},
+    kind: "workflow-task" as const,
+    toolName: "lookup",
+    workflowId: "workflow//./agent/tools/lookup//execute",
+  };
+  const ask = { ...lookup, attached: true, callId: "call-ask", toolName: "ask_question" };
+  vi.mocked(startWorkflowToolRun).mockResolvedValue({ hookToken: "control", runId: "run-1" });
+  vi.mocked(prepareCoordinationDispatch).mockResolvedValue({
+    batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [lookup, ask] },
+    plan: [lookup, ask],
+    session,
+    sessionState,
+  } as never);
+
+  const update = await dispatchCoordinationStep({
+    action: "park",
+    serializedContext: {},
+    sessionState,
+    sessionWritable: new WritableStream(),
+    workflowToolRunOwner: { inbox: "owner-inbox" },
   });
+
+  expect(update.results).toEqual([
+    {
+      callId: "call-lookup",
+      isError: true,
+      kind: "tool-result",
+      output: {
+        code: "TOO_MANY_TASKS",
+        message: expect.stringMatching(/^20 tasks are already working \(remind-000000, /u),
+      },
+      toolName: "lookup",
+    },
+  ]);
+  expect(startWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ callId: "call-ask" }),
+  );
+  const records = getTaskTable(readDurableSession(update.sessionState)).records;
+  expect(records.map(({ callId }) => callId)).not.toContain("call-lookup");
+  expect(records.find(({ callId }) => callId === "call-ask")).toMatchObject({ mode: "attached" });
 });
 
 it("registers task_wait calls before task_cancel calls, so a wait gets its task's cancellation", async () => {

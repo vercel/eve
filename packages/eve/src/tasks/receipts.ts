@@ -5,68 +5,65 @@ import type {
 import type { TaskError } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
-  renderBackgroundReceipt,
+  renderStartReceipt,
   renderSteeringReceipt,
-  renderTooManyBackgroundTasks,
+  renderTooManyTasks,
   type TaskReceipt,
 } from "#tasks/render.js";
-import { MAX_BACKGROUND_TASKS, workingBackgroundTaskIds } from "#tasks/results.js";
+import { MAX_WORKING_TASKS, workingDetachedTaskIds } from "#tasks/results.js";
 import type { TaskTable } from "#tasks/table.js";
 
 // Immediate tool results of calls the turn does not wait for. Clients read
 // the structured receipt; the model reads its text.
 
-/** Receipt of an agent call with `background: true`. */
-export function backgroundReceiptResult(
+/** Receipt of a call that started a detached task. */
+export function startReceiptResult(
   record: Pick<TaskRecord, "callId" | "id">,
   toolName: string,
 ): RuntimeToolResultActionResult {
-  const receipt: TaskReceipt = { status: "working", taskId: record.id };
-  return {
-    callId: record.callId,
-    kind: "tool-result",
-    modelOutput: renderBackgroundReceipt(record),
-    output: { ...receipt },
-    toolName,
-  };
+  return receiptResult(record.callId, record.id, toolName, renderStartReceipt(record));
 }
 
 /** Receipt of a call that sent a message to a working agent. */
 export function steeringReceiptResult(input: {
   readonly callId: string;
-  readonly record: Pick<TaskRecord, "id" | "mode">;
+  readonly record: Pick<TaskRecord, "id">;
   readonly toolName: string;
 }): RuntimeToolResultActionResult {
-  const receipt: TaskReceipt = { status: "working", taskId: input.record.id };
-  return {
-    callId: input.callId,
-    kind: "tool-result",
-    modelOutput: renderSteeringReceipt(input.record),
-    output: { ...receipt },
-    toolName: input.toolName,
-  };
+  return receiptResult(
+    input.callId,
+    input.record.id,
+    input.toolName,
+    renderSteeringReceipt(input.record),
+  );
+}
+
+function receiptResult(
+  callId: string,
+  taskId: string,
+  toolName: string,
+  modelOutput: string,
+): RuntimeToolResultActionResult {
+  const receipt: TaskReceipt = { status: "working", taskId };
+  return { callId, kind: "tool-result", modelOutput, output: { ...receipt }, toolName };
 }
 
 /**
- * The error result of a background agent call over the cap, or `undefined`
- * when the call may start. Detached calls count toward the cap, but a detach
- * is never rejected.
+ * The error result of a detached start over the cap, or `undefined` when the
+ * call may start. Every working detached generation counts.
  */
-export function tooManyBackgroundTasksResult(input: {
+export function tooManyTasksResult(input: {
   readonly callId: string;
   readonly table: TaskTable;
   readonly toolName: string;
 }): RuntimeToolResultActionResult | undefined {
-  const working = workingBackgroundTaskIds(input.table);
-  if (working.length < MAX_BACKGROUND_TASKS) return undefined;
+  const working = workingDetachedTaskIds(input.table);
+  if (working.length < MAX_WORKING_TASKS) return undefined;
   return {
     callId: input.callId,
     isError: true,
     kind: "tool-result",
-    output: {
-      code: "TOO_MANY_BACKGROUND_TASKS",
-      message: renderTooManyBackgroundTasks(working, MAX_BACKGROUND_TASKS),
-    },
+    output: { code: "TOO_MANY_TASKS", message: renderTooManyTasks(working, MAX_WORKING_TASKS) },
     toolName: input.toolName,
   };
 }

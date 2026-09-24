@@ -1,8 +1,6 @@
 import {
-  createTaskDetachedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
-  type TaskDetachedStreamEvent,
   type TaskSettledStreamEvent,
   type TaskStartedStreamEvent,
 } from "#protocol/message.js";
@@ -39,18 +37,6 @@ export function taskStartedEvent(input: {
     parentSessionId: input.ownerSessionId,
     taskId: record.id,
     turnId: record.turnId,
-  });
-}
-
-/** Reports that a waited call's task moved to the background. */
-export function taskDetachedEvent(input: {
-  readonly reason: TaskDetachedStreamEvent["data"]["reason"];
-  readonly record: TaskRecord;
-}): TaskDetachedStreamEvent {
-  return createTaskDetachedEvent({
-    callId: input.record.callId,
-    reason: input.reason,
-    taskId: input.record.id,
   });
 }
 

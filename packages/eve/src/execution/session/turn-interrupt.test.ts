@@ -17,10 +17,9 @@ import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import { DISMISSED_CALL_GRACE_MS, type TaskWaitPlan } from "#tasks/detach.js";
-import { detachWaitedTasksStep } from "#tasks/detach-step.js";
-import { answerTaskInput, endTaskWaits } from "#tasks/owner-body.js";
+import { answerTaskInput, endTaskWaits, interruptAttachedCalls } from "#tasks/owner-body.js";
 import type { TaskWaitRegistration } from "#tasks/wait.js";
+import { DISMISSED_CALL_GRACE_MS } from "#tasks/wait-timers.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -33,39 +32,30 @@ vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
   ...(await importOriginal()),
   answerTaskInput: vi.fn(),
   endTaskWaits: vi.fn(),
+  interruptAttachedCalls: vi.fn(),
 }));
 vi.mock("#execution/session-workflow-tool-run.js", () => ({
   handleWorkflowToolRunMessage: vi.fn(),
 }));
-vi.mock("#tasks/detach-step.js", () => ({ detachWaitedTasksStep: vi.fn() }));
 
-// The foreground wait's rules (plan §4.8): a steering message that answers
-// nothing detaches the waited calls of an interactive root turn, except
-// attached ones, ends waited sleeps everywhere, and ends every `task_wait`;
-// a `task_wait` timer ends only its own call; a result that lands first wins.
+// The interrupt rule (plan §4.8), in every session: a steering message that
+// answers nothing ends every attached call still in flight (`task_wait` and
+// attached workflow tools) except calls whose question it dismissed, which
+// get a grace period; a `task_wait` timer ends only its own call; a result
+// that lands first wins. Detached calls already returned their receipts.
 
 const STEERING: DeliverHookPayload = {
   kind: "deliver",
   payloads: [{ message: "Also check Plain." }],
 };
 
-const INTERACTIVE: TaskWaitPlan = { detachable: true, sleepCallIds: [], attachedCallIds: [] };
-
 beforeEach(() => {
   vi.mocked(sleep).mockReset();
   vi.mocked(turnStep).mockReset();
   vi.mocked(dispatchCoordinationStep).mockReset();
-  vi.mocked(detachWaitedTasksStep)
+  vi.mocked(interruptAttachedCalls)
     .mockReset()
-    .mockImplementation(async (input) => ({
-      events: [],
-      replies: [],
-      results: [...input.endCallIds, ...input.detachCallIds]
-        .filter((callId) => !input.keepTaskIds.includes(taskIdOf(callId)))
-        .map((callId) => receipt(callId)),
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    }));
+    .mockImplementation(async (_cursor, callIds) => callIds.map((callId) => stopped(callId)));
   vi.mocked(endTaskWaits)
     .mockReset()
     .mockImplementation(async (_cursor, input) =>
@@ -87,26 +77,41 @@ beforeEach(() => {
     );
 });
 
-describe("detach on steer", () => {
-  it("detaches every waited call and appends the message in the same step as the receipts", async () => {
+describe("the interrupt rule", () => {
+  it("ends every attached call and appends the message in the same step as their results", async () => {
     const { execution, steps } = setup({
-      calls: ["call-d0", "call-sre"],
+      calls: ["call-w1", "call-deploy"],
       script: [STEERING],
-      wait: INTERACTIVE,
+      taskWaits: [{ callId: "call-w1" }],
     });
 
     await execution.runTurn(undefined);
 
-    expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        detachCallIds: ["call-d0", "call-sre"],
-        endCallIds: [],
-        keepTaskIds: [],
-      }),
-    );
+    expect(interruptAttachedCalls).toHaveBeenCalledExactlyOnceWith(expect.anything(), [
+      "call-w1",
+      "call-deploy",
+    ]);
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [receipt("call-d0"), receipt("call-sre")] },
+      runtimeResults: { results: [stopped("call-w1"), stopped("call-deploy")] },
+    });
+  });
+
+  it("ends attached calls in a task-mode session too", async () => {
+    const { execution, steps } = setup({
+      calls: ["call-deploy"],
+      mode: "task",
+      script: [STEERING],
+    });
+
+    await execution.runTurn(undefined);
+
+    expect(interruptAttachedCalls).toHaveBeenCalledExactlyOnceWith(expect.anything(), [
+      "call-deploy",
+    ]);
+    expect(steps()[1]).toMatchObject({
+      delivery: STEERING,
+      runtimeResults: { results: [stopped("call-deploy")] },
     });
   });
 
@@ -115,168 +120,97 @@ describe("detach on steer", () => {
     const { execution, steps } = setup({
       calls: ["call-refund"],
       script: [{ kind: "deliver", payloads: [{ message: "Yes" }] }, outcome("call-refund")],
-      wait: INTERACTIVE,
     });
 
     await execution.runTurn(undefined);
 
-    expect(detachWaitedTasksStep).not.toHaveBeenCalled();
+    expect(interruptAttachedCalls).not.toHaveBeenCalled();
     expect(steps()[1]).toEqual({
       delivery: undefined,
       runtimeResults: expect.objectContaining({ results: [result("call-refund")] }),
     });
   });
 
-  it("keeps waiting on a call whose dismissible question the message dismissed", async () => {
+  it("lets a call whose dismissible question the message dismissed resolve normally", async () => {
     vi.mocked(sleep).mockImplementation(() => new Promise<void>(() => {}));
     dismissAsk();
     const { execution, steps } = setup({
-      calls: ["call-ask", "call-d0"],
+      calls: ["call-ask", "call-deploy"],
       script: [STEERING, outcome("call-ask")],
-      wait: INTERACTIVE,
     });
 
     await execution.runTurn(undefined);
 
-    expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        detachCallIds: ["call-ask", "call-d0"],
-        keepTaskIds: [taskIdOf("call-ask")],
-      }),
-    );
+    expect(interruptAttachedCalls).toHaveBeenCalledExactlyOnceWith(expect.anything(), [
+      "call-deploy",
+    ]);
     expect(sleep).toHaveBeenCalledExactlyOnceWith(DISMISSED_CALL_GRACE_MS);
-    // The dismissed call resolves normally, alongside the other call's receipt.
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [result("call-ask"), receipt("call-d0")] },
+      runtimeResults: { results: [result("call-ask"), stopped("call-deploy")] },
     });
   });
 
-  it("detaches a dismissed call into the message's group once its grace period ends", async () => {
+  it("stops a dismissed call once its grace period ends", async () => {
     vi.mocked(sleep).mockResolvedValue(undefined);
     dismissAsk();
     const { execution, steps } = setup({
-      calls: ["call-ask", "call-d0"],
+      calls: ["call-ask", "call-deploy"],
       script: [STEERING, "timer"],
-      wait: INTERACTIVE,
     });
 
     await execution.runTurn(undefined);
 
-    expect(vi.mocked(detachWaitedTasksStep).mock.calls.map(([call]) => call)).toEqual([
-      expect.objectContaining({ groupCallId: "call-ask", keepTaskIds: [taskIdOf("call-ask")] }),
-      expect.objectContaining({
-        detachCallIds: ["call-ask"],
-        groupCallId: "call-ask",
-        keepTaskIds: [],
-      }),
+    expect(vi.mocked(interruptAttachedCalls).mock.calls.map(([, callIds]) => callIds)).toEqual([
+      ["call-deploy"],
+      ["call-ask"],
     ]);
+    expect(endTaskWaits).not.toHaveBeenCalled();
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [receipt("call-ask"), receipt("call-d0")] },
+      runtimeResults: { results: [stopped("call-ask"), stopped("call-deploy")] },
     });
   });
 
   it("keeps waiting under turnPolicy: queue and leaves the message for a later turn", async () => {
     const queued: DeliverHookPayload = { ...STEERING, turnPolicy: "queue" };
     const { execution, queue, steps } = setup({
-      calls: ["call-d0"],
-      script: [queued, outcome("call-d0")],
-      wait: INTERACTIVE,
+      calls: ["call-deploy"],
+      script: [queued, outcome("call-deploy")],
     });
 
     await execution.runTurn(undefined);
 
-    expect(detachWaitedTasksStep).not.toHaveBeenCalled();
+    expect(interruptAttachedCalls).not.toHaveBeenCalled();
     expect(steps()[1]).toEqual({
       delivery: undefined,
-      runtimeResults: expect.objectContaining({ results: [result("call-d0")] }),
+      runtimeResults: expect.objectContaining({ results: [result("call-deploy")] }),
     });
     expect(queue.pendingCount).toBe(1);
   });
 
-  it("applies steering after the wait in a child or scheduled turn", async () => {
-    const { execution, steps } = setup({
-      calls: ["call-d0"],
-      script: [STEERING, outcome("call-d0")],
-      wait: { detachable: false, sleepCallIds: [], attachedCallIds: [] },
-    });
-
-    await execution.runTurn(undefined);
-
-    expect(detachWaitedTasksStep).not.toHaveBeenCalled();
-    expect(steps()[1]).toMatchObject({
-      delivery: STEERING,
-      runtimeResults: { results: [result("call-d0")] },
-    });
-  });
-
-  it("ends a waited sleep in any session, and keeps waiting on the other calls", async () => {
-    const { execution, steps } = setup({
-      calls: ["call-sleep", "call-d0"],
-      script: [STEERING, outcome("call-d0")],
-      wait: { detachable: false, sleepCallIds: ["call-sleep"], attachedCallIds: [] },
-    });
-
-    await execution.runTurn(undefined);
-
-    expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ detachCallIds: [], endCallIds: ["call-sleep"] }),
-    );
-    expect(steps()[1]).toMatchObject({
-      delivery: STEERING,
-      runtimeResults: { results: [receipt("call-sleep"), result("call-d0")] },
-    });
-  });
-
   it("interrupts the wait once per steering message", async () => {
-    vi.mocked(detachWaitedTasksStep).mockImplementation(async (input) => ({
-      events: [],
-      replies: [],
-      results: [],
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    }));
+    vi.mocked(interruptAttachedCalls).mockResolvedValue([]);
     const { execution } = setup({
-      calls: ["call-d0"],
+      calls: ["call-deploy"],
       script: [
         STEERING,
         { kind: "task.deadline", ownerRunId: "x", wakeAt: "y" },
-        outcome("call-d0"),
+        outcome("call-deploy"),
       ],
-      wait: INTERACTIVE,
     });
     await execution.runTurn(undefined);
-    expect(detachWaitedTasksStep).toHaveBeenCalledTimes(1);
+    expect(interruptAttachedCalls).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("attached calls and task_wait", () => {
-  it("never detaches an attached call on steer", async () => {
-    const { execution, steps } = setup({
-      calls: ["call-ask", "call-d0"],
-      script: [STEERING, outcome("call-ask")],
-      wait: { ...INTERACTIVE, attachedCallIds: ["call-ask"] },
-    });
-
-    await execution.runTurn(undefined);
-
-    expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ detachCallIds: ["call-d0"] }),
-    );
-    expect(steps()[1]).toMatchObject({
-      delivery: STEERING,
-      runtimeResults: { results: [result("call-ask"), receipt("call-d0")] },
-    });
-  });
-
+describe("task_wait timeouts", () => {
   it("ends only the task_wait whose timer fired", async () => {
     vi.mocked(sleep).mockResolvedValue(undefined);
     const { execution, steps } = setup({
       calls: ["call-w1", "call-w2"],
       script: ["timer", outcome("call-w2")],
       taskWaits: [{ callId: "call-w1", timeoutMs: 5_000 }, { callId: "call-w2" }],
-      wait: INTERACTIVE,
     });
 
     await execution.runTurn(undefined);
@@ -286,53 +220,12 @@ describe("attached calls and task_wait", () => {
       callIds: ["call-w1"],
       reason: "timed_out",
     });
-    expect(detachWaitedTasksStep).not.toHaveBeenCalled();
+    expect(interruptAttachedCalls).not.toHaveBeenCalled();
     expect(steps()[1]).toMatchObject({
       delivery: undefined,
       runtimeResults: {
         results: [expect.objectContaining({ callId: "call-w1" }), result("call-w2")],
       },
-    });
-  });
-
-  it("ends every task_wait on steer and detaches only the other calls", async () => {
-    vi.mocked(sleep).mockImplementation(() => new Promise<void>(() => {}));
-    const { execution, steps } = setup({
-      calls: ["call-w1", "call-w2", "call-d0"],
-      script: [STEERING],
-      taskWaits: [{ callId: "call-w1" }, { callId: "call-w2", timeoutMs: 60_000 }],
-      wait: INTERACTIVE,
-    });
-
-    await execution.runTurn(undefined);
-
-    expect(endTaskWaits).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
-      callIds: ["call-w1", "call-w2"],
-      reason: "interrupted",
-    });
-    expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ detachCallIds: ["call-d0"] }),
-    );
-    expect(steps()[1]).toMatchObject({ delivery: STEERING });
-  });
-
-  it("lets a steering message end a task_wait outside an interactive root turn", async () => {
-    const { execution, steps } = setup({
-      calls: ["call-w1"],
-      script: [STEERING],
-      taskWaits: [{ callId: "call-w1" }],
-      wait: { attachedCallIds: [], detachable: false, sleepCallIds: [] },
-    });
-
-    await execution.runTurn(undefined);
-
-    expect(endTaskWaits).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
-      callIds: ["call-w1"],
-      reason: "interrupted",
-    });
-    expect(steps()[1]).toMatchObject({
-      delivery: STEERING,
-      runtimeResults: { results: [expect.objectContaining({ callId: "call-w1" })] },
     });
   });
 });
@@ -342,7 +235,7 @@ type ScriptItem = SessionInboxPayload | "timer";
 /** The next routed message dismisses the dismissible question of `call-ask`. */
 function dismissAsk(): void {
   vi.mocked(answerTaskInput).mockImplementationOnce(async (_cursor, delivery) => ({
-    dismissedTaskIds: [taskIdOf("call-ask")],
+    dismissedCallIds: ["call-ask"],
     kind: "continue",
     remainder: delivery,
   }));
@@ -350,9 +243,9 @@ function dismissAsk(): void {
 
 function setup(input: {
   readonly calls: readonly string[];
+  readonly mode?: "conversation" | "task";
   readonly script: ScriptItem[];
   readonly taskWaits?: readonly TaskWaitRegistration[];
-  readonly wait: TaskWaitPlan;
 }) {
   const sessionState = ownerState();
   const queue = new SessionInputQueue();
@@ -392,7 +285,6 @@ function setup(input: {
     serializedContext: {},
     sessionState,
     taskWaits: input.taskWaits,
-    wait: input.wait,
   });
   const cursor = new SessionStateCursor({
     inbox,
@@ -403,7 +295,7 @@ function setup(input: {
   const execution = new SessionExecution({
     cursor,
     inbox,
-    mode: "conversation",
+    mode: input.mode ?? "conversation",
     queue,
     sessionId: sessionState.sessionId,
   });
@@ -418,12 +310,12 @@ function taskIdOf(callId: string): string {
   return `${callId.replace("call-", "")}-a1b2c3`;
 }
 
-function receipt(callId: string): RuntimeToolResultActionResult {
+function stopped(callId: string): RuntimeToolResultActionResult {
   return {
     callId,
     kind: "tool-result",
-    modelOutput: `receipt: ${taskIdOf(callId)}`,
-    output: { status: "working", taskId: taskIdOf(callId) },
+    modelOutput: `stopped: ${callId}`,
+    output: { status: "interrupted", waitedMs: 1_000 },
     toolName: "lookup",
   };
 }

@@ -424,8 +424,7 @@ describe("deriveRunFacts", () => {
     const receipt = { status: "working", taskId: "researcher-d1" };
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),
-      taskStarted({ callId: "d1", name: "researcher" }),
-      { type: "task.detached", data: { callId: "d1", reason: "steer", taskId: "researcher-d1" } },
+      taskStarted({ callId: "d1", mode: "detached", name: "researcher" }),
       actionResult({ callId: "d1", output: receipt, toolName: "researcher" }),
     ];
 
@@ -451,13 +450,13 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
-  it("keeps a background agent call working past a receipt that follows task.started", () => {
+  it("keeps a remote detached agent call working past a receipt that follows task.started", () => {
     const receipt = { status: "working", taskId: "billing-b1" };
     const facts = derive([
       turnStarted("t1", 0),
       taskStarted({
         callId: "b1",
-        mode: "background",
+        mode: "detached",
         name: "billing",
         remoteUrl: "https://billing.test",
       }),
@@ -473,14 +472,14 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
-  it("records a background agent call that fails before its child starts", () => {
+  it("records a detached agent call that fails before its child starts", () => {
     const error = { code: "START_FAILED", message: "Remote agent billing refused the call." };
     const facts = derive([
       turnStarted("t1", 0),
       actionsRequested([
         {
           callId: "b1",
-          input: { background: true, message: "Refund order 42." },
+          input: { message: "Refund order 42." },
           toolName: "billing",
         },
       ]),
@@ -504,7 +503,7 @@ describe("deriveRunFacts", () => {
         data: {
           callId: "c1",
           kind: "workflow",
-          mode: "foreground",
+          mode: "attached",
           name: "deploy",
           taskId: "deploy-c1",
           turnId: "t1",
@@ -545,7 +544,7 @@ describe("deriveRunFacts", () => {
         data: {
           callId: "c2",
           kind: "workflow",
-          mode: "foreground",
+          mode: "attached",
           name: "deploy",
           taskId: "deploy-c2",
           turnId: "t1",
@@ -758,7 +757,7 @@ describe("deriveRunFacts", () => {
 
 function taskStarted(input: {
   readonly callId: string;
-  readonly mode?: "background" | "foreground";
+  readonly mode?: "attached" | "detached";
   readonly name: string;
   readonly remoteUrl?: string;
 }): UnstampedMessageStreamEvent {
@@ -776,7 +775,7 @@ function taskStarted(input: {
               streamPath: `/eve/v1/session/s0/subagents/${input.callId}/${sessionId}/stream`,
             },
       kind: "agent",
-      mode: input.mode ?? "foreground",
+      mode: input.mode ?? "attached",
       name: input.name,
       taskId: `${input.name}-${input.callId}`,
       turnId: "t1",

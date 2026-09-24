@@ -18,11 +18,10 @@ const FOLLOW_UP = [
  * through its agentId: no second writer starts, and a draft that includes the
  * follow-up arrives. The writer's slow tool keeps it working when the
  * follow-up lands; if it still answers first, eve runs the follow-up as the
- * same agent's next background work, and one more result arrives for it.
+ * same agent's next detached work, and one more result arrives for it.
  */
 export default defineEval({
-  description:
-    "A follow-up for a working background agent is sent to it instead of starting new work.",
+  description: "A follow-up for a working agent is sent to it instead of starting new work.",
   tags: ["real-model"],
   timeoutMs: 300_000,
   async test(t) {
@@ -32,7 +31,7 @@ export default defineEval({
       receiptTaskIds(first, "launch-writer"),
       satisfies(
         (taskIds: readonly string[]) => taskIds.length === 1,
-        "one launch-writer call that returned a background receipt",
+        "one launch-writer call that returned a receipt",
       ),
     );
 

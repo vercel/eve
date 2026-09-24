@@ -32,7 +32,6 @@ import {
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { isInteractiveRootTurn } from "#tasks/interactive.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent } from "#channel/types.js";
@@ -69,7 +68,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
-  /** Who starts these tasks; a background result turn runs as this creator. */
+  /** Who starts these tasks; a detached task's result turn runs as this creator. */
   readonly creator: TaskCreator;
   readonly inheritedConversation: Parameters<
     typeof buildSubagentRunInput
@@ -102,13 +101,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<
-  | (PreparedCoordinationDispatch & {
-      /** Whether a steering message may detach these calls; see {@link isInteractiveRootTurn}. */
-      readonly interactiveRootTurn: boolean;
-    })
-  | undefined
-> {
+}): Promise<PreparedCoordinationDispatch | undefined> {
   const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingCoordinationBatch(durableSession.state);
 
@@ -129,22 +122,14 @@ export async function prepareCoordinationDispatch(input: {
     plan: () => planDispatch({ requests }),
     serializedContext: input.serializedContext,
   });
-  const interactiveRootTurn = isInteractiveRootTurn(ctx, event.sequence);
-  if (event === pending.event) {
-    return { ...prepared, interactiveRootTurn, sessionState: input.sessionState };
-  }
+  if (event === pending.event) return { ...prepared, sessionState: input.sessionState };
 
   const session = setPendingCoordinationBatch({
     ...pending,
     event,
     session: prepared.session,
   });
-  return {
-    ...prepared,
-    interactiveRootTurn,
-    session,
-    sessionState: createDurableSessionState({ session }),
-  };
+  return { ...prepared, session, sessionState: createDurableSessionState({ session }) };
 }
 
 interface DispatchBatch {

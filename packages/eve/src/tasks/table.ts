@@ -103,7 +103,7 @@ export type TaskEffect =
   | {
       /**
        * An agent answered before steering messages reached it, and runs them
-       * as its next turn for the same call: `record` is that new background
+       * as its next turn for the same call: `record` is that new detached
        * generation, already working.
        */
       readonly kind: "continued";
@@ -143,8 +143,7 @@ const EMPTY_TABLE = toTable([]);
 
 /**
  * Reads the table, decoding each record on its own so one bad record never
- * fails the session. Background runs an earlier release left working are
- * lost too.
+ * fails the session. Runs an earlier release left working are lost too.
  */
 export function readTaskTable(state: SessionStateMap | undefined): {
   readonly table: TaskTable;
@@ -304,7 +303,6 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
       creator: input.creator ?? agent.creator,
       deadlineAt,
       delivered: false,
-      detachGroup: undefined,
       generation: agent.generation + 1,
       input: undefined,
       mode: input.mode,
@@ -511,27 +509,6 @@ export function setTaskWait(
   return replaceRecord(table, withoutUndefined({ ...record, wait }));
 }
 
-/**
- * Moves waited tasks to the background. Tasks sharing `detachGroup` deliver
- * their results together; without one, each result is delivered on its own.
- */
-export function detachTasks(
-  table: TaskTable,
-  taskIds: readonly string[],
-  detachGroup?: string,
-): TaskTable {
-  let next = table;
-  for (const taskId of taskIds) {
-    const record = findTask(next, taskId);
-    if (record === undefined || record.mode === "background") continue;
-    next = replaceRecord(
-      next,
-      withoutUndefined({ ...record, detachGroup, mode: "background" as const }),
-    );
-  }
-  return next;
-}
-
 /** Removes records whose children the owner has already ended. */
 export function removeTasks(table: TaskTable, taskIds: ReadonlySet<string>): TaskTable {
   const records = table.records.filter((record) => !taskIds.has(record.id));
@@ -567,7 +544,7 @@ export function issueCommand(
 }
 
 /**
- * The background generation an agent starts when it answered before steering
+ * The detached generation an agent starts when it answered before steering
  * messages reached it. It keeps the call and the time limit of the generation
  * it follows, and its result arrives as a `task.result`.
  */
@@ -586,9 +563,8 @@ function continueAfterMissedSteers(
     delivered: false,
     deadlineAt:
       limitMs === undefined ? undefined : new Date(Date.parse(now) + limitMs).toISOString(),
-    detachGroup: undefined,
     generation: record.generation + 1,
-    mode: "background" as const,
+    mode: "detached" as const,
     startedAt: now,
     status: "working" as const,
     steers: missed,

@@ -19,7 +19,9 @@ export default defineEval({
     resumed.expectOk();
 
     t.succeeded();
-    t.calledTool("workflow", {
+    t.calledTool("workflow", { count: 1 });
+    // The program's call returned a receipt; its result reached the turn's task_wait.
+    t.calledTool("task_wait", {
       count: 1,
       output: /CHILD_HITL_RESULT=.*GENERATED-HITL-MARKER/su,
     });

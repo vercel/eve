@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Client } from "../../src/client/client.js";
-import type { MessageResponse } from "../../src/client/index.js";
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "../../src/protocol/message.js";
+import type { MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
@@ -49,31 +48,9 @@ async function collectFor(
   return events;
 }
 
-/**
- * Follows a turn's response to its boundary, and resolves `reached` once
- * `ready` holds, so the test can send a message while the turn still waits.
- */
-function followTurn(
-  response: MessageResponse,
-  ready: (events: readonly MessageStreamEvent[]) => boolean,
-) {
-  const events: MessageStreamEvent[] = [];
-  const reached = Promise.withResolvers<void>();
-  const finished = (async () => {
-    for await (const event of response) {
-      events.push(event);
-      if (ready(events)) reached.resolve();
-      if (isCurrentTurnBoundaryEvent(event)) break;
-    }
-    reached.reject(new Error(`The turn ended first; saw ${events.map((e) => e.type).join(", ")}`));
-    return events;
-  })();
-  return { finished, reached: reached.promise };
-}
-
-describe("background tasks", () => {
+describe("detached tasks", () => {
   it(
-    "stops background tasks through task_cancel and session.cancel({ taskId }) without a later result",
+    "stops detached tasks through task_cancel and session.cancel({ taskId }) without a later result",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -118,19 +95,17 @@ export default defineAgent({
         const { session, response } = await client.sessions.create({
           message: "Please set my stand-up and lunch reminders.",
         });
-        // A steering message moves both waited calls to the background.
-        const turn = followTurn(
-          response,
-          (events) => events.filter((event) => event.type === "task.started").length === 2,
+        // Both calls start detached and return receipts, so the turn ends at once.
+        const first = (await response.result()).events;
+        const starts = first.flatMap((event) =>
+          event.type === "task.started" ? [event.data] : [],
         );
-        await turn.reached;
-        await (await session.send("Thanks, keep them going.")).result();
-        const first = await turn.finished;
-        const started = first.flatMap((event) =>
-          event.type === "task.started" ? [event.data.taskId] : [],
+        expect(starts.map(({ mode }) => mode)).toEqual(["detached", "detached"]);
+        const started = starts.map(({ taskId }) => taskId);
+        const reply = first.findLast((event) => event.type === "message.completed");
+        expect(reply?.type === "message.completed" ? reply.data.message : "").toBe(
+          "Both reminders keep running.",
         );
-        expect(started).toHaveLength(2);
-        expect(first.filter((event) => event.type === "task.detached")).toHaveLength(2);
 
         const second = await (
           await session.send("Never mind the stand-up reminder, please cancel it.")
@@ -152,8 +127,8 @@ export default defineAgent({
             : [],
         );
         expect(cancelOutputs).toEqual([{ status: "cancelled" }]);
-        const reply = second.events.findLast((event) => event.type === "message.completed");
-        expect(reply?.type === "message.completed" ? reply.data.message : "").toContain(
+        const cancelReply = second.events.findLast((event) => event.type === "message.completed");
+        expect(cancelReply?.type === "message.completed" ? cancelReply.data.message : "").toContain(
           "Cancel result:",
         );
 

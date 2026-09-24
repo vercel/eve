@@ -10,17 +10,10 @@ export function taskStarts(events: SessionEvents, name: string) {
   );
 }
 
-/** The task ids a steering message moved to the background. */
-export function detachedTaskIds(events: SessionEvents): readonly string[] {
-  return events.flatMap((event) =>
-    event.type === "task.detached" && event.data.reason === "steer" ? [event.data.taskId] : [],
-  );
-}
-
 /**
- * The agent ids from background receipts the turn's calls to one agent
- * returned. A background call's `task.started` can land after its turn ends,
- * so the receipt is the turn's own evidence that the call did not wait.
+ * The agent ids from receipts the turn's calls to one agent returned. A
+ * detached call's `task.started` can land after its turn ends, so the
+ * receipt is the turn's own evidence of the call.
  */
 export function receiptTaskIds(turn: EveEvalTurn, name: string): readonly string[] {
   return turn.toolCalls.flatMap((call) => {
@@ -41,7 +34,7 @@ export function taskResultDeliveries(events: SessionEvents): readonly (readonly 
 
 /**
  * Waits for the session's next turn after `turn`, such as the result turn
- * that delivers a background agent's answer. Events the turn already
+ * that delivers a detached agent's answer. Events the turn already
  * published are replayed from the session cursor.
  */
 export async function watchNextTurn(t: EveEvalContext, turn: EveEvalTurn): Promise<EveEvalTurn> {

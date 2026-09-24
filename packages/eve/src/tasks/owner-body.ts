@@ -14,8 +14,6 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
-import type { WaitedTaskChanges } from "#tasks/detach.js";
-import { detachWaitedTasksStep } from "#tasks/detach-step.js";
 import {
   hasOwnPendingInput,
   hasPendingTaskInput,
@@ -28,7 +26,11 @@ import { answerTaskStep, publishTaskInputStep, surfaceTaskInputStep } from "#tas
 import type { TaskDeadlineSignal, TaskInputEvent } from "#tasks/protocol.js";
 import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
-import { cancelTasksStep, type TaskCancelSelector } from "#tasks/cancel.js";
+import {
+  cancelTasksStep,
+  interruptAttachedCallsStep,
+  type TaskCancelSelector,
+} from "#tasks/cancel.js";
 import {
   applyTaskReportStep,
   startAgentTasksStep,
@@ -183,8 +185,8 @@ export async function settleWorkflowTask(
 }
 
 /**
- * Cancels the agent tasks and workflow tool calls the active turn is waiting
- * on, without waiting for their children to stop.
+ * Cancels the attached calls the active turn holds, and the agent tasks their
+ * workflow bodies await, without waiting for their children to stop.
  */
 export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<void> {
   await cancelTasks(cursor, { kind: "active-turn" });
@@ -230,18 +232,19 @@ export async function endTaskWaits(
 }
 
 /**
- * Detaches or ends waited calls after a steering message or a detach timer.
- * Returns their tool results: receipts for detached calls, and the time
- * waited for each `sleep` that ended early.
+ * Ends the given attached calls of the active turn after a steering message,
+ * or after a dismissed call's grace period: a `task_wait` returns
+ * `interrupted`, and an attached workflow tool is cancelled. Returns their
+ * tool results. Detached tasks keep working.
  */
-export async function interruptWaitedTasks(
+export async function interruptAttachedCalls(
   cursor: SessionStateCursor,
-  changes: WaitedTaskChanges,
+  callIds: readonly string[],
 ): Promise<readonly RuntimeToolResultActionResult[]> {
   return await applyTaskOwnerUpdate(
     cursor,
-    await detachWaitedTasksStep({
-      ...changes,
+    await interruptAttachedCallsStep({
+      callIds,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }),
@@ -315,8 +318,8 @@ export type TaskAnswerRouting =
       readonly kind: "continue";
       /** What stays with this session; `undefined` when the answers used up the delivery. */
       readonly remainder: DeliverHookPayload | undefined;
-      /** Tasks whose dismissible question a person's message dismissed. */
-      readonly dismissedTaskIds?: readonly string[];
+      /** Calls whose task's dismissible question a person's message dismissed. */
+      readonly dismissedCallIds?: readonly string[];
     };
 
 /**
@@ -350,10 +353,10 @@ export async function answerTaskInput(
     await publishTaskInput(cursor, sent.flat());
   }
   if (plan.cancelTurn) return { kind: "cancel-turn" };
-  const dismissedTaskIds = plan.answers.flatMap((answers) =>
-    answers.dismissed.length === 0 ? [] : [answers.record.id],
+  const dismissedCallIds = plan.answers.flatMap((answers) =>
+    answers.dismissed.length === 0 ? [] : [answers.record.callId],
   );
-  return { dismissedTaskIds, kind: "continue", remainder: plan.remainder };
+  return { dismissedCallIds, kind: "continue", remainder: plan.remainder };
 }
 
 /**

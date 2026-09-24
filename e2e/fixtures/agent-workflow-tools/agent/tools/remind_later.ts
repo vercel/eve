@@ -3,8 +3,8 @@ import { sleep } from "workflow";
 import { z } from "zod";
 
 /**
- * Reminds the user after a delay. A steering message moves a waited call to
- * the background, and the reminder then arrives as a task result.
+ * Reminds the user after a delay. Each call starts a detached task, and the
+ * reminder arrives later as a task result.
  */
 export default defineWorkflowTool({
   description: "Remind the user about a note after the given number of seconds.",

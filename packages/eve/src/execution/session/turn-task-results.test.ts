@@ -102,7 +102,7 @@ describe("background results inside an active turn", () => {
   });
 
   it("lets a task-mode run park while its background tasks are outstanding", async () => {
-    const working = createTaskRecord({ kind: "workflow", mode: "background", name: "remind" });
+    const working = createTaskRecord({ kind: "workflow", mode: "detached", name: "remind" });
     const sessionState = ownerState(taskTableState([working]));
     const settled = { output: "Started the reminder." };
     vi.mocked(turnStep).mockResolvedValueOnce({

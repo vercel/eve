@@ -36,7 +36,7 @@ async function collectUntil(
   return events;
 }
 
-describe("background agent calls", () => {
+describe("detached agent calls", () => {
   it(
     "returns a receipt, steers the working agent with agentId, and reports one result later",
     async () => {
@@ -56,11 +56,7 @@ export default defineAgent({
       return { toolCalls: [{ name: "writer", input: { agentId, message: "Also mention the pricing." } }] };
     }
     if (toolResults.length === 0) {
-      return {
-        toolCalls: [
-          { name: "writer", input: { background: true, message: "Draft the launch post." } },
-        ],
-      };
+      return { toolCalls: [{ name: "writer", input: { message: "Draft the launch post." } }] };
     }
     return "Started the draft.";
   }),
@@ -171,7 +167,7 @@ export default defineWorkflowTool({
         expect(starts).toHaveLength(1);
         expect(starts[0]).toMatchObject({
           kind: "agent",
-          mode: "background",
+          mode: "detached",
           name: "writer",
           taskId,
         });

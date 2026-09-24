@@ -10,6 +10,7 @@ import { describePlan } from "../lib/plan.ts";
  * a timeout instead of parking forever.
  */
 export default defineWorkflowTool({
+  attached: true,
   description: "Ask for deploy approval, but give up if no one answers in time.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {

@@ -385,7 +385,7 @@ describe("dispatchCoordinationStep", () => {
     ]);
   });
 
-  it("starts each workflow tool call as a task and announces it", async () => {
+  it("starts each workflow tool call as a detached task, announces it, and returns its receipt", async () => {
     mockWorkflowToolBundle();
     startMock.mockResolvedValue({ runId: "workflow-run" });
     installSessionStoreMocks([workflowToolBatch("turn_0")]);
@@ -399,18 +399,26 @@ describe("dispatchCoordinationStep", () => {
       callId: "call-1",
       child: { commandToken: expect.any(String), kind: "workflow", runId: "workflow-run" },
       kind: "workflow",
-      mode: "foreground",
+      mode: "detached",
       name: "research",
       status: "working",
       turnId: "turn_0",
     });
-    expect(result.results).toEqual([]);
+    expect(result.results).toEqual([
+      {
+        callId: "call-1",
+        kind: "tool-result",
+        modelOutput: `Started task ${record!.id}. Use task_wait for its result.`,
+        output: { status: "working", taskId: record!.id },
+        toolName: "research",
+      },
+    ]);
     expect(result.events).toEqual([
       {
         data: {
           callId: "call-1",
           kind: "workflow",
-          mode: "foreground",
+          mode: "detached",
           name: "research",
           taskId: record!.id,
           turnId: "turn_0",
@@ -420,11 +428,11 @@ describe("dispatchCoordinationStep", () => {
     ]);
   });
 
-  it("starts no second run when the same batch is dispatched again", async () => {
+  it("starts no second run when the same batch is dispatched again, and repeats the receipt", async () => {
     mockWorkflowToolBundle();
     startMock.mockResolvedValue({ runId: "workflow-run" });
     installSessionStoreMocks([workflowToolBatch("turn_0")]);
-    await dispatchWorkflowTools();
+    const first = await dispatchWorkflowTools();
     const persisted = vi.mocked(createDurableSessionState).mock.calls.at(-1)![0].session;
     installSessionStoreMocks([persisted as never]);
 
@@ -432,7 +440,7 @@ describe("dispatchCoordinationStep", () => {
 
     expect(startMock).toHaveBeenCalledOnce();
     expect(replayed.events).toEqual([]);
-    expect(replayed.results).toEqual([]);
+    expect(replayed.results).toEqual(first.results);
   });
 
   it("returns a start failure as the call's error and settles its task START_FAILED", async () => {
@@ -1511,7 +1519,7 @@ describe("turnStep", () => {
       creator: encodeTaskCreator({ auth: null }),
       id: "remind-q4x1ze",
       kind: "workflow",
-      mode: "background",
+      mode: "detached",
       name: "remind",
       status: "completed",
     });

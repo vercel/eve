@@ -5,16 +5,16 @@
   "description": "Session streams recorded from real eve runs with scripted mock models. Each file holds one session's events, one JSON object per line, exactly as session.stream() yields them, with run-specific IDs, timestamps, versions, and origins replaced by stable placeholders.",
   "fixtures": [
     {
-      "name": "foreground-agent-call",
-      "description": "A waited agent call: task.started with a local child, then task.settled completed; the answer is the call's tool result.",
-      "file": "foreground-agent-call.ndjson",
+      "name": "agent-call-wait",
+      "description": "An agent call waited on with task_wait: the call returns a receipt, task.started with a local child, then task.settled completed; the answer is the task_wait call's tool result.",
+      "file": "agent-call-wait.ndjson",
       "sessionId": "session-root",
       "tasks": [
         {
           "name": "researcher",
           "taskId": "researcher-000001",
           "kind": "agent",
-          "mode": "foreground",
+          "mode": "detached",
           "status": "completed",
           "generations": 1,
           "remote": false,
@@ -24,48 +24,16 @@
       ]
     },
     {
-      "name": "background-agent-call",
-      "description": "An agent call with background: true: the call returns a receipt, the turn ends, and the answer arrives later as a task.result input that starts a result turn. The child's task.started can land before or after the first turn ends.",
-      "file": "background-agent-call.ndjson",
+      "name": "agent-call-result-turn",
+      "description": "An agent call the model does not wait on: the call returns a receipt, the turn ends, and the answer arrives later as a task.result input that starts a result turn. The child's task.started can land before or after the first turn ends.",
+      "file": "agent-call-result-turn.ndjson",
       "sessionId": "session-root",
       "tasks": [
         {
           "name": "writer",
           "taskId": "writer-000001",
           "kind": "agent",
-          "mode": "background",
-          "status": "completed",
-          "generations": 1,
-          "remote": false,
-          "inputRequests": 0,
-          "delivered": true
-        }
-      ]
-    },
-    {
-      "name": "detach-on-steer",
-      "description": "Two waited workflow tool calls detached by a steering message: task.detached with reason steer for each, receipts as their tool results, and both results delivered together in one task.result input.",
-      "file": "detach-on-steer.ndjson",
-      "sessionId": "session-root",
-      "tasks": [
-        {
-          "name": "lookup",
-          "taskId": "lookup-000001",
-          "kind": "workflow",
-          "mode": "foreground",
-          "detached": "steer",
-          "status": "completed",
-          "generations": 1,
-          "remote": false,
-          "inputRequests": 0,
-          "delivered": true
-        },
-        {
-          "name": "lookup",
-          "taskId": "lookup-000002",
-          "kind": "workflow",
-          "mode": "foreground",
-          "detached": "steer",
+          "mode": "detached",
           "status": "completed",
           "generations": 1,
           "remote": false,
@@ -76,7 +44,7 @@
     },
     {
       "name": "task-cancel",
-      "description": "A waited workflow tool call that a steering message moved to the background, then stopped by the model with task_cancel: the tool result is { status: \"cancelled\" }, task.settled reports cancelled, and no result is ever delivered.",
+      "description": "A workflow tool call that returned a receipt, then stopped by the model with task_cancel in a later turn: the task_cancel result is { status: \"cancelled\" }, task.settled reports cancelled, and no result is ever delivered.",
       "file": "task-cancel.ndjson",
       "sessionId": "session-root",
       "tasks": [
@@ -84,8 +52,7 @@
           "name": "remind",
           "taskId": "remind-000001",
           "kind": "workflow",
-          "mode": "foreground",
-          "detached": "steer",
+          "mode": "detached",
           "status": "cancelled",
           "generations": 1,
           "remote": false,
@@ -96,7 +63,7 @@
     },
     {
       "name": "agent-timed-out",
-      "description": "A waited agent call still working at its timeout: task.settled failed with error code TIMED_OUT, which is also the call's tool result.",
+      "description": "An agent call waited on with task_wait and still working at its timeout: task.settled failed with error code TIMED_OUT, which is also the task_wait call's result.",
       "file": "agent-timed-out.ndjson",
       "sessionId": "session-root",
       "tasks": [
@@ -104,7 +71,7 @@
           "name": "auditor",
           "taskId": "auditor-000001",
           "kind": "agent",
-          "mode": "foreground",
+          "mode": "detached",
           "status": "failed",
           "errorCode": "TIMED_OUT",
           "generations": 1,
@@ -116,7 +83,7 @@
     },
     {
       "name": "remote-agent-input-request",
-      "description": "A waited call to a remote agent whose tool needs approval: task.started with child.remote, the approval proxied onto the caller's stream as input.requested with the call's taskId, the child's input.resolved once it takes the answer, then task.settled completed.",
+      "description": "A call to a remote agent waited on with task_wait, whose tool needs approval: task.started with child.remote, the approval proxied onto the caller's stream as input.requested with the call's taskId, the child's input.resolved once it takes the answer, then task.settled completed and the wait returns the result.",
       "file": "remote-agent-input-request.ndjson",
       "sessionId": "session-root",
       "tasks": [
@@ -124,7 +91,7 @@
           "name": "billing",
           "taskId": "billing-000001",
           "kind": "agent",
-          "mode": "foreground",
+          "mode": "detached",
           "status": "completed",
           "generations": 1,
           "remote": true,

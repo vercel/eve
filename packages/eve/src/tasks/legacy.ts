@@ -54,7 +54,7 @@ function readLegacyRun(value: unknown): LegacyTaskLoss | undefined {
     generation: 1,
     id,
     kind: metadata.kind === "tool" ? "workflow" : "agent",
-    mode: "background",
+    mode: "detached",
     name,
     reason: LEGACY_REASON,
   };

@@ -7,6 +7,7 @@ import { z } from "zod";
  * cancellation cascading into a workflow tool run.
  */
 export default defineWorkflowTool({
+  attached: true,
   description: "Hold a deploy open until cancelled.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }) {

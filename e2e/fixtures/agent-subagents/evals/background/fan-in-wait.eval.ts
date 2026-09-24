@@ -10,12 +10,12 @@ const REQUEST = [
 ].join(" ");
 
 /**
- * Answers the user needs together stay in the foreground: both forecaster
- * calls are made in the same step without background, and the turn replies
- * with the comparison instead of a receipt.
+ * Answers the user needs together are waited on: both forecaster calls start
+ * as detached tasks in the same step, the model waits on both with task_wait
+ * in the next step, and the turn replies with the comparison.
  */
 export default defineEval({
-  description: "A request that needs two answers together keeps both agent calls waited.",
+  description: "A request that needs two answers together waits on both agent tasks.",
   tags: ["real-model"],
   timeoutMs: 180_000,
   async test(t) {
@@ -26,8 +26,8 @@ export default defineEval({
       taskStarts(turn.events, "forecaster"),
       satisfies(
         (calls: ReturnType<typeof taskStarts>) =>
-          calls.length === 2 && calls.every((call) => call.mode === "foreground"),
-        "both forecaster calls wait in the foreground",
+          calls.length === 2 && calls.every((call) => call.mode === "detached"),
+        "both forecaster calls start as detached tasks",
       ),
     );
     turn
@@ -37,6 +37,17 @@ export default defineEval({
             event.type === "actions.requested" &&
             event.data.actions.filter(
               (action) => "toolName" in action && action.toolName === "forecaster",
+            ).length === 2,
+        ),
+      )
+      .soft();
+    turn
+      .eventsSatisfy("both tasks are waited on with task_wait in the same step", (events) =>
+        events.some(
+          (event) =>
+            event.type === "actions.requested" &&
+            event.data.actions.filter(
+              (action) => "toolName" in action && action.toolName === "task_wait",
             ).length === 2,
         ),
       )

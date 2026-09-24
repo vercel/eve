@@ -235,16 +235,15 @@ Each eve release ships recorded task streams in the package, so you can replay r
 
 | File                                | Covers                                                                                    |
 | ----------------------------------- | ----------------------------------------------------------------------------------------- |
-| `foreground-agent-call.ndjson`      | A waited agent call that completes                                                        |
-| `background-agent-call.ndjson`      | An agent call with `background: true`: a receipt, then a result turn                      |
-| `detach-on-steer.ndjson`            | Two waited workflow tool calls detached by one steering message, delivered together       |
-| `task-cancel.ndjson`                | A background task stopped with `task_cancel`                                              |
-| `agent-timed-out.ndjson`            | A waited agent call that fails with `TIMED_OUT`                                           |
+| `agent-call-wait.ndjson`            | An agent call that returns a receipt, then its result through `task_wait`                 |
+| `agent-call-result-turn.ndjson`     | An agent call that returns a receipt, then its result in a result turn                    |
+| `task-cancel.ndjson`                | A workflow tool task stopped with `task_cancel`                                           |
+| `agent-timed-out.ndjson`            | An agent call waited on with `task_wait` that fails with `TIMED_OUT`                      |
 | `remote-agent-input-request.ndjson` | A remote agent call whose approval appears as `input.requested`, then as `input.resolved` |
 
-`manifest.json` records the `streamVersion` to serve the files with as `x-eve-stream-version`, the `taskProtocolVersion`, and, for each fixture, its `file`, `sessionId`, and the task states a consumer should derive from it: `taskId`, `name`, `kind`, `mode`, `detached`, `status`, `errorCode`, `generations`, `remote`, `inputRequests`, and `delivered`.
+`manifest.json` records the `streamVersion` to serve the files with as `x-eve-stream-version`, the `taskProtocolVersion`, and, for each fixture, its `file`, `sessionId`, and the task states a consumer should derive from it: `taskId`, `name`, `kind`, `mode`, `status`, `errorCode`, `generations`, `remote`, `inputRequests`, and `delivered`.
 
-eve records the fixtures from real runs with mock models, and its test suite fails when a fresh recording no longer matches them, so they describe the release they ship in. Session, turn, task, request, and delivery IDs, timestamps, trace IDs, the eve version, and deployment origins are replaced with stable placeholders such as `session-root`, `turn-1`, `researcher-000001`, and `https://billing.example`. The replacements are consistent within a file, so references such as `child.streamPath` still match. Events keep their recorded order, except that where a background child's `task.started` lands relative to its turn varies between runs, so a consumer must not depend on it. The `v1` directory changes only when the file layout changes; compare `streamVersion` and `taskProtocolVersion` with the versions your consumer supports.
+eve records the fixtures from real runs with mock models, and its test suite fails when a fresh recording no longer matches them, so they describe the release they ship in. Session, turn, task, request, and delivery IDs, timestamps, trace IDs, the eve version, and deployment origins are replaced with stable placeholders such as `session-root`, `turn-1`, `researcher-000001`, and `https://billing.example`. The replacements are consistent within a file, so references such as `child.streamPath` still match. Events keep their recorded order, except that where a detached child's `task.started` lands relative to its turn varies between runs, so a consumer must not depend on it. The `v1` directory changes only when the file layout changes; compare `streamVersion` and `taskProtocolVersion` with the versions your consumer supports.
 
 ```ts
 import { readFile } from "node:fs/promises";

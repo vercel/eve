@@ -17,8 +17,11 @@ export const TASK_PROTOCOL_MISMATCH = "TASK_PROTOCOL_MISMATCH";
 
 export type TaskKind = "agent" | "workflow";
 
-/** Whether the owner's turn waits for the result (`foreground`) or not (`background`). */
-export type TaskMode = "foreground" | "background";
+/**
+ * `attached`: the turn, or a workflow body's `ctx.agent`, awaits the result.
+ * `detached`: the call returned a receipt, and steering never stops the task.
+ */
+export type TaskMode = "attached" | "detached";
 
 export type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
 

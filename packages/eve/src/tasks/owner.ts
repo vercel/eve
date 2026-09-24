@@ -4,7 +4,6 @@ import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#ch
 import type { ContextContainer } from "#context/container.js";
 import { deserializeContext } from "#context/serialize.js";
 import { prepareActionDispatch } from "#execution/coordination-dispatch-shared.js";
-import { isInteractiveRootTurn } from "#tasks/interactive.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -40,7 +39,7 @@ import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { AGENT_UNREACHABLE, EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { renderAgentUnreachable } from "#tasks/render.js";
-import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
+import { startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
 import { flushHeldCommands, steerWorkingAgent } from "#tasks/steer.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
@@ -107,9 +106,8 @@ export interface AgentTaskCall {
   readonly callId: string;
   readonly input: InternalAgentInput;
   readonly toolName?: string;
+  /** Set for `ctx.agent`: the workflow body awaits the result. A model's call is detached. */
   readonly workflowCaller?: TaskRecord["workflowCaller"];
-  /** The model asked not to wait (`background: true`); honored only in interactive root turns. */
-  readonly background?: boolean;
 }
 
 /** A result owed to a `ctx.agent` caller. */
@@ -182,8 +180,6 @@ export async function startAgentTasks(input: {
   // question clears the live one, so a turn cancel still reaches these tasks.
   const pendingEvent = getPendingCoordinationBatch(durableSession.state)?.event;
   const turnId = pendingEvent?.turnId ?? activeTurnId(emission);
-  // Elsewhere, and in a turn a schedule started, `background: true` waits like any call.
-  const backgroundAllowed = isInteractiveRootTurn(ctx, pendingEvent?.sequence ?? emission.sequence);
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -269,8 +265,7 @@ export async function startAgentTasks(input: {
     const name = action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
     const agentId = readAgentId(action);
     const toolName = call.toolName ?? call.input.target;
-    const background =
-      call.background === true && call.workflowCaller === undefined && backgroundAllowed;
+    const detached = call.workflowCaller === undefined;
     let table = getTaskTable(session);
     const otherPrincipal = rejectOtherPrincipal({ agentId, caller: prepared.auth, table });
     if (otherPrincipal !== undefined) {
@@ -282,7 +277,7 @@ export async function startAgentTasks(input: {
       callId: call.callId,
       creator: encodeTaskCreator(prepared.creator),
       kind: "agent",
-      mode: background ? "background" : "foreground",
+      mode: detached ? "detached" : "attached",
       name,
       nodeId: action.nodeId,
       now: input.now,
@@ -292,9 +287,9 @@ export async function startAgentTasks(input: {
       workflowCaller: call.workflowCaller,
     });
     if (started.kind === "existing") {
-      // A replayed call already started its child; a background call still owes its receipt.
-      if (started.record.mode === "background" && call.workflowCaller === undefined) {
-        results.push(backgroundReceiptResult(started.record, toolName));
+      // A replayed call already started its child; a detached call still owes its receipt.
+      if (started.record.mode === "detached" && detached) {
+        results.push(startReceiptResult(started.record, toolName));
       }
       continue;
     }
@@ -323,16 +318,13 @@ export async function startAgentTasks(input: {
       results.push(steered.result);
       continue;
     }
-    if (background) {
-      const rejected = tooManyBackgroundTasksResult({
-        callId: call.callId,
-        table,
-        toolName,
-      });
-      if (rejected !== undefined) {
-        results.push(rejected);
-        continue;
-      }
+    // Over the cap, the start commits nothing, whether a new agent or an idle one.
+    const rejected = detached
+      ? tooManyTasksResult({ callId: call.callId, table, toolName })
+      : undefined;
+    if (rejected !== undefined) {
+      results.push(rejected);
+      continue;
     }
     const { record } = started;
     table = started.table;
@@ -446,7 +438,7 @@ export async function startAgentTasks(input: {
         }),
       );
     }
-    if (background) results.push(backgroundReceiptResult(record, toolName));
+    if (detached) results.push(startReceiptResult(record, toolName));
   }
 
   // New agents are the only way idle agents accumulate, so retiring here bounds them.
@@ -599,14 +591,14 @@ export async function applyTaskReport(input: {
       const settledEffect = applied.effects.find((effect) => effect.kind === "settled");
       if (settledEffect === undefined) continue;
       events.push(...settledEvents(applied.effects));
-      // A waited call's result is delivered now; a background one goes to a
+      // An awaited call's result is delivered now; a detached one goes to a
       // live `task_wait`, or is held for delivery.
-      const background = record.mode === "background" && record.workflowCaller === undefined;
+      const detached = record.mode === "detached" && record.workflowCaller === undefined;
       let next = setTaskTable(
         session,
-        background ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
+        detached ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
       );
-      if (background) {
+      if (detached) {
         const routed = routeDetachedResult(next, settledEffect.record, outcome);
         next = routed.session;
         if (routed.result !== undefined) results.push(routed.result);
@@ -629,7 +621,7 @@ export async function applyTaskReport(input: {
       );
       if (record.workflowCaller !== undefined) {
         replies.push({ replyTo: record.workflowCaller.replyTo, result });
-      } else if (!background) {
+      } else if (!detached) {
         results.push(toToolResult(record, result, outcome));
       }
     }

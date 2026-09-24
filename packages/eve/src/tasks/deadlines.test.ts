@@ -534,7 +534,7 @@ describe("applyTaskDeadlines", () => {
       generation: 2,
       id: "old-abc234",
       kind: "workflow",
-      mode: "background",
+      mode: "detached",
       name: "old",
       v: 0,
     });
@@ -573,7 +573,7 @@ describe("applyTaskDeadlines", () => {
     const waited = await applyLost(undefined, {
       callId: "call-9",
       id: "old-abc234",
-      mode: "foreground",
+      mode: "attached",
       name: "old",
       v: 0,
     });
@@ -584,7 +584,7 @@ describe("applyTaskDeadlines", () => {
     const nested = await applyLost(undefined, {
       callId: "call-9",
       id: "old-abc234",
-      mode: "foreground",
+      mode: "attached",
       name: "old",
       v: 0,
       workflowCaller: { replyTo: "reply-hook", runId: "run-1" },
@@ -685,7 +685,7 @@ describe("applyTaskDeadlines", () => {
       // so the owner applied that answer and started the call's next
       // generation for the second message.
       const table = applyTaskMessage(
-        taskTable([{ ...remote, mode: "background" as const, steers: 2 }]),
+        taskTable([{ ...remote, mode: "detached" as const, steers: 2 }]),
         {
           answer: 2,
           generation: 1,

@@ -36,21 +36,14 @@ import {
   applyTaskReport,
   cancelTurnDescendants,
   endTaskWaits,
-  interruptWaitedTasks,
+  interruptAttachedCalls,
   startPendingAgentTasks,
 } from "#tasks/owner-body.js";
 import { hasPendingTaskInput } from "#tasks/input.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
-import {
-  DISMISSED_CALL_GRACE_MS,
-  resolveWaitInterruption,
-  steeringInterruptsWait,
-  type TaskWaitPlan,
-  type WaitInterruption,
-} from "#tasks/detach.js";
 import type { TaskWaitRegistration } from "#tasks/wait.js";
-import { WaitTimers } from "#tasks/wait-timers.js";
-import { hasPendingBackgroundWork } from "#tasks/results.js";
+import { DISMISSED_CALL_GRACE_MS, WaitTimers } from "#tasks/wait-timers.js";
+import { hasPendingDetachedWork } from "#tasks/results.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -165,7 +158,6 @@ export class SessionExecution {
           pendingCallIds,
           taskWaits: dispatched.taskWaits ?? [],
           turn,
-          wait: dispatched.wait,
         });
         if (runtimeResults === "cancelled") return await this.finishCancelledTurn();
         // Steering accepted during the wait joins the same step as the results,
@@ -179,9 +171,9 @@ export class SessionExecution {
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
           this.input.mode === "conversation" ||
-          // A task-mode run waits for its background tasks, then a result turn ends it.
+          // A task-mode run waits for its detached tasks, then a result turn ends it.
           (result.settled !== undefined &&
-            hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state));
+            hasPendingDetachedWork(cursor.sessionState.snapshot.session.state));
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
@@ -212,11 +204,12 @@ export class SessionExecution {
   }
 
   /**
-   * Waits for every call in the batch. A `task_wait` ends at its timeout,
-   * and a steering message ends every `task_wait` still waiting. In an
-   * interactive root turn, a steering message also detaches the other calls
-   * still waiting, except attached ones; in any session, it ends a waited
-   * `sleep`. Each such call resolves at once with its own tool result.
+   * Waits for every call in the batch; detached calls already returned their
+   * receipts. A `task_wait` ends at its timeout. A steering message, in any
+   * session, ends every attached call still in flight (a `task_wait` returns
+   * `interrupted`, an attached workflow tool is cancelled), except calls whose
+   * question it dismissed: those resolve on their own, or are stopped after
+   * a grace period. Each ended call resolves at once with its own tool result.
    */
   private async waitForRuntimeActionResults(input: {
     readonly initialAcceptedAtMs: number | undefined;
@@ -224,8 +217,8 @@ export class SessionExecution {
     readonly pendingCallIds: readonly string[];
     readonly taskWaits: readonly TaskWaitRegistration[];
     readonly turn: ActiveTurn;
-    readonly wait: TaskWaitPlan | undefined;
   }): Promise<RuntimeActionResultStepInput | "cancelled"> {
+    const { cursor } = this.input;
     const results: RuntimeActionResult[] = [...input.initialResults];
     const acceptedAtMsByCallId = new Map<string, number>();
     if (input.initialAcceptedAtMs !== undefined) {
@@ -234,9 +227,7 @@ export class SessionExecution {
     }
     const unresolved = () =>
       input.pendingCallIds.filter((callId) => !results.some((result) => result.callId === callId));
-    const { wait } = input;
     const waitCallIds = new Set(input.taskWaits.map(({ callId }) => callId));
-    const steer = waitCallIds.size > 0 || (wait !== undefined && steeringInterruptsWait(wait));
     const timers = new WaitTimers(
       input.taskWaits.flatMap(({ callId, timeoutMs }) =>
         timeoutMs === undefined || !unresolved().includes(callId) ? [] : [{ callId, timeoutMs }],
@@ -248,9 +239,8 @@ export class SessionExecution {
       for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
       timers.disarm(accepted.map((result) => result.callId));
     };
-    // Calls a steering message left waiting because it dismissed their
-    // question, mapped to the call that names the message's detach group.
-    const dismissed = new Map<string, string>();
+    // Calls a steering message left running because it dismissed their question.
+    const dismissed = new Set<string>();
 
     while (true) {
       const ready = resolveRuntimeActionResultsForCallIds({
@@ -266,49 +256,43 @@ export class SessionExecution {
         };
       }
 
-      const next = await input.turn.nextRuntimeEvent({ steer, timer: timers.next() });
+      const next = await input.turn.nextRuntimeEvent({ timer: timers.next() });
       if (next === "cancelled") return next;
       if (next.kind === "runtime-action-result") {
         accept(next.results);
         continue;
       }
-      if (next.kind === "timeout") timers.disarm([next.callId]);
-      // A timeout ends its own `task_wait`; a steering message ends every one
-      // still waiting. The tasks keep working.
-      const endedWaits = unresolved().filter(
-        (callId) => waitCallIds.has(callId) && (next.kind === "steer" || callId === next.callId),
-      );
-      if (endedWaits.length > 0) {
+      if (next.kind === "timeout") {
+        timers.disarm([next.callId]);
+        if (!unresolved().includes(next.callId)) continue;
+        // A timeout ends its own `task_wait`, and stops a dismissed call past its grace period.
         accept(
-          await endTaskWaits(this.input.cursor, {
-            callIds: endedWaits,
-            reason: next.kind === "steer" ? "interrupted" : "timed_out",
-          }),
+          waitCallIds.has(next.callId)
+            ? await endTaskWaits(cursor, { callIds: [next.callId], reason: "timed_out" })
+            : await interruptAttachedCalls(cursor, [next.callId]),
         );
+        continue;
       }
-      const changes =
-        wait === undefined
-          ? undefined
-          : resolveWaitInterruption({
-              dismissed,
-              interruption: next,
-              plan: wait,
-              unresolvedCallIds: unresolved().filter((callId) => !waitCallIds.has(callId)),
-            });
-      if (changes === undefined) continue;
-      accept(await interruptWaitedTasks(this.input.cursor, changes));
-      // A dismissed call that keeps working past its grace period detaches
-      // with the rest of the group, so the message never waits on it.
-      const { groupCallId } = changes;
-      if (changes.keepTaskIds.length === 0 || groupCallId === undefined) continue;
-      for (const callId of changes.detachCallIds) {
+      for (const callId of next.dismissedCallIds) {
         if (dismissed.has(callId) || !unresolved().includes(callId)) continue;
-        dismissed.set(callId, groupCallId);
+        dismissed.add(callId);
         timers.arm(callId, DISMISSED_CALL_GRACE_MS);
       }
+      const ended = unresolved().filter((callId) => !dismissed.has(callId));
+      if (ended.length > 0) accept(await interruptAttachedCalls(cursor, ended));
     }
   }
 }
+
+/** What interrupted a runtime wait. */
+type WaitInterruption =
+  | {
+      /** A steering message, with the calls whose dismissible question it dismissed. */
+      readonly kind: "steer";
+      readonly dismissedCallIds: readonly string[];
+    }
+  /** A `task_wait` timeout, or a dismissed call's grace period. */
+  | { readonly kind: "timeout"; readonly callId: string };
 
 interface RuntimeResultEvent {
   readonly kind: "runtime-action-result";
@@ -331,7 +315,7 @@ type RuntimeEvent = RuntimeResultEvent | WaitInterruption | "cancelled";
 class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
-  /** Tasks whose question each routed delivery dismissed, by admission sequence. */
+  /** Calls whose question each routed delivery dismissed, by admission sequence. */
   private readonly dismissedBy = new Map<number, readonly string[]>();
   /** Steering deliveries that already interrupted a runtime wait. */
   private readonly interruptedBy = new Set<number>();
@@ -420,25 +404,23 @@ class ActiveTurn {
   }
 
   /**
-   * Next runtime result, admitting inbox traffic while waiting. With `steer`,
-   * a steering message that remains after routing interrupts the wait once;
-   * results the owner already produced come first. `timer` interrupts the
-   * wait unless an inbox payload was accepted first.
+   * Next runtime result, admitting inbox traffic while waiting. A steering
+   * message that remains after routing interrupts the wait once; results the
+   * owner already produced come first. `timer` interrupts the wait unless an
+   * inbox payload was accepted first.
    */
   async nextRuntimeEvent(
-    options: { readonly steer?: boolean; readonly timer?: Promise<string> } = {},
+    options: { readonly timer?: Promise<string> } = {},
   ): Promise<RuntimeEvent> {
     while (true) {
       if (this.signal.aborted) return "cancelled";
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
-      if (options.steer === true) {
-        // Deliveries admitted at the step boundary may answer a question first.
-        await this.routeAdmittedToChildren();
-        if (this.signal.aborted) return "cancelled";
-        const steering = this.takeWaitSteering();
-        if (steering !== undefined) return steering;
-      }
+      // Deliveries admitted at the step boundary may answer a question first.
+      await this.routeAdmittedToChildren();
+      if (this.signal.aborted) return "cancelled";
+      const steering = this.takeWaitSteering();
+      if (steering !== undefined) return steering;
       const payload =
         options.timer === undefined
           ? await this.input.inbox.next()
@@ -457,7 +439,7 @@ class ActiveTurn {
    * never steers.
    */
   private takeWaitSteering(): WaitInterruption | undefined {
-    const dismissedTaskIds: string[] = [];
+    const dismissedCallIds: string[] = [];
     let steered = false;
     for (const sequence of this.admitted) {
       if (this.interruptedBy.has(sequence) || !this.routedToChildren.has(sequence)) continue;
@@ -470,10 +452,10 @@ class ActiveTurn {
         continue;
       }
       this.interruptedBy.add(sequence);
-      dismissedTaskIds.push(...(this.dismissedBy.get(sequence) ?? []));
+      dismissedCallIds.push(...(this.dismissedBy.get(sequence) ?? []));
       steered = true;
     }
-    return steered ? { dismissedTaskIds, kind: "steer" } : undefined;
+    return steered ? { dismissedCallIds, kind: "steer" } : undefined;
   }
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
@@ -504,8 +486,8 @@ class ActiveTurn {
         return;
       }
       case "workflow": {
-        // Handled on admission, even between model steps: a background run's
-        // outcome, question, or progress must not wait for a foreground wait.
+        // Handled on admission, even between model steps: a detached run's
+        // outcome, question, or progress must not wait for a runtime wait.
         const result = await handleWorkflowToolRunMessage({
           cursor: this.input.cursor,
           message: admitted.message,
@@ -565,8 +547,8 @@ class ActiveTurn {
         this.abort();
         return;
       }
-      if (routed.dismissedTaskIds !== undefined) {
-        this.dismissedBy.set(sequence, routed.dismissedTaskIds);
+      if (routed.dismissedCallIds !== undefined) {
+        this.dismissedBy.set(sequence, routed.dismissedCallIds);
       }
       this.input.queue.replaceDelivery(sequence, routed.remainder);
       if (routed.remainder === undefined) this.admitted.delete(sequence);

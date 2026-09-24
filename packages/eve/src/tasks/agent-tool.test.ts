@@ -14,19 +14,31 @@ function request(input: RuntimeWorkflowTaskRequest["input"]): RuntimeWorkflowTas
 }
 
 describe("agentTaskCallFromRequest", () => {
-  it("keeps background on the call and out of the agent's input", () => {
-    expect(agentTaskCallFromRequest(request({ background: true, message: "Draft it." }))).toEqual({
-      background: true,
+  it("reads the agent's input and names the call after its tool", () => {
+    const outputSchema = { type: "object" };
+    expect(
+      agentTaskCallFromRequest(
+        request({ agentId: "researcher-abc234", message: "Draft it.", outputSchema }),
+      ),
+    ).toEqual({
       callId: "call-1",
-      input: { message: "Draft it.", target: "researcher" },
+      input: {
+        agentId: "researcher-abc234",
+        message: "Draft it.",
+        outputSchema,
+        target: "researcher",
+      },
       toolName: "researcher",
     });
   });
 
-  it.each([false, "true", undefined])("treats background %o as a waited call", (background) => {
-    const call = agentTaskCallFromRequest(
-      request(background === undefined ? { message: "Draft it." } : { background, message: "x" }),
-    );
-    expect(call.background).toBeUndefined();
+  it("starts a new agent for a blank agentId and drops fields outside the contract", () => {
+    expect(
+      agentTaskCallFromRequest(request({ agentId: " ", background: true, message: "Draft it." })),
+    ).toEqual({
+      callId: "call-1",
+      input: { message: "Draft it.", target: "researcher" },
+      toolName: "researcher",
+    });
   });
 });

@@ -23,8 +23,12 @@ import {
   getLastUserPromptText,
   getPromptContentText,
   getPromptText,
-  isTasksNoteText,
 } from "#runtime/agent/bootstrap-model-utils.js";
+import {
+  type BootstrapToolResult,
+  createTaskWaitCalls,
+  getLastAuthoredToolResult,
+} from "#runtime/agent/mock-model-tool-results.js";
 import {
   findRelevantSkill,
   getActivatedSkillIds,
@@ -38,13 +42,6 @@ const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
 const MOCK_AUTHORED_MODELS_ENV = "EVE_MOCK_AUTHORED_MODELS";
 type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
-
-interface BootstrapToolResult {
-  readonly isError: boolean;
-  readonly output: unknown;
-  readonly toolCallId: string;
-  readonly toolName: string;
-}
 
 const authoredRuntimeModelMocks = new Map<string, LanguageModel>();
 const bootstrapWeatherPayloadSchema = z
@@ -97,6 +94,11 @@ function createMockModelResult(
   const authoredToolResult = getLastAuthoredToolResult(options.prompt);
 
   if (authoredToolResult !== null) {
+    const waits = createTaskWaitCalls(options.prompt, getAvailableTools(options));
+    if (waits !== undefined) {
+      const inputTokens = estimateTokenCount(getPromptText(options.prompt));
+      return createToolCallsGenerateResult({ calls: waits, inputTokens, modelId, outputTokens: 1 });
+    }
     const followUpToolCall = createFollowUpToolCallResult({
       modelId,
       options,
@@ -480,54 +482,6 @@ function getAvailableTools(options: BootstrapGenerateOptions): AvailableBootstra
       },
     ];
   });
-}
-
-function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult | null {
-  for (const message of [...prompt].reverse()) {
-    if (message.role === "user") {
-      // A framework-injected [Tasks] note is scaffolding, not a
-      // turn boundary. Treating it as one masks the tool result behind it,
-      // and the adapter then re-issues the same deterministic tool call —
-      // for subagent starts that collides on the derived operation id and
-      // fatally fails the parent session.
-      if (isTasksNoteText(getPromptContentText(message.content).trim())) {
-        continue;
-      }
-      return null;
-    }
-
-    if (message.role !== "tool" && message.role !== "assistant") {
-      continue;
-    }
-
-    for (const part of [...message.content].reverse()) {
-      if (typeof part === "string" || part.type !== "tool-result") {
-        continue;
-      }
-
-      if (part.toolName === LOAD_SKILL_TOOL_NAME) {
-        continue;
-      }
-
-      return {
-        isError:
-          part.output.type === "error-json" ||
-          part.output.type === "error-text" ||
-          part.output.type === "execution-denied",
-        output:
-          part.output.type === "execution-denied"
-            ? {
-                reason: part.output.reason ?? null,
-                type: part.output.type,
-              }
-            : part.output.value,
-        toolCallId: part.toolCallId,
-        toolName: part.toolName,
-      };
-    }
-  }
-
-  return null;
 }
 
 function findNextExplicitToolAfterResult(input: {

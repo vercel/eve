@@ -1,4 +1,4 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, waitForTasks } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
@@ -59,6 +59,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
 export default defineAgent({
   ...e2eAgentConfig(),
   // Parking coverage requires both actions in one step; children still use the matrix model.
-  model: mockModel(respond),
+  // Agent calls start detached tasks, so the script waits for their results.
+  model: mockModel(waitForTasks(respond)),
   modelContextWindowTokens: 1_000_000,
 });

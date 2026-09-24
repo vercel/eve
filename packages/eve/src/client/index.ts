@@ -132,7 +132,6 @@ export type {
   StepStartedStreamEvent,
   SubagentChildEventStreamEvent,
   TaskChildStream,
-  TaskDetachedStreamEvent,
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
   TaskUsage,

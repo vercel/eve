@@ -1,8 +1,10 @@
+import { waitForTasks } from "@eve-e2e/config";
 import { mockModel } from "eve/evals";
 import { respond } from "./respond.ts";
 
 export function continuationModel() {
-  const model = mockModel({ modelId: "hitl-continuation", respond });
+  // workflow-draft starts a detached task; the script reads its result.
+  const model = mockModel({ modelId: "hitl-continuation", respond: waitForTasks(respond) });
   if (typeof model === "string" || model.specificationVersion !== "v3") {
     throw new Error("This fixture expects mockModel's v3 provider boundary.");
   }

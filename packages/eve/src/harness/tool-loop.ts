@@ -71,8 +71,8 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveTasksAnnouncement } from "#tasks/render.js";
-import { hasPendingBackgroundWork } from "#tasks/results.js";
-import { applyBackgroundTaskSurface, resolveBackgroundTaskSurface } from "#tasks/interactive.js";
+import { hasPendingDetachedWork } from "#tasks/results.js";
+import { resolveTasksInstruction, withoutTaskTools } from "#tasks/surface.js";
 import { getTaskTable } from "#tasks/state.js";
 import {
   createResultTurnReplyPrompt,
@@ -1323,24 +1323,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     ): ModelMessage[] =>
       note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
 
-    const backgroundTaskSurface = resolveBackgroundTaskSurface({
-      ctx,
-      mode: config.mode,
-      tools: config.tools,
-    });
-    const backgroundTasksInstruction = backgroundTaskSurface.instruction;
+    const tasksInstruction = resolveTasksInstruction({ ctx, tools: config.tools });
     const prepareModelInstructions = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
         ? [{ role: "system" as const, content: extraSystemNote }]
         : [];
       const baseSystemEntry: SystemModelMessage[] = [
         session.agent.system,
-        backgroundTasksInstruction,
+        tasksInstruction,
       ].flatMap((content) => (content ? [{ role: "system" as const, content }] : []));
       const rawInstructions =
         currentMessages.systemMessages.length > 0 ||
         extraSystemEntry.length > 0 ||
-        backgroundTasksInstruction !== undefined
+        tasksInstruction !== undefined
           ? [...extraSystemEntry, ...baseSystemEntry, ...currentMessages.systemMessages]
           : undefined;
       const markedInstructions =
@@ -1397,10 +1392,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
 
     const prepareModelTools = async (opts: ModelCallOptions) => {
-      const harnessTools = applyBackgroundTaskSurface(
-        buildHarnessToolsWithDynamicSubagents(config.tools, ctx),
-        backgroundTaskSurface,
-      );
+      const configuredTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      const harnessTools =
+        tasksInstruction === undefined ? withoutTaskTools(configuredTools) : configuredTools;
       const advertisedHarnessTools = getAdvertisedTools({
         session,
         tools: harnessTools,
@@ -2918,7 +2912,7 @@ async function handleStepResult(input: {
 
   if (config.mode === "task") {
     return finishTaskTurn({
-      awaitingTasks: hasPendingBackgroundWork(nextSession.state),
+      awaitingTasks: hasPendingDetachedWork(nextSession.state),
       emissionState,
       emit,
       history: promptMessages,

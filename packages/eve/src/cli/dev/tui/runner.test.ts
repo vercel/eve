@@ -397,7 +397,7 @@ describe("registryHandoffAddress", () => {
               streamPath: "/eve/v1/session/child-session/stream",
             },
             kind: "agent",
-            mode: "foreground",
+            mode: "attached",
             name: "self-modification__agent",
             taskId: "self-modification__agent-task",
             turnId: "parent-turn",
@@ -3619,7 +3619,7 @@ describe("EveTUIRunner renderer teardown", () => {
               streamPath: "/eve/v1/session/child-session/stream",
             },
             kind: "agent",
-            mode: "foreground",
+            mode: "attached",
             name: "weather-child",
             taskId: "weather-child-task",
             turnId: "turn-parent",
@@ -3692,7 +3692,7 @@ describe("EveTUIRunner renderer teardown", () => {
               streamPath: "/eve/v1/session/child-session/stream",
             },
             kind: "agent",
-            mode: "foreground",
+            mode: "attached",
             name: "weather-child",
             taskId: "weather-child-task",
             turnId: "turn-parent",
@@ -3719,10 +3719,7 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-child" });
   });
 
-  it.each([
-    ["started in the background", "background", false],
-    ["detached while the turn waited", "foreground", true],
-  ] as const)("keeps a call %s open as a background section", async (_label, mode, detached) => {
+  it("keeps a detached call open as a background section", async () => {
     const client = stubClient();
     vi.stubGlobal(
       "fetch",
@@ -3773,24 +3770,12 @@ describe("EveTUIRunner renderer teardown", () => {
               streamPath: "/eve/v1/session/child-session/stream",
             },
             kind: "agent",
-            mode,
+            mode: "detached",
             name: "weather-child",
             taskId: "weather-child-task",
             turnId: "turn-parent",
           },
         },
-        ...(detached
-          ? [
-              {
-                type: "task.detached" as const,
-                data: {
-                  callId: "call-child",
-                  reason: "steer" as const,
-                  taskId: "weather-child-task",
-                },
-              },
-            ]
-          : []),
         { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
         {
           type: "session.waiting",
@@ -3851,7 +3836,7 @@ describe("EveTUIRunner renderer teardown", () => {
               streamPath: "/eve/v1/session/child-session/stream",
             },
             kind: "agent",
-            mode: "foreground",
+            mode: "attached",
             name: "weather-child",
             taskId: "weather-child-task",
             turnId: "turn-parent",
@@ -4888,7 +4873,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
             streamPath: "/eve/v1/session/child-a/stream",
           },
           kind: "agent",
-          mode: "foreground",
+          mode: "attached",
           name: "researcher",
           taskId: "researcher-task",
           turnId: "turn-a",
@@ -4903,7 +4888,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
             streamPath: "/eve/v1/session/child-1/stream",
           },
           kind: "agent",
-          mode: "foreground",
+          mode: "attached",
           name: "researcher",
           taskId: "researcher-task",
           turnId: "turn-1",

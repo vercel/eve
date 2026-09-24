@@ -66,7 +66,6 @@ describe("published task stream fixtures", () => {
     );
     const types = new Set(fixtures.flatMap(({ events }) => events.map((event) => event.type)));
     expect([...types].filter((type) => type.startsWith("task.")).toSorted()).toEqual([
-      "task.detached",
       "task.settled",
       "task.started",
     ]);
@@ -105,9 +104,6 @@ describe("published task stream fixtures", () => {
           case "task.started":
             expect(started.has(generation!)).toBe(false);
             started.add(generation!);
-            break;
-          case "task.detached":
-            expect(settled.has(generation!)).toBe(false);
             break;
           case "task.settled":
             expect(settled.has(generation!)).toBe(false);

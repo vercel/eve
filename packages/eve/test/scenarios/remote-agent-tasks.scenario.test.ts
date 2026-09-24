@@ -45,27 +45,39 @@ const PARENT_AGENT = `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 const AGENT_ID = /<agent id="([^"]+)" name="billing"/u;
+const RECEIPT = /^(?:Started task|Sent your message to agent) ([\\w-]+)[.,]/u;
 
 // One call per user message, keyed by its id: a [Tasks] note may follow the result.
+// A plan that waits reads its result with task_wait; the refund's arrives in a result turn.
 const PLANS = {
   "Refund order 42 through billing.": { id: "refund-call", name: "billing", input: () => ({ message: "Refund order 42." }) },
   "Ask billing for the refund status.": {
     id: "status-call",
     name: "billing",
     input: (text) => ({ agentId: AGENT_ID.exec(text)?.[1], message: "What is the refund status?" }),
+    wait: true,
   },
-  "Summarize the ledger.": { id: "ledger-call", name: "ledger", input: () => ({ message: "Summarize the ledger." }) },
-  "Call the legacy billing agent.": { id: "legacy-call", name: "legacy", input: () => ({ message: "Hello from the parent." }) },
+  "Summarize the ledger.": { id: "ledger-call", name: "ledger", input: () => ({ message: "Summarize the ledger." }), wait: true },
+  "Call the legacy billing agent.": { id: "legacy-call", name: "legacy", input: () => ({ message: "Hello from the parent." }), wait: true },
 };
 
 export default defineAgent({
   model: mockModel(({ lastUserMessage, messages, toolResults }) => {
+    if (lastUserMessage?.startsWith("<task_result")) return "Result: " + lastUserMessage;
     const plan = PLANS[lastUserMessage ?? ""];
     if (plan === undefined) return "Unexpected: " + lastUserMessage;
+    const waited = toolResults.find((candidate) => candidate.id === plan.id + "-wait");
+    if (waited !== undefined) return "Result: " + JSON.stringify(waited.output);
     const result = toolResults.find((candidate) => candidate.id === plan.id);
-    if (result !== undefined) return "Result: " + JSON.stringify(result.output);
-    const text = messages.map((message) => message.text).join("\\n");
-    return { toolCalls: [{ id: plan.id, name: plan.name, input: plan.input(text) }] };
+    if (result === undefined) {
+      const text = messages.map((message) => message.text).join("\\n");
+      return { toolCalls: [{ id: plan.id, name: plan.name, input: plan.input(text) }] };
+    }
+    const taskId = RECEIPT.exec(String(result.output))?.[1];
+    // A start that failed returns its error in place of a receipt.
+    if (taskId === undefined) return "Result: " + JSON.stringify(result.output);
+    if (plan.wait !== true) return "Started: " + taskId;
+    return { toolCalls: [{ id: plan.id + "-wait", name: "task_wait", input: { taskId } }] };
   }),
   modelContextWindowTokens: 32_000,
 });
@@ -224,29 +236,39 @@ export default defineTool({
           message: "Refund order 42 through billing.",
         });
         const first = await response.result();
-        const started = first.events.find((event) => event.type === "task.started");
+        expect(lastReply(first.events)).toMatch(/^Started: billing-/u);
+
+        // The remote tool's approval reaches the parent's client after the turn
+        // that started the task ended, attributed to the task.
+        const asked = await followUntil(session, (events) => requestCount(events) === 1);
+        const started = asked.find((event) => event.type === "task.started");
         const taskId = started?.type === "task.started" ? started.data.taskId : undefined;
         expect(started?.type === "task.started" && started.data.child?.remote).toBeDefined();
-
-        // The remote tool's approval reaches the parent's client, attributed to the task.
-        const approval = inputRequest(first.events);
+        const approval = inputRequest(asked);
         expect(approval).toMatchObject({ kind: "tool-approval", taskId });
 
-        const second = await (
-          await session.respond([
-            { optionId: approvalOption(approval), requestId: approval.requestId },
-          ])
-        ).result();
+        await session.respond([
+          { optionId: approvalOption(approval), requestId: approval.requestId },
+        ]);
         // Then the remote agent's own question, through the same route.
-        const question = inputRequest(second.events);
+        const question = inputRequest(
+          await followUntil(session, (events) => requestCount(events) === 2),
+        );
         expect(question).toMatchObject({ kind: "question", taskId });
 
-        const third = await (
-          await session.respond([
-            { optionId: question.options[0]!.id, requestId: question.requestId },
-          ])
-        ).result();
-        const reply = lastReply(third.events);
+        await session.respond([
+          { optionId: question.options[0]!.id, requestId: question.requestId },
+        ]);
+        // The result arrives in a result turn.
+        const delivered = await followUntil(session, (events) =>
+          events.some(
+            (event, index) =>
+              event.type === "message.received" &&
+              event.data.kind === "task.result" &&
+              events.slice(index).some((later) => later.type === "turn.completed"),
+          ),
+        );
+        const reply = lastReply(delivered);
         expect(reply).toContain("Refunded order 42");
         expect(reply).toContain("refunded");
         expect(reply).toContain("Add a note");
@@ -441,6 +463,37 @@ function approvalOption(request: SurfacedRequest): string {
 function lastReply(events: readonly MessageStreamEvent[]): string {
   const reply = events.findLast((event) => event.type === "message.completed");
   return reply?.type === "message.completed" ? (reply.data.message ?? "") : "";
+}
+
+function requestCount(events: readonly MessageStreamEvent[]): number {
+  return events.filter((event) => event.type === "input.requested").length;
+}
+
+/** Follows the session's stream from its start until `done` holds. */
+async function followUntil(
+  session: Pick<ClientSession, "stream">,
+  done: (events: readonly MessageStreamEvent[]) => boolean,
+): Promise<MessageStreamEvent[]> {
+  const events: MessageStreamEvent[] = [];
+  const iterator = session.stream({ startIndex: 0 })[Symbol.asyncIterator]();
+  const deadline = Date.now() + 120_000;
+  try {
+    while (!done(events)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`Timed out; saw ${events.map((e) => e.type).join(", ")}`);
+      const next = await Promise.race([
+        iterator.next(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Timed out waiting for stream events.")), remaining),
+        ),
+      ]);
+      if (next.done) break;
+      events.push(next.value);
+    }
+  } finally {
+    await iterator.return?.();
+  }
+  return events;
 }
 
 function settledFor(events: readonly MessageStreamEvent[], taskId: string | undefined) {

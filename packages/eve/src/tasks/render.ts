@@ -22,7 +22,7 @@ const EMPTY_TASKS_NOTE = [
   "</idle_agents>",
 ].join("\n");
 
-/** Structured receipt returned to clients for a background call. */
+/** Structured receipt returned to clients for a detached call. */
 export interface TaskReceipt {
   readonly status: "working";
   readonly taskId: string;
@@ -32,37 +32,26 @@ function noun(kind: TaskKind): "agent" | "task" {
   return kind === "agent" ? "agent" : "task";
 }
 
-/** Receipt text for an agent call with `background: true`. */
-export function renderBackgroundReceipt(record: Pick<TaskRecord, "id">): string {
-  return `Agent ${record.id} is working in the background. Its result will arrive in a later message. Do not poll or repeat this work. Continue with anything that does not depend on it; if nothing remains, tell the user briefly what you started and end your turn.`;
+/** Receipt text for a call that started a detached task. */
+export function renderStartReceipt(record: Pick<TaskRecord, "id">): string {
+  return `Started task ${record.id}. Use task_wait for its result.`;
 }
 
-/** Receipt text for a waited call that moved to the background. */
-export function renderDetachedReceipt(record: Pick<TaskRecord, "id" | "kind">): string {
-  return `A new message arrived, so this call moved to the background as ${noun(record.kind)} ${record.id}. Its result will arrive in a later message. Do not poll or repeat this work.`;
+/** Tool result for a call that sent a message to an agent that is still working. */
+export function renderSteeringReceipt(record: Pick<TaskRecord, "id">): string {
+  return `Sent your message to agent ${record.id}, which is still working. Use task_wait for its result.`;
 }
 
-/**
- * Tool result for a call that sent a message to an agent that is still
- * working. A background agent's result arrives later; a waited agent's result
- * goes to the call that is waiting for it.
- */
-export function renderSteeringReceipt(record: Pick<TaskRecord, "id" | "mode">): string {
-  const sent = `Sent your message to agent ${record.id}, which is still working.`;
-  return record.mode === "background"
-    ? `${sent} Its result will arrive in a later message.`
-    : `${sent} Its result will arrive as the result of the call that started it.`;
-}
-
-/** Tool result for a `sleep` that a steering message ended early. */
-export function renderSleepEndedEarly(waitedMs: number): string {
-  return `The sleep ended early after ${formatDuration(waitedMs)} because a new message arrived.`;
+/** Tool result for an attached call that a new message ended. */
+export function renderInterruptedCall(waitedMs: number): string {
+  return `Stopped after ${formatDuration(waitedMs)} because a new message arrived.`;
 }
 
 /**
- * Truncates a task result the model reads, whether its call waited or ran in
- * the background: 50 KB and 2,000 lines, with `[truncated]` marking the cut.
- * A line longer than 2,000 characters is cut the same way.
+ * Truncates a task result the model reads, whether an attached call, a
+ * `task_wait`, or a `task.result` message delivers it: 50 KB and 2,000
+ * lines, with `[truncated]` marking the cut. A line longer than 2,000
+ * characters is cut the same way.
  */
 export function truncateTaskResult(text: string): string {
   return truncateTaskResultParts([text])[0]!;
@@ -148,11 +137,11 @@ export function resolveTasksAnnouncement(input: {
 }
 
 /**
- * The `[Tasks]` note: every background task whose result has not reached
+ * The `[Tasks]` note: every detached task whose result has not reached
  * history, plus idle agents. Returns `undefined` when there is nothing to list.
  */
 export function renderTasksNote(records: readonly TaskRecord[]): string | undefined {
-  const tasks = records.filter((record) => record.mode === "background" && !record.delivered);
+  const tasks = records.filter((record) => record.mode === "detached" && !record.delivered);
   const idle = records
     .filter(
       (record) =>
@@ -182,14 +171,6 @@ export function renderTasksNote(records: readonly TaskRecord[]): string | undefi
   return lines.join("\n");
 }
 
-/**
- * Static system block for agents that can delegate. It is the one
- * explanation of the `[Tasks]` note wherever agents exist; the background
- * block below adds only what background work changes.
- */
-export const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nAn agent call waits for the agent to answer, and its answer is the tool result. When the call returns a receipt instead, the agent keeps working in the background and its answer arrives later in a <task_result> message. Agents stay available after they answer. eve adds a note labeled `[Tasks]` to the conversation whenever its listing changes, and the latest note is current. The note is added by eve, not written by the user, and never requires a reply. Its `<tasks>` block lists background work whose result has not arrived yet, with its status, and its `<idle_agents>` block lists each idle agent's id, name, and a summary of its last answer. The note does not limit which agent tools you can call: any agent tool can always be called without `agentId` to start a new agent, including when the note is empty or absent. Pass an idle agent's id as `agentId` to the same agent tool to give that agent more work in its existing session.";
-
 /** Description of the `agentId` input on every agent tool. */
 export const AGENT_ID_PARAMETER_DESCRIPTION =
   "The id of an agent from the latest [Tasks] note or a receipt. An idle agent gets more work in the same child session; an agent that is still working receives this message as a correction to its current work, keeps the output format it was given, and still returns one result. Omit this field (or pass null or an empty string) to start a new agent.";
@@ -208,11 +189,11 @@ export const TASK_CANCEL_DESCRIPTION =
 
 /** Description of the `taskId` input of `task_cancel` and `task_wait`. */
 export const TASK_ID_PARAMETER_DESCRIPTION =
-  "The id of a background task or agent, from its receipt or the latest [Tasks] note.";
+  "The id of a task or agent, from its receipt or the latest [Tasks] note.";
 
 /** Error message for a `task_cancel` call whose input could not be read. */
 export const TASK_CANCEL_INVALID_INPUT_MESSAGE =
-  "task_cancel needs taskId: the id of one background task or agent.";
+  "task_cancel needs taskId: the id of one task or agent.";
 
 export const TASK_WAIT_DESCRIPTION =
   "Wait for a task's next result. Returns when the task has a result you have not seen, when timeout (in milliseconds) passes, or when a new message arrives. Ending a wait never stops the task. To wait on several tasks, call task_wait once for each in the same step. Omit timeout to wait until the result arrives; a timeout of 0 returns at once with the task's current state.";
@@ -223,7 +204,7 @@ export const TASK_WAIT_TIMEOUT_DESCRIPTION =
 
 /** Error message for a `task_wait` call whose input could not be read. */
 export const TASK_WAIT_INVALID_INPUT_MESSAGE =
-  "task_wait needs taskId, the id of one background task or agent, and an optional timeout in milliseconds (0 or more).";
+  "task_wait needs taskId, the id of one task or agent, and an optional timeout in milliseconds (0 or more).";
 
 /** Result of a `task_wait` whose timeout passed first. */
 export function renderWaitTimedOut(taskId: string, waitedMs: number): string {
@@ -262,26 +243,39 @@ export function renderTaskAlreadyWaited(taskId: string): string {
   return `Another task_wait in this step already waits for task "${taskId}"; use that call's result.`;
 }
 
-export const BACKGROUND_PARAMETER_DESCRIPTION =
-  "Run in the background and return immediately. The result arrives later in its own message. Use only when the user does not need the answer to continue. Do not poll, sleep, or call again to check on it. To get several answers together, make the calls in the same step without background.";
-
 /**
- * Static system block for sessions that can have background tasks. With
- * agents, {@link AGENT_MESSAGING_INSTRUCTION} already explains the `[Tasks]`
- * note, so this block only adds redirecting a working agent.
+ * Static system block, offered with `task_wait` and `task_cancel` in every
+ * session whose agent can start a detached task. With agents, it also
+ * explains how to continue or correct one by `agentId`.
  */
-export function renderBackgroundTasksInstruction(options: { readonly agents: boolean }): string {
-  const rules =
-    "A background call returns a receipt right away, and its result arrives later in a <task_result> message. Never poll, sleep, or call again to check on background work. Reply to every result, in one line if it no longer matters.";
-  const specific = options.agents
-    ? "To redirect an agent that is still working, pass its agentId to its tool with your correction; its one result still arrives later. Use task_cancel to stop a background agent or task."
-    : "The latest [Tasks] note lists background tasks until their results arrive; it is added by eve, not written by the user, and never requires a reply. Use task_cancel to stop a background task.";
-  return `Background tasks\n${rules} ${specific}`;
+export function renderTasksInstruction(options: { readonly agents: boolean }): string {
+  const starts = options.agents
+    ? "Every agent call and most workflow tool calls start a task and return its id right away"
+    : "Most workflow tool calls start a task and return its id right away";
+  const choices = options.agents
+    ? "keep the tasks, correct an agent by passing its id as agentId to its tool, or stop them with task_cancel"
+    : "keep the tasks or stop them with task_cancel";
+  const sentences = [
+    `${starts}; the task keeps working while you continue.`,
+    "When the user needs the answer to continue, wait for it with task_wait. Start independent tasks first, then wait on them in the same step, one task_wait per task.",
+    "A result you don't wait for arrives later in a <task_result> message.",
+    `A new message interrupts your waits but not your tasks: decide whether it changes the work, then ${choices}.`,
+    "Never use sleep to wait for a task.",
+  ];
+  if (options.agents) {
+    sentences.push(
+      "Agents stay available after they answer: pass an idle agent's id as agentId to its tool to give it more work in its existing session. Any agent tool can always be called without agentId to start a new agent, even when the [Tasks] note is empty or absent.",
+    );
+  }
+  sentences.push(
+    `The latest [Tasks] note lists working tasks${options.agents ? " and idle agents" : ""}; eve adds it whenever the listing changes, and it never needs a reply.`,
+  );
+  return `Tasks\n${sentences.join(" ")}`;
 }
 
-/** `TOO_MANY_BACKGROUND_TASKS` error message for an agent call with `background: true`. */
-export function renderTooManyBackgroundTasks(ids: readonly string[], limit: number): string {
-  return `${limit} background tasks are already running (${ids.join(", ")}). Wait for one to report, stop one with task_cancel, or call without background.`;
+/** `TOO_MANY_TASKS` error message for a start over the working-task cap. */
+export function renderTooManyTasks(ids: readonly string[], limit: number): string {
+  return `${limit} tasks are already working (${ids.join(", ")}). Wait for one with task_wait or stop one with task_cancel, then try again.`;
 }
 
 /** Framework continuation for a result turn that ended without a reply. */

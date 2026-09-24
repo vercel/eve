@@ -109,11 +109,11 @@ export interface WorkflowToolDefinition<
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   /**
-   * `true` keeps the call attached to its turn: its result is always the
-   * tool result, and a steering message never moves it to the background.
-   * Defaults to `false`: the call still waits, but in an interactive root
-   * session (a root session in conversation mode) a steering message moves
-   * it to the background, and its result arrives later as a task result.
+   * `true` keeps the call attached to its turn: the turn holds the call, its
+   * result is the tool result, and a steering message cancels it. Defaults
+   * to `false`: the call starts a detached task and returns a receipt at
+   * once; the task keeps working when a new message arrives, and the model
+   * gets its result from `task_wait` or in a later task result message.
    */
   attached?: boolean;
   /**

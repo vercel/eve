@@ -1356,7 +1356,7 @@ describe("ClientSession.streamSubagent", () => {
         sessionId: "child_1",
       },
       kind: "agent",
-      mode: "foreground",
+      mode: "attached",
       name: "research",
       parentSessionId: "session_1",
       taskId: "research-abc234",
@@ -1444,7 +1444,7 @@ describe("ClientSession.streamSubagent", () => {
     const started = createTaskStartedEvent({
       callId: "call_2",
       kind: "workflow",
-      mode: "foreground",
+      mode: "attached",
       name: "deploy",
       parentSessionId: "session_1",
       taskId: "deploy-abc234",

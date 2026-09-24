@@ -2,16 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskRecord } from "#tasks/record.js";
 import {
-  AGENT_MESSAGING_INSTRUCTION,
-  renderBackgroundReceipt,
-  renderBackgroundTasksInstruction,
-  renderDetachedReceipt,
+  renderInterruptedCall,
   renderModelOutputBody,
-  renderSleepEndedEarly,
+  renderStartReceipt,
+  renderSteeringReceipt,
   renderTaskResults,
+  renderTasksInstruction,
   renderTasksNote,
   renderTimedOut,
-  renderTooManyBackgroundTasks,
+  renderTooManyTasks,
   resolveTasksAnnouncement,
   truncateTaskResult,
   truncateTaskResultParts,
@@ -24,7 +23,7 @@ function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
     generation: 1,
     id: "researcher-7k2m9q",
     kind: "agent",
-    mode: "background",
+    mode: "detached",
     name: "researcher",
     startedAt: "2026-09-24T14:02:31.000Z",
     status: "working",
@@ -35,17 +34,14 @@ function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
 }
 
 describe("receipts", () => {
-  it("names agents and tasks by id", () => {
-    expect(renderBackgroundReceipt(record())).toMatch(/^Agent researcher-7k2m9q is working/);
-    expect(renderDetachedReceipt(record())).toMatch(
-      /^A new message arrived, so this call moved to the background as agent researcher-7k2m9q\./,
+  it("name the task and point to task_wait", () => {
+    expect(renderStartReceipt(record())).toBe(
+      "Started task researcher-7k2m9q. Use task_wait for its result.",
     );
-    expect(renderDetachedReceipt(record({ kind: "workflow" }))).toMatch(
-      /^A new message arrived, so this call moved to the background as task researcher-7k2m9q\./,
+    expect(renderSteeringReceipt(record())).toBe(
+      "Sent your message to agent researcher-7k2m9q, which is still working. Use task_wait for its result.",
     );
-    expect(renderSleepEndedEarly(12_400)).toBe(
-      "The sleep ended early after 12 s because a new message arrived.",
-    );
+    expect(renderInterruptedCall(12_400)).toBe("Stopped after 12 s because a new message arrived.");
   });
 });
 
@@ -181,13 +177,13 @@ describe("renderTasksNote", () => {
   it("lists undelivered background tasks and the most recent idle agents", () => {
     const note = renderTasksNote([
       record(),
-      record({ id: "fg-aaaaaa", mode: "foreground", name: "fg" }),
+      record({ id: "fg-aaaaaa", mode: "attached", name: "fg" }),
       record({
         child: { continuationToken: "tok", kind: "local", sessionId: "s1" },
         delivered: true,
         id: "d0-2b0c1a",
         lastStatus: "Answered the <Q3> revenue question.",
-        mode: "foreground",
+        mode: "attached",
         name: "d0",
         status: "completed",
       }),
@@ -207,31 +203,37 @@ describe("renderTasksNote", () => {
   });
 
   it("returns nothing when there is nothing to list", () => {
-    expect(renderTasksNote([record({ mode: "foreground" })])).toBeUndefined();
+    expect(renderTasksNote([record({ mode: "attached" })])).toBeUndefined();
   });
 });
 
-describe("system blocks", () => {
-  it("explain the [Tasks] note once, whichever blocks a session gets", () => {
-    const mentions = (text: string) =>
-      text.split("added by eve, not written by the user").length - 1;
-    const withAgents = renderBackgroundTasksInstruction({ agents: true });
-    const withoutAgents = renderBackgroundTasksInstruction({ agents: false });
+describe("renderTasksInstruction", () => {
+  it("describes detached tasks, task_wait, results, and interruptions in one block", () => {
+    for (const agents of [true, false]) {
+      const block = renderTasksInstruction({ agents });
+      expect(block).toMatch(/^Tasks\n/u);
+      expect(block).toContain("return its id right away");
+      expect(block).toContain("one task_wait per task");
+      expect(block).toContain("<task_result>");
+      expect(block).toContain("A new message interrupts your waits but not your tasks");
+      expect(block).toContain("task_cancel");
+      expect(block).toContain("Never use sleep to wait for a task.");
+      expect(block.split("[Tasks] note").length - 1).toBe(agents ? 2 : 1);
+    }
+  });
 
-    expect(mentions(AGENT_MESSAGING_INSTRUCTION)).toBe(1);
-    expect(mentions(`${AGENT_MESSAGING_INSTRUCTION}\n${withAgents}`)).toBe(1);
-    expect(mentions(withoutAgents)).toBe(1);
-    // A delegated answer can arrive as a receipt; only a session with agents can redirect one.
-    expect(AGENT_MESSAGING_INSTRUCTION).toContain("When the call returns a receipt instead");
-    expect(withAgents).toContain("To redirect an agent that is still working");
-    expect(withoutAgents).not.toContain("agentId");
+  it("explains agentId only to a session with agents", () => {
+    expect(renderTasksInstruction({ agents: true })).toContain("agentId");
+    expect(renderTasksInstruction({ agents: true })).toContain("idle agents");
+    expect(renderTasksInstruction({ agents: false })).not.toContain("agentId");
+    expect(renderTasksInstruction({ agents: false })).not.toContain("agent call");
   });
 });
 
-describe("renderTooManyBackgroundTasks", () => {
-  it("offers a waited agent call instead", () => {
-    expect(renderTooManyBackgroundTasks(["a-1", "b-2"], 10)).toBe(
-      "10 background tasks are already running (a-1, b-2). Wait for one to report, stop one with task_cancel, or call without background.",
+describe("renderTooManyTasks", () => {
+  it("names the working tasks and says how to make room", () => {
+    expect(renderTooManyTasks(["a-1", "b-2"], 20)).toBe(
+      "20 tasks are already working (a-1, b-2). Wait for one with task_wait or stop one with task_cancel, then try again.",
     );
   });
 });
@@ -244,7 +246,7 @@ describe("resolveTasksAnnouncement", () => {
   });
   const working = record({ id: "remind-q4x1ze", kind: "workflow", name: "remind" });
 
-  it("lists a background task again once compaction or a clear removed the latest note", () => {
+  it("lists a detached task again once compaction or a clear removed the latest note", () => {
     const note = renderTasksNote([working])!;
     const compacted = [{ content: "Summary of the earlier conversation.", role: "user" as const }];
 

@@ -65,10 +65,12 @@ function buildSerializedContext(input: {
 /**
  * Registers one fixture workflow as an authored tool. The fixture module
  * passed through the test tier's client transform, so `execute` is the stub
- * the real pipeline produces: a function carrying its `workflowId`.
+ * the real pipeline produces: a function carrying its `workflowId`. Calls are
+ * detached unless `attached` holds them in their turn.
  */
 async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
+  readonly attached?: boolean;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
@@ -80,6 +82,7 @@ async function createWorkflowToolRuntime(input: {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({
           default: defineWorkflowTool({
+            attached: input.attached,
             description: `Deploys a service (${input.toolName}).`,
             execute: input.execute as WorkflowToolDefinition["execute"],
             inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
@@ -294,6 +297,8 @@ describe("workflow step authorization", () => {
     async (disposition) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth-failure",
+        // A turn cancel stops the calls its turn holds.
+        attached: true,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });
@@ -513,7 +518,7 @@ describe("workflow tools", () => {
     expect(output).toContain("deploy of api exploded");
   });
 
-  it("routes workflow reports, human input, and outcome through the session owner", async () => {
+  it("routes a detached run's reports, human input, and outcome through the session owner", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-hitl",
@@ -564,17 +569,22 @@ describe("workflow tools", () => {
           (event) =>
             event.type === "action.partial" && event.data.result.output === "approval received",
         );
+        // The call returned a receipt, so the outcome reaches the turn's task_wait.
         const resultIndex = answered.findIndex(
           (event) =>
             event.type === "action.result" &&
             event.data.result.kind === "tool-result" &&
-            event.data.result.toolName === "confirm_deploy",
+            event.data.result.toolName === "task_wait",
         );
         expect(progress, JSON.stringify(answered)).toBeGreaterThanOrEqual(0);
         expect(resultIndex).toBeGreaterThan(progress);
         const results = filterEventsByType(answered, "action.result");
-        expect(results.map((event) => JSON.stringify(event.data.result.output))).toContainEqual(
-          JSON.stringify({ approved: true, service: "api" }),
+        expect(results.map((event) => event.data.result.output)).toContainEqual(
+          expect.objectContaining({
+            name: "confirm_deploy",
+            outcome: { output: { approved: true, service: "api" }, status: "completed" },
+            status: "settled",
+          }),
         );
         expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
       } finally {
@@ -668,6 +678,7 @@ describe("workflow tools", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-cancel",
+      attached: true,
       execute: holdUntilAbortedWorkflow,
       toolName: "deploy_service",
     });
@@ -717,6 +728,7 @@ describe("workflow tools", () => {
   it("streams a waiting tool's yields as action.partial and settles with its return", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-progress",
+      attached: true,
       execute: reportingDeployWorkflow,
       toolName: "deploy_service",
     });

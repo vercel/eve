@@ -4,12 +4,17 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { setPendingCoordinationBatch } from "#harness/coordination.js";
+import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
-import { applyTaskCancelCall, cancelTasksStep } from "#tasks/cancel.js";
+import {
+  applyTaskCancelCall,
+  cancelTasksStep,
+  interruptAttachedCalls,
+  interruptAttachedCallsStep,
+} from "#tasks/cancel.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
@@ -58,7 +63,7 @@ const REMINDER = createTaskRecord({
   creator: { auth: null },
   id: "remind-q4x1ze",
   kind: "workflow",
-  mode: "background",
+  mode: "detached",
   name: "remind",
   turnId: "turn-0",
 });
@@ -187,7 +192,7 @@ describe("applyTaskCancelCall", () => {
     const nested = createTaskRecord({
       callId: "call-nested",
       id: "research-b81d0c",
-      mode: "background",
+      mode: "detached",
       workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
     });
     const session = { state: taskTableState([waited, nested]) };
@@ -307,7 +312,7 @@ describe("applyTaskCancelCall", () => {
     const agent = createTaskRecord({
       child: LOCAL_CHILD,
       id: "research-7k2m9q",
-      mode: "background",
+      mode: "detached",
     });
 
     const table = getTaskTable(cancel([agent], "research-7k2m9q").session);
@@ -319,7 +324,7 @@ describe("applyTaskCancelCall", () => {
       agentId: "research-7k2m9q",
       callId: "call-2",
       kind: "agent",
-      mode: "foreground",
+      mode: "attached",
       name: "research",
       now: NOW,
       ownerId: "parent",
@@ -407,8 +412,8 @@ describe("cancelTasksStep with the task selector", () => {
   );
 });
 
-describe("cancelTasksStep with the background selector", () => {
-  it("cancels every background task and leaves calls a caller waits on", async () => {
+describe("cancelTasksStep with the detached selector", () => {
+  it("cancels every detached task and leaves calls a caller waits on", async () => {
     const waited = createTaskRecord({ child: LOCAL_CHILD, id: "research-7k2m9q" });
     const nested = createTaskRecord({
       callId: "call-nested",
@@ -419,11 +424,11 @@ describe("cancelTasksStep with the background selector", () => {
       callId: "call-detached",
       child: { ...LOCAL_CHILD, sessionId: "detached-child" },
       id: "research-3fq8wd",
-      mode: "background",
+      mode: "detached",
     });
 
     const { events } = await cancelTasksStep({
-      selector: { kind: "background" },
+      selector: { kind: "detached" },
       serializedContext: {},
       sessionState: ownerState([REMINDER, waited, nested, detachedAgent]),
     });
@@ -435,6 +440,163 @@ describe("cancelTasksStep with the background selector", () => {
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
       sessionId: "detached-child",
     });
+  });
+});
+
+describe("interruptAttachedCalls", () => {
+  const SLEEP = createTaskRecord({
+    callId: "call-sleep",
+    child: { commandToken: "sleep-control", kind: "workflow", runId: "run-sleep" },
+    id: "sleep-g7h8j9",
+    kind: "workflow",
+    name: "sleep",
+    startedAt: "2026-09-24T13:59:48.000Z",
+    turnId: "turn-1",
+  });
+
+  it("cancels an attached call through the cancel path with the interruption text", () => {
+    const stopped = interruptAttachedCalls({
+      callIds: [SLEEP.callId],
+      now: NOW,
+      session: { state: taskTableState([SLEEP]) },
+      turnId: "turn-1",
+    });
+
+    expect(stopped.results).toEqual([
+      {
+        callId: SLEEP.callId,
+        kind: "tool-result",
+        modelOutput: "Stopped after 12 s because a new message arrived.",
+        output: { status: "interrupted", waitedMs: 12_000 },
+        toolName: "sleep",
+      },
+    ]);
+    expect(getTaskTable(stopped.session).records).toEqual([
+      expect.objectContaining({
+        cancelConfirmBy: expect.any(String),
+        delivered: true,
+        mode: "attached",
+        status: "cancelled",
+      }),
+    ]);
+    expect(stopped.events).toEqual([
+      {
+        data: { callId: SLEEP.callId, status: "cancelled", taskId: SLEEP.id },
+        type: "task.settled",
+      },
+    ]);
+    expect(stopped.commands).toEqual([
+      expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
+    ]);
+  });
+
+  it("leaves detached tasks, other turns' calls, settled calls, and ctx.agent calls alone", () => {
+    const session = {
+      state: taskTableState([
+        { ...REMINDER, callId: "call-a", turnId: "turn-1" },
+        { ...SLEEP, callId: "call-b", id: "sleep-b", turnId: "turn-0" },
+        { ...SLEEP, callId: "call-c", id: "sleep-c", status: "completed" as const },
+        createTaskRecord({
+          callId: "call-d",
+          turnId: "turn-1",
+          workflowCaller: { replyTo: "reply-hook", runId: "run-1" },
+        }),
+      ]),
+    };
+
+    const stopped = interruptAttachedCalls({
+      callIds: ["call-a", "call-b", "call-c", "call-d"],
+      now: NOW,
+      session,
+      turnId: "turn-1",
+    });
+
+    expect(stopped).toEqual({ commands: [], events: [], results: [], session });
+  });
+});
+
+describe("interruptAttachedCallsStep", () => {
+  it("ends a task_wait and cancels an attached run in one step, naming results after their calls", async () => {
+    const deploy = createTaskRecord({
+      callId: "call-deploy",
+      child: { commandToken: "deploy-control", kind: "workflow", runId: "run-deploy" },
+      id: "deploy-k1m2n3",
+      kind: "workflow",
+      name: "deploy",
+      startedAt: NOW,
+      turnId: "turn-1",
+    });
+    const waited = { ...REMINDER, wait: { callId: "call-wait", startedAt: NOW } };
+    const state = withBatch(taskTableState([waited, deploy]), ["call-wait"]);
+    const tasks = [
+      ...(getPendingCoordinationBatch(state.state)?.tasks ?? []),
+      {
+        callId: "call-deploy",
+        input: {},
+        kind: "workflow-task",
+        toolName: "ship_it",
+        workflowId: "workflow//./agent/tools/deploy//execute",
+      },
+    ];
+    const base = createTestSessionState({
+      emissionState: { sequence: 1, sessionStarted: true, stepIndex: 1, turnId: "turn-1" },
+      sessionId: "parent",
+    });
+    const sessionState = {
+      ...base,
+      snapshot: {
+        session: {
+          ...base.snapshot.session,
+          state: {
+            ...state.state,
+            "eve.runtime.pendingCoordinationBatch": {
+              ...(state.state?.["eve.runtime.pendingCoordinationBatch"] as object),
+              tasks,
+            },
+          },
+        },
+      },
+    };
+
+    const update = await interruptAttachedCallsStep({
+      callIds: ["call-wait", "call-deploy"],
+      serializedContext: {},
+      sessionState,
+    });
+
+    expect(
+      update.results.map(({ callId, output, toolName }) => ({ callId, output, toolName })),
+    ).toEqual([
+      {
+        callId: "call-wait",
+        output: { status: "interrupted", taskId: REMINDER.id },
+        toolName: "task_wait",
+      },
+      {
+        callId: "call-deploy",
+        output: { status: "interrupted", waitedMs: expect.any(Number) },
+        toolName: "ship_it",
+      },
+    ]);
+    expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
+      { hookToken: "deploy-control", runId: "run-deploy" },
+      expect.any(String),
+    );
+    expect(records(update.sessionState)).toEqual([
+      expect.objectContaining({ id: REMINDER.id, status: "working" }),
+      expect.objectContaining({ id: deploy.id, status: "cancelled" }),
+    ]);
+    expect(records(update.sessionState)[0]?.wait).toBeUndefined();
+  });
+
+  it("changes nothing when every selected call already settled", async () => {
+    const sessionState = ownerState([{ ...REMINDER, mode: "attached", status: "completed" }]);
+    const update = await interruptAttachedCallsStep({
+      callIds: [REMINDER.callId],
+      serializedContext: {},
+      sessionState,
+    });
+    expect(update).toMatchObject({ events: [], results: [], sessionState });
   });
 });
 

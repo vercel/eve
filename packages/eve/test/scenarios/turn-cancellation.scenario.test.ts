@@ -77,6 +77,13 @@ import { mockModel } from "eve/evals";
 const model = mockModel((request) => {
   const message = request.lastUserMessage ?? "";
   if (message.includes("Use workflow exactly once")) {
+    // The program runs as a detached task; the turn waits on it with task_wait.
+    const receipt = request.toolResults.find((result) => result.name === "workflow");
+    if (request.toolResults.some((result) => result.name === "task_wait")) return "waited";
+    if (receipt !== undefined) {
+      const taskId = /Started task ([\\w-]+)\\./u.exec(String(receipt.output))?.[1];
+      return { toolCalls: [{ name: "task_wait", input: { taskId } }] };
+    }
     const localOnly = message.includes("local-sleeper only");
     return {
       toolCalls: [
@@ -217,9 +224,14 @@ describe("turn cancellation descendant cascade", () => {
             }),
           ]);
 
+          // The turn waits on the detached program, so the cancel names detached tasks too.
           const cancelResponse = await parentClient.fetch(
             createEveSessionCancelRoutePath(response.sessionId),
-            { method: "POST" },
+            {
+              body: JSON.stringify({ tasks: true }),
+              headers: { "content-type": "application/json" },
+              method: "POST",
+            },
           );
           expect(cancelResponse.status).toBe(202);
           await expect(cancelResponse.json()).resolves.toMatchObject({
@@ -247,14 +259,29 @@ describe("turn cancellation descendant cascade", () => {
           expectCancellationBoundary(remoteEvents);
           expectCancellationBoundary(parentEvents);
           // The owner reports each cancelled task, including the workflow tool call, once; the
-          // children's confirmations add nothing.
-          expect(
-            parentEvents
+          // children's confirmations add nothing. The program's own agent calls stop when its
+          // cancelled run unwinds, which can be after the turn's boundary.
+          const settledTasks = async () => {
+            const all: MessageStreamEvent[] = [];
+            for await (const event of parentSession.stream({ follow: false, startIndex: 0 })) {
+              all.push(event);
+            }
+            return all
               .flatMap((event) =>
                 event.type === "task.settled" ? [`${event.data.taskId}:${event.data.status}`] : [],
               )
-              .sort(),
-          ).toEqual(
+              .sort();
+          };
+          await withinEventDeadline(
+            (async () => {
+              while ((await settledTasks()).length < 3) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+            })(),
+            "the program's agent calls to settle",
+          );
+          await new Promise((resolve) => setTimeout(resolve, 1_500));
+          expect(await settledTasks()).toEqual(
             [
               `${localChild.taskId}:cancelled`,
               `${remoteChild.taskId}:cancelled`,
@@ -309,14 +336,16 @@ describe("turn cancellation descendant cascade", () => {
           iterator: response[Symbol.asyncIterator](),
           label: "root session-limit prompt",
         });
-        const calls = events.filter(
-          (event) => event.type === "task.started" && event.data.kind === "agent",
-        );
         const requests = events.flatMap((event) =>
           event.type === "input.requested" ? event.data.requests : [],
         );
-        expect(calls).toHaveLength(1);
         expect(requests).toHaveLength(1);
+        // The detached program's agent call can start after the root's prompt.
+        await readUntil({
+          iterator: session.stream({ startIndex: 0 })[Symbol.asyncIterator](),
+          label: "generated child dispatch",
+          matches: isAgentTaskStart,
+        });
         expect(requests[0]?.requestId.startsWith(`${response.sessionId}:limit:`)).toBe(true);
 
         const requestId = requests[0]?.requestId;
@@ -325,6 +354,9 @@ describe("turn cancellation descendant cascade", () => {
         expect(declined.status).toBe("waiting");
         expectCancellationBoundary(declined.events);
         expect(declined.events.some((event) => event.type === "task.started")).toBe(false);
+        const all: MessageStreamEvent[] = [];
+        for await (const event of session.stream({ follow: false, startIndex: 0 })) all.push(event);
+        expect(all.filter(isAgentTaskStart)).toHaveLength(1);
       } catch (error) {
         throw new Error(
           [
@@ -361,6 +393,10 @@ async function readTaskStarts(input: {
     })(),
     input.label,
   );
+}
+
+function isAgentTaskStart(event: MessageStreamEvent): boolean {
+  return event.type === "task.started" && event.data.kind === "agent";
 }
 
 function isWaitForCancelToolCall(event: MessageStreamEvent): boolean {

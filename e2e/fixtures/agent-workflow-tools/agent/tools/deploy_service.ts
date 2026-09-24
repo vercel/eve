@@ -8,6 +8,7 @@ import { deployService } from "../lib/deploy.ts";
  * sleeps, then resumes with the return value as the tool result.
  */
 export default defineWorkflowTool({
+  attached: true,
   description: "Deploy a service after planning it durably.",
   inputSchema: z.strictObject({ service: z.string() }),
   execute: deployService,

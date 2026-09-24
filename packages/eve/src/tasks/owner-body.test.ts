@@ -297,7 +297,7 @@ describe("answerTaskInput", () => {
     };
 
     await expect(answerTaskInput(cursor, both)).resolves.toEqual({
-      dismissedTaskIds: [],
+      dismissedCallIds: [],
       kind: "continue",
       remainder: undefined,
     });
@@ -342,7 +342,7 @@ describe("answerTaskInput", () => {
     const text = { kind: "deliver" as const, payloads: [{ message: "approve" }] };
 
     await expect(answerTaskInput(cursor, text)).resolves.toEqual({
-      dismissedTaskIds: [],
+      dismissedCallIds: [],
       kind: "continue",
       remainder: text,
     });

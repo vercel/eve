@@ -2,7 +2,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import { TASK_RECORD_VERSION, type TaskRecord } from "#tasks/record.js";
 import { readTaskTable, TASK_TABLE_STATE_KEY, type TaskTable } from "#tasks/table.js";
 
-/** One agent task record with test defaults: a working foreground call with no child yet. */
+/** One agent task record with test defaults: a working attached call with no child yet. */
 export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   return {
     callId: "call-1",
@@ -10,7 +10,7 @@ export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecor
     generation: 1,
     id: "research-abc234",
     kind: "agent",
-    mode: "foreground",
+    mode: "attached",
     name: "research",
     nodeId: "subagents/research",
     startedAt: "2026-09-24T14:00:00.000Z",

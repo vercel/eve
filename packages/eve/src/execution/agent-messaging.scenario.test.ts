@@ -30,10 +30,19 @@ const CODEWORD = ${JSON.stringify(CODEWORD)};
 const SUBAGENT_NAME = ${JSON.stringify(subagentName)};
 const AGENT_ID_PATTERN = new RegExp(${JSON.stringify(agentIdPattern)}, "u");
 
+// Each program call starts a detached task; the script waits on its receipt.
+const receiptTaskId = (result) => /Started task ([\\w-]+)\\./u.exec(String(result?.output))?.[1];
+const waitedOutput = (result) =>
+  /<task_result [^>]*status="completed"[^>]*>\\n([\\s\\S]*?)\\n<\\/task_result>/u.exec(String(result?.output))?.[1];
+const waitOn = (receipt) => ({
+  toolCalls: [{ id: receipt.id + "-wait", input: { taskId: receiptTaskId(receipt) }, name: "task_wait" }],
+});
+
 const model = mockModel((request) => {
-  const firstResult = request.toolResults.find((result) => result.id === "memory-exchange-1");
+  const result = (id) => request.toolResults.find((candidate) => candidate.id === id);
   if (request.userMessageCount === 1) {
-    if (firstResult !== undefined) return "FIRST_EXCHANGE_COMPLETE";
+    if (result("memory-exchange-1-wait") !== undefined) return "FIRST_EXCHANGE_COMPLETE";
+    if (result("memory-exchange-1") !== undefined) return waitOn(result("memory-exchange-1"));
     return {
       toolCalls: [
         {
@@ -45,14 +54,16 @@ const model = mockModel((request) => {
     };
   }
 
-  const secondResult = request.toolResults.find((result) => result.id === "memory-exchange-2");
   if (request.userMessageCount === 2) {
-    if (secondResult !== undefined) {
-      if (typeof secondResult.output !== "string") {
-        throw new Error("Second child result was not text.");
+    const waited = result("memory-exchange-2-wait");
+    if (waited !== undefined) {
+      const output = waitedOutput(waited);
+      if (output === undefined) {
+        throw new Error("Second child result was not a completed task result.");
       }
-      return \`PARENT_RECALLED=\${secondResult.output}\`;
+      return \`PARENT_RECALLED=\${output}\`;
     }
+    if (result("memory-exchange-2") !== undefined) return waitOn(result("memory-exchange-2"));
     const agentsSnippet = request.messages.map((message) => message.text).join("\\n");
     const agentId = AGENT_ID_PATTERN.exec(agentsSnippet)?.[1];
     if (agentId === undefined) {

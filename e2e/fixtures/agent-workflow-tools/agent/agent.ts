@@ -1,15 +1,19 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, waitForTasks } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
+import {
+  mockModel,
+  type MockModelRequest,
+  type MockModelResponder,
+  type MockModelResponse,
+} from "eve/evals";
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? null);
 }
 
 /**
- * Background task flows, one `BG-*-START` directive per session. A result
- * turn echoes its `<task_result>` message, a steering message containing
- * `BG-PING` gets a short reply, and each flow starts its tools once.
+ * Detached task flows, one `BG-*-START` directive per session. A result turn
+ * echoes its `<task_result>` message, and each flow starts its tools once.
  */
 function respondBackground(request: MockModelRequest): MockModelResponse | string | undefined {
   const last = request.lastUserMessage ?? "";
@@ -31,19 +35,6 @@ function respondBackground(request: MockModelRequest): MockModelResponse | strin
   const results = (name: string) => request.toolResults.filter((entry) => entry.name === name);
 
   switch (directive) {
-    case "BG-GROUP-START":
-      if (last.includes("BG-PING")) return "BG-PING-REPLY";
-      if (results("slow_lookup").length > 0) return "BG-GROUP-WAITED";
-      return {
-        toolCalls: [
-          { input: { seconds: 20, topic: "billing" }, name: "slow_lookup" },
-          { input: { seconds: 25, topic: "search" }, name: "slow_lookup" },
-        ],
-      };
-    case "BG-APPROVAL-START":
-      if (last.includes("BG-PING")) return "BG-PING-REPLY";
-      if (results("confirm_deploy").length > 0) return "BG-APPROVAL-WAITED";
-      return { toolCalls: [{ input: { service: "billing" }, name: "confirm_deploy" }] };
     case "BG-SLEEP-START": {
       const slept = results("sleep")[0];
       if (slept !== undefined) return `BG-SLEPT ${text(slept.output)}`;
@@ -72,12 +63,11 @@ function respondBackground(request: MockModelRequest): MockModelResponse | strin
 
 /**
  * Deterministic script: each directive names the workflow tool to call with
- * service "api"; once the turn holds a tool result the reply echoes it.
+ * service "api"; once the turn holds a tool result the reply echoes it. An
+ * agent the script calls directly returns a receipt, so the script waits for
+ * its result.
  */
-function respond(request: MockModelRequest): MockModelResponse | string {
-  const background = respondBackground(request);
-  if (background !== undefined) return background;
-
+const respondWorkflow = waitForTasks((request) => {
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
     const auditing = request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT");
@@ -189,7 +179,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return "WORKFLOW-IDLE";
-}
+});
+
+const respond: MockModelResponder = (request) =>
+  respondBackground(request) ?? respondWorkflow(request);
 
 const base = e2eAgentConfig({ mock: respond });
 

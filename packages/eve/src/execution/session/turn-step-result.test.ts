@@ -54,7 +54,7 @@ describe("delegated turn completion", () => {
   });
 
   it("folds a turn's usage into the later settlement while background work is out", () => {
-    const working = createTaskRecord({ kind: "workflow", mode: "background", name: "remind" });
+    const working = createTaskRecord({ kind: "workflow", mode: "detached", name: "remind" });
     const current = withUsage({ ...session(), state: taskTableState([working]) }, 100);
     const settled = endTurn(current, { output: "Started the reminder." });
 

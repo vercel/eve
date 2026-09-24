@@ -162,6 +162,8 @@ export function getPromptContentText(content: BootstrapPrompt[number]["content"]
  * role in conversation history, but they are not authored input and must
  * not drive mock directive parsing.
  */
+const TASK_RESULT_TEXT = /^<task_result /u;
+
 export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
   for (const message of [...prompt].reverse()) {
     if (message.role !== "user") {
@@ -170,7 +172,8 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
 
     const text = getPromptContentText(message.content).trim();
 
-    if (isTasksNoteText(text)) {
+    // Task results reach the turn as user-role scaffolding, not authored input.
+    if (isTasksNoteText(text) || TASK_RESULT_TEXT.test(text)) {
       continue;
     }
 

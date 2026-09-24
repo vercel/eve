@@ -38,7 +38,7 @@ const events: UnstampedMessageStreamEvent[] = [
       callId: "call",
       child: { sessionId: "child", streamPath: "/child" },
       kind: "agent",
-      mode: "foreground",
+      mode: "attached",
       name: "research",
       taskId: "research-abc234",
       turnId: "turn",

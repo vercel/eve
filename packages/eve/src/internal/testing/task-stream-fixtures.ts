@@ -1,7 +1,6 @@
 import type {
   MessageStreamEvent,
   MessageStreamEventMeta,
-  TaskDetachedStreamEvent,
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
 } from "#protocol/message.js";
@@ -43,7 +42,6 @@ export interface TaskStreamState {
   readonly kind?: TaskStartedStreamEvent["data"]["kind"];
   /** The `mode` of the task's first `task.started`. */
   readonly mode?: TaskStartedStreamEvent["data"]["mode"];
-  readonly detached?: TaskDetachedStreamEvent["data"]["reason"];
   readonly status: "working" | TaskSettledStreamEvent["data"]["status"];
   readonly errorCode?: string;
   /** `task.started` events for the task: one per generation. */
@@ -57,18 +55,16 @@ export interface TaskStreamState {
 
 type TaskStreamEvent = Extract<
   MessageStreamEvent,
-  { readonly type: "task.detached" | "task.settled" | "task.started" }
+  { readonly type: "task.settled" | "task.started" }
 >;
 
 export function isTaskStreamEvent(event: MessageStreamEvent): event is TaskStreamEvent {
-  return (
-    event.type === "task.started" || event.type === "task.detached" || event.type === "task.settled"
-  );
+  return event.type === "task.started" || event.type === "task.settled";
 }
 
 /**
  * The reference fold from stream events to task states. Tasks are keyed by
- * `taskId` and sorted by it, so a background child's `task.started`, which
+ * `taskId` and sorted by it, so a detached child's `task.started`, which
  * may land before or after its turn ends, does not change the result.
  */
 export function deriveTaskStreamStates(
@@ -111,9 +107,6 @@ export function deriveTaskStreamStates(
         if (event.data.child?.remote !== undefined) state.remote = true;
         break;
       }
-      case "task.detached":
-        ensure(event.data.taskId, event.data.callId).detached = event.data.reason;
-        break;
       case "task.settled": {
         const state = ensure(event.data.taskId, event.data.callId);
         state.status = event.data.status;
@@ -155,7 +148,6 @@ export const TASK_STREAM_MANIFEST_KEYS = [
   "taskId",
   "kind",
   "mode",
-  "detached",
   "status",
   "errorCode",
   "generations",
@@ -186,7 +178,7 @@ const FIXTURE_EPOCH_MS = Date.parse("2026-01-01T00:00:00.000Z");
  * Replaces every value that differs between two recordings of the same
  * scenario with a stable placeholder, keeping each event's shape. Sessions,
  * turns, tasks, requests, and deliveries are numbered in an order that does
- * not depend on when a background child reported; `meta.id` and `meta.at`
+ * not depend on when a detached child reported; `meta.id` and `meta.at`
  * follow the recorded order. Call IDs must be stable already, which a mock
  * model gets by naming every tool call's `id`.
  */
@@ -327,7 +319,7 @@ export function findVolatileStrings(events: readonly MessageStreamEvent[]): read
 /**
  * The parts of a recording that must match across runs: every event other
  * than `task.*` in order, and each task's own `task.*` events in order.
- * A background child reports `task.started` whenever its session starts,
+ * A detached child reports `task.started` whenever its session starts,
  * so where task events interleave with the turn is not compared. `meta`
  * is renumbered by position, so it is left out.
  */

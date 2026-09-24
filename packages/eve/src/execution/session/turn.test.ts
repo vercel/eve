@@ -865,7 +865,7 @@ describe("SessionExecution turn checkpoints", () => {
     ).resolves.toMatchObject({ kind: "done" });
 
     expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
-      { kind: "background" },
+      { kind: "detached" },
     ]);
   });
 
@@ -904,7 +904,7 @@ describe("SessionExecution turn checkpoints", () => {
     await expect(execution.runTurn(undefined)).resolves.toEqual({ cancelled: true, kind: "park" });
 
     expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
-      { kind: "background" },
+      { kind: "detached" },
       { kind: "active-turn" },
     ]);
   });

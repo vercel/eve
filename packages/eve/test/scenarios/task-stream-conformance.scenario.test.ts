@@ -47,9 +47,8 @@ const REMOTE_TOKEN = "task-stream-fixtures-token";
 
 /** Published fixtures, in manifest order. */
 const FIXTURE_NAMES = [
-  "foreground-agent-call",
-  "background-agent-call",
-  "detach-on-steer",
+  "agent-call-wait",
+  "agent-call-result-turn",
   "task-cancel",
   "agent-timed-out",
   "remote-agent-input-request",
@@ -59,8 +58,6 @@ const MESSAGES = {
   background: "Draft the Orbit launch post, no rush.",
   cancel: "Remind me about the design review in ten minutes.",
   cancelFollowUp: "Actually, cancel that reminder.",
-  detach: "Check the d0 and sre dashboards.",
-  detachSteer: "Also check the Plain queue, please.",
   foreground: "Ask the researcher about the Orbit launch.",
   remote: "Refund order 42 through billing.",
   timeout: "Ask the auditor to review the Q3 ledger.",
@@ -69,7 +66,6 @@ const MESSAGES = {
 const REPLIES = {
   background: "The launch post draft is ready.",
   cancel: "Cancelled the reminder.",
-  detach: "d0 and sre are both healthy.",
   foreground: "The researcher found three sources.",
   remote: "Billing refunded order 42.",
   timeout: "The auditor did not finish in time.",
@@ -91,40 +87,36 @@ export default defineAgent({
     const latest = lastUserMessage ?? "";
     const result = (id) => toolResults.find((candidate) => candidate.id === id);
     const delivered = latest.startsWith("<task_result");
+    const taskId = (id) => /Started task ([\\w-]+)\\./u.exec(JSON.stringify(result(id)?.output))?.[1];
+    // Starts a detached task with one call, waits on it with task_wait, then replies.
+    const startAndWait = ([id, name, input], text) => {
+      if (!result(id)) return call([id, name, input]);
+      const waitId = id + "-wait";
+      return result(waitId) ? reply(text) : call([waitId, "task_wait", { taskId: taskId(id) }]);
+    };
     switch (userMessages[0]) {
       case M.foreground:
-        return result("research-call")
-          ? reply(R.foreground)
-          : call(["research-call", "researcher", { message: "Summarize the coverage of the Orbit launch." }]);
+        return startAndWait(
+          ["research-call", "researcher", { message: "Summarize the coverage of the Orbit launch." }],
+          R.foreground,
+        );
       case M.background:
         if (delivered) return reply(R.background);
         return result("draft-call")
           ? reply("Started the draft; I will share it when it is ready.")
-          : call(["draft-call", "writer", { background: true, message: "Draft the Orbit launch post." }]);
-      case M.detach:
-        if (delivered) return reply(R.detach);
-        if (latest === M.detachSteer) return reply("Checking the Plain queue now; d0 and sre moved to the background.");
-        return call(
-          ["d0-call", "lookup", { seconds: 6, source: "d0" }],
-          ["sre-call", "lookup", { seconds: 12, source: "sre" }],
-        );
+          : call(["draft-call", "writer", { message: "Draft the Orbit launch post." }]);
       case M.cancel:
         if (latest === M.cancelFollowUp) {
           if (result("cancel-call")) return reply(R.cancel);
-          const taskId = /remind-[0-9a-z]{6}/u.exec(JSON.stringify(result("review-call")?.output))?.[0];
-          return call(["cancel-call", "task_cancel", { taskId }]);
+          return call(["cancel-call", "task_cancel", { taskId: taskId("review-call") }]);
         }
         return result("review-call")
           ? reply("I will remind you in ten minutes.")
           : call(["review-call", "remind", { note: "Design review.", seconds: 600 }]);
       case M.timeout:
-        return result("audit-call")
-          ? reply(R.timeout)
-          : call(["audit-call", "auditor", { message: "Review the Q3 ledger." }]);
+        return startAndWait(["audit-call", "auditor", { message: "Review the Q3 ledger." }], R.timeout);
       case M.remote:
-        return result("refund-call")
-          ? reply(R.remote)
-          : call(["refund-call", "billing", { message: "Refund order 42." }]);
+        return startAndWait(["refund-call", "billing", { message: "Refund order 42." }], R.remote);
       default:
         return reply("Unexpected: " + latest);
     }
@@ -152,6 +144,8 @@ export default defineAgent({
 }
 
 function sleepingToolSource(input: {
+  /** A child agent's own slow work, which its turn waits for. */
+  readonly attached?: boolean;
   readonly description: string;
   readonly inputSchema: string;
   readonly seconds: string;
@@ -161,7 +155,7 @@ function sleepingToolSource(input: {
 import { sleep } from "workflow";
 import { z } from "zod";
 
-export default defineWorkflowTool({
+export default defineWorkflowTool({${input.attached === true ? "\n  attached: true," : ""}
   description: ${JSON.stringify(input.description)},
   inputSchema: ${input.inputSchema},
   async execute(input) {
@@ -255,6 +249,7 @@ export default defineTool({
         }),
         "agent/subagents/auditor/instructions.md": "Scan the ledger, then report.\n",
         "agent/subagents/auditor/tools/scan.ts": sleepingToolSource({
+          attached: true,
           description: "Scan the ledger slowly.",
           inputSchema: "z.object({})",
           result: '"late"',
@@ -283,16 +278,11 @@ export default defineRemoteAgent({
         }),
         "agent/subagents/writer/instructions.md": "Gather notes, then draft.\n",
         "agent/subagents/writer/tools/gather.ts": sleepingToolSource({
+          attached: true,
           description: "Gather the launch notes.",
           inputSchema: "z.object({})",
           result: '{ notes: "Orbit ships today." }',
           seconds: "6",
-        }),
-        "agent/tools/lookup.ts": sleepingToolSource({
-          description: "Look up a dashboard.",
-          inputSchema: "z.object({ seconds: z.number(), source: z.string() })",
-          result: '{ source: input.source, status: "healthy" }',
-          seconds: "input.seconds",
         }),
         "agent/tools/remind.ts": sleepingToolSource({
           description: "Remind the user after a delay.",
@@ -389,55 +379,37 @@ export default defineRemoteAgent({
     );
   }
 
-  fixture("foreground-agent-call", async (client) => {
+  fixture("agent-call-wait", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.foreground });
     await response.result();
     const events = await recordUntilReply(session, REPLIES.foreground);
     expect(deriveTaskStreamStates(events)).toMatchObject([
-      { kind: "agent", mode: "foreground", name: "researcher", status: "completed" },
+      {
+        delivered: false,
+        kind: "agent",
+        mode: "detached",
+        name: "researcher",
+        status: "completed",
+      },
     ]);
     return {
       description:
-        "A waited agent call: task.started with a local child, then task.settled completed; the answer is the call's tool result.",
+        "An agent call waited on with task_wait: the call returns a receipt, task.started with a local child, then task.settled completed; the answer is the task_wait call's tool result.",
       events,
       sessionId: session.state.sessionId,
     };
   });
 
-  fixture("background-agent-call", async (client) => {
+  fixture("agent-call-result-turn", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.background });
     await response.result();
     const events = await recordUntilReply(session, REPLIES.background);
     expect(deriveTaskStreamStates(events)).toMatchObject([
-      { delivered: true, kind: "agent", mode: "background", name: "writer", status: "completed" },
+      { delivered: true, kind: "agent", mode: "detached", name: "writer", status: "completed" },
     ]);
     return {
       description:
-        "An agent call with background: true: the call returns a receipt, the turn ends, and the answer arrives later as a task.result input that starts a result turn. The child's task.started can land before or after the first turn ends.",
-      events,
-      sessionId: session.state.sessionId,
-    };
-  });
-
-  fixture("detach-on-steer", async (client) => {
-    const { session, response } = await client.sessions.create({ message: MESSAGES.detach });
-    const turn = followTurn(response, (events) => count(events, "task.started") === 2);
-    await turn.reached;
-    await (await session.send(MESSAGES.detachSteer)).result();
-    await turn.finished;
-    const events = await recordUntilReply(session, REPLIES.detach);
-    const tasks = deriveTaskStreamStates(events);
-    expect(tasks).toMatchObject([
-      { detached: "steer", kind: "workflow", mode: "foreground", status: "completed" },
-      { detached: "steer", kind: "workflow", mode: "foreground", status: "completed" },
-    ]);
-    const deliveries = events.filter(
-      (event) => event.type === "message.received" && event.data.kind === "task.result",
-    );
-    expect(deliveries).toHaveLength(1);
-    return {
-      description:
-        "Two waited workflow tool calls detached by a steering message: task.detached with reason steer for each, receipts as their tool results, and both results delivered together in one task.result input.",
+        "An agent call the model does not wait on: the call returns a receipt, the turn ends, and the answer arrives later as a task.result input that starts a result turn. The child's task.started can land before or after the first turn ends.",
       events,
       sessionId: session.state.sessionId,
     };
@@ -445,23 +417,15 @@ export default defineRemoteAgent({
 
   fixture("task-cancel", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.cancel });
-    const turn = followTurn(response, (events) => count(events, "task.started") === 1);
-    await turn.reached;
+    await response.result();
     await (await session.send(MESSAGES.cancelFollowUp)).result();
-    await turn.finished;
     const events = await recordUntilReply(session, REPLIES.cancel);
     expect(deriveTaskStreamStates(events)).toMatchObject([
-      {
-        delivered: false,
-        detached: "steer",
-        kind: "workflow",
-        mode: "foreground",
-        status: "cancelled",
-      },
+      { delivered: false, kind: "workflow", mode: "detached", status: "cancelled" },
     ]);
     return {
       description:
-        'A waited workflow tool call that a steering message moved to the background, then stopped by the model with task_cancel: the tool result is { status: "cancelled" }, task.settled reports cancelled, and no result is ever delivered.',
+        'A workflow tool call that returned a receipt, then stopped by the model with task_cancel in a later turn: the task_cancel result is { status: "cancelled" }, task.settled reports cancelled, and no result is ever delivered.',
       events,
       sessionId: session.state.sessionId,
     };
@@ -472,11 +436,17 @@ export default defineRemoteAgent({
     await response.result();
     const events = await recordUntilReply(session, REPLIES.timeout);
     expect(deriveTaskStreamStates(events)).toMatchObject([
-      { errorCode: "TIMED_OUT", kind: "agent", name: "auditor", status: "failed" },
+      {
+        errorCode: "TIMED_OUT",
+        kind: "agent",
+        mode: "detached",
+        name: "auditor",
+        status: "failed",
+      },
     ]);
     return {
       description:
-        "A waited agent call still working at its timeout: task.settled failed with error code TIMED_OUT, which is also the call's tool result.",
+        "An agent call waited on with task_wait and still working at its timeout: task.settled failed with error code TIMED_OUT, which is also the task_wait call's result.",
       events,
       sessionId: session.state.sessionId,
     };
@@ -484,22 +454,26 @@ export default defineRemoteAgent({
 
   fixture("remote-agent-input-request", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.remote });
-    const first = await response.result();
-    const asked = first.events.findLast((event) => event.type === "input.requested");
-    if (asked?.type !== "input.requested") {
-      throw new Error(`No input request; saw ${first.events.map((e) => e.type).join(", ")}`);
-    }
+    // The turn is still in task_wait when the child asks; the answer reaches
+    // the child without interrupting the wait.
+    const turn = followTurn(response, (events) =>
+      events.some((event) => event.type === "input.requested"),
+    );
+    await turn.reached;
+    const asked = turn.events.findLast((event) => event.type === "input.requested");
+    if (asked?.type !== "input.requested") throw new Error("No input request.");
     const request = asked.data.requests[0]!;
     const approve =
       request.options?.find((option) => /approve|allow|yes/iu.test(option.id))?.id ?? "approve";
     await (await session.respond([{ optionId: approve, requestId: request.requestId }])).result();
+    await turn.finished;
     const events = await recordUntilReply(session, REPLIES.remote);
     expect(deriveTaskStreamStates(events)).toMatchObject([
       { inputRequests: 1, kind: "agent", name: "billing", remote: true, status: "completed" },
     ]);
     return {
       description:
-        "A waited call to a remote agent whose tool needs approval: task.started with child.remote, the approval proxied onto the caller's stream as input.requested with the call's taskId, the child's input.resolved once it takes the answer, then task.settled completed.",
+        "A call to a remote agent waited on with task_wait, whose tool needs approval: task.started with child.remote, the approval proxied onto the caller's stream as input.requested with the call's taskId, the child's input.resolved once it takes the answer, then task.settled completed and the wait returns the result.",
       events,
       sessionId: session.state.sessionId,
     };
@@ -547,7 +521,7 @@ function repliedAndParked(events: readonly MessageStreamEvent[], reply: string):
 
 /**
  * Follows a turn's response to its boundary and resolves `reached` once
- * `ready` holds, so the test can steer while the turn still waits.
+ * `ready` holds, so the test can answer while the turn still waits.
  */
 function followTurn(
   response: MessageResponse,
@@ -564,9 +538,5 @@ function followTurn(
     reached.reject(new Error(`The turn ended first; saw ${events.map((e) => e.type).join(", ")}`));
     return events;
   })();
-  return { finished, reached: reached.promise };
-}
-
-function count(events: readonly MessageStreamEvent[], type: MessageStreamEvent["type"]): number {
-  return events.filter((event) => event.type === type).length;
+  return { events, finished, reached: reached.promise };
 }

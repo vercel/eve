@@ -760,6 +760,112 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("waits on every receipt of the last step with one task_wait each", async () => {
+    const receipt = (callId: string, taskId: string) => ({
+      output: { type: "text", value: `Started task ${taskId}. Use task_wait for its result.` },
+      toolCallId: callId,
+      toolName: "deploy_service",
+      type: "tool-result",
+    });
+    const result = await generateWithPrompt(
+      [
+        { content: "Run deploy_service twice.", role: "user" },
+        {
+          content: [
+            receipt("call_a", "deploy_service-a1b2c3"),
+            receipt("call_b", "deploy_service-d4e5f6"),
+          ],
+          role: "tool",
+        },
+      ],
+      [
+        { inputSchema: { type: "object" }, name: "deploy_service", type: "function" },
+        { inputSchema: { type: "object" }, name: "task_wait", type: "function" },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({ taskId: "deploy_service-a1b2c3" }),
+        toolCallId: "call_task_wait_deploy_service_a1b2c3",
+        toolName: "task_wait",
+        type: "tool-call",
+      },
+      {
+        input: JSON.stringify({ taskId: "deploy_service-d4e5f6" }),
+        toolCallId: "call_task_wait_deploy_service_d4e5f6",
+        toolName: "task_wait",
+        type: "tool-call",
+      },
+    ]);
+  });
+
+  it("replies to a settled task_wait as the result of the call that started the task", async () => {
+    const result = await generateWithPrompt([
+      { content: "Run deploy_service.", role: "user" },
+      {
+        content: [
+          {
+            output: {
+              type: "text",
+              value: [
+                '<task_result id="deploy_service-a1b2c3" name="deploy_service" status="completed">',
+                '{\n  "service": "api"\n}',
+                "</task_result>",
+              ].join("\n"),
+            },
+            toolCallId: "call_task_wait",
+            toolName: "task_wait",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+
+    expect(result.content).toEqual([
+      { text: 'Used deploy_service for "Run deploy_service.": {"service":"api"}', type: "text" },
+    ]);
+  });
+
+  it("reads a result that arrived in a task.result message instead of waiting again", async () => {
+    const result = await generateWithPrompt(
+      [
+        { content: "Run deploy_service.", role: "user" },
+        {
+          content: [
+            {
+              output: {
+                type: "text",
+                value: "Started task deploy_service-a1b2c3. Use task_wait for its result.",
+              },
+              toolCallId: "call_deploy_service",
+              toolName: "deploy_service",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content: [
+            '<task_result id="deploy_service-a1b2c3" name="deploy_service" status="completed">',
+            "ready",
+            "</task_result>",
+          ].join("\n"),
+          role: "user",
+        },
+      ],
+      [
+        { inputSchema: { type: "object" }, name: "deploy_service", type: "function" },
+        { inputSchema: { type: "object" }, name: "task_wait", type: "function" },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      { text: 'Used deploy_service for "Run deploy_service.": ready', type: "text" },
+    ]);
+  });
+
   it("does not reuse a prior turn's tool result after a later user message", async () => {
     const result = await generateWithPrompt([
       {

@@ -126,8 +126,8 @@ export async function answerTaskStep(input: {
  * Emits each event with its task's ID through this session's own sink, which
  * passes it on to this session's caller when it has one, and records what
  * the task then waits on. Between turns the sink stamps the last turn's
- * delivery IDs: the IDs of the turn that started a waited task, but not
- * always of the turn that started a background one.
+ * delivery IDs: the IDs of the turn that started an attached task, but not
+ * always of the turn that started a detached one.
  */
 async function publishTaskInput(
   ctx: ContextContainer,

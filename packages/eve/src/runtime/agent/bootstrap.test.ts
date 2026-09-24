@@ -43,7 +43,7 @@ function createResolvedAgentForTest(overrides: Partial<ResolvedAgent> = {}): Res
   return agent as ResolvedAgent;
 }
 
-describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
+describe("createResolvedRuntimeTurnAgent", () => {
   it("partitions static user instructions into initial messages", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest({
@@ -89,63 +89,15 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     );
   });
 
-  it("includes agent messaging instructions for the root framework agent tool", () => {
+  it("leaves task instructions to the harness, which offers them with the task tools", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [createFrameworkAgentTool()],
     });
 
-    expect(turnAgent.instructions).toContainEqual(
-      expect.stringContaining("An agent call waits for the agent to answer"),
-    );
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("task receipt"));
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Tool execution"));
-  });
-
-  it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
-    const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: { name: "test-agent" } as ResolvedAgent["config"],
-      }),
-      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [
-        {
-          description: "Authored replacement for the framework agent tool.",
-          inputSchema: null,
-          kind: "authored-tool",
-          logicalPath: `tools/${AGENT_TOOL_NAME}.ts`,
-          name: AGENT_TOOL_NAME,
-          owner: APPLICATION_OWNER,
-          sourceId: `tools/${AGENT_TOOL_NAME}.ts`,
-        },
-      ],
-    });
-
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
-  });
-
-  it("omits the messaging instruction when no agent tool was compiled", () => {
-    const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: { name: "test-agent" } as ResolvedAgent["config"],
-      }),
-      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [],
-    });
-
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
-  });
-
-  it("omits the messaging instruction for a non-root node without declared subagents", () => {
-    const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: { name: "test-agent" } as ResolvedAgent["config"],
-      }),
-      nodeId: "subagents/researcher",
-      tools: [],
-    });
-
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("agentId"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("[Tasks]"));
   });
 });

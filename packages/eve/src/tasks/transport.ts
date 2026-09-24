@@ -124,7 +124,7 @@ async function runCommand(
  * call, with the owner's key, so the agent admits the message once and
  * reports receiving it when it answers that call: in its current turn, in
  * its next turn for the same call when it is holding that call for its own
- * background work, or as a new turn for the call when it has already
+ * detached work, or as a new turn for the call when it has already
  * answered. A remote agent gets the same message over HTTP, with the owner's
  * callback for the call. Returns the call's error output when the message
  * did not reach the agent.

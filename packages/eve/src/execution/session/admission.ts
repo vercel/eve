@@ -108,7 +108,7 @@ export async function admitSessionInboxPayload(
         return results.length === 0 ? { kind: "consumed" } : { kind: "wait-results", results };
       }
       // The turn's own calls are cancelled with the turn, when the turn guard matches.
-      if (command.tasks === true) await cancelTasks(input.cursor, { kind: "background" });
+      if (command.tasks === true) await cancelTasks(input.cursor, { kind: "detached" });
       return { command, kind: "cancel" };
   }
 }

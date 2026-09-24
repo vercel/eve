@@ -205,8 +205,8 @@ export class SubagentPump {
 
   /**
    * The originating call returned a task receipt, not the child's result:
-   * it started in the background or detached while the turn waited. Keep the
-   * section open until the child stream reaches its own boundary. A child
+   * it started a detached task. Keep the section open until the child stream
+   * reaches its own boundary. A child
    * that already settled before the receipt raced in stays settled.
    */
   background(callId: string): void {

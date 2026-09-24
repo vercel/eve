@@ -10,6 +10,7 @@ import { type ReplicaResult, startReplica } from "../lib/fanout.ts";
  * steps across the run boundary.
  */
 export default defineWorkflowTool({
+  attached: true,
   description: "Plan several deploy replicas in parallel and combine their digests.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }) {

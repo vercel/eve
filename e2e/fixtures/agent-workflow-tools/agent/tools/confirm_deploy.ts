@@ -8,6 +8,7 @@ import { describePlan } from "../lib/plan.ts";
  * the run, and the answer resumes the hook `ask` returns.
  */
 export default defineWorkflowTool({
+  attached: true,
   description: "Deploy a service after a human approves the plan.",
   inputSchema: z.strictObject({ service: z.string() }),
   async *execute({ service }, ctx) {

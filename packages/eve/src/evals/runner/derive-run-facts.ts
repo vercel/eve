@@ -64,9 +64,9 @@ export function deriveRunFacts(
   // Model calls whose input matches the agent tool contract, in case their
   // task settles without ever starting a child.
   const agentToolCallsByCallId = new Map<string, { name: string; turnIndex: number }>();
-  // Background and detached calls: their tool result is a receipt, and only
-  // `task.settled` resolves the agent call. A remote background child reports
-  // `task.started` before the receipt.
+  // Detached calls: their tool result is a receipt, and only `task.settled`
+  // resolves the agent call. A remote child reports `task.started` before
+  // the receipt.
   const receiptCallIds = new Set<string>();
   const inputRequests: InputRequest[] = [];
   let turnIndex = -1;
@@ -157,7 +157,7 @@ export function deriveRunFacts(
 
       case "task.started": {
         if (event.data.kind !== "agent") break;
-        if (event.data.mode === "background") receiptCallIds.add(event.data.callId);
+        if (event.data.mode === "detached") receiptCallIds.add(event.data.callId);
         const call = ensureSubagentCall(event.data.callId, event.data.name);
         call.taskId = event.data.taskId;
         const child = event.data.child;
@@ -165,11 +165,6 @@ export function deriveRunFacts(
           call.childSessionId = child.sessionId;
           if (child.remote !== undefined) call.remoteUrl = child.remote.url;
         }
-        break;
-      }
-
-      case "task.detached": {
-        receiptCallIds.add(event.data.callId);
         break;
       }
 
@@ -233,8 +228,7 @@ export function deriveRunFacts(
 
 /**
  * Every agent tool (declared, remote, or built-in `agent`) shares one input
- * contract: a `message`, plus optional `agentId`, `outputSchema`, and, in
- * interactive root sessions, `background`.
+ * contract: a `message`, plus optional `agentId` and `outputSchema`.
  */
 function isAgentToolInput(input: JsonObject): boolean {
   return (
@@ -243,7 +237,7 @@ function isAgentToolInput(input: JsonObject): boolean {
   );
 }
 
-const AGENT_TOOL_INPUT_KEYS = new Set(["agentId", "background", "message", "outputSchema"]);
+const AGENT_TOOL_INPUT_KEYS = new Set(["agentId", "message", "outputSchema"]);
 
 /**
  * Returns empty derived facts, used when a case produced no events

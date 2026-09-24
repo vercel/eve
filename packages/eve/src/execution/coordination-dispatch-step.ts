@@ -14,7 +14,6 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { isAgentTaskRequest } from "#tasks/agent-tool.js";
 import { applyTaskCancelCall } from "#tasks/cancel.js";
 import { isTaskCancelRequest } from "#tasks/cancel-tool.js";
-import { planTaskWait, type TaskWaitPlan } from "#tasks/detach.js";
 import { readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 import { applyTaskWaitCall, type TaskWaitRegistration } from "#tasks/wait.js";
@@ -27,7 +26,6 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
 
 export async function dispatchCoordinationStep(input: CoordinationDispatchStepInput): Promise<
   TaskOwnerUpdate & {
-    readonly wait?: TaskWaitPlan;
     /** The `task_wait` calls the turn holds for. */
     readonly taskWaits?: readonly TaskWaitRegistration[];
   }
@@ -120,10 +118,6 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
     results,
     serializedContext: input.serializedContext,
     taskWaits,
-    wait: planTaskWait({
-      detachable: prepared.interactiveRootTurn,
-      requests: prepared.plan.filter((request) => !isTaskWaitRequest(request)),
-    }),
     sessionState:
       nextSession === session
         ? prepared.sessionState

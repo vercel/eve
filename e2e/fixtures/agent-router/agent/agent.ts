@@ -1,4 +1,4 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, waitForTasks } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
@@ -7,7 +7,8 @@ export default defineAgent({
   description: "Handle general tasks that do not belong to a specialist.",
   model: mockModel({
     modelId: "agent-router-parent",
-    respond(request) {
+    // The router and inspect-agents start detached tasks; the script reads their results.
+    respond: waitForTasks((request) => {
       if (request.userMessages.some((message) => message.includes("Return the root-copy marker"))) {
         if (request.tools.some((tool) => tool.name === "agent")) {
           throw new Error("The delegated root copy exposed the root-only agent router tool.");
@@ -32,7 +33,7 @@ export default defineAgent({
             ],
           }
         : JSON.stringify(result.output);
-    },
+    }),
   }),
   modelContextWindowTokens: 1_000_000,
   tool: false,

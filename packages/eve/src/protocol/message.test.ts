@@ -286,7 +286,7 @@ describe("message stream protocol", () => {
     const input = {
       callId: "call/1",
       kind: "agent" as const,
-      mode: "foreground" as const,
+      mode: "attached" as const,
       name: "research",
       parentSessionId: "parent/1",
       taskId: "research-abc234",
@@ -298,7 +298,7 @@ describe("message stream protocol", () => {
         callId: "call/1",
         child: { sessionId: "child/1", streamPath: "/eve/v1/session/child%2F1/stream" },
         kind: "agent",
-        mode: "foreground",
+        mode: "attached",
         name: "research",
         taskId: "research-abc234",
         turnId: "turn_1",

@@ -110,7 +110,7 @@ function createCalled(overrides: { readonly callId?: string } = {}): TaskStarted
       sessionId: "child-1",
     },
     kind: "agent",
-    mode: "foreground",
+    mode: "attached",
     name: "research",
     parentSessionId: "parent-1",
     taskId: "research-abc234",

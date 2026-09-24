@@ -14,13 +14,13 @@ import { createTaskRecord, taskTableState } from "#internal/testing/task-records
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
-  renderBackgroundTasksInstruction,
+  renderTasksInstruction,
   RESULT_TURN_REPLY_PROMPT,
   TASKS_NOTE_LABEL,
 } from "#tasks/render.js";
 
-// These sessions have no agent tools, so the block explains the note itself.
-const BACKGROUND_TASKS_INSTRUCTION = renderBackgroundTasksInstruction({ agents: false });
+// These sessions have no agent tools.
+const TASKS_INSTRUCTION = renderTasksInstruction({ agents: false });
 import { encodeTaskCreator, holdTaskResult, readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
@@ -81,7 +81,7 @@ function sessionWithResult(input: {
     creator: encodeTaskCreator({ auth: input.creator }),
     id: "remind-q4x1ze",
     kind: "workflow",
-    mode: "background",
+    mode: "detached",
     name: "remind",
     status: "completed",
   });
@@ -155,7 +155,7 @@ function lastUserText(request: MockModelRequest): string | undefined {
   return request.messages.findLast((message) => message.role === "user")?.text;
 }
 
-describe("background result delivery in the tool loop", () => {
+describe("detached result delivery in the tool loop", () => {
   it("starts a result turn with one task.result message rendered through toModelOutput", async () => {
     const { events, requests, session } = await runStep({
       auth: ALICE,
@@ -250,11 +250,11 @@ describe("background result delivery in the tool loop", () => {
     expect(result.settledTurn?.output).toBe("Your reminder fired: stand-up at 10.");
   });
 
-  it("keeps a task-mode run open until its background tasks report", async () => {
+  it("keeps a task-mode run open until its detached tasks report", async () => {
     const working = createTaskRecord({
       id: "remind-q4x1ze",
       kind: "workflow",
-      mode: "background",
+      mode: "detached",
       name: "remind",
     });
     const awaiting = await runStep({
@@ -281,7 +281,7 @@ describe("background result delivery in the tool loop", () => {
     expect(finished.events.map((event) => event.type)).toContain("session.completed");
   });
 
-  it("includes the background tasks block in an interactive root session with a workflow tool", async () => {
+  it("includes the tasks block in a session with a workflow tool that is not attached", async () => {
     const withDetach = await runStep({
       auth: null,
       respond: () => "ok",
@@ -301,8 +301,8 @@ describe("background result delivery in the tool loop", () => {
         .filter((message) => message.role === "system")
         .map((message) => message.text)
         .join("\n");
-    expect(system(withDetach.requests[0]!)).toContain(BACKGROUND_TASKS_INSTRUCTION);
-    expect(system(without.requests[0]!)).not.toContain(BACKGROUND_TASKS_INSTRUCTION);
+    expect(system(withDetach.requests[0]!)).toContain(TASKS_INSTRUCTION);
+    expect(system(without.requests[0]!)).not.toContain(TASKS_INSTRUCTION);
     // A user turn never starts with a held result.
     expect(hasResultMessage(withDetach.requests[0]!)).toBe(false);
   });
@@ -324,7 +324,7 @@ describe("background result delivery in the tool loop", () => {
       "a task-mode run with a workflow tool",
       "task" as const,
       [REMIND, TASK_CANCEL, TASK_WAIT],
-      false,
+      true,
     ],
     [
       "a session with only plain tools",
@@ -333,7 +333,7 @@ describe("background result delivery in the tool loop", () => {
       false,
     ],
   ])(
-    "advertises task_wait and task_cancel with the background block for %s",
+    "advertises task_wait and task_cancel with the tasks block for %s",
     async (_label, mode, tools, advertised) => {
       const { requests } = await runStep({
         auth: null,
@@ -351,7 +351,7 @@ describe("background result delivery in the tool loop", () => {
         .join("\n");
       expect(names.includes("task_cancel")).toBe(advertised);
       expect(names.includes("task_wait")).toBe(advertised);
-      expect(system.includes(BACKGROUND_TASKS_INSTRUCTION)).toBe(advertised);
+      expect(system.includes(TASKS_INSTRUCTION)).toBe(advertised);
     },
   );
 
@@ -359,7 +359,7 @@ describe("background result delivery in the tool loop", () => {
     const working = createTaskRecord({
       id: "remind-q4x1ze",
       kind: "workflow",
-      mode: "background",
+      mode: "detached",
       name: "remind",
     });
     const { result, session } = await runStep({

@@ -9,7 +9,7 @@ const SCENARIO_TIMEOUT_MS = 360_000;
 
 describe("per-call timeout", () => {
   it(
-    "fails a subagent call with TIMED_OUT once its authored timeout passes on the owner's timer",
+    "fails a subagent task with TIMED_OUT once its authored timeout passes on the owner's timer",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -22,7 +22,11 @@ export default defineAgent({
     if (toolResults.length === 0) {
       return { toolCalls: [{ name: "researcher", input: { message: "Dig into Alice's report." } }] };
     }
-    return "Parent got: " + JSON.stringify(toolResults[0].output);
+    if (toolResults.length === 1) {
+      const taskId = /researcher-[0-9a-z]{6}/u.exec(String(toolResults[0].output))?.[0];
+      return { toolCalls: [{ name: "task_wait", input: { taskId } }] };
+    }
+    return "Parent got: " + JSON.stringify(toolResults[1].output);
   }),
   modelContextWindowTokens: 32_000,
 });
@@ -73,18 +77,27 @@ export default defineWorkflowTool({
           error: { code: "TIMED_OUT" },
           status: "failed",
         });
-        const researcherResults = result.events.flatMap((event) =>
-          event.type === "action.result" &&
-          event.data.result.kind === "tool-result" &&
-          event.data.result.toolName === "researcher"
-            ? [event.data.result]
-            : [],
-        );
-        expect(researcherResults).toHaveLength(1);
-        expect(researcherResults[0]).toMatchObject({
-          isError: true,
-          output: { code: "TIMED_OUT" },
-        });
+        const resultsOf = (toolName: string) =>
+          result.events.flatMap((event) =>
+            event.type === "action.result" &&
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === toolName
+              ? [event.data.result]
+              : [],
+          );
+        // The call returned its receipt; the wait returned the timeout.
+        expect(resultsOf("researcher")).toMatchObject([
+          { output: { status: "working", taskId: settled?.data.taskId } },
+        ]);
+        expect(resultsOf("task_wait")).toMatchObject([
+          {
+            output: {
+              outcome: { error: { code: "TIMED_OUT" }, status: "failed" },
+              status: "settled",
+              taskId: settled?.data.taskId,
+            },
+          },
+        ]);
         const reply = result.events.findLast((event) => event.type === "message.completed");
         expect(reply?.data.message).toContain("TIMED_OUT");
         // The child's 60-second tool never finished; the 2-second limit ended the call.

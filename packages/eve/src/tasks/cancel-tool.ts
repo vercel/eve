@@ -2,11 +2,11 @@ import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 import { MAX_TASK_ID_LENGTH } from "#shared/session-cancel.js";
 
-// The model's tool for stopping a background task. The harness reads this
+// The model's tool for stopping a detached task. The harness reads this
 // module, so it must stay free of Node.js built-ins.
 
 /**
- * Marks the model tool that stops a background task. Its calls defer like a
+ * Marks the model tool that stops a detached task. Its calls defer like a
  * workflow tool's, and the owner applies them to its task table; nothing with
  * this ID is ever started as a workflow.
  */

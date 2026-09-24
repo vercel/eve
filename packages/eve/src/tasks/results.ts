@@ -6,15 +6,15 @@ import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { isReportedLoss, markTaskDelivered, readTaskTable, type TaskTable } from "#tasks/table.js";
 
-// Background results are held in session state from settlement until a model
-// step delivers them as one `task.result` message. Read by the session
-// workflow body, so this module must not import Node.js built-ins.
+// Detached results no wait took are held in session state from settlement
+// until a model step delivers them as one `task.result` message. Read by the
+// session workflow body, so this module must not import Node.js built-ins.
 
-/** Session state key holding background results that have not reached history. */
+/** Session state key holding detached results that have not reached history. */
 export const TASK_RESULTS_STATE_KEY = "eve.taskResults";
 
-/** Working background tasks one session may hold. Detached tasks count; a detach is never rejected. */
-export const MAX_BACKGROUND_TASKS = 10;
+/** Working detached tasks one session may hold; a start over the cap fails `TOO_MANY_TASKS`. */
+export const MAX_WORKING_TASKS = 20;
 
 /** Who started a task, captured at start. A result turn runs as this creator. */
 export interface TaskCreator {
@@ -23,7 +23,7 @@ export interface TaskCreator {
   readonly activityRootTurnId?: string;
 }
 
-/** One settled background result waiting for delivery. */
+/** One settled detached result waiting for delivery. */
 export interface PendingTaskResult {
   readonly taskId: string;
   readonly generation: number;
@@ -31,11 +31,6 @@ export interface PendingTaskResult {
   readonly kind: TaskKind;
   readonly outcome: TaskOutcome;
   readonly creator?: JsonObject;
-  /**
-   * The detach group the task belonged to when it settled. Kept on the
-   * result, so giving the agent new work does not pull it out of its group.
-   */
-  readonly group?: string;
 }
 
 export function encodeTaskCreator(creator: TaskCreator): JsonObject {
@@ -85,13 +80,13 @@ export function readPendingTaskResults(
 }
 
 /**
- * Holds the first terminal outcome of a background task until a model step
+ * Holds the first terminal outcome of a detached task until a model step
  * delivers it. The record stays undelivered, so the `[Tasks]` note keeps
  * listing it meanwhile.
  */
 export function holdTaskResult<T extends { readonly state?: SessionStateMap }>(
   session: T,
-  record: Pick<TaskRecord, "creator" | "detachGroup" | "generation" | "id" | "kind" | "name">,
+  record: Pick<TaskRecord, "creator" | "generation" | "id" | "kind" | "name">,
   outcome: TaskOutcome,
 ): T {
   const pending = readPendingTaskResults(session.state);
@@ -108,51 +103,37 @@ export function holdTaskResult<T extends { readonly state?: SessionStateMap }>(
     taskId: record.id,
   };
   if (record.creator !== undefined) entry.creator = record.creator;
-  if (record.detachGroup !== undefined) entry.group = record.detachGroup;
   return writePending(session, [...pending, entry]);
 }
 
-/**
- * Results that may be delivered now. Members of a detach group are held
- * while another member is working; each working member's time limit, or the
- * session's lifetime, bounds that wait. A member waiting on a person does
- * not hold the others: it reports on its own once answered.
- */
-export function deliverableTaskResults(
-  state: SessionStateMap | undefined,
-): readonly PendingTaskResult[] {
-  const table = getTaskTable({ state });
-  return readPendingTaskResults(state).filter((entry) => isGroupSettled(table, entry));
-}
-
-/** Whether any deliverable result was created by `principal`. */
+/** Whether any held result was created by `principal`. */
 export function hasDeliverableTaskResults(
   state: SessionStateMap | undefined,
   principal: SessionAuthContext | null,
 ): boolean {
-  return deliverableTaskResults(state).some((entry) =>
+  return readPendingTaskResults(state).some((entry) =>
     sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal),
   );
 }
 
-/** The creator whose results start the next result turn, when any result is deliverable. */
+/** The creator whose results start the next result turn, when any result is held. */
 export function nextTaskResultTurn(
   state: SessionStateMap | undefined,
 ): { readonly creator?: JsonObject } | undefined {
-  const [first] = deliverableTaskResults(state);
+  const [first] = readPendingTaskResults(state);
   if (first === undefined) return undefined;
   return first.creator === undefined ? {} : { creator: first.creator };
 }
 
 /**
- * Takes every deliverable result whose creator is `principal`, so they share
- * one message, and marks their records delivered.
+ * Takes every held result whose creator is `principal`, so they share one
+ * message, and marks their records delivered.
  */
 export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
   session: T,
   principal: SessionAuthContext | null,
 ): { readonly results: readonly PendingTaskResult[]; readonly session: T } {
-  const taken = deliverableTaskResults(session.state).filter((entry) =>
+  const taken = readPendingTaskResults(session.state).filter((entry) =>
     sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal),
   );
   if (taken.length === 0) return { results: [], session };
@@ -169,8 +150,8 @@ export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
 }
 
 /**
- * Takes the held result of one generation, whatever its detach group, and
- * marks it delivered: a `task_wait` asked for that task by name.
+ * Takes the held result of one generation and marks it delivered: a
+ * `task_wait` asked for that task by name.
  */
 export function takeTaskResult<T extends { readonly state?: SessionStateMap }>(
   session: T,
@@ -193,34 +174,28 @@ export function takeTaskResult<T extends { readonly state?: SessionStateMap }>(
 }
 
 /**
- * Whether background work remains whose result has not reached history. A
+ * Whether detached work remains whose result has not reached history. A
  * session with such work is not quiescent: a delegated caller or a task-mode
  * run waits for it.
  */
-export function hasPendingBackgroundWork(state: SessionStateMap | undefined): boolean {
+export function hasPendingDetachedWork(state: SessionStateMap | undefined): boolean {
   if (readPendingTaskResults(state).length > 0) return true;
   const { lost, table } = readTaskTable(state);
   // An unreadable record is reported as a result before the session is quiescent.
   if (lost.some(isReportedLoss)) return true;
-  return table.records.some((record) => record.mode === "background" && !record.delivered);
+  return table.records.some((record) => record.mode === "detached" && !record.delivered);
 }
 
-/** Background tasks still working, which count toward {@link MAX_BACKGROUND_TASKS}. */
-export function workingBackgroundTaskIds(table: TaskTable): readonly string[] {
+/** Detached generations still working, which count toward {@link MAX_WORKING_TASKS}. */
+export function workingDetachedTaskIds(table: TaskTable): readonly string[] {
   return table.records
     .filter(
       (record) =>
-        record.mode === "background" &&
+        record.mode === "detached" &&
+        record.workflowCaller === undefined &&
         (record.status === "working" || record.status === "input_required"),
     )
     .map((record) => record.id);
-}
-
-function isGroupSettled(table: TaskTable, entry: PendingTaskResult): boolean {
-  if (entry.group === undefined) return true;
-  return table.records
-    .filter((record) => record.detachGroup === entry.group)
-    .every((record) => record.status !== "working");
 }
 
 function writePending<T extends { readonly state?: SessionStateMap }>(
@@ -290,7 +265,6 @@ function isPendingTaskResult(value: unknown): value is PendingTaskResult {
     typeof entry.generation === "number" &&
     typeof entry.name === "string" &&
     (entry.kind === "agent" || entry.kind === "workflow") &&
-    (entry.group === undefined || typeof entry.group === "string") &&
     typeof outcome === "object" &&
     outcome !== null &&
     (outcome.status === "completed" ||

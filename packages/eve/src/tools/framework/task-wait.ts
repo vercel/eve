@@ -11,7 +11,7 @@ import { defineJsonSchema } from "#tools/schema.js";
 export const TASK_WAIT_TOOL_NAME = "task_wait";
 
 /**
- * Holds the turn until one background task has a result the model has not
+ * Holds the turn until one detached task has a result the model has not
  * seen, the timeout passes, or a new message arrives. eve advertises it with
  * `task_cancel`, and the owner applies each call to its task table.
  */

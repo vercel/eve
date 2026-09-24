@@ -1,37 +1,35 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { receiptTaskIds, taskResultDeliveries, waitForStarts } from "./helpers";
+import { receiptTaskIds, taskResultDeliveries } from "./helpers";
 
 /**
- * Alice sets a reminder, then changes her mind while the turn still waits on
- * it. Her message moves the reminder to the background, the model stops it
- * with task_cancel, and the cancelled reminder never wakes the model: the
- * next turn after the reminder's time is Alice's own follow-up.
+ * Alice sets a reminder, which starts as a detached task and returns a
+ * receipt at once. She then changes her mind, the model stops it with
+ * task_cancel, and the cancelled reminder never wakes the model: the next
+ * turn after the reminder's time is Alice's own follow-up.
  */
 export default defineEval({
   description: "A task cancelled with task_cancel never starts a result turn.",
   timeoutMs: 120_000,
   async test(t) {
-    const session = await t.session();
-    const live = await session.start(
+    const started = await t.send(
       "Alice would like a reminder about the office plants. BG-CANCEL-START",
     );
-    await waitForStarts(t, live, "remind_later", 1);
-
-    const change = await live.session.start("Alice changed her mind about the reminder. BG-STOP", {
-      turnPolicy: "steer",
-    });
-    const stopped = await live.result();
-    await change.result();
-    stopped.expectOk();
+    started.expectOk();
+    started.messageIncludes("BG-STARTED");
     const [taskId] = await t.require(
-      receiptTaskIds(stopped, "remind_later"),
+      receiptTaskIds(started, "remind_later"),
       satisfies(
         (taskIds: readonly string[]) => taskIds.length === 1,
-        "the reminder moved to the background with one receipt",
+        "the reminder started as a detached task with one receipt",
       ),
     );
+
+    const stopped = await started.session.send(
+      "Alice changed her mind about the reminder. BG-STOP",
+    );
+    stopped.expectOk();
     stopped.messageIncludes("BG-CANCELLED");
     stopped.calledTool("task_cancel", {
       count: 1,

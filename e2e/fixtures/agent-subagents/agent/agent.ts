@@ -1,4 +1,4 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, waitForTasks } from "@eve-e2e/config";
 import { defineAgent, defineDynamic } from "eve";
 import { mockModel, type MockModelMessage } from "eve/evals";
 
@@ -17,7 +17,7 @@ const TOOL_FALSE_PROBE = "E2E_TOOL_FALSE_SUBAGENT";
 const DISABLED_TOOL_PROBE = "E2E_DISABLED_SUBAGENT";
 const hiddenSubagentProbe = mockModel({
   modelId: "hidden-subagent-probe",
-  respond(request) {
+  respond: waitForTasks((request) => {
     const probe = [...request.userMessages]
       .reverse()
       .find(
@@ -34,7 +34,7 @@ const hiddenSubagentProbe = mockModel({
     return result === undefined
       ? { toolCalls: [{ name: "invoke-hidden", input: { target } }] }
       : JSON.stringify(result.output);
-  },
+  }),
 });
 
 const base = e2eAgentConfig();
@@ -50,9 +50,10 @@ const workspaceReader = mockModel({
     return { toolCalls: [{ name: "read-workspace-label", input: {} }] };
   },
 });
+// Waits on each agent it starts, so each lookup finishes within its turn.
 const workspaceDispatcher = mockModel({
   modelId: "principal-forwarding-workspace-dispatcher",
-  respond(request) {
+  respond: waitForTasks((request) => {
     let requestIndex = -1;
     for (const [index, message] of request.messages.entries()) {
       if (message.role === "user" && message.text.includes(WORKSPACE_FORWARDING_MARKER)) {
@@ -98,11 +99,11 @@ const workspaceDispatcher = mockModel({
         },
       ],
     };
-  },
+  }),
 });
 const scheduledRemoteModel = mockModel({
   modelId: "scheduled-remote-completion",
-  respond(request) {
+  respond: waitForTasks((request) => {
     if (request.userMessages.some((message) => message.includes(SCHEDULED_REMOTE_CHILD_SCENARIO))) {
       return "SCHEDULED-REMOTE-CHILD-RESULT";
     }
@@ -122,7 +123,7 @@ const scheduledRemoteModel = mockModel({
     return JSON.stringify(remote.output).includes("SCHEDULED-REMOTE-CHILD-RESULT")
       ? "SCHEDULED-REMOTE-FINAL SCHEDULED-REMOTE-CHILD-RESULT"
       : `Scheduled remote agent returned an unexpected result: ${JSON.stringify(remote.output)}`;
-  },
+  }),
 });
 
 /**

@@ -40,7 +40,7 @@ const LOOKUP = createTaskRecord({
   creator: encodeTaskCreator({ auth: ALICE }),
   id: "lookup-q4x1ze",
   kind: "workflow",
-  mode: "background",
+  mode: "detached",
   name: "lookup",
   nodeId: undefined,
 });
@@ -165,7 +165,7 @@ describe("applyTaskWaitCall", () => {
         callId: "call-nested",
         creator: encodeTaskCreator({ auth: ALICE }),
         id: "research-b81d0c",
-        mode: "background",
+        mode: "detached",
         workflowCaller: { replyTo: "reply-hook", runId: "run-9" },
       }),
       {
@@ -302,7 +302,7 @@ describe("endTaskWaits", () => {
       callId: "call-research",
       creator: encodeTaskCreator({ auth: ALICE }),
       id: "research-7k2m9q",
-      mode: "background",
+      mode: "detached",
     });
     const w1 = waitCall("call-w1", { taskId: LOOKUP.id });
     const w2 = waitCall("call-w2", { taskId: agent.id });

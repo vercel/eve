@@ -3,11 +3,11 @@ import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json
 import { MAX_TASK_ID_LENGTH } from "#shared/session-cancel.js";
 import type { TaskOutcome } from "#tasks/protocol.js";
 
-// The model's tool for waiting on one background task. The harness reads this
+// The model's tool for waiting on one detached task. The harness reads this
 // module, so it must stay free of Node.js built-ins.
 
 /**
- * Marks the model tool that waits on a background task. Its calls defer like
+ * Marks the model tool that waits on a detached task. Its calls defer like
  * a workflow tool's, and the owner applies them to its task table; nothing
  * with this ID is ever started as a workflow.
  */

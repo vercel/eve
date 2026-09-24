@@ -6,9 +6,9 @@ import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "../../src/p
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
 
-// task_wait end to end over background agent calls in an interactive root
-// session: a settled result, a timeout whose result arrives later, a wait a
-// steering message interrupts, and two waits in one step.
+// task_wait end to end over detached agent calls: a settled result, a
+// timeout whose result arrives later, a wait a steering message interrupts,
+// and two waits in one step.
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -24,7 +24,7 @@ const PLANS = {
   "Research plain.": { message: "source=plain seconds=15" },
 };
 const idOf = (output) => /researcher-[0-9a-z]{6}/u.exec(String(output))?.[0] ?? "missing";
-const research = (message) => ({ name: "researcher", input: { background: true, message } });
+const research = (message) => ({ name: "researcher", input: { message } });
 
 export default defineAgent({
   model: mockModel(({ lastUserMessage, messages, toolResults, userMessages }) => {
@@ -82,6 +82,7 @@ import { sleep } from "workflow";
 import { z } from "zod";
 
 export default defineWorkflowTool({
+  attached: true,
   description: "Gather notes on a source.",
   inputSchema: z.object({ seconds: z.number(), source: z.string() }),
   async execute({ seconds, source }) {
@@ -191,7 +192,7 @@ function lastReply(events: readonly MessageStreamEvent[]): string {
 
 describe("task_wait", () => {
   it(
-    "returns a background result, times out, yields to a steering message, and fans in",
+    "returns a detached result, times out, yields to a steering message, and fans in",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },

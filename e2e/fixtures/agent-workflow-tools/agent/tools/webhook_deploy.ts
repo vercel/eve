@@ -5,6 +5,7 @@ import { z } from "zod";
 import { postWorkflowCallback } from "../lib/webhook.ts";
 
 export default defineWorkflowTool({
+  attached: true,
   description: "Verify a deploy callback through the public workflow webhook route.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }) {

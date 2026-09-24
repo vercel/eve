@@ -1147,7 +1147,7 @@ function taskStarted(
         streamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       },
       kind: "agent",
-      mode: "foreground",
+      mode: "attached",
       name,
       taskId: `${name}-abc234`,
       turnId,

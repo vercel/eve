@@ -151,7 +151,7 @@ it("cancels background tasks and leaves the turn's calls to turn cancellation fo
     admitSessionInboxPayload(command, { cursor, queue: new SessionInputQueue() }),
   ).resolves.toEqual({ command, kind: "cancel" });
 
-  expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(cursor, { kind: "background" });
+  expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(cursor, { kind: "detached" });
 });
 
 it("leaves tasks alone for a plain turn cancel", async () => {

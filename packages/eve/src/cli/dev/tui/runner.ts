@@ -1637,10 +1637,8 @@ export class EveTUIRunner {
         onTaskStarted: (started) => {
           if (sourceSession === undefined) return;
           this.#subagentPump.begin(started, sourceSession.state.sessionId);
-          if (started.data.mode === "background")
-            this.#subagentPump.background(started.data.callId);
+          if (started.data.mode === "detached") this.#subagentPump.background(started.data.callId);
         },
-        onTaskDetached: (callId) => this.#subagentPump.background(callId),
         onTaskSettled: (callId) => this.#subagentPump.settle(callId),
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
@@ -2104,8 +2102,6 @@ type EveStreamTranslatorInput = {
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onTaskStarted?: (event: TaskStartedStreamEvent) => void;
-  /** A waited call moved to the background; its section stays open past the turn. */
-  onTaskDetached?: (callId: string) => void;
   onTaskSettled?: (callId: string) => void;
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
@@ -2152,7 +2148,6 @@ async function* eveEventsToTUIStream(
     pendingInputRequests,
     turnState,
     onTaskStarted,
-    onTaskDetached,
     onTaskSettled,
     onTurnCancelled,
     onConnectionAuthRequired,
@@ -2516,10 +2511,6 @@ async function* eveEventsToTUIStream(
         break;
       }
 
-      case "task.detached":
-        onTaskDetached?.(event.data.callId);
-        break;
-
       case "subagent.event":
         // `subagent.event` is not emitted by the current harness. All
         // intermediate child content is observed via the runner's parallel
@@ -2678,7 +2669,6 @@ function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
     case "step.failed":
     case "step.started":
     case "subagent.event":
-    case "task.detached":
     case "task.settled":
     case "task.started":
     case "turn.completed":

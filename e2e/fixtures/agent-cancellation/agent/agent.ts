@@ -1,4 +1,4 @@
-import { e2eAgentConfig } from "@eve-e2e/config";
+import { e2eAgentConfig, waitForTasks } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
@@ -95,7 +95,8 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   return `Mock reply: ${message}`;
 }
 
-const base = e2eAgentConfig({ mock: respond });
+// The workflow tool starts detached tasks; the script reads their results.
+const base = e2eAgentConfig({ mock: waitForTasks(respond) });
 
 export default defineAgent({
   ...base,

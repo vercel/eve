@@ -27,7 +27,7 @@ const log = createLogger("tasks.steer");
  * An agent, local or remote, that answered before the message reached it
  * runs the message as its next turn for the same call. Its answer reports
  * how many messages it received, so the owner records that turn as the
- * agent's next background generation, whose result arrives as a
+ * agent's next detached generation, whose result arrives as a
  * `task.result`.
  */
 export async function steerWorkingAgent(input: {

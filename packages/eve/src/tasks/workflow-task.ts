@@ -20,6 +20,7 @@ import { toTaskError } from "#tasks/outcome.js";
 import type { TaskOwnerUpdate } from "#tasks/owner.js";
 import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
 import { encodeTaskCreator, type TaskCreator } from "#tasks/results.js";
 import { findWorkflowTask, getTaskTable, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
@@ -36,8 +37,9 @@ const log = createLogger("tasks.workflow");
  * a replayed call whose record exists starts nothing, and a start retried
  * after the run began starts a duplicate that exits without running the
  * body. A start failure settles the task `START_FAILED` and returns the
- * call's error result at once. The call starts waited; in an interactive
- * root turn a steering message may later move it to the background.
+ * call's error result at once. A call to an `attached: true` tool holds its
+ * turn until the run's outcome; any other call is detached and returns its
+ * receipt at once, unless the session is at the working-task cap.
  */
 export async function startWorkflowTask<
   T extends { readonly sessionId: string; readonly state?: SessionStateMap },
@@ -54,11 +56,13 @@ export async function startWorkflowTask<
   readonly session: T;
 }> {
   const { now, request, session } = input;
-  const started = startTask(getTaskTable(session), {
+  const detached = request.attached !== true;
+  const table = getTaskTable(session);
+  const started = startTask(table, {
     callId: request.callId,
     creator: input.creator === undefined ? undefined : encodeTaskCreator(input.creator),
     kind: "workflow",
-    mode: "foreground",
+    mode: detached ? "detached" : "attached",
     name: request.toolName,
     now,
     ownerId: session.sessionId,
@@ -67,10 +71,19 @@ export async function startWorkflowTask<
     turnId: input.turnId,
   });
   // The replayed call's run already started; its outcome settles this record.
-  if (started.kind === "existing") return { events: [], session };
+  if (started.kind === "existing") {
+    const receipt = detached ? startReceiptResult(started.record, request.toolName) : undefined;
+    return receipt === undefined
+      ? { events: [], session }
+      : { events: [], result: receipt, session };
+  }
   if (started.kind !== "started") {
     throw new Error(`Workflow tool call "${request.callId}" cannot continue an agent.`);
   }
+  const rejected = detached
+    ? tooManyTasksResult({ callId: request.callId, table, toolName: request.toolName })
+    : undefined;
+  if (rejected !== undefined) return { events: [], result: rejected, session };
   const { record } = started;
 
   let address: WorkflowToolRunAddress;
@@ -124,15 +137,17 @@ export async function startWorkflowTask<
     now,
   );
   const adoptedRecord = findTask(adopted.table, record.id)!;
-  return {
+  const update = {
     events: [taskStartedEvent({ child, ownerSessionId: session.sessionId, record: adoptedRecord })],
     session: setTaskTable(session, adopted.table),
   };
+  return detached ? { ...update, result: startReceiptResult(record, request.toolName) } : update;
 }
 
 /**
  * Applies a workflow tool run's outcome to its task. The first outcome of a
- * working task settles it and becomes the waiting call's tool result; the
+ * working task settles it: an attached call's tool result, or a detached
+ * result for a live `task_wait` or a later `task.result` message. The
  * outcome of a task the owner cancelled only confirms the stop. An outcome
  * that matches no task is dropped.
  */
@@ -178,18 +193,18 @@ export function settleWorkflowTask(input: {
     input.now,
   );
   const settled = applied.effects.find((effect) => effect.kind === "settled");
-  const background = settled !== undefined && record.mode === "background";
-  // A waited call's result goes straight to the turn, so it is delivered now;
-  // a background result goes to a live `task_wait`, or is held until a model
-  // step delivers it.
+  const detached = settled !== undefined && record.mode === "detached";
+  // An attached call's result goes straight to the turn, so it is delivered
+  // now; a detached result goes to a live `task_wait`, or is held until a
+  // model step delivers it.
   let next = setTaskTable(
     session,
-    settled !== undefined && !background
+    settled !== undefined && !detached
       ? markTaskDelivered(applied.table, record.id, record.generation)
       : applied.table,
   );
-  const results = settled !== undefined && !background ? [result] : [];
-  if (background) {
+  const results = settled !== undefined && !detached ? [result] : [];
+  if (detached) {
     const routed = routeDetachedResult(next, settled.record, settled.outcome);
     next = routed.session;
     if (routed.result !== undefined) results.push(routed.result);

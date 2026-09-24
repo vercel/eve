@@ -21,7 +21,7 @@ import {
   closeTaskOwnerInbox,
   syncTaskTimer,
 } from "#tasks/owner-body.js";
-import { hasPendingBackgroundWork } from "#tasks/results.js";
+import { hasPendingDetachedWork } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
   readAdmittedOperations,
@@ -254,7 +254,7 @@ async function runSessionLoop(
         deferDeliveries:
           boot.mode === "task" &&
           (expectedAttemptIds.size > 0 ||
-            hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)),
+            hasPendingDetachedWork(cursor.sessionState.snapshot.session.state)),
         expectedAttemptIds,
         inbox,
         // A held caller, or a task-mode run waiting on its background tasks,
@@ -262,7 +262,7 @@ async function runSessionLoop(
         ownsParkedWork: () =>
           progress.caller !== undefined ||
           (boot.mode === "task" &&
-            hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)),
+            hasPendingDetachedWork(cursor.sessionState.snapshot.session.state)),
         queue,
       });
       if (next.kind !== "workflow") return next;
@@ -381,7 +381,7 @@ async function runSessionLoop(
         action.settled !== undefined &&
         // A delegated call settles only when this session is quiescent: the
         // caller waits for the result turn that reports the background work.
-        !hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state) &&
+        !hasPendingDetachedWork(cursor.sessionState.snapshot.session.state) &&
         // A message the owner sent this working agent as its turn ended joins
         // the same call, so the reply that settles it has seen the message.
         // One that arrives after the reply starts the call's next turn.

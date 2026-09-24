@@ -10,11 +10,11 @@ import { defineJsonSchema } from "#tools/schema.js";
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
 
 /**
- * Stops one background task by ID. eve advertises it exactly when it adds the
- * background-tasks instructions: in an interactive root session with any
- * agent tool or workflow tool that is not attached. The owner applies each
- * call to its task table; a stopped task never reports back, except to a
- * `task_wait` on it.
+ * Stops one detached task by ID. eve advertises it with `task_wait` and the
+ * static tasks instructions, in any session whose agent has an agent tool or
+ * a workflow tool that is not attached. The owner applies each call to its
+ * task table; a stopped task never reports back, except to a `task_wait` on
+ * it.
  */
 export const taskCancel = defineNativeTool<{ taskId: string }, TaskCancelOutput>(
   {

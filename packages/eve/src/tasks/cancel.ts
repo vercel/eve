@@ -19,11 +19,15 @@ import { findCallerTask } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { taskToolErrorResult } from "#tasks/receipts.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { TASK_CANCEL_INVALID_INPUT_MESSAGE, type TaskCancelOutput } from "#tasks/render.js";
+import {
+  renderInterruptedCall,
+  TASK_CANCEL_INVALID_INPUT_MESSAGE,
+  type TaskCancelOutput,
+} from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { cancelTask, type TaskTable } from "#tasks/table.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
-import { takeLiveWait } from "#tasks/wait.js";
+import { endTaskWaits, takeLiveWait } from "#tasks/wait.js";
 
 // Owner-side cancellation: record the outcome at once, ask each started child
 // to stop, and never wait for it. The timer hard-stops a child that does not
@@ -32,17 +36,17 @@ import { takeLiveWait } from "#tasks/wait.js";
 
 /** Which working tasks {@link cancelTasksStep} cancels. */
 export type TaskCancelSelector =
-  /** The waited tasks of the turn the session is running or parked in. */
+  /** The attached calls of the turn the session is running or parked in. */
   | { readonly kind: "active-turn" }
   /** Every working task: the session ends, or its delegated caller cancels it. */
   | { readonly kind: "all" }
   /**
-   * Every working task no caller waits on. The calls a turn waits on are
+   * Every working detached task. The attached calls a turn holds are
    * cancelled with that turn, so a turn that keeps running never waits on a
    * cancelled call.
    */
-  | { readonly kind: "background" }
-  /** One background task. A call its turn waits on is cancelled with that turn. */
+  | { readonly kind: "detached" }
+  /** One detached task. An attached call is cancelled with its turn. */
   | { readonly kind: "task"; readonly taskId: string }
   | { readonly kind: "workflow-run"; readonly runId: string };
 
@@ -107,7 +111,101 @@ export async function cancelTasksStep(input: {
 }
 
 /**
- * Applies one model call that stops a background task. A working task is
+ * Ends the attached calls of the active turn that a steering message
+ * interrupts, or whose dismissed question's grace period ran out. Each
+ * `task_wait` among `callIds` returns `interrupted`, and each attached task
+ * among them is cancelled through the normal cancel path, with the
+ * interruption text as its tool result. Detached tasks keep working.
+ */
+export async function interruptAttachedCallsStep(input: {
+  readonly callIds: readonly string[];
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<TaskOwnerUpdate> {
+  "use step";
+
+  const durable = readDurableSession(input.sessionState);
+  const now = new Date().toISOString();
+  const waits = endTaskWaits(durable, { callIds: input.callIds, now, reason: "interrupted" });
+  const stopped = interruptAttachedCalls({
+    callIds: input.callIds,
+    now,
+    session: waits.session,
+    turnId:
+      getPendingCoordinationBatch(durable.state)?.event.turnId ||
+      activeTurnId(input.sessionState.emissionState),
+  });
+  if (stopped.session === durable) {
+    return {
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
+  if (stopped.commands.length > 0) {
+    await runCommands(stopped.commands, await readContext(input.serializedContext));
+  }
+  return {
+    events: stopped.events,
+    replies: [],
+    results: [...waits.results, ...stopped.results],
+    serializedContext: input.serializedContext,
+    sessionState: replaceDurableSessionSnapshot({
+      session: stopped.session,
+      state: input.sessionState,
+    }),
+  };
+}
+
+/**
+ * The transition behind {@link interruptAttachedCallsStep} for attached
+ * tasks. A call whose task already settled is left alone: its result is on
+ * its way to the turn.
+ */
+export function interruptAttachedCalls<T extends Session>(input: {
+  readonly callIds: readonly string[];
+  readonly now: string;
+  readonly session: T;
+  readonly turnId: string;
+}): Omit<CancelledTasks, "table"> & {
+  readonly results: readonly RuntimeToolResultActionResult[];
+  readonly session: T;
+} {
+  const table = getTaskTable(input.session);
+  const selected = table.records.filter(
+    (record) =>
+      input.callIds.includes(record.callId) &&
+      record.turnId === input.turnId &&
+      record.mode === "attached" &&
+      record.workflowCaller === undefined &&
+      !isTerminalTaskStatus(record.status),
+  );
+  if (selected.length === 0)
+    return { commands: [], events: [], results: [], session: input.session };
+  const calls = getPendingCoordinationBatch(input.session.state)?.tasks ?? [];
+  const cancelled = cancelRecords(table, selected, input.now);
+  const results = selected.map((record): RuntimeToolResultActionResult => {
+    const waitedMs = Math.max(0, Date.parse(input.now) - Date.parse(record.startedAt));
+    return {
+      callId: record.callId,
+      kind: "tool-result",
+      modelOutput: renderInterruptedCall(waitedMs),
+      output: { status: "interrupted", waitedMs },
+      toolName: calls.find((call) => call.callId === record.callId)?.toolName ?? record.name,
+    };
+  });
+  return {
+    commands: cancelled.commands,
+    events: cancelled.events,
+    results,
+    session: setTaskTable(input.session, cancelled.table),
+  };
+}
+
+/**
+ * Applies one model call that stops a detached task. A working task is
  * cancelled and never reports, except to a `task_wait` on it; a finished one
  * keeps its result. A call its turn still waits on is unknown, and a task
  * another principal started is refused. The caller sends the commands and
@@ -191,33 +289,33 @@ function selectTasks(
   switch (selector.kind) {
     case "all":
       return () => true;
-    case "background":
-      return isBackgroundWork;
+    case "detached":
+      return isDetachedWork;
     case "task":
-      return (record) => record.id === selector.taskId && isBackgroundWork(record);
+      return (record) => record.id === selector.taskId && isDetachedWork(record);
     case "workflow-run":
       return (record) => record.workflowCaller?.runId === selector.runId;
     case "active-turn": {
       const activeTurn = turnId();
-      // A background run's own agent calls belong to that run, not to any turn.
-      const backgroundRuns = new Set(
+      // A detached run's own agent calls belong to that run, not to any turn.
+      const detachedRuns = new Set(
         table.records.flatMap((record) =>
-          record.mode === "background" && record.child?.kind === "workflow"
+          record.mode === "detached" && record.child?.kind === "workflow"
             ? [record.child.runId]
             : [],
         ),
       );
       return (record) =>
         record.turnId === activeTurn &&
-        record.mode === "foreground" &&
-        !backgroundRuns.has(record.workflowCaller?.runId ?? "");
+        record.mode === "attached" &&
+        !detachedRuns.has(record.workflowCaller?.runId ?? "");
     }
   }
 }
 
-/** A task no caller waits on: a background call, or one that detached. */
-function isBackgroundWork(record: TaskRecord): boolean {
-  return record.mode === "background" && record.workflowCaller === undefined;
+/** A task no turn or workflow body awaits. */
+function isDetachedWork(record: TaskRecord): boolean {
+  return record.mode === "detached" && record.workflowCaller === undefined;
 }
 
 function cancelRecords(

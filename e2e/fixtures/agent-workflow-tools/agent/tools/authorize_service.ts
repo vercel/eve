@@ -5,6 +5,7 @@ import { createFakeAuthProvider } from "../lib/fake-auth-provider.ts";
 import { fixtureUrl } from "../lib/fake-service.ts";
 
 export default defineWorkflowTool({
+  attached: true,
   description: "Exercise requester authorization inside a durable step.",
   inputSchema: z.strictObject({ service: z.string() }),
   async execute({ service }, ctx) {

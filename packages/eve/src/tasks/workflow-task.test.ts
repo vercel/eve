@@ -54,13 +54,13 @@ const WORKING = createTaskRecord({
 });
 
 describe("startWorkflowTask", () => {
-  it("commits the task before its run starts, then adopts the run and announces it", async () => {
+  it("commits the task before its run starts, then adopts the run, announces it, and returns its receipt", async () => {
     const startRun = vi.fn(async (record: TaskRecord) => {
       expect(record).toMatchObject({
         callId: "call-1",
         delivered: false,
         kind: "workflow",
-        mode: "foreground",
+        mode: "detached",
         name: "deploy",
         status: "working",
         turnId: "turn-1",
@@ -78,8 +78,14 @@ describe("startWorkflowTask", () => {
     });
 
     expect(startRun).toHaveBeenCalledOnce();
-    expect(started.result).toBeUndefined();
     const [record] = getTaskTable(started.session).records;
+    expect(started.result).toEqual({
+      callId: "call-1",
+      kind: "tool-result",
+      modelOutput: `Started task ${record!.id}. Use task_wait for its result.`,
+      output: { status: "working", taskId: record!.id },
+      toolName: "deploy",
+    });
     expect(record).toMatchObject({
       callId: "call-1",
       child: RUN,
@@ -95,13 +101,31 @@ describe("startWorkflowTask", () => {
         data: {
           callId: "call-1",
           kind: "workflow",
-          mode: "foreground",
+          mode: "detached",
           name: "deploy",
           taskId: record!.id,
           turnId: "turn-1",
         },
         type: "task.started",
       },
+    ]);
+  });
+
+  it("holds an attached tool's call for its run's outcome instead of returning a receipt", async () => {
+    const started = await startWorkflowTask({
+      now: NOW,
+      request: { ...REQUEST, attached: true },
+      session: PARENT,
+      startRun: async () => ({ hookToken: "control-hook", runId: "run-1" }),
+      turnId: "turn-1",
+    });
+
+    expect(started.result).toBeUndefined();
+    expect(getTaskTable(started.session).records).toEqual([
+      expect.objectContaining({ child: RUN, mode: "attached", status: "working" }),
+    ]);
+    expect(started.events).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ mode: "attached" }) }),
     ]);
   });
 
@@ -143,7 +167,8 @@ describe("startWorkflowTask", () => {
     });
 
     expect(startRun).not.toHaveBeenCalled();
-    expect(replayed).toEqual({ events: [], session: first.session });
+    // A detached call still owes its receipt.
+    expect(replayed).toEqual({ events: [], result: first.result, session: first.session });
   });
 
   it("settles a run that fails to start as START_FAILED and returns the error at once", async () => {
@@ -221,7 +246,7 @@ describe("startWorkflowTask", () => {
 });
 
 describe("settleWorkflowTask for a background task", () => {
-  const BACKGROUND = { ...WORKING, creator: { auth: null }, mode: "background" as const };
+  const BACKGROUND = { ...WORKING, creator: { auth: null }, mode: "detached" as const };
 
   it("gives the result to a live task_wait on the task instead of holding it", () => {
     const waited = { ...BACKGROUND, wait: { callId: "call-wait", startedAt: NOW } };

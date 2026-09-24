@@ -2,6 +2,7 @@ import type { AgentDefinition, AgentStaticModelDefinition } from "eve";
 import { mockModel, type MockModelResponder } from "eve/evals";
 
 export { e2eJudgeModel } from "./judge.js";
+export { waitForTasks } from "./tasks.js";
 
 /**
  * Sentinel value for `EVE_E2E_MODEL` that makes fixtures author a

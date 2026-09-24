@@ -11,6 +11,10 @@ const SCENARIO_TIMEOUT_MS = 360_000;
 const RESULT_TIMEOUT_MS = 90_000;
 const ENV = { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" };
 
+// The interrupt rule end to end: a steering message ends an attached call
+// through the cancel path, and leaves a detached task, and the question it
+// waits on, untouched.
+
 /** Collects events from the stream until `done` holds or the timeout passes. */
 async function collectUntil(
   stream: AsyncIterable<MessageStreamEvent>,
@@ -87,110 +91,9 @@ function outputsByCall(events: readonly MessageStreamEvent[]): Map<string, unkno
   );
 }
 
-describe("detaching waited calls", () => {
+describe("the interrupt rule", () => {
   it(
-    "detaches both calls on a steering message, lists them, and delivers them in one result turn",
-    async () => {
-      const app = await scenarioApp({
-        dependencies: { zod: "^4.3.6" },
-        files: {
-          "agent/agent.ts": `import { defineAgent } from "eve";
-import { mockModel } from "eve/evals";
-
-export default defineAgent({
-  model: mockModel(({ lastUserMessage, messages, toolResults }) => {
-    const note = messages.findLast((m) => m.role === "user" && m.text.startsWith("[Tasks]"))?.text ?? "";
-    if (lastUserMessage?.startsWith("<task_result")) return "Combined: " + lastUserMessage;
-    if (lastUserMessage === "Also check Plain, please.") {
-      return "Detached: " + JSON.stringify(toolResults.map((r) => r.output)) + " Note: " + note;
-    }
-    if (lastUserMessage === "Where are d0 and sre?") return "Status: " + note;
-    if (toolResults.length === 0) {
-      return {
-        toolCalls: [
-          { name: "lookup", input: { source: "d0", seconds: 8 } },
-          { name: "lookup", input: { source: "sre", seconds: 16 } },
-        ],
-      };
-    }
-    return "Unexpected: " + lastUserMessage;
-  }),
-  modelContextWindowTokens: 32_000,
-});
-`,
-          "agent/instructions.md": "Look things up when asked.\n",
-          "agent/tools/lookup.ts": `import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
-import { z } from "zod";
-
-export default defineWorkflowTool({
-  description: "Look up a source.",
-  inputSchema: z.object({ source: z.string(), seconds: z.number() }),
-  async execute({ source, seconds }) {
-    "use workflow";
-    await sleep(seconds * 1000);
-    return { source, status: "healthy" };
-  },
-});
-`,
-        },
-        installDependencies: true,
-        name: "detach-steer-group",
-      });
-      const server = await startEveDev(app.appRoot, { env: ENV });
-      try {
-        const client = new Client({ host: server.url });
-        const { session, response } = await client.sessions.create({
-          message: "Check d0 and sre.",
-        });
-        const turn = followTurn(response, (events) => count(events, "task.started") === 2);
-        await turn.reached;
-        await (await session.send("Also check Plain, please.")).result();
-        const events = await turn.finished;
-
-        const started = events.flatMap((event) =>
-          event.type === "task.started" ? [event.data] : [],
-        );
-        expect(started.map((data) => data.mode)).toEqual(["foreground", "foreground"]);
-        const detached = events.flatMap((event) =>
-          event.type === "task.detached" ? [event.data] : [],
-        );
-        expect(detached.map(({ reason }) => reason)).toEqual(["steer", "steer"]);
-        expect(detached.map(({ taskId }) => taskId).toSorted()).toEqual(
-          started.map(({ taskId }) => taskId).toSorted(),
-        );
-        const outputs = outputsByCall(events);
-        for (const { callId, taskId } of started) {
-          expect(outputs.get(callId)).toEqual({ status: "working", taskId });
-        }
-        // Receipts and the steering message reach the model in the same step.
-        const reply = lastReply(events);
-        expect(reply).toContain("A new message arrived, so this call moved to the background");
-        expect(reply).toContain("[Tasks]");
-        expect(count(events, "turn.started")).toBe(1);
-
-        const status = await (await session.send("Where are d0 and sre?")).result();
-        for (const { taskId } of started) expect(lastReply(status.events)).toContain(taskId);
-
-        const later = await nextResultTurn(session);
-        const received = later.filter(
-          (event) => event.type === "message.received" && event.data.kind === "task.result",
-        );
-        expect(received).toHaveLength(1);
-        expect(
-          received[0]?.type === "message.received" ? received[0].data.taskIds?.toSorted() : [],
-        ).toEqual(started.map(({ taskId }) => taskId).toSorted());
-        const combined = lastReply(later);
-        for (const { taskId } of started) expect(combined).toContain(`id="${taskId}"`);
-      } finally {
-        await server.stop();
-      }
-    },
-    SCENARIO_TIMEOUT_MS,
-  );
-
-  it(
-    "ends an attached sleep early on steer instead of detaching it",
+    "ends an attached sleep on a steering message with the interruption text",
     async () => {
       const app = await scenarioApp({
         files: {
@@ -212,7 +115,7 @@ export default sleep();
 `,
         },
         installDependencies: true,
-        name: "detach-sleep",
+        name: "interrupt-sleep",
       });
       const server = await startEveDev(app.appRoot, { env: ENV });
       try {
@@ -224,7 +127,9 @@ export default sleep();
         const events = await turn.finished;
 
         const sleepTask = events.find((event) => event.type === "task.started");
-        expect(count(events, "task.detached")).toBe(0);
+        expect(sleepTask?.type === "task.started" ? sleepTask.data.mode : undefined).toBe(
+          "attached",
+        );
         expect(events).toContainEqual(
           expect.objectContaining({
             data: expect.objectContaining({
@@ -234,10 +139,14 @@ export default sleep();
             type: "task.settled",
           }),
         );
-        const waited = [...outputsByCall(events).values()][0] as { waitedSeconds: number };
-        expect(waited.waitedSeconds).toBeLessThan(60);
+        const stopped = [...outputsByCall(events).values()][0] as {
+          status: string;
+          waitedMs: number;
+        };
+        expect(stopped.status).toBe("interrupted");
+        expect(stopped.waitedMs).toBeLessThan(60_000);
         const reply = lastReply(events);
-        expect(reply).toContain("The sleep ended early after");
+        expect(reply).toMatch(/Stopped after .+ because a new message arrived\./u);
         expect(reply).toContain("Never mind, let's move on.");
         expect(count(events, "turn.started")).toBe(1);
       } finally {
@@ -248,7 +157,7 @@ export default sleep();
   );
 
   it(
-    "detaches a call waiting on approval for an unrelated message, then reports the answer",
+    "keeps a detached task and its approval through an unrelated message, then reports the answer",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -259,11 +168,9 @@ import { mockModel } from "eve/evals";
 export default defineAgent({
   model: mockModel(({ lastUserMessage, toolResults }) => {
     if (lastUserMessage?.startsWith("<task_result")) return "Refund update: " + lastUserMessage;
-    if (lastUserMessage === "What are your support hours?") {
-      return "Refund pending: " + JSON.stringify(toolResults.map((r) => r.output)) + " Hours: 9 to 5.";
-    }
+    if (lastUserMessage === "What are your support hours?") return "Hours: 9 to 5.";
     if (toolResults.length === 0) return { toolCalls: [{ name: "refund", input: { orderId: "42" } }] };
-    return "Unexpected: " + lastUserMessage;
+    return "Refund started: " + JSON.stringify(toolResults.map((r) => r.output));
   }),
   modelContextWindowTokens: 32_000,
 });
@@ -290,7 +197,7 @@ export default defineWorkflowTool({
 `,
         },
         installDependencies: true,
-        name: "detach-approval",
+        name: "interrupt-detached-approval",
       });
       const server = await startEveDev(app.appRoot, { env: ENV });
       try {
@@ -298,26 +205,28 @@ export default defineWorkflowTool({
         const { session, response } = await client.sessions.create({
           message: "Please refund order 42.",
         });
-        // A surfaced question closes the stream's turn while the call keeps waiting.
-        await response.result();
-        await (await session.send("What are your support hours?")).result();
-        // `task.detached` belongs to the delivery that made the call, so read the whole log.
-        const events: MessageStreamEvent[] = [];
-        for await (const event of session.stream({ follow: false, startIndex: 0 })) {
-          events.push(event);
-        }
+        const first = await response.result();
+        const started = first.events.find((event) => event.type === "task.started");
+        const taskId = started?.type === "task.started" ? started.data.taskId : undefined;
+        expect(started?.type === "task.started" ? started.data.mode : undefined).toBe("detached");
+        expect(lastReply(first.events)).toContain(`Started task ${taskId}.`);
 
-        const asked = events.find((event) => event.type === "input.requested");
-        const requestId =
-          asked?.type === "input.requested" ? asked.data.requests[0]?.requestId : "";
-        expect(requestId).toBeTruthy();
-        const detached = events.flatMap((event) =>
-          event.type === "task.detached" ? [event.data] : [],
+        // The detached run asks on its own; the question outlives the turn that started it.
+        const asked = await collectUntil(session.stream({ startIndex: 0 }), (events) =>
+          events.some((event) => event.type === "input.requested"),
         );
-        expect(detached).toEqual([expect.objectContaining({ reason: "steer" })]);
-        const reply = lastReply(events);
-        expect(reply).toContain("Refund pending:");
-        expect(reply).toContain(`moved to the background as task ${detached[0]?.taskId}`);
+        const request = asked.find((event) => event.type === "input.requested");
+        const requestId =
+          request?.type === "input.requested" ? request.data.requests[0]?.requestId : undefined;
+        expect(requestId).toBeTruthy();
+
+        const unrelated = await (await session.send("What are your support hours?")).result();
+        expect(lastReply(unrelated.events)).toBe("Hours: 9 to 5.");
+        expect(
+          unrelated.events.some(
+            (event) => event.type === "task.settled" && event.data.taskId === taskId,
+          ),
+        ).toBe(false);
 
         await session.respond([{ optionId: "approve", requestId: requestId! }]);
         const later = await nextResultTurn(session);
@@ -325,7 +234,7 @@ export default defineWorkflowTool({
           (event) => event.type === "message.received" && event.data.kind === "task.result",
         );
         expect(received?.type === "message.received" ? received.data.taskIds : []).toEqual([
-          detached[0]?.taskId,
+          taskId,
         ]);
         expect(lastReply(later)).toContain('"decision": "approve"');
       } finally {

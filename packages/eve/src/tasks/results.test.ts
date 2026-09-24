@@ -9,17 +9,17 @@ import { renderTasksNote } from "#tasks/render.js";
 import {
   encodeTaskCreator,
   hasDeliverableTaskResults,
-  hasPendingBackgroundWork,
+  hasPendingDetachedWork,
   holdTaskResult,
   nextTaskResultTurn,
   readPendingTaskResults,
   readTaskCreator,
   sameTaskPrincipal,
   takeTaskResults,
-  workingBackgroundTaskIds,
+  workingDetachedTaskIds,
 } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
-import { applyTaskMessage, detachTasks } from "#tasks/table.js";
+import { applyTaskMessage } from "#tasks/table.js";
 
 const NOW = "2026-09-24T14:05:00.000Z";
 const ALICE: SessionAuthContext = {
@@ -37,7 +37,7 @@ function background(id: string, auth: SessionAuthContext | null, extra: Partial<
     creator: encodeTaskCreator({ auth }),
     id,
     kind: "workflow",
-    mode: "background",
+    mode: "detached",
     name: id.split("-")[0]!,
     ...extra,
   });
@@ -59,7 +59,7 @@ function settleAll(records: readonly TaskRecord[], ids: readonly string[]) {
   return session;
 }
 
-describe("background task results", () => {
+describe("detached task results", () => {
   it("holds one result per generation and keeps its task listed until delivery", () => {
     const remind = background("remind-a1", ALICE);
     const once = settleAll([remind], ["remind-a1"]);
@@ -67,7 +67,7 @@ describe("background task results", () => {
 
     expect(readPendingTaskResults(twice.state)).toHaveLength(1);
     expect(renderTasksNote(getTaskTable(twice).records)).toContain('id="remind-a1"');
-    expect(hasPendingBackgroundWork(twice.state)).toBe(true);
+    expect(hasPendingDetachedWork(twice.state)).toBe(true);
   });
 
   it("delivers a creator's results together and marks them delivered", () => {
@@ -112,113 +112,38 @@ describe("background task results", () => {
     });
   });
 
-  it("holds detach group members until every member settled", () => {
-    const records = detachTasks(
-      taskTable([
-        background("sre-g1", ALICE, { mode: "foreground" }),
-        background("d0-g2", ALICE, { mode: "foreground" }),
-      ]),
-      ["sre-g1", "d0-g2"],
-      "steer-1",
-    ).records;
-
-    const partly = settleAll(records, ["sre-g1"]);
-    expect(nextTaskResultTurn(partly.state)).toBeUndefined();
-    expect(takeTaskResults(partly, ALICE).results).toEqual([]);
-    // A held result stays listed in the note.
-    expect(renderTasksNote(getTaskTable(partly).records)).toContain('id="sre-g1"');
-
-    const settled = settleAll(records, ["sre-g1", "d0-g2"]);
-    expect(takeTaskResults(settled, ALICE).results.map((result) => result.taskId)).toEqual([
-      "sre-g1",
-      "d0-g2",
-    ]);
-  });
-
-  it("does not let a member waiting on a person hold its group", () => {
-    const records = detachTasks(
-      taskTable([
-        background("approve-g1", ALICE, { mode: "foreground", status: "input_required" }),
-        background("d0-g2", ALICE, { mode: "foreground" }),
-      ]),
-      ["approve-g1", "d0-g2"],
-      "steer-1",
-    ).records;
-
-    const settled = settleAll(records, ["d0-g2"]);
-    expect(takeTaskResults(settled, ALICE).results.map((result) => result.taskId)).toEqual([
-      "d0-g2",
-    ]);
-    // Once answered, the member works again and holds the others until it settles.
-    const answered = settleAll(
-      records.map((record) =>
-        record.id === "approve-g1" ? { ...record, status: "working" as const } : record,
-      ),
-      ["d0-g2"],
-    );
-    expect(takeTaskResults(answered, ALICE).results).toEqual([]);
-  });
-
-  it("keeps a held result in its group after its agent is given new work", () => {
-    const records = detachTasks(
-      taskTable([
-        background("sre-g1", ALICE, { kind: "agent", mode: "foreground" }),
-        background("d0-g2", ALICE, { mode: "foreground" }),
-      ]),
-      ["sre-g1", "d0-g2"],
-      "steer-1",
-    ).records;
-    const held = settleAll(records, ["sre-g1"]);
-    expect(readPendingTaskResults(held.state)[0]?.group).toBe("steer-1");
-
-    // The next generation leaves the group, but the earlier result still waits for d0.
-    const continued = {
-      ...held,
-      state: {
-        ...held.state,
-        ...taskTableState(
-          getTaskTable(held).records.map((record) =>
-            record.id === "sre-g1"
-              ? { ...record, detachGroup: undefined, generation: 2, status: "working" as const }
-              : record,
-          ),
-        ),
-      },
-    };
-    expect(takeTaskResults(continued, ALICE).results).toEqual([]);
-  });
-
   it("treats an unreadable record as outstanding until it is reported", () => {
     const lost = { "eve.taskTable": { records: [{ id: "x-1", name: "x", v: 0 }] } };
-    expect(hasPendingBackgroundWork(lost)).toBe(true);
+    expect(hasPendingDetachedWork(lost)).toBe(true);
     const delivered = {
       "eve.taskTable": { records: [{ delivered: true, id: "x-1", name: "x", v: 0 }] },
     };
-    expect(hasPendingBackgroundWork(delivered)).toBe(false);
+    expect(hasPendingDetachedWork(delivered)).toBe(false);
   });
 
-  it("treats a session as quiescent only when no background result is outstanding", () => {
+  it("treats a session as quiescent only when no detached result is outstanding", () => {
     const working = background("remind-a1", ALICE);
-    expect(hasPendingBackgroundWork(taskTableState([working]))).toBe(true);
+    expect(hasPendingDetachedWork(taskTableState([working]))).toBe(true);
     expect(
-      hasPendingBackgroundWork(taskTableState([{ ...working, mode: "foreground" as const }])),
+      hasPendingDetachedWork(taskTableState([{ ...working, mode: "attached" as const }])),
     ).toBe(false);
     const cancelled = { ...working, delivered: true, status: "cancelled" as const };
-    expect(hasPendingBackgroundWork(taskTableState([cancelled]))).toBe(false);
+    expect(hasPendingDetachedWork(taskTableState([cancelled]))).toBe(false);
 
     const settled = settleAll([working], ["remind-a1"]);
-    expect(hasPendingBackgroundWork(settled.state)).toBe(true);
-    expect(hasPendingBackgroundWork(takeTaskResults(settled, ALICE).session.state)).toBe(false);
+    expect(hasPendingDetachedWork(settled.state)).toBe(true);
+    expect(hasPendingDetachedWork(takeTaskResults(settled, ALICE).session.state)).toBe(false);
   });
 
-  it("counts working and input_required background tasks toward the cap", () => {
+  it("counts working and input_required detached generations toward the cap", () => {
     expect(
-      workingBackgroundTaskIds(
+      workingDetachedTaskIds(
         taskTable([
           background("a-1", ALICE),
-          background("b-1", ALICE, { status: "input_required" }),
+          background("b-1", ALICE, { kind: "agent", status: "input_required" }),
           background("c-1", ALICE, { status: "completed" }),
-          background("d-1", ALICE, { mode: "foreground" }),
+          background("d-1", ALICE, { mode: "attached" }),
+          background("e-1", ALICE, { workflowCaller: { replyTo: "hook", runId: "run-1" } }),
         ]),
       ),
     ).toEqual(["a-1", "b-1"]);
