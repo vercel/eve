@@ -26,6 +26,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { projectToDurableSession } from "#execution/session.js";
 import {
+  formatAgentStatus,
   getAgentHandleStore,
   writeHandles,
   type AgentHandle,
@@ -374,6 +375,11 @@ export async function settleAgentInvocationStep(input: {
               : {
                   address: handle.address,
                   identity: handle.identity,
+                  lastStatus: formatAgentStatus(
+                    input.result.outcome.result.kind === "succeeded"
+                      ? input.result.outcome.result.output
+                      : input.result.outcome.result.error,
+                  ),
                   phase: "available" as const,
                 }
             : candidate,

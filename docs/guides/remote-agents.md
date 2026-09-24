@@ -83,7 +83,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 By default, a remote agent is another subagent tool to the model. The model calls it the same way it calls a local subagent, with a `message` and an optional `outputSchema`. Set `tool: false` when an authored workflow tool should be the only model-facing routing surface; the workflow can still call the remote agent by its path-derived name through `ctx.agent()`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
-To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value arrives in the task's completion notification, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
+To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value becomes the tool result, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
 
 ## Outbound auth
 
@@ -197,6 +197,8 @@ Clients follow a remote child through the parent. [`session.streamSubagent()`](.
 Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
+
+A remote child cannot ask the parent's user for input or authorization yet. If a remote child's turn stops for a tool approval, a `ctx.ask()` question, or a connection sign-in, the child fails and the parent's call fails with its error instead of waiting. Configure tools and connections on the remote deployment so the turn can finish without a person.
 
 A failed _start_ fails the tool call. After a remote starts, a terminal failure callback fails the call with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
 

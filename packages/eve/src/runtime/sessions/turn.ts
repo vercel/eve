@@ -8,8 +8,8 @@ import type { PreparedToolBehavior } from "#tools/behavior.js";
 export interface PreparedRuntimeWorkflowTask {
   /**
    * Runtime graph ID of the agent definition this tool delegates to, including
-   * the root agent for the framework `agent` tool. Used for receipts and handle
-   * reservations; `agentId` identifies the resulting agent instance.
+   * the root agent for the framework `agent` tool. Used for handle reservations;
+   * `agentId` identifies the resulting agent instance.
    * Absent for authored workflow tools, even if their body calls `ctx.agent()`.
    */
   readonly nodeId?: string;

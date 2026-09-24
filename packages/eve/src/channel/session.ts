@@ -76,7 +76,6 @@ export type SessionSendOptions = SessionDeliveryOptions & {
   /** Initial workflow title for a prewarmed session. */
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
-  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
 };
 
 /** Options for answering pending input requests through a fixed session handle. */

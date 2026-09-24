@@ -294,8 +294,6 @@ export interface ToolLoopHarnessConfig {
    * for terminal assistant text inside the current invocation.
    */
   readonly mode: RunMode;
-  /** Whether this node enables framework background-task behavior. */
-  readonly tasksEnabled?: boolean;
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

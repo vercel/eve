@@ -85,7 +85,7 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 `t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
-A subagent call stays `working` until its result is observed, and becomes `completed` when its successful result is observed through `subagent.completed`, even when the child session stays available for another call. A rejected dispatch is `failed`; an explicit cancelled child outcome is `cancelled`.
+A subagent call stays `working` until its result is observed. It becomes `completed` when the call returns a successful result, even when the child session stays available for another call, and `failed` when the call returns an error or its dispatch is rejected. An explicit cancelled child outcome is `cancelled`; a call interrupted by cancelling the parent turn stays `working`.
 
 The runner derives these values from captured events. A proxied input request does not change the subagent call's status; assert that request with `requireInputRequest`.
 

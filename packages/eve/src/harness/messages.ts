@@ -93,10 +93,17 @@ export function validateHarnessModelMessages(
       validated.push(message);
       continue;
     }
-    if (!isUserModelMessage(message)) {
+    if (isUserModelMessage(message)) {
+      validated.push(message);
+      continue;
+    }
+    const kind = (message as { readonly kind?: unknown }).kind;
+    if (typeof kind !== "string") {
       throw new TypeError("Expected every user-role model message to have a kind.");
     }
-    validated.push(message);
+    // History retained from an earlier release may carry a framework kind this
+    // release no longer defines. Keep it as framework-authored instead of failing the session.
+    validated.push({ ...message, kind: "execution.continuation" });
   }
   return validated;
 }

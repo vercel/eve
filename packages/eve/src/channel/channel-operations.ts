@@ -35,7 +35,6 @@ interface BaseChannelSendOptions {
   readonly outputSchema?: JsonObject;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
-  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
 }
 
 /** Options for sending a message from a channel-local continuation address. */

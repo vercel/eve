@@ -69,6 +69,44 @@ describe("SessionExecution turn checkpoints", () => {
     ).rejects.toThrow("Task mode cannot wait for follow-up input");
   });
 
+  it.each([
+    ["input", { hasPendingAuthorization: false, hasPendingInputBatch: true }],
+    ["authorization", { hasPendingAuthorization: true, hasPendingInputBatch: false }],
+  ] as const)("fails a remotely called turn that parks for %s", async (_label, pending) => {
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    const sessionState = state("");
+    vi.mocked(turnStep).mockResolvedValue({
+      action: "park",
+      ...pending,
+      serializedContext: {},
+      sessionState,
+    });
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn({
+        delivery: {
+          caller: {
+            callId: "call-1",
+            replyTo: { kind: "callback", token: "tok", url: "https://parent.example/cb/tok" },
+            subagentName: "researcher",
+          },
+          kind: "deliver",
+          payloads: [{ message: "Alice asked for a deployment review." }],
+        },
+      }),
+    ).rejects.toThrow("called by a remote agent that cannot answer");
+  });
+
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],

@@ -18,7 +18,6 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 export interface CrossChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly turnPolicy?: TurnPolicy;
-  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
 }
 
 /** Message delivery bound to one channel-specific proactive target. */

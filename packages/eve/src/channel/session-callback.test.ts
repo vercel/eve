@@ -26,6 +26,15 @@ describe("parseSessionCallback callback-URL token extraction", () => {
     ).toMatchObject({ ok: true });
   });
 
+  it("drops the task ID an earlier release included", () => {
+    const url = "https://agent.example.com/eve/v1/callback/tok123";
+
+    expect(parseSessionCallback({ ...createCallback(url), taskId: "task-1" })).toEqual({
+      callback: createCallback(url),
+      ok: true,
+    });
+  });
+
   it("reads the token from the last callback route segment", () => {
     expect(
       parseSessionCallback(

@@ -141,7 +141,6 @@ export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
   readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
   readonly mode?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["mode"];
-  /** Updates the session policy; omission preserves it. */
   readonly thread: SerializedThread | Thread | string;
   readonly title?: string;
   /**

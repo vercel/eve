@@ -336,7 +336,6 @@ export interface SlackInitialMessage {
  * Options for one turn requested by a generic Slack event handler.
  */
 export interface SlackEventSendOptions {
-  /** Updates the session policy; omission preserves it. */
   readonly auth: SessionAuthContext | null;
   readonly target: SlackReceiveTarget;
   /** Overrides the workflow run title without changing the message sent to the model. */

@@ -20,6 +20,9 @@ const sessionCallbackSchema = z
   .object({
     callId: z.string().min(1),
     subagentName: z.string().min(1),
+    // Earlier releases sent and persisted a task ID; accept and drop it so an
+    // in-flight child from before an upgrade can still report its result.
+    taskId: z.string().min(1).optional(),
     token: z.string().min(1),
     url: z.string().min(1),
   })
@@ -60,7 +63,8 @@ const sessionCallbackSchema = z
 export function parseSessionCallback(value: unknown): SessionCallbackParseResult {
   const parsed = sessionCallbackSchema.safeParse(value);
   if (parsed.success) {
-    return { callback: parsed.data, ok: true };
+    const { taskId: _taskId, ...callback } = parsed.data;
+    return { callback, ok: true };
   }
 
   return {

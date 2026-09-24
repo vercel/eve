@@ -123,6 +123,12 @@ export function deriveRunFacts(
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
           call.status = status;
+          // A model-level agent call resolves as the tool result of the same call ID.
+          const subagentCall = subagentCallsByCallId.get(result.callId);
+          if (subagentCall?.status === "working") {
+            subagentCall.output = subagentCall.output ?? result.output;
+            subagentCall.status = status === "completed" ? "completed" : "failed";
+          }
         } else if (result.kind === "subagent-result") {
           const call = ensureSubagentCall(result.callId, result.subagentName);
           call.output = call.output ?? result.output;

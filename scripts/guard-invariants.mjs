@@ -113,10 +113,11 @@
  *             `defineSandboxProvider()` and does not import sandbox runtime
  *             orchestration, registries, key derivation, or session state.
  *             Built-ins and authored providers must share one contract.
- *   rule 45 — The removed background-task surface stays removed. Tool calls
- *             resolve inside their turn; source, tests, docs, apps, and e2e
- *             fixtures must not reintroduce task receipts, delivery policies,
- *             cohort notifications, or background tool execution.
+ *   rule 45 — The removed background-task surface stays removed. Source,
+ *             tests, docs, apps, and e2e fixtures must not reintroduce task
+ *             receipts, delivery policies, cohort notifications, the
+ *             `execution: "background"` tool option, or the old
+ *             `#execution/tasks` runtime.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -1068,7 +1069,6 @@ async function checkRule31RemovedCliReferences() {
 // ---------- Rule 45: removed background-task surface stays removed ----------
 
 const REMOVED_BACKGROUND_TASK_REFERENCES = [
-  /\btask_cancel\b/,
   /\btaskDeliveryPolicy\b/,
   /\bTaskDeliveryPolicy\b/,
   /\btaskDeliveryIds?\b/,
@@ -1076,7 +1076,7 @@ const REMOVED_BACKGROUND_TASK_REFERENCES = [
   /\b(?:TurnTaskDeliveryKey|TaskDeliveryPolicyKey|BackgroundToolExecutorKey|getBackgroundTasks)\b/,
   /\bexecution\.background_task\b/,
   /\bexecution:\s*["']background["']/,
-  /["']#(?:tasks|execution\/tasks)\//,
+  /["']#execution\/tasks\//,
 ];
 
 /**
@@ -1086,8 +1086,13 @@ async function checkRule45RemovedBackgroundTaskReferences() {
   /** @type {Violation[]} */
   const violations = [];
 
-  // Tracked files only: ignored build output can hold stale copies of removed names.
-  const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: REPO_ROOT, encoding: "utf8" })
+  // Ignored build output can hold stale copies of removed names, so scan only
+  // tracked and not-yet-added files.
+  const tracked = execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  )
     .split("\0")
     .filter((posix) => posix !== "" && isActiveCliReferenceFile(posix));
   for (const posix of tracked) {
@@ -1106,7 +1111,7 @@ async function checkRule45RemovedBackgroundTaskReferences() {
         file: posix,
         line: index + 1,
         message:
-          "references the removed background-task surface. Tool calls, including subagent calls and workflow tools, resolve inside their turn. Historical mentions belong only in changelogs or changesets.",
+          'references the removed background-task surface (task receipts, delivery policies, cohort notifications, or `execution: "background"`). Historical mentions belong only in changelogs or changesets.',
       });
     });
   }

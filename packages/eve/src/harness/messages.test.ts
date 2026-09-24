@@ -324,6 +324,24 @@ describe("createFrameworkUserMessage", () => {
       validateHarnessModelMessages([{ content: "A user message", role: "user" }]),
     ).toThrow("Expected every user-role model message to have a kind.");
   });
+
+  it("keeps retained user messages whose kind an earlier release defined", () => {
+    const retained: ModelMessage = JSON.parse(
+      JSON.stringify({
+        content: "A delegated result from an earlier release",
+        kind: "execution.retired_kind",
+        role: "user",
+      }),
+    );
+
+    expect(validateHarnessModelMessages([retained])).toEqual([
+      {
+        content: "A delegated result from an earlier release",
+        kind: "execution.continuation",
+        role: "user",
+      },
+    ]);
+  });
 });
 
 describe("resolveAssistantStepText", () => {

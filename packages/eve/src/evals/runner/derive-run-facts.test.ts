@@ -347,6 +347,41 @@ describe("deriveRunFacts", () => {
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
+  it("settles a subagent call from the tool result of the same call id", () => {
+    const called = (callId: string): UnstampedMessageStreamEvent => ({
+      type: "subagent.called",
+      data: {
+        callId,
+        childSessionId: `child-${callId}`,
+        childStreamPath: `/eve/v1/session/s0/subagents/${callId}/child-${callId}/stream`,
+        sessionId: "s0",
+        sequence: 1,
+        name: "reviewer",
+        toolName: "reviewer",
+        turnId: "t1",
+        workflowId: "w1",
+      },
+    });
+    const facts = derive([
+      turnStarted("t1", 0),
+      actionsRequested([
+        { callId: "ok", toolName: "reviewer" },
+        { callId: "bad", toolName: "reviewer" },
+      ]),
+      called("ok"),
+      called("bad"),
+      actionResult({ callId: "ok", output: "Looks good.", toolName: "reviewer" }),
+      actionResult({ callId: "bad", isError: true, output: "boom", toolName: "reviewer" }),
+    ]);
+
+    expect(
+      facts.subagentCalls.map(({ callId, output, status }) => ({ callId, output, status })),
+    ).toEqual([
+      { callId: "ok", output: "Looks good.", status: "completed" },
+      { callId: "bad", output: "boom", status: "failed" },
+    ]);
+  });
+
   it("joins subagent.called with subagent.completed by call id", () => {
     const events: UnstampedMessageStreamEvent[] = [
       turnStarted("t1", 0),

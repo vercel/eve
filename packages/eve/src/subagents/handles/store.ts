@@ -124,7 +124,7 @@ export type TurnOwnedAgentHandle =
  * Workflow-owner lifecycle: `reserved → claimed → available ↔ claimed`.
  *
  * `reserved` leases a fresh identity before start, `claimed` leases an
- * addressed child turn to one task or workflow-tool run, and `available`
+ * addressed child turn to one workflow-tool run, and `available`
  * retains the idle address between invocations. A terminal child leaves this
  * union entirely.
  */
@@ -151,6 +151,8 @@ export type TaskOwnedAgentHandle =
       readonly phase: "available";
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
+      /** Summary of the child's latest reply, so the model can tell same-named agents apart. */
+      readonly lastStatus?: string;
     };
 
 /**
@@ -335,6 +337,7 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
   z.looseObject({
     address: addressSchema,
     identity: identitySchema,
+    lastStatus: z.string().max(MAX_STATUS_LENGTH).optional(),
     phase: z.literal("available"),
   }),
 ]);

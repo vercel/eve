@@ -247,7 +247,7 @@ describe("blocking workflow agent continuation", () => {
       previousSettlement = settlement;
       sessionState = settled.sessionState;
       expect(getAgentHandleStore(sessionState.snapshot.session.state)?.handles).toEqual([
-        { address, identity, phase: "available" },
+        { address, identity, lastStatus: message, phase: "available" },
       ]);
     }
 

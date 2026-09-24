@@ -1637,7 +1637,6 @@ export class EveTUIRunner {
         turnState,
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
         onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
-        // Cancellation is turn-scoped; background descendants survive.
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
