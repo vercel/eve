@@ -35,6 +35,7 @@
   },
   "files": [
     "bin",
+    "conformance",
     "dist",
     "docs",
     "CHANGELOG.md",
@@ -459,6 +460,7 @@
       "default": "./dist/src/public/channels/linear/index.js"
     },
     "./package.json": "./package.json",
+    "./conformance/*": "./conformance/*",
     "./setup/scaffold": {
       "eve-source": "./dist/src/setup/scaffold/index.js",
       "types": "./dist/src/setup/scaffold/index.d.ts",

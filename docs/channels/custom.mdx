@@ -74,10 +74,11 @@ the exact session, while `channel.continuation` exposes the current address and
 receives only `(eventData, channel)` because it runs outside session context;
 its event data contains `sessionId` directly.
 
-Handle `task.started` and `task.settled` to observe the agent calls and workflow
-tool calls a session runs as tasks; `task.started.data.kind` tells them apart.
-[Sessions, runs and streaming](../concepts/sessions-runs-and-streaming#stream-a-session)
-describes their fields.
+Handle `task.started`, `task.detached`, and `task.settled` to observe the agent
+calls and workflow tool calls a session runs as tasks; `task.started.data.kind`
+tells them apart. [Task stream events](../concepts/tasks#task-stream-events)
+describes their fields and ordering, and links recorded streams you can replay
+through your handlers in a contract test.
 
 `channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not

@@ -6,7 +6,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 /**
  * Version of the owner/child task protocol that crosses deployments. A remote
  * owner sends it with every delegated request; a child rejects any other
- * version, and an owner rejects a child that does not report this one.
+ * version, and an owner rejects a child that does not report this one. The
+ * published task stream fixtures record it, so a change regenerates them.
  */
 export const TASK_PROTOCOL_VERSION = 1;
 

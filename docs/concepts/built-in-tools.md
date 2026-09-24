@@ -235,7 +235,7 @@ export default disableTool();
 
 ### `task_cancel`
 
-`task_cancel` lets the model stop background tasks, such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach) and agent calls made with [`background: true`](../subagents#run-a-call-in-the-background). eve advertises it only when the session can have background tasks: a root session in conversation mode whose agent has an agent or workflow tool, or any session whose agent has a `detach: true` tool. The decision is fixed for the session, and it is the same one that adds eve's background-task instructions, which mention `task_cancel`, to the system prompt.
+`task_cancel` lets the model stop [background tasks](./tasks), such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach) and agent calls made with [`background: true`](../subagents#run-a-call-in-the-background). eve advertises it only when the session can have background tasks: a root session in conversation mode whose agent has an agent or workflow tool, or any session whose agent has a `detach: true` tool. The decision is fixed for the session, and it is the same one that adds eve's background-task instructions, which mention `task_cancel`, to the system prompt.
 
 The model passes 1 to 50 IDs from receipts or the `[Tasks]` note:
 
@@ -253,7 +253,7 @@ The result lists each ID once:
 - `alreadyFinished` lists tasks that settled before the call. Their results are still delivered.
 - `unknown` lists IDs that name no background task, including a call the current turn is still waiting on. Cancel the turn to stop such a call.
 
-A cancelled agent stays available: pass its ID as `agentId` to give it new work.
+A cancelled agent stays available: pass its ID as `agentId` to give it new work. See [Cancel tasks](./tasks#cancel-tasks) for the other ways a task stops.
 
 In a session several people share, `task_cancel` can stop any background task in the session, whichever principal's turn started it, as [`session.cancel({ taskId })`](./sessions-runs-and-streaming#cancel-the-in-flight-turn) can. Access to a session includes the right to cancel its tasks.
 

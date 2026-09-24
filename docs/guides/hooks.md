@@ -86,14 +86,14 @@ handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
 
-For `task.started` and `task.settled`, `ctx.session.id` identifies the parent
-session. Typed handlers and `*` handlers receive this context even when the
-task event arrives between parent turns. These hooks can use
-`ctx.getSandbox()` against the parent session. Subscribe to `task.*` events to
-observe agent calls and workflow tool calls: every call that starts a task emits
-one `task.settled`, and `task.started` announces the task once its child exists.
-Check `task.started.data.kind` (`agent` or `workflow`) and `name` to tell them
-apart.
+For `task.started`, `task.detached`, and `task.settled`, `ctx.session.id`
+identifies the parent session. Typed handlers and `*` handlers receive this
+context even when the task event arrives between parent turns. These hooks can
+use `ctx.getSandbox()` against the parent session. Subscribe to `task.*` events
+to observe agent calls and workflow tool calls: every call that starts a task
+emits one `task.settled`, and `task.started` announces the task once its child
+exists. Check `task.started.data.kind` (`agent` or `workflow`) and `name` to
+tell them apart. See [Task stream events](../concepts/tasks#task-stream-events).
 
 ### Narrowing tool results
 

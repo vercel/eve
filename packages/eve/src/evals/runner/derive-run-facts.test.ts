@@ -451,6 +451,50 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
+  it("keeps a background agent call working past a receipt that follows task.started", () => {
+    const receipt = { status: "working", taskId: "billing-b1" };
+    const facts = derive([
+      turnStarted("t1", 0),
+      taskStarted({
+        callId: "b1",
+        mode: "background",
+        name: "billing",
+        remoteUrl: "https://billing.test",
+      }),
+      actionResult({ callId: "b1", output: receipt, toolName: "billing" }),
+      {
+        type: "task.settled",
+        data: { callId: "b1", output: "Refunded.", status: "completed", taskId: "billing-b1" },
+      },
+    ]);
+
+    expect(facts.subagentCalls).toEqual([
+      expect.objectContaining({ callId: "b1", output: "Refunded.", status: "completed" }),
+    ]);
+  });
+
+  it("records a background agent call that fails before its child starts", () => {
+    const error = { code: "START_FAILED", message: "Remote agent billing refused the call." };
+    const facts = derive([
+      turnStarted("t1", 0),
+      actionsRequested([
+        {
+          callId: "b1",
+          input: { background: true, message: "Refund order 42." },
+          toolName: "billing",
+        },
+      ]),
+      {
+        type: "task.settled",
+        data: { callId: "b1", error, status: "failed", taskId: "billing-b1" },
+      },
+    ]);
+
+    expect(facts.subagentCalls).toEqual([
+      expect.objectContaining({ callId: "b1", name: "billing", output: error, status: "failed" }),
+    ]);
+  });
+
   it("records a workflow tool call as a tool call, not a subagent call", () => {
     const facts = derive([
       turnStarted("t1", 0),
@@ -714,6 +758,7 @@ describe("deriveRunFacts", () => {
 
 function taskStarted(input: {
   readonly callId: string;
+  readonly mode?: "background" | "foreground";
   readonly name: string;
   readonly remoteUrl?: string;
 }): UnstampedMessageStreamEvent {
@@ -731,7 +776,7 @@ function taskStarted(input: {
               streamPath: `/eve/v1/session/s0/subagents/${input.callId}/${sessionId}/stream`,
             },
       kind: "agent",
-      mode: "foreground",
+      mode: input.mode ?? "foreground",
       name: input.name,
       taskId: `${input.name}-${input.callId}`,
       turnId: "t1",

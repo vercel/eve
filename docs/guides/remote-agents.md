@@ -191,7 +191,7 @@ A remote subagent runs in its own deployment, and the parent turn waits for its 
 2. The remote child runs its turn. Questions, approvals, and sign-in prompts it raises travel back through the same callback URL.
 3. The child posts its answer to the callback URL, and the answer becomes the tool result for the parent's call.
 
-The parent stream carries the same `task.started`, `action.result`, and `task.settled` events as local delegation. For a remote call, `task.started.data.child.remote.url` records the target.
+A remote call is a [task](../concepts/tasks) like a local one: the parent stream carries the same `task.started`, `action.result`, and `task.settled` events as local delegation, and the same receipts, detach, cancellation, and time limits apply. For a remote call, `task.started.data.child.remote.url` records the target.
 
 In an interactive root session, the model can run a remote agent call in the background with `background: true`, exactly as with a local subagent: the call returns a receipt, and the remote child's answer arrives through the same callback and reaches the model later in a `task.result` message. See [Run a call in the background](../subagents#run-a-call-in-the-background).
 

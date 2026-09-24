@@ -5,6 +5,7 @@
     "project-structure",
     "execution-model-and-durability",
     "sessions-runs-and-streaming",
+    "tasks",
     "state",
     "default-harness",
     "built-in-tools",

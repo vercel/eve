@@ -144,10 +144,12 @@ file metadata. File parts never include raw bytes or internal sandbox paths; `ur
 client-resolvable `http(s)` and `data:` URLs.
 
 A `message.received` event with `data.kind: "task.result"` is not a user message. eve emits it when
-it delivers [background task results](../../tools/workflows#return-a-receipt-with-detach) to the
-model, and `data.taskIds` names the delivered tasks. The default message reducer skips it and never
-uses it to confirm an optimistic submission. A custom renderer should skip it too, and show the
-assistant reply that follows.
+it delivers [background task results](../../concepts/tasks#how-results-arrive) to the model, and
+`data.taskIds` names the delivered tasks. The default message reducer skips it and never uses it to
+confirm an optimistic submission. A custom renderer should skip it too, and show the assistant reply
+that follows. To check that a custom consumer handles every task event, replay the
+[recorded task streams](../../concepts/tasks#test-a-consumer-against-recorded-streams) that ship
+with eve.
 
 ## Authorization pauses
 
@@ -275,7 +277,7 @@ if (started?.type === "task.started") {
 
 The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn. The matching `task.settled` event on the parent stream reports the call's outcome.
 
-If a steering message moves a waiting call to the background, the parent stream emits `task.detached` with the call's `taskId`, `callId`, and `reason` (`"steer"`, or `"timeout"` for a workflow tool's `detach: { timeout }` timer). The call's `action.result` then carries a receipt, `{ status: "working", taskId }`, while the child keeps working, so keep following its stream until `task.settled`. `task.detached` is stamped with the delivery that made the call, so read it from `session.stream()` rather than from the steering message's `MessageResponse`. See [Detach a waited call](../../tools/workflows#detach-a-waited-call). Passing a `task.started` event that has no `child` throws, and so does passing a remote child's event from another parent session, whose proxy route names that session.
+If a steering message moves a waiting call to the background, the parent stream emits `task.detached` with the call's `taskId`, `callId`, and `reason` (`"steer"`, or `"timeout"` for a workflow tool's `detach: { timeout }` timer). The call's `action.result` then carries a receipt, `{ status: "working", taskId }`, while the child keeps working, so keep following its stream until `task.settled`. `task.detached` is stamped with the delivery that made the call, so read it from `session.stream()` rather than from the steering message's `MessageResponse`. See [Detach a waited call](../../concepts/tasks#detach-a-waited-call). Passing a `task.started` event that has no `child` throws, and so does passing a remote child's event from another parent session, whose proxy route names that session.
 
 ## Abort a request
 

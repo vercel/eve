@@ -27,6 +27,11 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
+/**
+ * Schema version of the session stream. The published task stream fixtures
+ * under `conformance/task-streams/` record it, so a change regenerates them
+ * (`EVE_UPDATE_TASK_STREAM_FIXTURES=1` on their scenario test).
+ */
 export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /** Version of transport control records understood by this eve release. */

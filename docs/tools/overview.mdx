@@ -134,7 +134,8 @@ call resolves at once with a receipt, and the workflow's result arrives later in
 See [Return a receipt with `detach`](/docs/tools/workflows#return-a-receipt-with-detach). In an
 interactive root session, a new message can also move a waiting workflow tool or subagent call to
 the background, which resolves it with a receipt; see
-[Detach a waited call](/docs/tools/workflows#detach-a-waited-call).
+[Detach a waited call](/docs/concepts/tasks#detach-a-waited-call). [Tasks](/docs/concepts/tasks)
+describes which calls wait and how background results arrive.
 
 | Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
 | -------------------- | -------------------------------------------------------- | ---------------------------------- |

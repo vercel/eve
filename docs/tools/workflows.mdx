@@ -14,7 +14,8 @@ the workflow holds no compute. In an interactive root session, a new message mov
 the background so the agent can answer the message; see
 [Detach a waited call](#detach-a-waited-call). A tool defined with `detach: true` returns a receipt
 at once and delivers its result later in its own message; see
-[Return a receipt with `detach`](#return-a-receipt-with-detach).
+[Return a receipt with `detach`](#return-a-receipt-with-detach). Each call runs as a
+[task](/docs/concepts/tasks), the model eve uses for both workflow tool calls and agent calls.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
@@ -479,54 +480,32 @@ The `detach` option on `defineWorkflowTool` decides when a call stops holding it
 | `true`            | The call returns a receipt at once. See [Return a receipt with `detach`](#return-a-receipt-with-detach).                  |
 | `{ timeout }`     | Like `false`. In an interactive root session, the call also detaches if it is still working after `timeout` milliseconds. |
 
-An interactive root session is a root session, not a subagent's session, in conversation mode. A
-turn that a schedule started never detaches, so a scheduled run posts one final reply.
-
 A detached call keeps working; detaching never stops its run. A receipt becomes the call's tool
-result, the task switches to the background and appears in the `[Tasks]` note, and its result
-arrives later in a `task.result` message, by the same rules as a
-[`detach: true` result](#return-a-receipt-with-detach). Detached tasks count toward the 10 working
-background tasks a session holds, but eve never rejects a detach.
+result, and the run's result reaches the model later in a `task.result` message, like a
+[`detach: true` result](#return-a-receipt-with-detach). An interactive root session is a root
+session, not a subagent's session, in conversation mode. A turn that a schedule started never
+detaches, so a scheduled run posts one final reply. See
+[Which calls wait](/docs/concepts/tasks#which-calls-wait) for every call site.
 
 ### Detach on a new message
 
 When a steering message (`turnPolicy: "steer"`, the default) arrives while an interactive root turn
-waits on calls, eve applies it in this order:
-
-1. If the message answers a pending question, it answers the question and does not steer. See
-   [Ask a human](#ask-a-human-ctxask) for when plain text answers a question.
-2. Otherwise, each pending question created with `dismissible: true` resolves as `dismissed`. Its
-   call keeps waiting for up to 10 seconds to return as usual. A call still working after that
-   detaches with the calls in step 3, so the turn never waits on it to show the model the message.
-3. Every other waited call detaches. eve emits `task.detached` with `reason: "steer"` for each
-   one, and the turn continues in one model step with their receipts followed by the new message.
-
-The model reads a receipt such as:
+waits on calls, it first answers a pending question that it matches, then resolves questions created
+with `dismissible: true` as `dismissed`. Every call still waiting then detaches, including a call
+waiting on an approval, whose request stays pending. eve emits `task.detached` with
+`reason: "steer"` for each call, and the turn continues in one model step with the receipts followed
+by the new message. The model reads a receipt such as:
 
 ```text
 A new message arrived, so this call moved to the background as task deploy-3fq8wd. Its result will arrive in a later message. Do not poll or repeat this work.
 ```
 
-The calls one message detaches form a detach group. eve delivers the group's results together, in
-one `task.result` message, once no member is still working. The wait is bounded by each working
-member's time limit, or by the session's lifetime for a workflow tool without `timeout`. Agent calls
-in the same turn detach with them; see
-[Subagents](/docs/subagents#steering-while-a-call-waits). A result stays in its group even if the
-model gives that agent new work before the group is delivered.
-
-A call waiting on an approval, or on a question that is not dismissible, also detaches. Its request
-stays pending, and it does not hold the rest of its group: the others are delivered once they
-finish. A later answer resumes the run, which reports its result in its own message.
-
-A message with `turnPolicy: "queue"` never detaches anything: it waits until the turn settles. In
-subagent sessions, task-mode runs, and turns started by a schedule, a steering message is applied
-after the waited calls return, in the same turn.
-
-eve's [`sleep` tool](/docs/concepts/built-in-tools#sleep) is the exception, in every session: a
-steering message ends a waited `sleep` early instead of detaching it. eve cancels the sleep's run,
-and the call's result reports the time it waited, such as
-`The sleep ended early after 12 s because a new message arrived.` Authored tools cannot opt into
-this behavior.
+The calls that one message detaches, including [agent calls](/docs/subagents#steering-while-a-call-waits)
+in the same turn, deliver their results together once none of them is still working. A message with
+`turnPolicy: "queue"` never detaches anything. eve's [`sleep` tool](/docs/concepts/built-in-tools#sleep)
+is the exception in every session: a steering message ends a waited `sleep` early instead of
+detaching it. See [Detach a waited call](/docs/concepts/tasks#detach-a-waited-call) for the full
+order, detach groups, and how other sessions apply the message.
 
 ### Detach after a timeout
 
@@ -589,10 +568,11 @@ export default defineWorkflowTool({
 
 The model reads a receipt such as `Task remind-q4x1ze is working in the background.` Clients read
 the structured receipt on `action.result`: `output` is `{ status: "working", taskId }`. The task
-starts with `mode: "background"` on `task.started`. Without `detach: true`, the call waits until it
-returns or [detaches](#detach-a-waited-call).
+starts with `mode: "background"` on `task.started`. `detach: true` applies in every session, and a
+subagent's session or a task-mode run finishes only after the result is delivered. Without
+`detach: true`, the call waits until it returns or [detaches](#detach-a-waited-call).
 
-When the run finishes, eve delivers its outcome to the model as one user-role message of kind
+When the run finishes, eve delivers its outcome to the model in a user-role message of kind
 `task.result`, with one `<task_result>` block per result:
 
 ```text
@@ -603,52 +583,19 @@ Reminder: stand-up at 10
 
 The block body is the definition's `toModelOutput(output)` when it has one, and the output
 otherwise. A failed task carries `status="failed"`, a `code` attribute, and the error message.
-Background results share the tool-result truncation limit: 50 KB and 2,000 lines.
+An idle session starts a result turn for the result, a running turn from the principal whose call
+started the task receives it at its next tool step, and a result never appears in another
+principal's turn. Until the result arrives, the task is listed in the `[Tasks]` note. See
+[How results arrive](/docs/concepts/tasks#how-results-arrive) for every delivery rule.
 
-Each result belongs to the principal whose call started the task. Two principals match when their
-authenticator, principal type, and principal ID match. eve delivers results by these rules:
-
-- **Idle session.** The result starts a result turn, and the model replies to it.
-- **Running turn from the same principal.** The result is added at the turn's next tool step, where
-  the model is called again. If the turn is already finishing, it ends normally and a result turn
-  follows, so each turn produces one reply.
-- **Running turn from a different principal.** The result waits for its own result turn. A result
-  never appears in another principal's turn.
-- **Several results.** Results from the same principal that are ready together share one message
-  and one result turn.
-- **Turn waiting on a person.** While a turn waits on an approval or a question, no result turn
-  starts, whoever the result belongs to. Results wait until the request is answered or the turn
-  ends, then follow the rules above.
-
-A result turn runs with the auth of the call that started the task, and its activity attaches to
-the originating turn. A result turn must produce a reply: if the model ends one without replying,
-eve asks it once more and accepts whatever it returns.
-
-Until its result reaches history, a background task appears in the `[Tasks]` note that eve adds to
-the conversation, with its current status. The note drops the task once its result is delivered.
-
-A session holds at most 10 working background tasks, including detached calls and agent calls made
-with [`background: true`](/docs/subagents#run-a-call-in-the-background). A `detach: true` call
-over that limit does not start and fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background
-run still publish `action.partial` for the originating call and never wake the model. Cancelling a
-turn does not cancel background tasks it started, and when the session ends, eve cancels every
-working task and delivers nothing afterward.
-
-To stop a background task, the model calls [`task_cancel`](/docs/concepts/built-in-tools#task_cancel)
-with its ID. Application code calls `session.cancel({ taskId })` to stop one task and leave the turn
-running, or `session.cancel({ tasks: true })` to cancel the active turn and every working task (see
-[Cancel the in-flight turn](/docs/concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn)).
-Cancel rights come with access to the session, not with the principal that started a task: any
-caller that can reach the session, and the model in any principal's turn, can stop any of its
-tasks.
-eve records the task as cancelled at once, emits `task.settled` with `status: "cancelled"`, and
-signals the run, which unwinds as described in
-[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). A cancelled task delivers no result and
-never starts a result turn. A task that finished before the request still delivers its result.
-
-A subagent session and a task-mode run wait for their own background tasks before they finish. A
-subagent answers its caller with the reply it gives after it has seen the results, and a task-mode
-run returns the output of the result turn that delivers the last result.
+A session holds at most 10 working background tasks, and a `detach: true` call over that limit does
+not start: it fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background run still publish
+`action.partial` for the originating call and never wake the model. Cancelling a turn does not
+cancel the background tasks it started. The model stops a background task with
+[`task_cancel`](/docs/concepts/built-in-tools#task_cancel), and application code with
+`session.cancel({ taskId })`; the run then unwinds as described in
+[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). See
+[Cancel tasks](/docs/concepts/tasks#cancel-tasks).
 
 ## Limit a call with `timeout`
 
@@ -811,23 +758,21 @@ One call, one result. A waited workflow tool call resolves once, with the return
 or a cancellation. A `detach: true` or detached call resolves once with its receipt, and its task
 delivers the result once.
 
-Every workflow tool call is a task. When its run starts, the session stream emits `task.started`
-with `kind: "workflow"`, the tool `name`, `mode` (`"background"` for `detach: true`, otherwise
-`"foreground"`), and no `child`. A waited call that detaches emits `task.detached` with `reason`
-`"steer"` or `"timeout"`, and its `action.result` carries the receipt. The call's first outcome
-emits one `task.settled`, and a run that fails to start settles with `error.code` `START_FAILED`.
-Progress stays on `action.partial` and the result on `action.result`. Agent calls emit the same
-events with `kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
-[Sessions, runs and streaming](/docs/concepts/sessions-runs-and-streaming#stream-a-session) for the
-event fields.
+Every workflow tool call is a [task](/docs/concepts/tasks). When its run starts, the session stream
+emits `task.started` with `kind: "workflow"`, the tool `name`, `mode` (`"background"` for
+`detach: true`, otherwise `"foreground"`), and no `child`. A waited call that detaches emits
+`task.detached`, and its `action.result` carries the receipt. The call's first outcome emits one
+`task.settled`, and a run that fails to start settles with `error.code` `START_FAILED`. Progress
+stays on `action.partial` and the result on `action.result`. Agent calls emit the same events with
+`kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
+[Task stream events](/docs/concepts/tasks#task-stream-events) for the fields.
 
 While a waited workflow tool runs, the turn waits for it. A message with `turnPolicy: "queue"` waits
 until the turn settles. A message with `turnPolicy: "steer"` (the default) detaches the call in an
-interactive root session, and the turn continues with the call's receipt and the message; see
-[Detach on a new message](#detach-on-a-new-message). Elsewhere, the message is applied after the
-tool call resolves, in the same turn, so the model sees it before continuing. Steering never cancels
-the run, except for eve's `sleep`, which ends early. Input responses never steer. Cancelling the turn
-cancels the waited run, which withdraws its requests.
+interactive root session; see [Detach on a new message](#detach-on-a-new-message). Elsewhere, the
+message is applied after the tool call resolves, in the same turn, so the model sees it before
+continuing. Steering never cancels the run, except for eve's `sleep`, which ends early. Input
+responses never steer. Cancelling the turn cancels the waited run, which withdraws its requests.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the tool invocation.

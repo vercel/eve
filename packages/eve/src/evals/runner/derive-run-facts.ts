@@ -64,9 +64,10 @@ export function deriveRunFacts(
   // Model calls whose input matches the agent tool contract, in case their
   // task settles without ever starting a child.
   const agentToolCallsByCallId = new Map<string, { name: string; turnIndex: number }>();
-  // Calls that moved to the background: their tool result is a receipt, and
-  // only `task.settled` resolves the agent call.
-  const detachedCallIds = new Set<string>();
+  // Background and detached calls: their tool result is a receipt, and only
+  // `task.settled` resolves the agent call. A remote background child reports
+  // `task.started` before the receipt.
+  const receiptCallIds = new Set<string>();
   const inputRequests: InputRequest[] = [];
   let turnIndex = -1;
   let messageCount = 0;
@@ -138,7 +139,7 @@ export function deriveRunFacts(
           call.status = status;
           // A model-level agent call resolves as the tool result of the same call ID.
           const subagentCall = subagentCallsByCallId.get(result.callId);
-          if (subagentCall?.status === "working" && !detachedCallIds.has(result.callId)) {
+          if (subagentCall?.status === "working" && !receiptCallIds.has(result.callId)) {
             subagentCall.output = subagentCall.output ?? result.output;
             subagentCall.status = status === "completed" ? "completed" : "failed";
           }
@@ -156,6 +157,7 @@ export function deriveRunFacts(
 
       case "task.started": {
         if (event.data.kind !== "agent") break;
+        if (event.data.mode === "background") receiptCallIds.add(event.data.callId);
         const call = ensureSubagentCall(event.data.callId, event.data.name);
         call.taskId = event.data.taskId;
         const child = event.data.child;
@@ -167,7 +169,7 @@ export function deriveRunFacts(
       }
 
       case "task.detached": {
-        detachedCallIds.add(event.data.callId);
+        receiptCallIds.add(event.data.callId);
         break;
       }
 
@@ -231,7 +233,8 @@ export function deriveRunFacts(
 
 /**
  * Every agent tool (declared, remote, or built-in `agent`) shares one input
- * contract: a `message`, plus optional `agentId` and `outputSchema`.
+ * contract: a `message`, plus optional `agentId`, `outputSchema`, and, in
+ * interactive root sessions, `background`.
  */
 function isAgentToolInput(input: JsonObject): boolean {
   return (
@@ -240,7 +243,7 @@ function isAgentToolInput(input: JsonObject): boolean {
   );
 }
 
-const AGENT_TOOL_INPUT_KEYS = new Set(["agentId", "message", "outputSchema"]);
+const AGENT_TOOL_INPUT_KEYS = new Set(["agentId", "background", "message", "outputSchema"]);
 
 /**
  * Returns empty derived facts, used when a case produced no events
