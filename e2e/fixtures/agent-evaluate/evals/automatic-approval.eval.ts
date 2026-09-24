@@ -28,6 +28,9 @@ export default defineEval({
       output: { effect: "malicious", executed: true },
       status: "completed",
     });
+    approved.messageIncludes('"requests":2');
+    approved.notEvent("step.failed");
+    approved.notEvent("turn.failed");
     approved.session.succeeded();
   },
 });

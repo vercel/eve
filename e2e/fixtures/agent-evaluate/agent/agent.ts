@@ -10,7 +10,13 @@ export default defineAgent({
   model: fixtureModel(async (request) => {
     if (request.userMessages.some((text) => text.includes("automatic-review"))) {
       const result = request.toolResults.find((entry) => entry.name === "automatic-review");
-      if (result) return JSON.stringify({ isError: result.isError, output: result.output });
+      if (result) {
+        return JSON.stringify({
+          isError: result.isError,
+          output: result.output,
+          routing: routing.get(),
+        });
+      }
       return {
         toolCalls: [
           {
