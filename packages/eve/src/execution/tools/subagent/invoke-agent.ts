@@ -66,7 +66,7 @@ export async function agent(
   return await invokeAgent(ctx, {
     agentId: input.agentId,
     message: input.message,
-    ...(input.model === undefined ? {} : { model: input.model }),
+    model: input.model,
     outputSchema: input.outputSchema,
     target,
   });

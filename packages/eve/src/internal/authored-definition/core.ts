@@ -199,7 +199,11 @@ function normalizeModelChoices(
   if (duplicate !== undefined) {
     throw new Error(`${message} The "model" array lists "${duplicate}" more than once.`);
   }
-  return choices as unknown as NormalizedAgentDefinition["model"];
+  const [first, ...rest] = choices;
+  if (first === undefined) {
+    throw new Error(`${message} A "model" array must list at least one AI Gateway model id.`);
+  }
+  return [first, ...rest];
 }
 
 /** `false` explicitly disables one numeric runtime limit. */
