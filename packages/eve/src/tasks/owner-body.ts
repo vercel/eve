@@ -1,18 +1,25 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
+import type {
+  DeliverHookPayload,
+  RuntimeActionResultHookPayload,
+  TaskStartedHookPayload,
+} from "#channel/types.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import type { WaitedTaskChanges } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
-import type { TaskDeadlineSignal } from "#tasks/protocol.js";
-import { hasStartingChildren, planTaskTimer } from "#tasks/state.js";
+import { hasPendingTaskInput, pendingTaskInput, planTaskAnswers } from "#tasks/input.js";
+import { answerTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
+import type { TaskDeadlineSignal, TaskInputEvent } from "#tasks/protocol.js";
+import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { cancelTasksStep, type TaskCancelSelector } from "#tasks/cancel.js";
 import {
@@ -153,10 +160,17 @@ export async function settleWorkflowTask(
 
 /**
  * Cancels the agent tasks and workflow tool calls the active turn is waiting
- * on, without waiting for their children to stop.
+ * on, without waiting for their children to stop. Returns whether a task's
+ * question, other than a session-limit prompt, was pending: it ended the
+ * turn's stream when it surfaced, and cancelling withdraws a waited one.
  */
-export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<void> {
+export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<boolean> {
+  const table = getTaskTable(cursor.sessionState.snapshot.session);
+  const questionPending = pendingTaskInput(table).some(
+    ({ request }) => request.kind !== "session-limit",
+  );
   await cancelTasks(cursor, { kind: "active-turn" });
+  return questionPending;
 }
 
 /** Cancels the selected working tasks and publishes their `task.settled` events. */
@@ -210,6 +224,70 @@ export async function applyTaskDeadline(
       signal,
     }),
   );
+}
+
+/**
+ * Surfaces a child's human-input event for its task and passes it on to this
+ * session's caller at once: a question must not wait for the next input.
+ */
+export async function surfaceTaskInput(
+  cursor: SessionStateCursor,
+  taskId: string,
+  event: TaskInputEvent,
+): Promise<void> {
+  await cursor.apply(
+    await surfaceTaskInputStep({
+      event,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+      sessionWritable: cursor.sessionWritable,
+      taskId,
+    }),
+  );
+  await syncTaskTimer(cursor);
+  await flushUnsentCallerEvents(cursor);
+}
+
+/** Where a delivery goes once its answers for tasks are sent. */
+export type TaskAnswerRouting =
+  | { readonly kind: "cancel-turn" }
+  | {
+      readonly kind: "continue";
+      /** What stays with this session; `undefined` when the answers used up the delivery. */
+      readonly remainder: DeliverHookPayload | undefined;
+      /** Tasks whose dismissible question a person's message dismissed. */
+      readonly dismissedTaskIds?: readonly string[];
+    };
+
+/**
+ * Sends the answers a delivery holds for tasks to the children that asked
+ * (see `planTaskAnswers`). Without pending task input it takes no step.
+ */
+export async function answerTaskInput(
+  cursor: SessionStateCursor,
+  delivery: DeliverHookPayload,
+): Promise<TaskAnswerRouting> {
+  const session = cursor.sessionState.snapshot.session;
+  if (!hasPendingTaskInput(session)) return { kind: "continue", remainder: delivery };
+  const plan = planTaskAnswers({ delivery, table: getTaskTable(session) });
+  if (plan.answers.length > 0) {
+    await cursor.apply(
+      await answerTaskInputStep({
+        answers: plan.answers,
+        delivery,
+        serializedContext: cursor.serializedContext,
+        sessionState: cursor.sessionState,
+        sessionWritable: cursor.sessionWritable,
+      }),
+    );
+    // A workflow question the owner resolved restarts its task's clock.
+    await syncTaskTimer(cursor);
+  }
+  if (plan.cancelTurn) return { kind: "cancel-turn" };
+  const dismissedTaskIds = plan.answers.flatMap((answers) =>
+    answers.dismissed.length === 0 ? [] : [answers.record.id],
+  );
+  return { dismissedTaskIds, kind: "continue", remainder: plan.remainder };
 }
 
 /**

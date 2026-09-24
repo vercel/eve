@@ -3,7 +3,6 @@ import {
   replaceDurableSessionSnapshot,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
@@ -85,15 +84,7 @@ export async function applyTaskDeadlines(input: {
   for (const effect of evaluated.effects) {
     if (effect.kind === "unconfirmed") {
       const { child, record } = effect;
-      if (child !== undefined) {
-        const runId = await hardStopTaskChild(child, record.id);
-        // The stopped run can no longer take an answer.
-        session = clearProxyInputRequestsWhere(session, (route) =>
-          child.kind === "local"
-            ? route.childContinuationToken === child.continuationToken
-            : route.answerHook?.runId === runId || route.answerHook?.runId === child.runId,
-        );
-      }
+      if (child !== undefined) await hardStopTaskChild(child, record.id);
       // A child that never confirmed its stop ends its generation's span here.
       serializedContext = recordTaskTraceTerminal({
         nowMs,

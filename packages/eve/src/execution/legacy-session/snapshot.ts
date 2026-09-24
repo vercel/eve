@@ -44,7 +44,6 @@ export function importConversation(session: LegacySession): DurableSessionState 
     version: 1,
     sessionId: session.sessionId,
     continuationToken: session.continuationToken,
-    hasProxyInputRequests: false,
     emissionState,
     snapshot: { session: imported },
   };

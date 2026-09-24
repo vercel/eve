@@ -21,7 +21,6 @@ describe("durable session checkpoints", () => {
       sessionId: "session",
       continuationToken: "alias",
       version: DURABLE_SESSION_VERSION,
-      hasProxyInputRequests: false,
       emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
       snapshot: { session: projectToDurableSession(session) },
     });

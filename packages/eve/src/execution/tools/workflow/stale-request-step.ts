@@ -1,7 +1,8 @@
-import { resumeWorkflowToolRunDismissal } from "#execution/tools/workflow/answer.js";
 import type { WorkflowToolRunRequestMessage } from "#execution/tools/workflow/messages.js";
 import { isWorkflowTargetGone } from "#execution/tools/workflow/target-gone.js";
 import { createLogger } from "#internal/logging.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
+import type { ToolInputResponse } from "#tools/definition.js";
 
 /**
  * Handles a request from a run whose task the owner no longer waits on,
@@ -25,7 +26,8 @@ export async function dismissStaleWorkflowRequestStep(
   );
   if (message.request.kind !== "ask") return;
   try {
-    await resumeWorkflowToolRunDismissal(message.replyTo);
+    const dismissed: ToolInputResponse = { status: "dismissed" };
+    await resumeHook(message.replyTo, dismissed);
   } catch (error) {
     if (!isWorkflowTargetGone(error)) throw error;
   }

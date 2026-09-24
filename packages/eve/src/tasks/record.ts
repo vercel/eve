@@ -1,5 +1,12 @@
 import type { JsonObject } from "#shared/json.js";
-import type { ChildAddress, TaskCommand, TaskKind, TaskMode, TaskStatus } from "#tasks/protocol.js";
+import type {
+  ChildAddress,
+  TaskCommand,
+  TaskInputBatch,
+  TaskKind,
+  TaskMode,
+  TaskStatus,
+} from "#tasks/protocol.js";
 
 export const TASK_RECORD_VERSION = 1;
 
@@ -41,8 +48,8 @@ export interface TaskRecord {
   readonly cancelConfirmBy?: string;
   /** Commands issued before the child reported `task.started`. */
   readonly pendingCommands?: readonly TaskCommand[];
-  /** Sequence of the last applied `task.input` report for this generation. */
-  readonly inputSeq?: number;
+  /** The `input.requested` batches the task waits on; present exactly while `input_required`. */
+  readonly input?: readonly TaskInputBatch[];
   /** One-line summary of an idle agent's last answer. */
   readonly lastStatus?: string;
   /**
@@ -149,6 +156,29 @@ function isTaskCommand(value: unknown): value is TaskCommand {
   }
 }
 
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+// The shape the owner routes answers by; the child validates each answer.
+function isInputBatch(value: unknown): value is TaskInputBatch {
+  return (
+    isRecordObject(value) &&
+    isString(value.turnId) &&
+    isCount(value.sequence) &&
+    isCount(value.stepIndex) &&
+    Array.isArray(value.requests) &&
+    value.requests.length > 0 &&
+    value.requests.every(
+      (request) =>
+        isRecordObject(request) &&
+        isString(request.requestId) &&
+        isString(request.kind) &&
+        (request.dismissible === undefined || typeof request.dismissible === "boolean"),
+    )
+  );
+}
+
 /** Decodes one record on its own, so one bad record never fails the table. */
 export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   if (!isRecordObject(value)) return { ok: false, reason: "not an object" };
@@ -195,24 +225,14 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   )
     return fail("invalid pendingCommands");
   if (
-    value.inputSeq !== undefined &&
-    (typeof value.inputSeq !== "number" || !Number.isSafeInteger(value.inputSeq))
+    value.input !== undefined &&
+    (!Array.isArray(value.input) || !value.input.every(isInputBatch))
   )
-    return fail("invalid inputSeq");
+    return fail("invalid input");
   if (value.lastStatus !== undefined && typeof value.lastStatus !== "string")
     return fail("invalid lastStatus");
-  if (
-    value.steers !== undefined &&
-    (typeof value.steers !== "number" || !Number.isSafeInteger(value.steers) || value.steers < 0)
-  )
-    return fail("invalid steers");
-  if (
-    value.answerSeq !== undefined &&
-    (typeof value.answerSeq !== "number" ||
-      !Number.isSafeInteger(value.answerSeq) ||
-      value.answerSeq < 0)
-  )
-    return fail("invalid answerSeq");
+  if (value.steers !== undefined && !isCount(value.steers)) return fail("invalid steers");
+  if (value.answerSeq !== undefined && !isCount(value.answerSeq)) return fail("invalid answerSeq");
   if (
     value.workflowCaller !== undefined &&
     (!isRecordObject(value.workflowCaller) ||

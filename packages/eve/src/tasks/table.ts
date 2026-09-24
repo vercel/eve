@@ -1,6 +1,5 @@
 import { WORKFLOW_CANCELLATION_CLEANUP_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import type { SessionStateMap } from "#harness/types.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { deriveTaskId } from "#tasks/ids.js";
@@ -101,11 +100,6 @@ export type TaskEffect =
       readonly kind: "send";
       readonly record: TaskRecord;
       readonly commands: readonly TaskCommand[];
-    }
-  | {
-      readonly kind: "input";
-      readonly record: TaskRecord;
-      readonly requests: readonly InputRequest[];
     }
   | {
       /**
@@ -313,6 +307,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
       delivered: false,
       detachGroup: undefined,
       generation: agent.generation + 1,
+      input: undefined,
       mode: input.mode,
       pendingCommands: undefined,
       startedAt: input.now,
@@ -407,20 +402,17 @@ export function applyTaskMessage(
       };
     }
     case "task.input": {
+      // The clock rule: it stops while any surfaced request waits on a person.
       if (isTerminalTaskStatus(record.status)) return { effects: [], table };
-      if (message.seq <= (record.inputSeq ?? -1)) return { effects: [], table };
-      const waiting = message.requests.length > 0;
+      const waiting = message.input.length > 0;
       const next = withoutUndefined<TaskRecord>({
         ...record,
         clockStoppedAt: waiting ? (record.clockStoppedAt ?? now) : undefined,
         deadlineAt: waiting ? record.deadlineAt : resumeDeadline(record, now),
-        inputSeq: message.seq,
+        input: waiting ? message.input : undefined,
         status: waiting ? "input_required" : "working",
       });
-      return {
-        effects: [{ kind: "input", record: next, requests: message.requests }],
-        table: replace(table, next),
-      };
+      return { effects: [], table: replace(table, next) };
     }
     case "task.settled": {
       // A repeat of an answer already applied, even one to an earlier
@@ -491,6 +483,7 @@ export function cancelTask(table: TaskTable, taskId: string, now: string): TaskT
     deadlineAt: undefined,
     // The owner already knows the outcome; there is nothing left to deliver.
     delivered: true,
+    input: undefined,
     lastStatus: renderLastStatus({ status: "cancelled" }),
     status: "cancelled" as const,
   });
@@ -651,7 +644,6 @@ function continueAfterMissedSteers(
       limitMs === undefined ? undefined : new Date(Date.parse(now) + limitMs).toISOString(),
     detachGroup: undefined,
     generation: record.generation + 1,
-    inputSeq: undefined,
     mode: "background" as const,
     startedAt: now,
     status: "working" as const,
@@ -665,6 +657,7 @@ function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
     ...record,
     clockStoppedAt: undefined,
     deadlineAt: undefined,
+    input: undefined,
     lastStatus: renderLastStatus(outcome),
     status: outcome.status,
   });

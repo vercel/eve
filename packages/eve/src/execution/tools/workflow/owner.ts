@@ -28,13 +28,11 @@ export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
   };
 }
 
-/** Acknowledge only step-owned events, after delivery or deliberate discard. */
+/** Acknowledges a sign-in event after the owner surfaced or deliberately discarded it. */
 export async function deliverWorkflowAuthorization(
   message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAuthorizationRequest },
   deliver: () => Promise<void>,
 ): Promise<void> {
   await deliver();
-  // Agent events reuse their invocation reply channel; it is not an event acknowledgement.
-  if (message.request.event.childSessionId === message.from.runId)
-    await resumeHookStep(message.replyTo, null, { ifPresent: true });
+  await resumeHookStep(message.replyTo, null, { ifPresent: true });
 }

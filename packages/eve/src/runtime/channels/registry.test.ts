@@ -8,7 +8,6 @@ import {
 } from "#channel/activity-renderer.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
-import { SUBAGENT_ADAPTER } from "#tasks/child-input.js";
 import { RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
@@ -39,7 +38,9 @@ describe("createRuntimeAdapterRegistry", () => {
       const registry = createRuntimeAdapterRegistry({ channels: [] });
 
       expect(registry.adaptersByKind.get(HTTP_ADAPTER_KIND)).toBe(HTTP_ADAPTER);
-      expect(registry.adaptersByKind.get(SUBAGENT_ADAPTER_KIND)).toBe(SUBAGENT_ADAPTER);
+      expect(registry.adaptersByKind.get(SUBAGENT_ADAPTER_KIND)).toEqual({
+        kind: SUBAGENT_ADAPTER_KIND,
+      });
       expect(registry.adaptersByKind.get(SCHEDULE_ADAPTER_KIND)).toBe(SCHEDULE_ADAPTER);
     });
 

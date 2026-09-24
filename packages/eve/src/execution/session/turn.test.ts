@@ -8,11 +8,11 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
+import { answerTaskInput } from "#tasks/owner-body.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -23,8 +23,9 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinatio
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
 }));
-vi.mock("#execution/route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn(),
+vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  answerTaskInput: vi.fn(),
 }));
 vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
 vi.mock("#tasks/cancel.js", async (importOriginal) => ({
@@ -44,14 +45,9 @@ vi.mock("#tasks/cancel.js", async (importOriginal) => ({
 }));
 
 beforeEach(() => {
-  vi.mocked(routeDeliverToChildren)
+  vi.mocked(answerTaskInput)
     .mockReset()
-    .mockImplementation(async ({ delivery, serializedContext, sessionState }) => ({
-      kind: "continue",
-      remainder: delivery,
-      serializedContext,
-      sessionState,
-    }));
+    .mockImplementation(async (_cursor, delivery) => ({ kind: "continue", remainder: delivery }));
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -945,7 +941,7 @@ describe("SessionExecution turn checkpoints", () => {
   });
 
   it("routes a descendant answer while waiting for runtime results", async () => {
-    const sessionState = { ...state(""), hasProxyInputRequests: true };
+    const sessionState = state("");
     const childAnswer: DeliverHookPayload = {
       kind: "deliver",
       payloads: [{ inputResponses: [{ requestId: "child-request", text: "blue" }] }],
@@ -973,12 +969,7 @@ describe("SessionExecution turn checkpoints", () => {
       sessionState,
     });
     vi.mocked(dispatchCoordinationStep).mockResolvedValue(ownerUpdate(sessionState));
-    vi.mocked(routeDeliverToChildren).mockResolvedValue({
-      kind: "continue",
-      remainder: undefined,
-      serializedContext: {},
-      sessionState: { ...sessionState, hasProxyInputRequests: false },
-    });
+    vi.mocked(answerTaskInput).mockResolvedValue({ kind: "continue", remainder: undefined });
 
     await expect(
       execution.runTurn({
@@ -986,9 +977,7 @@ describe("SessionExecution turn checkpoints", () => {
       }),
     ).resolves.toEqual({ cancelled: true, kind: "park" });
 
-    expect(routeDeliverToChildren).toHaveBeenCalledWith(
-      expect.objectContaining({ delivery: childAnswer }),
-    );
+    expect(answerTaskInput).toHaveBeenCalledWith(expect.anything(), childAnswer);
     expect(queue.pendingCount).toBe(0);
   });
 });
@@ -1019,7 +1008,6 @@ function state(continuationToken: string): DurableSessionState {
   return createTestSessionState({
     continuationToken,
     emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
-    hasProxyInputRequests: false,
     sessionId: "session-1",
     version: 1,
   });

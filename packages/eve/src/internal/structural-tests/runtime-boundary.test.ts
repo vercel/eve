@@ -12,10 +12,7 @@ const WORKFLOW_PRIMITIVE_SPECIFIERS = new Set([
   "#compiled/@workflow/core/runtime.js",
 ]);
 // Existing reachability debt through ContextKey serialization. This set should only shrink.
-const WORKFLOW_REACHABILITY_ALLOWLIST = new Set([
-  "harness/attachment-staging.ts",
-  "harness/tool-loop.ts",
-]);
+const WORKFLOW_REACHABILITY_ALLOWLIST = new Set<string>([]);
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts"] as const;
 

@@ -6,7 +6,7 @@ import {
 } from "#channel/activity-renderer.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER } from "#channel/schedule.js";
-import { SUBAGENT_ADAPTER } from "#tasks/child-input.js";
+import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import type { RuntimeRegistryEntryLocation } from "#internal/runtime-registry.js";
 import { RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -27,7 +27,8 @@ export interface RuntimeAdapterRegistry {
  */
 const FRAMEWORK_ADAPTERS: readonly ChannelAdapter[] = [
   HTTP_ADAPTER,
-  SUBAGENT_ADAPTER,
+  // A task child's events reach its caller through the session's event sink.
+  { kind: SUBAGENT_ADAPTER_KIND },
   SCHEDULE_ADAPTER,
 ];
 

@@ -7,7 +7,6 @@ import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/me
 import { workflowToolRunOutcomeToToolResult } from "#execution/tools/workflow/owner-inbox.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
-import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -218,14 +217,7 @@ export function settleWorkflowTask(input: {
     replies: [],
     results: settled !== undefined && !background ? [result] : [],
     serializedContext: input.serializedContext,
-    sessionState: replaceDurableSessionSnapshot({
-      // Withdraw the finished run's unanswered requests so a late answer cannot reach it.
-      session: clearProxyInputRequestsWhere(
-        next,
-        (route) => route.answerHook?.runId === from.runId,
-      ),
-      state: input.sessionState,
-    }),
+    sessionState: replaceDurableSessionSnapshot({ session: next, state: input.sessionState }),
   };
 }
 

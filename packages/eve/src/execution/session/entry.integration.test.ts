@@ -1390,9 +1390,10 @@ describe("workflowEntry integration", () => {
 
         const secondTurn = await withTimeout(stream.nextTurn(), "delegated HITL turn");
         expect(filterEventsByType(secondTurn, "input.requested")).toHaveLength(1);
-        await expect(waitForSubagentInputRequest(child.runId, "call-2")).resolves.toMatchObject({
+        await expect(waitForTaskInput(child.runId, "call-2")).resolves.toMatchObject({
           callId: "call-2",
-          kind: "subagent-input-request",
+          event: { type: "input.requested" },
+          kind: "task.input",
           subagentName: "researcher",
         });
       } finally {
@@ -2480,7 +2481,7 @@ async function waitForRuntimeActionResult(runId: string, callId: string): Promis
   );
 }
 
-async function waitForSubagentInputRequest(runId: string, callId: string): Promise<unknown> {
+async function waitForTaskInput(runId: string, callId: string): Promise<unknown> {
   const world = await getWorld();
   const deadline = Date.now() + 10_000;
 
@@ -2497,7 +2498,7 @@ async function waitForSubagentInputRequest(runId: string, callId: string): Promi
         typeof payload === "object" &&
         payload !== null &&
         "kind" in payload &&
-        payload.kind === "subagent-input-request" &&
+        payload.kind === "task.input" &&
         "callId" in payload &&
         payload.callId === callId
       ) {
@@ -2507,7 +2508,7 @@ async function waitForSubagentInputRequest(runId: string, callId: string): Promi
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Timed out waiting for a subagent input request from caller "${callId}".`);
+  throw new Error(`Timed out waiting for task input from caller "${callId}".`);
 }
 
 /** Every delegated result for `callId` the run's inbox received, in order. */

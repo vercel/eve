@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+
 import { ContextContainer } from "#context/container.js";
 import { SessionDynamicSubagentSelectionsKey } from "#context/keys.js";
 import {
@@ -23,8 +25,9 @@ import {
 import { RemoteTaskProtocolError } from "#subagents/remote/protocol.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 import { ownerInboxHookToken } from "#tasks/state.js";
+import type { TaskRecord } from "#tasks/record.js";
 import {
-  answerRemoteTask,
+  answerTask,
   deliverToChild,
   readRemoteTaskReport,
   runCommands,
@@ -482,71 +485,131 @@ describe("sendAgentMessage", () => {
   });
 });
 
-describe("answerRemoteTask", () => {
+describe("answerTask", () => {
   const ALICE = {
     attributes: {},
     authenticator: "slack",
     principalId: "U-alice",
     principalType: "user",
   } as const;
-  const inputResponses = [{ optionId: "approve", requestId: "req-1" }];
   const BOB = { ...ALICE, principalId: "U-bob" } as const;
-  const answer = () =>
-    answerRemoteTask({
-      auth: BOB,
+  const responses = [{ optionId: "approve", requestId: "req-1" }];
+  const delivery = {
+    auth: BOB,
+    deliveryMetadata: [
+      { channelKind: "slack", channelName: "slack", deliveryId: "d-1", payloadIndex: 3 },
+    ],
+    kind: "deliver" as const,
+    payloads: [{ message: "ignored" }],
+    requestId: "request-1",
+  };
+  const answer = (
+    child: TaskRecord["child"],
+    extra: { readonly dismissed?: readonly string[]; readonly callbackAlias?: string } = {},
+  ) =>
+    answerTask({
+      answers: {
+        deliveryMetadata: [{ ...delivery.deliveryMetadata[0]!, payloadIndex: 0 }],
+        dismissed: extra.dismissed ?? [],
+        record: createTaskRecord({ child, creator: encodeTaskCreator({ auth: ALICE }) }),
+        responses,
+      },
+      callbackAlias: extra.callbackAlias,
       ctx: contextWithBundle(),
-      inputResponses,
-      record: createTaskRecord({ child: remoteChild, creator: encodeTaskCreator({ auth: ALICE }) }),
+      delivery,
     });
 
-  it("answers where the agent runs, attributed to the principal that answered", async () => {
-    await expect(answer()).resolves.toEqual({ kind: "answered" });
+  it("delivers a local agent's answers to its inbox as the answerer's delivery", async () => {
+    vi.mocked(resumeHook).mockResolvedValueOnce({ runId: "child-run" } as never);
+
+    await answer(localChild);
+
+    expect(resumeHook).toHaveBeenCalledExactlyOnceWith(
+      "eve:inbox:v1:eve:session:child-session:inbox",
+      {
+        ...delivery,
+        deliveryMetadata: [{ ...delivery.deliveryMetadata[0], payloadIndex: 0 }],
+        payloads: [{ inputResponses: responses }],
+      },
+    );
+  });
+
+  it("answers where a remote agent runs, attributed to the principal that answered", async () => {
+    await answer(remoteChild);
 
     // Bob answers Alice's agent: an approval policy there checks Bob, while the
     // agent, a delegated session, keeps acting as Alice.
     expect(answerRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
       auth: BOB,
-      inputResponses,
+      inputResponses: responses,
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
     });
+    expect(resumeHook).not.toHaveBeenCalled();
   });
 
   it("keeps an answer that did not reach the remote agent answerable", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
 
-    await expect(answer()).resolves.toEqual({ kind: "retry" });
+    await answer(remoteChild, { callbackAlias: "eve:task-callback:alias" });
+
+    expect(resumeHook).not.toHaveBeenCalled();
     error.mockRestore();
   });
 
-  it("fails the task AGENT_SESSION_ENDED when the agent's session is gone", async () => {
+  it.each([
+    [
+      "AGENT_SESSION_ENDED when the agent's session is gone",
+      new Error("HTTP 404"),
+      "terminal",
+      { code: "AGENT_SESSION_ENDED", message: "The agent's session ended before it replied." },
+    ],
+    [
+      "AGENT_UNREACHABLE when the agent speaks another task protocol",
+      new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 }),
+      "parked",
+      {
+        code: "AGENT_UNREACHABLE",
+        message: new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 }).message,
+      },
+    ],
+  ])("fails the task %s, through the owner's inbox", async (_label, cause, kind, failure) => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 404"));
+    vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(cause);
     vi.mocked(isRetryableRemoteAgentContinueError).mockReturnValue(false);
 
-    await expect(answer()).resolves.toEqual({
-      childEnded: true,
-      error: {
-        code: "AGENT_SESSION_ENDED",
-        message: "The agent's session ended before it replied.",
-      },
-      kind: "failed",
+    await answer(remoteChild, { callbackAlias: "eve:task-callback:alias" });
+
+    expect(resumeHook).toHaveBeenCalledExactlyOnceWith("eve:inbox:v1:eve:task-callback:alias", {
+      kind: "runtime-action-result",
+      results: [
+        expect.objectContaining({
+          callId: "call-1",
+          isError: true,
+          origin: "child",
+          outcome: expect.objectContaining({ kind, result: { error: failure, kind: "failed" } }),
+          output: failure,
+        }),
+      ],
+      source: { kind: "remote", sessionId: "remote-child" },
     });
     error.mockRestore();
   });
 
-  it("fails the task AGENT_UNREACHABLE when the agent speaks another task protocol", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const mismatch = new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 });
-    vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(mismatch);
+  it("resumes a workflow run's question hooks with each answer and dismissal", async () => {
+    const workflowChild = { commandToken: "control", kind: "workflow" as const, runId: "run" };
+    vi.mocked(resumeHook)
+      .mockResolvedValueOnce(undefined as never)
+      .mockRejectedValueOnce(new HookNotFoundError("ask-2"));
 
-    await expect(answer()).resolves.toEqual({
-      childEnded: false,
-      error: { code: "AGENT_UNREACHABLE", message: mismatch.message },
-      kind: "failed",
-    });
-    error.mockRestore();
+    await answer(workflowChild, { dismissed: ["ask-2"] });
+
+    // The ask's hook is its request ID; a run that already ended takes nothing.
+    expect(vi.mocked(resumeHook).mock.calls).toEqual([
+      ["req-1", { optionId: "approve", status: "answered", text: undefined }],
+      ["ask-2", { status: "dismissed" }],
+    ]);
   });
 });
 

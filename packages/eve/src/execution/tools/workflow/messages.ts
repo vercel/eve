@@ -1,7 +1,6 @@
-import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
 import type { AgentInvocationRequest } from "#execution/tools/workflow/agent.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TaskInputEvent } from "#tasks/protocol.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
@@ -12,12 +11,15 @@ export interface WorkflowToolRunOwner {
 export type WorkflowToolAgentRequest = AgentInvocationRequest;
 
 /**
- * A child authorization event the owner should display. Unlike input requests
- * it has no answer: the authorization callback completes against the child
- * directly, so the owner only re-emits it.
+ * A sign-in the owner should display. Unlike a question it has no answer:
+ * the authorization callback completes against the run directly, so the
+ * owner only surfaces it, then acknowledges it on `replyTo`.
  */
 export interface WorkflowToolAuthorizationRequest {
-  readonly event: SubagentAuthorizationEventHookPayload;
+  readonly event: Extract<
+    TaskInputEvent,
+    { readonly type: "authorization.required" | "authorization.completed" }
+  >;
   readonly kind: "authorization-request";
 }
 
@@ -27,21 +29,10 @@ export interface WorkflowToolAskRequest {
   readonly request: ToolInputRequest;
 }
 
-/**
- * A child subagent's pending input requests for one step, forwarded as a unit
- * so the owner resolves them against the same child step they came from.
- */
-export interface WorkflowToolInputRequestBatch {
-  readonly kind: "input-batch";
-  readonly requests: readonly InputRequest[];
-}
-
 export type WorkflowToolRequest =
   | WorkflowToolAgentRequest
   | WorkflowToolAuthorizationRequest
-  | WorkflowToolAskRequest
-  | InputRequest
-  | WorkflowToolInputRequestBatch;
+  | WorkflowToolAskRequest;
 
 /** Identifies the sending workflow tool run to an owner shared by many runs. */
 export interface WorkflowToolRunRef {
@@ -70,11 +61,6 @@ export interface WorkflowToolRunRequestMessage {
   readonly from: WorkflowToolRunRef;
   readonly replyTo: string;
   readonly request: WorkflowToolRequest;
-  readonly requestCoordinates?: {
-    readonly sequence: number;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  };
 }
 
 /**

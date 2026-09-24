@@ -244,16 +244,7 @@ async function reportAuthorization(
         kind: "request",
         from: run.from,
         replyTo: acknowledged.token,
-        request: {
-          kind: "authorization-request",
-          event: {
-            kind: "subagent-authorization-event",
-            callId: run.from.callId,
-            childSessionId: run.from.runId,
-            subagentName: run.from.toolName,
-            event,
-          },
-        },
+        request: { kind: "authorization-request", event },
       }),
       signal,
     );

@@ -6,14 +6,17 @@ import type {
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cancelTasks, settleWorkflowTask, startAgentTasks } from "#tasks/owner-body.js";
+import {
+  cancelTasks,
+  settleWorkflowTask,
+  startAgentTasks,
+  surfaceTaskInput,
+} from "#tasks/owner-body.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { findWorkflowTask, getTaskTable } from "#tasks/state.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { dismissStaleWorkflowRequestStep } from "#execution/tools/workflow/stale-request-step.js";
-import { workflowToolRunRequestToInputRequestPayload } from "#execution/tools/workflow/owner-inbox.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
+import { workflowAskInputEvent } from "#execution/tools/workflow/owner-inbox.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
@@ -107,19 +110,8 @@ async function handleWorkflowToolRunRequest(
   if (message.request.kind === "authorization-request") {
     const request = message.request;
     await deliverWorkflowAuthorization({ ...message, request }, async () => {
-      if (taskId === undefined) {
-        await dismissStaleWorkflowRequestStep(message);
-        return;
-      }
-      await cursor.apply(
-        await runProxySubagentEventStep({
-          hookPayload: request.event,
-          sessionWritable: cursor.sessionWritable,
-          serializedContext: cursor.serializedContext,
-          sessionState: cursor.sessionState,
-          taskId,
-        }),
-      );
+      if (taskId === undefined) await dismissStaleWorkflowRequestStep(message);
+      else await surfaceTaskInput(cursor, taskId, request.event);
     });
     return;
   }
@@ -127,30 +119,10 @@ async function handleWorkflowToolRunRequest(
     await dismissStaleWorkflowRequestStep(message);
     return;
   }
-  // The run's task waits on the answer, so its deadline clock stops until then.
-  await cursor.apply(
-    await runProxySubagentEventStep({
-      ...(message.requestCoordinates === undefined
-        ? { answerHook: createAnswerHookRoute(message) }
-        : {}),
-      hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      sessionWritable: cursor.sessionWritable,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-      taskId,
-    }),
+  // Surfaced like a child's question; the owner resolves it when it answers.
+  await surfaceTaskInput(
+    cursor,
+    taskId,
+    workflowAskInputEvent({ ...message, request: message.request }),
   );
-}
-
-function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHookRoute {
-  if (message.request.kind !== "ask") return { runId: message.from.runId };
-  const { allowFreeform, dismissible, options } = message.request.request;
-  return {
-    question: {
-      ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(dismissible !== undefined && { dismissible }),
-      ...(options !== undefined && { options: [...options] }),
-    },
-    runId: message.from.runId,
-  };
 }

@@ -1,3 +1,4 @@
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
@@ -79,10 +80,8 @@ export type TaskMessage =
       readonly kind: "task.input";
       readonly taskId: string;
       readonly generation: number;
-      /** Sequence of this report within the generation; later reports supersede earlier ones. */
-      readonly seq: number;
-      /** Requests still unanswered. An empty list means every request was resolved. */
-      readonly requests: readonly InputRequest[];
+      /** Every batch still unanswered, replacing the last snapshot. `[]` means all were resolved. */
+      readonly input: readonly TaskInputBatch[];
     }
   | {
       readonly kind: "task.settled";
@@ -114,6 +113,49 @@ export type TaskMessage =
 
 /** The owner timer's signal; it carries no task identity and is re-evaluated against the table. */
 export type TaskDeadlineSignal = Extract<TaskMessage, { readonly kind: "task.deadline" }>;
+
+/** A human-input event as the child's own stream emitted it, before the owner adds its task ID. */
+export type TaskInputEvent = Extract<
+  UnstampedMessageStreamEvent,
+  {
+    readonly type:
+      | "input.requested"
+      | "input.resolved"
+      | "approval.candidate"
+      | "approval.settled"
+      | "authorization.required"
+      | "authorization.completed";
+  }
+>;
+
+/**
+ * A child's human-input event on its way to the owner's inbox, from a local
+ * child's hook or a remote child's callback. The owner surfaces it with the
+ * task's ID and records the requests the task waits on.
+ */
+export interface TaskInputHookPayload {
+  readonly kind: "task.input";
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly subagentName: string;
+  /** Set by the remote callback route; the owner applies it only to remote tasks. */
+  readonly source?: { readonly kind: "remote" };
+  readonly event: TaskInputEvent;
+}
+
+/**
+ * A request surfaced at this owner. `dismissible` comes only from a workflow
+ * `ctx.ask`, and never leaves the owner's record.
+ */
+export type TaskInputRequest = InputRequest & { readonly dismissible?: boolean };
+
+/** One `input.requested` batch a task waits on, with the coordinates its resolution repeats. */
+export interface TaskInputBatch {
+  readonly turnId: string;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly requests: readonly TaskInputRequest[];
+}
 
 /** Owner → child. Held on the record until the child reports `task.started`. */
 export type TaskCommand =

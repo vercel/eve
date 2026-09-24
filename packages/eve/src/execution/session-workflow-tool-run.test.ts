@@ -4,18 +4,18 @@ import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-r
 import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { dismissStaleWorkflowRequestStep } from "#execution/tools/workflow/stale-request-step.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
-import { startAgentTasks } from "#tasks/owner-body.js";
+import { startAgentTasks, surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
 
 vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
   ...(await importOriginal()),
   startAgentTasks: vi.fn(),
+  surfaceTaskInput: vi.fn(),
 }));
 vi.mock("#tasks/emit-event-step.js", () => ({
   emitSubagentEventStep: vi.fn(async () => ({})),
@@ -26,7 +26,6 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
 vi.mock("#execution/tools/workflow/stale-request-step.js", () => ({
   dismissStaleWorkflowRequestStep: vi.fn(),
 }));
-vi.mock("#subagents/event-proxy-step.js", () => ({ runProxySubagentEventStep: vi.fn() }));
 vi.mock("#tasks/cancel.js", async (importOriginal) => ({
   ...(await importOriginal()),
   cancelTasksStep: vi.fn(),
@@ -119,22 +118,36 @@ it.each([
   });
 });
 
-it("proxies a working task's question with its taskId", async () => {
+it("surfaces a working task's question for its task, answered through the ask's hook", async () => {
   const cursor = createCursor([workflowTask]);
-  vi.mocked(runProxySubagentEventStep).mockResolvedValue(unchanged(cursor));
-  const request = { kind: "ask" as const, request: { prompt: "Deploy now?" } };
+  const request = {
+    kind: "ask" as const,
+    request: { dismissible: true, options: [{ id: "yes", label: "Yes" }], prompt: "Deploy now?" },
+  };
 
   await handleWorkflowToolRunMessage({
     cursor,
     message: { from, kind: "request", replyTo: "answer-hook", request },
   });
 
-  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({
-      answerHook: expect.objectContaining({ runId: "run" }),
-      taskId: workflowTask.id,
-    }),
-  );
+  expect(surfaceTaskInput).toHaveBeenCalledExactlyOnceWith(cursor, workflowTask.id, {
+    data: {
+      requests: [
+        {
+          action: { callId: "call", input: {}, kind: "tool-call", toolName: "research" },
+          dismissible: true,
+          kind: "question",
+          options: [{ id: "yes", label: "Yes" }],
+          prompt: "Deploy now?",
+          requestId: "answer-hook",
+        },
+      ],
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn",
+    },
+    type: "input.requested",
+  });
   expect(dismissStaleWorkflowRequestStep).not.toHaveBeenCalled();
 });
 
@@ -151,35 +164,23 @@ it.each([
     ],
   ],
 ])(
-  "dismisses a question or approval from a run with %s instead of asking the user",
+  "dismisses a question from a run with %s instead of asking the user",
   async (_label, records) => {
     const cursor = createCursor(records as TaskRecord[]);
-    const ask = { kind: "ask" as const, request: { prompt: "Deploy now?" } };
-    const approval = {
-      action: { callId: "call", input: {}, kind: "tool-call" as const, toolName: "deploy" },
-      kind: "tool-approval" as const,
-      prompt: "Approve?",
-      requestId: "approval-1",
-    };
+    const request = { kind: "ask" as const, request: { prompt: "Deploy now?" } };
+    const message = { from, kind: "request" as const, replyTo: "answer-hook", request };
 
-    for (const request of [ask, approval]) {
-      const message = { from, kind: "request" as const, replyTo: "answer-hook", request };
-      await handleWorkflowToolRunMessage({ cursor, message });
-      expect(dismissStaleWorkflowRequestStep).toHaveBeenLastCalledWith(message);
-    }
-    expect(runProxySubagentEventStep).not.toHaveBeenCalled();
+    await handleWorkflowToolRunMessage({ cursor, message });
+
+    expect(dismissStaleWorkflowRequestStep).toHaveBeenCalledExactlyOnceWith(message);
+    expect(surfaceTaskInput).not.toHaveBeenCalled();
   },
 );
 
-it("proxies a working task's authorization event with its taskId and drops a stale run's", async () => {
-  const event = {
-    childSessionId: "child",
-    event: { data: { name: "github" }, type: "authorization.required" },
-    kind: "subagent-authorization-event",
-  } as never;
+it("surfaces a working task's sign-in for its task, drops a stale run's, and acknowledges both", async () => {
+  const event = { data: { name: "github" }, type: "authorization.required" } as never;
   const request = { event, kind: "authorization-request" as const };
   const working = createCursor([workflowTask]);
-  vi.mocked(runProxySubagentEventStep).mockResolvedValue(unchanged(working));
 
   await handleWorkflowToolRunMessage({
     cursor: working,
@@ -190,10 +191,10 @@ it("proxies a working task's authorization event with its taskId and drops a sta
     message: { from, kind: "request", replyTo: "reply", request },
   });
 
-  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({ hookPayload: event, taskId: workflowTask.id }),
-  );
+  expect(surfaceTaskInput).toHaveBeenCalledExactlyOnceWith(working, workflowTask.id, event);
   expect(dismissStaleWorkflowRequestStep).toHaveBeenCalledOnce();
+  expect(resumeHookStep).toHaveBeenCalledTimes(2);
+  expect(resumeHookStep).toHaveBeenCalledWith("reply", null, { ifPresent: true });
 });
 
 const ownedAgent = createTaskRecord({

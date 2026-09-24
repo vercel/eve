@@ -74,7 +74,7 @@ describe("eve dist single-chunk module evaluation", () => {
     const stepSources = [
       "src/internal/workflow/builtins.ts",
       "src/subagents/remote/callback-step.ts",
-      "src/tasks/child-input.ts",
+      "src/tasks/input-step.ts",
       "src/execution/session/turn.ts",
       "src/execution/session/entry.ts",
       "src/execution/session/turn-step.ts",

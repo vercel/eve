@@ -1,47 +1,45 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import { cancelTasks } from "#tasks/owner-body.js";
+import { cancelTasks, surfaceTaskInput } from "#tasks/owner-body.js";
+import type { TaskInputHookPayload } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 
-vi.mock("#subagents/event-proxy-step.js", () => ({ runProxySubagentEventStep: vi.fn() }));
-vi.mock("#tasks/owner-body.js", () => ({ cancelTasks: vi.fn() }));
+vi.mock("#tasks/owner-body.js", () => ({ cancelTasks: vi.fn(), surfaceTaskInput: vi.fn() }));
 
 const CHILD = { continuationToken: "child-token", kind: "local" as const, sessionId: "child-1" };
 
-const inputRequest: SubagentInputRequestHookPayload = {
+const inputRequest: TaskInputHookPayload = {
   callId: "call-1",
-  childContinuationToken: "child-token",
   childSessionId: "child-1",
-  event: { requests: [], sequence: 1, stepIndex: 0, turnId: "child-turn" },
-  kind: "subagent-input-request",
+  event: {
+    data: { requests: [], sequence: 1, stepIndex: 0, turnId: "child-turn" },
+    type: "input.requested",
+  },
+  kind: "task.input",
   subagentName: "research",
 };
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(runProxySubagentEventStep).mockImplementation(async (input) => ({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  }));
 });
 
-it("proxies a working task's child request with the task's ID", async () => {
+it("surfaces a working task's child request with the task's ID", async () => {
   const cursor = createCursor([createTaskRecord({ child: CHILD })]);
 
   await expect(
     admitSessionInboxPayload(inputRequest, { cursor, queue: new SessionInputQueue() }),
   ).resolves.toEqual({ kind: "consumed" });
 
-  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({ hookPayload: inputRequest, taskId: "research-abc234" }),
+  expect(surfaceTaskInput).toHaveBeenCalledExactlyOnceWith(
+    cursor,
+    "research-abc234",
+    inputRequest.event,
   );
 });
 
@@ -50,7 +48,7 @@ it("drops a request that matches no working task", async () => {
 
   await admitSessionInboxPayload(inputRequest, { cursor, queue: new SessionInputQueue() });
 
-  expect(runProxySubagentEventStep).not.toHaveBeenCalled();
+  expect(surfaceTaskInput).not.toHaveBeenCalled();
 });
 
 const REMOTE_CHILD = {
@@ -59,20 +57,21 @@ const REMOTE_CHILD = {
   sessionId: "remote-1",
   url: "https://billing.example",
 };
-const remoteRequest: SubagentInputRequestHookPayload = {
+const remoteRequest: TaskInputHookPayload = {
   ...inputRequest,
-  childContinuationToken: "eve:remote-child:remote-1",
   childSessionId: "remote-1",
   source: { kind: "remote" },
 };
 
-it("proxies a remote child's request, marked by the callback route, with the task's ID", async () => {
+it("surfaces a remote child's request, marked by the callback route, with the task's ID", async () => {
   const cursor = createCursor([createTaskRecord({ child: REMOTE_CHILD })]);
 
   await admitSessionInboxPayload(remoteRequest, { cursor, queue: new SessionInputQueue() });
 
-  expect(runProxySubagentEventStep).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({ hookPayload: remoteRequest, taskId: "research-abc234" }),
+  expect(surfaceTaskInput).toHaveBeenCalledExactlyOnceWith(
+    cursor,
+    "research-abc234",
+    remoteRequest.event,
   );
 });
 
@@ -89,7 +88,7 @@ it.each([
 
   await admitSessionInboxPayload(request, { cursor, queue: new SessionInputQueue() });
 
-  expect(runProxySubagentEventStep).not.toHaveBeenCalled();
+  expect(surfaceTaskInput).not.toHaveBeenCalled();
 });
 
 it("admits the owner timer's signal for the deadline step", async () => {

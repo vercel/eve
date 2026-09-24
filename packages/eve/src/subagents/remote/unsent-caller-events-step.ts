@@ -1,5 +1,5 @@
 import { UnsentCallerEventsKey, type UnsentCallerEvent } from "#context/keys.js";
-import { sendCallerEvent } from "#subagents/remote/caller-events.js";
+import { sendCallerEvent } from "#tasks/input-forward.js";
 
 /**
  * Sends the caller events a session still owes, in order, and throws on a

@@ -8,7 +8,9 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
+import { answerTaskInputStep } from "#tasks/input-step.js";
 import {
+  answerTaskInput,
   applyTaskDeadline,
   applyTaskOwnerUpdate,
   cancelTasks,
@@ -44,6 +46,10 @@ vi.mock("#tasks/owner.js", () => ({
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: vi.fn() }));
 vi.mock("#tasks/cancel.js", () => ({ cancelTasksStep: vi.fn() }));
 vi.mock("#tasks/workflow-task.js", () => ({ settleWorkflowTaskStep: vi.fn() }));
+vi.mock("#tasks/input-step.js", () => ({
+  answerTaskInputStep: vi.fn(),
+  surfaceTaskInputStep: vi.fn(),
+}));
 
 const ALIAS = `eve:task-callback:${"ab".repeat(24)}`;
 const CALL = { callId: "call-1", input: { message: "Find sources.", target: "research" } };
@@ -217,11 +223,79 @@ describe("cancelTurnDescendants", () => {
       sessionState: cursor.sessionState,
     });
 
-    await cancelTurnDescendants(cursor);
+    await expect(cancelTurnDescendants(cursor)).resolves.toBe(false);
 
     expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ selector: { kind: "active-turn" } }),
     );
+  });
+
+  it.each([
+    ["a question", "question", true],
+    ["only a session-limit prompt", "session-limit", false],
+  ] as const)(
+    "reports whether %s was pending before the cancel withdrew it",
+    async (_l, kind, pending) => {
+      const cursor = createCursor(
+        stateWith(taskTableState([waitingOn(kind)])),
+        vi.fn(async () => {}),
+      );
+      vi.mocked(cancelTasksStep).mockResolvedValue({
+        events: [],
+        replies: [],
+        results: [],
+        serializedContext: {},
+        sessionState: createTestSessionState(),
+      });
+
+      await expect(cancelTurnDescendants(cursor)).resolves.toBe(pending);
+    },
+  );
+});
+
+describe("answerTaskInput", () => {
+  const answer = {
+    kind: "deliver" as const,
+    payloads: [{ inputResponses: [{ requestId: "q-1" }] }],
+  };
+
+  it("passes a delivery through without a step while no task waits on input", async () => {
+    const cursor = createCursor(stateWith(taskTableState([createTaskRecord()])), vi.fn());
+
+    await expect(answerTaskInput(cursor, answer)).resolves.toEqual({
+      kind: "continue",
+      remainder: answer,
+    });
+    expect(answerTaskInputStep).not.toHaveBeenCalled();
+  });
+
+  it("sends a task its answers in one step and returns what stays with the session", async () => {
+    const cursor = createCursor(stateWith(taskTableState([waitingOn("question")])), vi.fn());
+    vi.mocked(answerTaskInputStep).mockResolvedValue({});
+
+    await expect(answerTaskInput(cursor, answer)).resolves.toEqual({
+      dismissedTaskIds: [],
+      kind: "continue",
+      remainder: undefined,
+    });
+    expect(answerTaskInputStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        answers: [expect.objectContaining({ responses: [{ requestId: "q-1" }] })],
+        delivery: answer,
+      }),
+    );
+  });
+
+  it("stops the turn once a descendant's declined session-limit prompt is sent on", async () => {
+    const cursor = createCursor(stateWith(taskTableState([waitingOn("session-limit")])), vi.fn());
+    vi.mocked(answerTaskInputStep).mockResolvedValue({});
+    const stop = {
+      kind: "deliver" as const,
+      payloads: [{ inputResponses: [{ optionId: "stop", requestId: "q-1" }] }],
+    };
+
+    await expect(answerTaskInput(cursor, stop)).resolves.toEqual({ kind: "cancel-turn" });
+    expect(answerTaskInputStep).toHaveBeenCalledOnce();
   });
 });
 
@@ -585,6 +659,20 @@ describe("applyTaskDeadline", () => {
     );
   });
 });
+
+function waitingOn(kind: "question" | "session-limit") {
+  const request = {
+    action: { callId: "c", input: {}, kind: "tool-call" as const, toolName: "t" },
+    kind,
+    prompt: "Continue?",
+    requestId: "q-1",
+  };
+  return createTaskRecord({
+    child: { continuationToken: "child-token", kind: "local", sessionId: "child" },
+    input: [{ requests: [request], sequence: 0, stepIndex: 0, turnId: "child-turn" }],
+    status: "input_required",
+  });
+}
 
 function send(message: string): SessionInboxPayload {
   return { kind: "send", payload: { message } };

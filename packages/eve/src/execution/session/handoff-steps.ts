@@ -9,7 +9,6 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import { isObject } from "#shared/guards.js";
 import { TASK_RESULTS_STATE_KEY } from "#tasks/results.js";
 import { hasWorkingTasks } from "#tasks/state.js";
 import { readTaskTable } from "#tasks/table.js";
@@ -32,12 +31,6 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
   if (pendingKeys.some((key) => state?.[key] !== undefined)) return false;
   const batches = state?.["eve.runtime.pendingInputBatches"];
   if (batches !== undefined && (!Array.isArray(batches) || batches.length > 0)) return false;
-  const proxyRequests = state?.["eve.runtime.proxyInputRequests"];
-  if (
-    proxyRequests !== undefined &&
-    (!isObject(proxyRequests) || Object.keys(proxyRequests).length > 0)
-  )
-    return false;
   // An unreadable task record may be a working task this deployment cannot see.
   if (readTaskTable(state).lost.length > 0) return false;
   return !hasWorkingTasks({ state });

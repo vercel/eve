@@ -4,20 +4,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
+import { answerTaskInput } from "#tasks/owner-body.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
 }));
-vi.mock("../route-child-delivery.js", () => ({
-  routeDeliverToChildren: vi.fn(),
+vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  answerTaskInput: vi.fn(),
 }));
 vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
 beforeEach(() => {
-  vi.mocked(routeDeliverToChildren).mockReset();
+  vi.mocked(answerTaskInput).mockReset();
 });
 
 interface ScriptedRead {
@@ -340,35 +341,6 @@ describe("nextTurnDelivery", () => {
 
     expect(next).toMatchObject({ kind: "closed" });
   });
-
-  it("carries retired proxy state through fully routed parked deliveries", async () => {
-    const retiredState = { ...sessionState, hasProxyInputRequests: false };
-    const inbox = createMockInbox([messageRead("child response"), messageRead("parent turn")]);
-    vi.mocked(routeDeliverToChildren)
-      .mockResolvedValueOnce({
-        kind: "continue",
-        remainder: undefined,
-        serializedContext: {},
-        sessionState: retiredState,
-      })
-      .mockResolvedValueOnce({
-        kind: "continue",
-        remainder: { kind: "deliver", payloads: [{ message: "parent turn" }] },
-        serializedContext: {},
-        sessionState: retiredState,
-      });
-
-    const next = await nextTurnDelivery({
-      ...waitInput(inbox),
-      expectedAttemptIds: undefined,
-    });
-
-    expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
-    expect(next).toMatchObject({
-      delivery: { payloads: [{ message: "parent turn" }] },
-      kind: "turn",
-    });
-  });
 });
 
 function slackAuth(principalId: string): SessionAuthContext {
@@ -401,14 +373,10 @@ function authenticatedDelivery(message: string, auth: SessionAuthContext): Deliv
 
 function batchingInputFor(bufferedDeliveries: DeliverHookPayload[]) {
   const input = waitInput(createMockInbox([]));
-  vi.mocked(routeDeliverToChildren).mockImplementation(
-    async ({ delivery, serializedContext, sessionState }) => ({
-      kind: "continue",
-      remainder: delivery,
-      serializedContext,
-      sessionState,
-    }),
-  );
+  vi.mocked(answerTaskInput).mockImplementation(async (_cursor, delivery) => ({
+    kind: "continue",
+    remainder: delivery,
+  }));
   return { ...input, queue: queueOf(...bufferedDeliveries) };
 }
 
@@ -417,23 +385,14 @@ describe("nextTurnDelivery routing", () => {
     const sessionState = createTestSessionState({
       continuationToken: "token",
       emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "turn" },
-      hasProxyInputRequests: true,
       sessionId: "session",
       version: 1,
     });
-    const routedSessionState = { ...sessionState, hasProxyInputRequests: false };
-    vi.mocked(routeDeliverToChildren)
-      .mockResolvedValueOnce({
-        kind: "continue",
-        remainder: undefined,
-        serializedContext: {},
-        sessionState,
-      })
+    vi.mocked(answerTaskInput)
+      .mockResolvedValueOnce({ kind: "continue", remainder: undefined })
       .mockResolvedValueOnce({
         kind: "continue",
         remainder: { kind: "deliver", payloads: [{ message: "ordinary" }] },
-        serializedContext: {},
-        sessionState: routedSessionState,
       });
     const commands = [
       { kind: "send" as const, payload: { inputResponses: [{ requestId: "child-request" }] } },
@@ -462,7 +421,6 @@ describe("nextTurnDelivery routing", () => {
       delivery: { payloads: [{ message: "ordinary" }] },
       kind: "turn",
     });
-    expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
-    expect(cursor.sessionState).toBe(routedSessionState);
+    expect(answerTaskInput).toHaveBeenCalledTimes(2);
   });
 });

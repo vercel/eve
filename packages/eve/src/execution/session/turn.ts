@@ -2,7 +2,6 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import { isSteeringDelivery, type SessionInputQueue } from "#execution/session/input-queue.js";
 import {
@@ -31,14 +30,15 @@ import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import {
+  answerTaskInput,
   applyTaskDeadline,
   applyTaskOwnerUpdate,
   applyTaskReport,
   cancelTurnDescendants,
   interruptWaitedTasks,
   startPendingAgentTasks,
-  syncTaskTimer,
 } from "#tasks/owner-body.js";
+import { hasPendingTaskInput } from "#tasks/input.js";
 import {
   DetachTimers,
   DISMISSED_CALL_GRACE_MS,
@@ -198,9 +198,10 @@ export class SessionExecution {
   }
 
   private async finishCancelledTurn(): Promise<TurnOutcome> {
-    const { cursor } = this.input;
-    await cancelTurnDescendants(cursor);
-    return { cancelled: true, kind: "park" };
+    const taskQuestionPending = await cancelTurnDescendants(this.input.cursor);
+    return taskQuestionPending
+      ? { cancelled: true, kind: "park", taskQuestionPending }
+      : { cancelled: true, kind: "park" };
   }
 
   /**
@@ -340,7 +341,8 @@ class ActiveTurn {
     if (
       delivery.kind === "deliver" &&
       isSteeringDelivery(delivery, this.callerCallId) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests &&
+      // A message may answer a task's question, so routing decides before it steers.
+      !hasPendingTaskInput(this.input.cursor.sessionState.snapshot.session) &&
       delivery.payloads.some(
         (value) => value.message !== undefined && value.inputResponses === undefined,
       )
@@ -530,15 +532,7 @@ class ActiveTurn {
         continue;
       }
       this.routedToChildren.add(sequence);
-      const routed = await routeDeliverToChildren({
-        delivery,
-        sessionWritable: this.input.cursor.sessionWritable,
-        serializedContext: this.input.cursor.serializedContext,
-        sessionState: this.input.cursor.sessionState,
-      });
-      await this.input.cursor.apply(routed);
-      // An answered request can restart a task's deadline clock.
-      await syncTaskTimer(this.input.cursor);
+      const routed = await answerTaskInput(this.input.cursor, delivery);
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
         this.admitted.delete(sequence);

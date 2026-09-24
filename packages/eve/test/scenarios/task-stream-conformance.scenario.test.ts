@@ -523,7 +523,7 @@ export default defineRemoteAgent({
     ]);
     return {
       description:
-        "A waited call to a remote agent whose tool needs approval: task.started with child.remote, the approval proxied onto the caller's stream as input.requested with the call's taskId, then task.settled completed after the answer.",
+        "A waited call to a remote agent whose tool needs approval: task.started with child.remote, the approval proxied onto the caller's stream as input.requested with the call's taskId, the child's input.resolved once it takes the answer, then task.settled completed.",
       events,
       sessionId: session.state.sessionId,
     };

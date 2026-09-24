@@ -13,7 +13,6 @@ import {
   resolveHookOwnerRunId,
   resolveSessionOwnerRunId,
 } from "#execution/workflow-runtime.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
@@ -187,22 +186,7 @@ describe("applyTaskDeadlines", () => {
         status: "cancelled",
       }),
     ].map((record) => ({ ...record, delivered: true }));
-    const proxied = {
-      "local-request": { childContinuationToken: "child-token", kind: "question" },
-      "workflow-request": {
-        answerHook: { runId: "run-1" },
-        childContinuationToken: "answer-hook",
-        kind: "question",
-      },
-      other: { childContinuationToken: "other-token", kind: "question" },
-    };
-
-    const update = await applyTaskDeadlines(
-      input(tasks, {
-        now: "2026-09-24T14:00:31.000Z",
-        state: { "eve.runtime.proxyInputRequests": proxied },
-      }),
-    );
+    const update = await applyTaskDeadlines(input(tasks, { now: "2026-09-24T14:00:31.000Z" }));
 
     expect(vi.mocked(cancelRun).mock.calls).toEqual([
       [WORLD, "child-session", { cancelReason: expect.any(String) }],
@@ -212,7 +196,6 @@ describe("applyTaskDeadlines", () => {
     // A stopped local agent can take no more work; the remote agent stays available.
     expect(records(update.sessionState).map((record) => record.id)).toEqual(["billing-abc234"]);
     expect(records(update.sessionState)[0]).not.toHaveProperty("cancelConfirmBy");
-    expect([...getProxyInputRequests(stateOf(update.sessionState)).keys()]).toEqual(["other"]);
     // Each unconfirmed agent generation's span ends as cancelled; workflow tasks have none.
     expect(
       vi

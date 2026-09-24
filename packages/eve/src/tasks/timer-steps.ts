@@ -197,9 +197,9 @@ export async function hardStopTaskChildrenStep(
  * Terminates the child's current run. A local child may have handed off to
  * a successor run, so the run that owns its stable inbox is stopped; a
  * duplicate workflow run never ran the body, so the run that owns the
- * command hook is stopped. Returns the run it stopped.
+ * command hook is stopped.
  */
-export async function hardStopTaskChild(child: HardStopTarget, taskId?: string): Promise<string> {
+export async function hardStopTaskChild(child: HardStopTarget, taskId?: string): Promise<void> {
   let runId = child.kind === "local" ? child.sessionId : child.runId;
   try {
     runId =
@@ -216,7 +216,6 @@ export async function hardStopTaskChild(child: HardStopTarget, taskId?: string):
       });
     }
   }
-  return runId;
 }
 
 /** Best-effort: a timer that keeps running only re-evaluates the table once more. */

@@ -14,11 +14,9 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { cancelTasks } from "#tasks/owner-body.js";
+import { cancelTasks, surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
 
@@ -53,7 +51,7 @@ export async function admitSessionInboxPayload(
   }
   if (value.kind === "task.started") return { kind: "task-report", payload: value };
   if (value.kind === "task.deadline") return { kind: "task-deadline", signal: value };
-  if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+  if (value.kind === "task.input") {
     const task = getTaskTable(input.cursor.sessionState.snapshot.session).records.find(
       (record) =>
         record.callId === value.callId &&
@@ -67,17 +65,7 @@ export async function admitSessionInboxPayload(
         : task?.child === undefined ||
           (task.child.kind === "local" && task.child.sessionId === value.childSessionId);
     if (task?.name === value.subagentName && fromChild) {
-      await input.cursor.apply(
-        await runProxySubagentEventStep({
-          hookPayload: value,
-          sessionWritable: input.cursor.sessionWritable,
-          serializedContext: input.cursor.serializedContext,
-          sessionState: input.cursor.sessionState,
-          taskId: task.id,
-        }),
-      );
-      // A descendant's question this session passes up must not wait for its next input.
-      await flushUnsentCallerEvents(input.cursor);
+      await surfaceTaskInput(input.cursor, task.id, value.event);
     }
     return { kind: "consumed" };
   }

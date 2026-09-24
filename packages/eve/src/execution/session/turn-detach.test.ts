@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import {
   InboxWaitEnded,
   type SessionInbox,
@@ -20,6 +19,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { DISMISSED_CALL_GRACE_MS, type TaskWaitPlan } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
+import { answerTaskInput } from "#tasks/owner-body.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -28,7 +28,10 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
 }));
 vi.mock("#execution/session/turn-step.js", () => ({ turnStep: vi.fn() }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
-vi.mock("#execution/route-child-delivery.js", () => ({ routeDeliverToChildren: vi.fn() }));
+vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  answerTaskInput: vi.fn(),
+}));
 vi.mock("#execution/session-workflow-tool-run.js", () => ({
   handleWorkflowToolRunMessage: vi.fn(),
 }));
@@ -61,14 +64,9 @@ beforeEach(() => {
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     }));
-  vi.mocked(routeDeliverToChildren)
+  vi.mocked(answerTaskInput)
     .mockReset()
-    .mockImplementation(async ({ delivery, serializedContext, sessionState }) => ({
-      kind: "continue",
-      remainder: delivery,
-      serializedContext,
-      sessionState,
-    }));
+    .mockImplementation(async (_cursor, delivery) => ({ kind: "continue", remainder: delivery }));
   vi.mocked(handleWorkflowToolRunMessage)
     .mockReset()
     .mockImplementation(async ({ message }) =>
@@ -101,14 +99,7 @@ describe("detach on steer", () => {
   });
 
   it("does not steer with a message that answered a pending question", async () => {
-    vi.mocked(routeDeliverToChildren).mockImplementationOnce(
-      async ({ serializedContext, sessionState }) => ({
-        kind: "continue",
-        remainder: undefined,
-        serializedContext,
-        sessionState,
-      }),
-    );
+    vi.mocked(answerTaskInput).mockResolvedValueOnce({ kind: "continue", remainder: undefined });
     const { execution, steps } = setup({
       calls: ["call-refund"],
       script: [{ kind: "deliver", payloads: [{ message: "Yes" }] }, outcome("call-refund")],
@@ -306,15 +297,11 @@ type ScriptItem = SessionInboxPayload | "timer";
 
 /** The next routed message dismisses the dismissible question of `call-ask`. */
 function dismissAsk(): void {
-  vi.mocked(routeDeliverToChildren).mockImplementationOnce(
-    async ({ delivery, serializedContext, sessionState }) => ({
-      dismissedTaskIds: [taskIdOf("call-ask")],
-      kind: "continue",
-      remainder: delivery,
-      serializedContext,
-      sessionState,
-    }),
-  );
+  vi.mocked(answerTaskInput).mockImplementationOnce(async (_cursor, delivery) => ({
+    dismissedTaskIds: [taskIdOf("call-ask")],
+    kind: "continue",
+    remainder: delivery,
+  }));
 }
 
 function setup(input: {

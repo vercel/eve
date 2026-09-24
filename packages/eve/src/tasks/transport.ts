@@ -1,6 +1,13 @@
-import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
+import type {
+  ActivityObserverConfig,
+  DeliverHookPayload,
+  RuntimeActionResultHookPayload,
+  SessionAuthContext,
+} from "#channel/types.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
+import { isWorkflowTargetGone } from "#execution/tools/workflow/target-gone.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   createWorkflowRuntime,
@@ -8,6 +15,7 @@ import {
   requestWorkflowTurnCancellation,
 } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
@@ -33,11 +41,12 @@ import {
 import { projectSessionCallbackResult } from "#subagents/remote/callback-route.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import type { InputResponse } from "#shared/input.js";
 import { RemoteTaskProtocolError } from "#subagents/remote/protocol.js";
-import type { ChildAddress, TaskCommand, TaskError } from "#tasks/protocol.js";
+import type { TaskAnswers } from "#tasks/input.js";
+import type { ChildAddress, TaskCommand } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { readTaskCreator } from "#tasks/results.js";
+import type { ToolInputResponse } from "#tools/definition.js";
 import { ownerInboxHookToken } from "#tasks/state.js";
 import type { TaskEffect } from "#tasks/table.js";
 import type { HardStopTarget } from "#tasks/timer-steps.js";
@@ -189,60 +198,98 @@ export async function sendAgentMessage(input: {
 }
 
 /**
- * What became of answers sent to a remote agent: they reached it; they did
- * not but may on a later try, so the requests stay answerable; or they never
- * can, because the agent's session is gone or speaks another protocol, so
- * the task fails with `error`.
+ * Sends a task the answers a delivery holds for it, as the principal that
+ * answered: an approval policy checks that responder, while the child keeps
+ * acting as the principal that started it. A local child takes them in its
+ * inbox; a remote one over HTTP, where an answer that may yet arrive stays
+ * answerable and one that never can fails the task through the owner's
+ * inbox, like a result from the child. A workflow run's question hook, named
+ * by its request ID, takes an answer or a dismissal.
  */
-export type RemoteAnswerOutcome =
-  | { readonly kind: "answered" }
-  | { readonly kind: "retry" }
-  | { readonly kind: "failed"; readonly error: TaskError; readonly childEnded: boolean };
-
-/**
- * Answers input requests a remote agent surfaced, as the principal that
- * answered: an approval policy checks that responder. The agent itself keeps
- * acting as the principal that started it, because a delegated session never
- * takes on an answer's principal.
- */
-export async function answerRemoteTask(input: {
-  /** The answering principal, forwarded when the definition forwards the caller identity. */
-  readonly auth: SessionAuthContext | null;
+export async function answerTask(input: {
+  readonly answers: TaskAnswers;
+  /** The owner's remote callback alias. */
+  readonly callbackAlias: string | undefined;
   readonly ctx: ContextContainer | undefined;
-  readonly inputResponses: readonly InputResponse[];
-  readonly record: TaskRecord;
-}): Promise<RemoteAnswerOutcome> {
-  const { record } = input;
+  /** The delivery that carried the answers; its principal and envelope travel with them. */
+  readonly delivery: DeliverHookPayload;
+}): Promise<void> {
+  const { deliveryMetadata, dismissed, record, responses } = input.answers;
   const child = record.child;
+  if (child?.kind === "workflow") {
+    const answers: (readonly [string, ToolInputResponse])[] = [
+      ...responses.map(
+        ({ optionId, requestId, text }) =>
+          [requestId, { optionId, status: "answered" as const, text }] as const,
+      ),
+      ...dismissed.map((requestId) => [requestId, { status: "dismissed" as const }] as const),
+    ];
+    for (const [token, answer] of answers) {
+      try {
+        await resumeHook(token, answer);
+      } catch (error) {
+        if (!isWorkflowTargetGone(error)) throw error;
+      }
+    }
+    return;
+  }
+  if (responses.length === 0) return;
+  if (child?.kind === "local") {
+    await resumeSessionInbox(
+      { sessionId: child.sessionId },
+      {
+        ...input.delivery,
+        deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
+        payloads: [{ inputResponses: responses }],
+      },
+    );
+    return;
+  }
   const remote = resolveRemoteChild(record, input.ctx);
-  if (child?.kind !== "remote" || remote === undefined) return { kind: "retry" };
+  if (child?.kind !== "remote" || remote === undefined) return;
   try {
     await answerRemoteAgentSession({
-      auth: input.auth,
-      inputResponses: input.inputResponses,
+      auth: input.delivery.auth ?? null,
+      inputResponses: responses,
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
     });
-    return { kind: "answered" };
   } catch (error) {
-    logError(log, "failed to answer a remote agent's input request", error, {
-      taskId: record.id,
-    });
-    if (error instanceof RemoteTaskProtocolError) {
-      return {
-        childEnded: false,
-        error: { code: AGENT_UNREACHABLE, message: error.message },
-        kind: "failed",
-      };
-    }
-    if (!isRetryableRemoteAgentContinueError(error)) {
-      return {
-        childEnded: true,
-        error: { code: "AGENT_SESSION_ENDED", message: AGENT_SESSION_ENDED_MESSAGE },
-        kind: "failed",
-      };
-    }
-    return { kind: "retry" };
+    logError(log, "failed to answer a remote agent's input request", error, { taskId: record.id });
+    const protocol = error instanceof RemoteTaskProtocolError;
+    if (
+      (!protocol && isRetryableRemoteAgentContinueError(error)) ||
+      input.callbackAlias === undefined
+    )
+      return;
+    const failure = protocol
+      ? { code: AGENT_UNREACHABLE, message: error.message }
+      : { code: "AGENT_SESSION_ENDED", message: AGENT_SESSION_ENDED_MESSAGE };
+    const report: RuntimeActionResultHookPayload = {
+      kind: "runtime-action-result",
+      results: [
+        {
+          callId: record.callId,
+          isError: true,
+          kind: "subagent-result",
+          origin: "child",
+          outcome: {
+            kind: protocol ? "parked" : "terminal",
+            result: { error: failure, kind: "failed" },
+            usageDelta: {
+              cacheReadTokens: 0,
+              cacheWriteTokens: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+            },
+          },
+          output: failure,
+          subagentName: record.name,
+        },
+      ],
+      source: { kind: "remote", sessionId: child.sessionId },
+    };
+    await resumeHook(sessionInboxHookToken(input.callbackAlias), report);
   }
 }
 

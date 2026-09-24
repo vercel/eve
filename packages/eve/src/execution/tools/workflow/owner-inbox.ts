@@ -1,15 +1,11 @@
-import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type {
+  WorkflowToolAskRequest,
   WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunRef,
-  WorkflowToolInputRequestBatch,
-  WorkflowToolRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import type { InputRequest } from "#shared/input.js";
-import type { ToolInputRequest } from "#tools/definition.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import type { TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
 
 export function workflowToolRunOutcomeToToolResult(
   message: WorkflowToolRunOutcomeMessage,
@@ -64,66 +60,29 @@ function parseJsonValueOrUndefined(value: unknown): JsonValue | undefined {
   }
 }
 
-export function workflowToolRunRequestToInputRequestPayload(
-  message: WorkflowToolRunRequestMessage,
-): SubagentInputRequestHookPayload {
-  const { from, replyTo, requestCoordinates } = message;
-  return {
-    callId: from.callId,
-    childContinuationToken: replyTo,
-    childSessionId: from.runId,
-    event: {
-      requests: workflowToolRunInputRequests(message),
-      sequence: requestCoordinates?.sequence ?? from.sequence,
-      stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
-      turnId: requestCoordinates?.turnId ?? from.turnId,
-    },
-    kind: "subagent-input-request",
-    subagentName: from.toolName,
-  };
-}
-
-export function workflowToolRunInputRequests(
-  message: WorkflowToolRunRequestMessage,
-): readonly InputRequest[] {
-  return message.request.kind === "input-batch"
-    ? message.request.requests
-    : [normalizeInputRequest(message.request, message.from, message.replyTo)];
-}
-
-function normalizeInputRequest(
-  request: Exclude<WorkflowToolRequest, WorkflowToolInputRequestBatch>,
-  from: WorkflowToolRunRef,
-  requestId: string,
-): InputRequest {
-  switch (request.kind) {
-    case "agent-invoke":
-      throw new TypeError("A workflow agent request cannot be normalized as human input.");
-    case "authorization-request":
-      throw new TypeError("A workflow authorization event cannot be normalized as human input.");
-    case "ask":
-      return normalizeAskRequest(request.request, from, requestId);
-    default:
-      return request;
-  }
-}
-
-function normalizeAskRequest(
-  authored: ToolInputRequest,
-  from: WorkflowToolRunRef,
-  requestId: string,
-): InputRequest {
+/**
+ * The `input.requested` event the owner surfaces for a run's `ask()`, at the
+ * run's call coordinates. The request ID is the ask's reply hook, which takes
+ * the answer.
+ */
+export function workflowAskInputEvent(
+  message: WorkflowToolRunRequestMessage & { readonly request: WorkflowToolAskRequest },
+): Extract<TaskInputEvent, { readonly type: "input.requested" }> {
+  const { from, replyTo: requestId, request } = message;
+  const authored = request.request;
   if (typeof authored.prompt !== "string" || authored.prompt.length === 0) {
     throw new TypeError("A workflow tool run request needs a non-empty `prompt`.");
   }
-  const normalized: InputRequest = {
+  const normalized: { -readonly [K in keyof TaskInputRequest]: TaskInputRequest[K] } = {
     action: { callId: from.callId, input: from.input, kind: "tool-call", toolName: from.toolName },
     kind: "question",
     prompt: authored.prompt,
     requestId,
   };
   if (authored.allowFreeform !== undefined) normalized.allowFreeform = authored.allowFreeform;
+  if (authored.dismissible !== undefined) normalized.dismissible = authored.dismissible;
   if (authored.display !== undefined) normalized.display = authored.display;
   if (authored.options !== undefined) normalized.options = [...authored.options];
-  return normalized;
+  const { sequence, stepIndex, turnId } = from;
+  return { data: { requests: [normalized], sequence, stepIndex, turnId }, type: "input.requested" };
 }

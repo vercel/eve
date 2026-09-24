@@ -100,109 +100,25 @@ describe("session callback route", () => {
     expect(response.status).toBe(503);
   });
 
-  it("passes a remote child's input request to its owner as a remote-sourced proxy request", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
-      requests: [
-        {
-          action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "refund" },
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "deny", label: "Deny" },
-          ],
-          prompt: "Approve refund?",
-          requestId: "req-1",
-        },
-      ],
-      sequence: 2,
-      stepIndex: 0,
-      turnId: "turn_0",
-    };
-
-    const response = await handleSessionCallbackRequest(
-      new Request(CALLBACK_URL, {
-        body: JSON.stringify({
-          taskProtocol: 1,
-          callId: "call-1",
-          event,
-          kind: "input.requested",
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: CALLBACK_TOKEN }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
-      callId: "call-1",
-      childContinuationToken: "eve:remote-child:remote-session",
-      childSessionId: "remote-session",
-      event,
-      kind: "subagent-input-request",
-      source: { kind: "remote" },
-      subagentName: "research",
-    });
-  });
-
-  it("passes a remote child's authorization event to its owner", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-    const event = {
-      data: { attemptId: "a-1", connection: "github", sequence: 1, turnId: "turn_0" },
-      type: "authorization.required",
-    };
-
-    const response = await handleSessionCallbackRequest(
-      new Request(CALLBACK_URL, {
-        body: JSON.stringify({
-          taskProtocol: 1,
-          callId: "call-1",
-          event,
-          kind: "authorization.event",
-          sessionId: "remote-session",
-          subagentName: "research",
-        }),
-        method: "POST",
-      }),
-      createRouteContext({ token: CALLBACK_TOKEN }),
-    );
-
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
-      callId: "call-1",
-      childSessionId: "remote-session",
-      event,
-      kind: "subagent-authorization-event",
-      source: { kind: "remote" },
-      subagentName: "research",
-    });
-  });
-
-  it.each([
-    ["without its session", { event: { requests: [] }, kind: "input.requested" }],
-    [
-      "with no requests",
-      {
-        event: { requests: [], sequence: 0, stepIndex: 0, turnId: "t" },
-        kind: "input.requested",
-        sessionId: "s",
-      },
+  const REQUEST = {
+    action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "refund" },
+    kind: "tool-approval",
+    options: [
+      { id: "approve", label: "Approve" },
+      { id: "deny", label: "Deny" },
     ],
-    [
-      "with an unknown event type",
-      {
-        event: { data: {}, type: "message.completed" },
-        kind: "authorization.event",
-        sessionId: "s",
-      },
-    ],
-  ])("rejects an input callback %s", async (_label, body) => {
-    const response = await handleSessionCallbackRequest(
+    prompt: "Approve refund?",
+    requestId: "req-1",
+  };
+  const COORDINATES = { sequence: 2, stepIndex: 0, turnId: "turn_0" };
+
+  const postTaskInput = (body: Record<string, unknown>) =>
+    handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
           callId: "call-1",
+          kind: "task.input",
+          sessionId: "remote-session",
           subagentName: "research",
           taskProtocol: 1,
           ...body,
@@ -212,11 +128,103 @@ describe("session callback route", () => {
       createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
+  it.each([
+    ["input.requested", { data: { ...COORDINATES, requests: [REQUEST] }, type: "input.requested" }],
+    [
+      "input.resolved",
+      {
+        data: {
+          ...COORDINATES,
+          resolutions: [
+            {
+              kind: "tool-approval",
+              outcome: "approved",
+              requestId: "req-1",
+              response: { optionId: "approve", requestId: "req-1" },
+            },
+          ],
+        },
+        type: "input.resolved",
+      },
+    ],
+    [
+      "authorization.required",
+      {
+        data: { attemptId: "a-1", connection: "github", sequence: 1, turnId: "turn_0" },
+        type: "authorization.required",
+      },
+    ],
+  ])("passes a remote child's %s to its owner as remote task input", async (_label, event) => {
+    resumeHookMock.mockResolvedValue(undefined);
+
+    const response = await postTaskInput({ event });
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(CALLBACK_TOKEN, {
+      callId: "call-1",
+      childSessionId: "remote-session",
+      event,
+      kind: "task.input",
+      source: { kind: "remote" },
+      subagentName: "research",
+    });
+  });
+
+  it.each([
+    ["without its session", { event: { data: {}, type: "input.requested" }, sessionId: undefined }],
+    [
+      "with no requests",
+      { event: { data: { ...COORDINATES, requests: [] }, type: "input.requested" } },
+    ],
+    [
+      "with more than 64 requests",
+      {
+        event: {
+          data: {
+            ...COORDINATES,
+            requests: Array.from({ length: 65 }, (_, index) => ({
+              ...REQUEST,
+              requestId: `req-${index}`,
+            })),
+          },
+          type: "input.requested",
+        },
+      },
+    ],
+    [
+      "with a request outside the public shape",
+      {
+        event: {
+          data: { ...COORDINATES, requests: [{ ...REQUEST, dismissible: true }] },
+          type: "input.requested",
+        },
+      },
+    ],
+    [
+      "with an unknown resolution outcome",
+      {
+        event: {
+          data: {
+            ...COORDINATES,
+            resolutions: [{ kind: "question", outcome: "maybe", requestId: "req-1" }],
+          },
+          type: "input.resolved",
+        },
+      },
+    ],
+    ["with an event type it does not forward", { event: { data: {}, type: "message.completed" } }],
+  ])("rejects a task input callback %s", async (_label, body) => {
+    const response = await postTaskInput(body);
+
     expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid task input callback.",
+      ok: false,
+    });
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it.each(["task.update", "task.input-requested", "task.authorization", "turn.started"])(
+  it.each(["task.update", "input.requested", "authorization.event", "turn.started"])(
     "rejects removed %s callbacks without resuming the caller",
     async (kind) => {
       const response = await handleSessionCallbackRequest(

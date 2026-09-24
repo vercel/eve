@@ -8,7 +8,6 @@ import {
   resolveToolCallInputObject,
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
-import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
@@ -16,8 +15,6 @@ import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { truncateTaskResult } from "#tasks/render.js";
-
-const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
 
 describe("createRuntimeActionRequestFromToolCall", () => {
   const loadSkillCall = {
@@ -325,7 +322,7 @@ describe("coordination batch identity", () => {
 });
 
 describe("resolvePendingCoordination", () => {
-  it("resolves a workflow tool call and leaves proxy routes to the task owner", async () => {
+  it("resolves a workflow tool call", async () => {
     const parked = setPendingCoordinationBatch({
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
@@ -340,30 +337,9 @@ describe("resolvePendingCoordination", () => {
         },
       ],
     });
-    const answerToken = "eve:workflow-tool-run-answer:run-1:0";
-    const session = upsertProxyInputRequests({
-      entries: [
-        ["other-request", { childContinuationToken: CHILD_CONTINUATION_TOKEN, kind: "question" }],
-      ],
-      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
-      session: upsertProxyInputRequests({
-        entries: [
-          [
-            answerToken,
-            {
-              answerHook: { runId: "run-1" },
-              childContinuationToken: answerToken,
-              kind: "question",
-            },
-          ],
-        ],
-        forChildContinuationToken: answerToken,
-        session: parked,
-      }),
-    });
 
     const resolved = await resolvePendingCoordination({
-      session,
+      session: parked,
       stepInput: {
         runtimeActionResults: [
           { callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" },
@@ -373,11 +349,6 @@ describe("resolvePendingCoordination", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(getPendingCoordinationBatch(resolved.session.state)).toBeUndefined();
-    // Settling the workflow task withdraws its run's requests; resolution does not.
-    expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual([
-      answerToken,
-      "other-request",
-    ]);
   });
 
   it("projects a workflow tool's result through its toModelOutput", async () => {

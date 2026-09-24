@@ -11,7 +11,6 @@ import {
   reportTaskStartedStep,
   resolveInitialTurnCallerStep,
 } from "#tasks/child.js";
-import { SUBAGENT_ADAPTER } from "#tasks/child-input.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -37,7 +36,7 @@ function createSerializedContext(
 ): Record<string, unknown> {
   const bundle = {
     adapterRegistry: {
-      adaptersByKind: new Map([[SUBAGENT_ADAPTER_KIND, SUBAGENT_ADAPTER]]),
+      adaptersByKind: new Map([[SUBAGENT_ADAPTER_KIND, { kind: SUBAGENT_ADAPTER_KIND }]]),
     },
     compiledArtifactsSource: { kind: "test" },
     nodeId: undefined,
@@ -48,7 +47,7 @@ function createSerializedContext(
   ctx.set(BundleKey, bundle);
   ctx.set(SessionIdKey, "child-session");
   ctx.set(ChannelKey, {
-    ...SUBAGENT_ADAPTER,
+    kind: SUBAGENT_ADAPTER_KIND,
     state: {
       callId: "call-1",
       parentContinuationToken: "parent-tok",

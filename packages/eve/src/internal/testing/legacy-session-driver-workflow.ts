@@ -60,7 +60,6 @@ export async function legacySessionDriverWorkflow(input: {
       version: 1,
       sessionId,
       continuationToken: input.alias,
-      hasProxyInputRequests: false,
       emissionState: session.state!["eve.harness.emission"],
       snapshot: { version: 1, session },
     };

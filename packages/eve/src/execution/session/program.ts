@@ -301,11 +301,12 @@ async function runSessionLoop(
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async () => {
+  const settleCancelledTurn = async (taskQuestionPending: boolean) => {
     const settled = await settleCancelledTurnStep({
       sessionWritable: boot.sessionWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
+      taskQuestionPending,
     });
     await cursor.apply(settled);
     progress.caller = undefined;
@@ -371,7 +372,7 @@ async function runSessionLoop(
           queue.discardSteering(progress.caller.callId);
           await cancelTasks(cursor, { kind: "all" });
         }
-        const settled = await settleCancelledTurn();
+        const settled = await settleCancelledTurn(action.taskQuestionPending === true);
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
             ? cancelledCaller
@@ -438,13 +439,15 @@ async function runSessionLoop(
           const turnOpen =
             next.kind === "cancel-turn" ||
             hasOpenTurnWork(cursor.sessionState.snapshot.session.state);
-          await cancelTurnDescendants(cursor);
+          const taskQuestionPending = await cancelTurnDescendants(cursor);
           if (caller !== undefined) queue.discardSteering(caller.callId);
           // A cancelled agent, or task-mode run, also stops its own background tasks.
           if (caller !== undefined || (next.kind === "cancel-parked" && boot.mode === "task")) {
             await cancelTasks(cursor, { kind: "all" });
           }
-          const usage = turnOpen ? (await settleCancelledTurn()).usage : action.settled?.usage;
+          const usage = turnOpen
+            ? (await settleCancelledTurn(taskQuestionPending)).usage
+            : action.settled?.usage;
           progress.caller = undefined;
           // The caller learns the call was cancelled; the prior turn is never reported.
           await notifyCancelledTaskCallerStep(

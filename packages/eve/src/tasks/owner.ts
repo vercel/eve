@@ -71,7 +71,6 @@ import {
   type CommandEffect,
 } from "#tasks/transport.js";
 import {
-  clearReportedChildRoutes,
   findReportedTask,
   readAgentId,
   readDynamicRemoteAgent,
@@ -580,13 +579,8 @@ export async function applyTaskReport(input: {
       );
       if (applied.effects.some((effect) => effect.kind === "confirmed")) {
         // A cancelled child confirmed it stopped: count its spend, report nothing.
-        const confirmed = clearReportedChildRoutes(
-          setTaskTable(session, applied.table),
-          record,
-          childEnded,
-        );
         session = setTurnUsageState(
-          confirmed,
+          setTaskTable(session, applied.table),
           accumulateSessionUsage({
             previous: getTurnUsageState(session.state),
             usage: result.outcome.usageDelta,
@@ -613,7 +607,6 @@ export async function applyTaskReport(input: {
       );
       if (background) next = holdTaskResult(next, settledEffect.record, outcome);
       events.push(...continuedEvents(applied.effects, session.sessionId));
-      next = clearReportedChildRoutes(next, record, childEnded);
       session = setTurnUsageState(
         next,
         accumulateSessionUsage({

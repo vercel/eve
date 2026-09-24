@@ -14,7 +14,8 @@ import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
 import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
-import { projectRemoteHitlCallback } from "#subagents/remote/callback-hitl.js";
+import { inputRequestKindSchema, inputRequestSchema, inputResponseSchema } from "#shared/input.js";
+import type { TaskInputEvent } from "#tasks/protocol.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
   cacheReadTokens: 0,
@@ -26,9 +27,9 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 // Wire schemas of the child→parent callback route. Possession of the owner's
 // callback alias is the authorization to report; results bind to a remote
 // task by callId and agent name. The self-reported `sessionId` narrows which
-// remote task a result may settle. Input requests and authorization events
-// travel the same route, so a remote child's HITL reaches the owner's client.
-// Every body carries the child's task protocol version.
+// remote task a result may settle. A child's human-input events travel the
+// same route as `task.input`, exactly as a local child's reach the owner's
+// inbox. Every body carries the child's task protocol version.
 
 /** Steering messages a child reports receiving for the call; absent means none. */
 const steersSchema = z.number().int().nonnegative().optional();
@@ -79,6 +80,57 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     subagentName: z.string().min(1),
   }),
 ]);
+
+/** Requests or resolutions one input event may carry. */
+const MAX_TASK_INPUT_ITEMS = 64;
+
+const inputCoordinates = {
+  sequence: z.number().int().nonnegative(),
+  stepIndex: z.number().int().nonnegative(),
+  turnId: z.string().min(1),
+};
+
+const taskInputCallbackSchema = z.object({
+  callId: z.string().min(1),
+  event: z.union([
+    z.object({
+      data: z.object({
+        requests: z.array(inputRequestSchema).min(1).max(MAX_TASK_INPUT_ITEMS),
+        ...inputCoordinates,
+      }),
+      type: z.literal("input.requested"),
+    }),
+    z.object({
+      data: z.object({
+        resolutions: z
+          .array(
+            z.object({
+              kind: inputRequestKindSchema,
+              outcome: z.enum(["answered", "approved", "denied", "ignored", "invalid"]),
+              requestId: z.string().min(1),
+              response: inputResponseSchema.optional(),
+            }),
+          )
+          .min(1)
+          .max(MAX_TASK_INPUT_ITEMS),
+        ...inputCoordinates,
+      }),
+      type: z.literal("input.resolved"),
+    }),
+    z.object({
+      data: z.record(z.string(), z.unknown()),
+      type: z.enum([
+        "approval.candidate",
+        "approval.settled",
+        "authorization.required",
+        "authorization.completed",
+      ]),
+    }),
+  ]),
+  kind: z.literal("task.input"),
+  sessionId: z.string().min(1),
+  subagentName: z.string().min(1),
+});
 
 export async function handleSessionCallbackRequest(
   request: Request,
@@ -141,8 +193,21 @@ function projectCallbackHookPayload(value: unknown): HookPayload | Response {
   if (value === null || typeof value !== "object") {
     return Response.json({ error: "Expected a JSON object.", ok: false }, { status: 400 });
   }
-  const hitl = projectRemoteHitlCallback(value);
-  if (hitl !== undefined) return hitl;
+  if (Reflect.get(value, "kind") === "task.input") {
+    const parsed = taskInputCallbackSchema.safeParse(value);
+    if (!parsed.success) {
+      return Response.json({ error: "Invalid task input callback.", ok: false }, { status: 400 });
+    }
+    const { callId, event, sessionId, subagentName } = parsed.data;
+    return {
+      callId,
+      childSessionId: sessionId,
+      event: event as TaskInputEvent,
+      kind: "task.input",
+      source: { kind: "remote" },
+      subagentName,
+    };
+  }
   const result = projectSessionCallbackResult(value);
   if (result instanceof Response) return result;
   const sessionId = Reflect.get(value, "sessionId");

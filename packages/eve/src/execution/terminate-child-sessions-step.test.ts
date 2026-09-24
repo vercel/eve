@@ -366,7 +366,6 @@ function makeSessionState(records: readonly TaskRecord[]): DurableSessionState {
       stepIndex: 0,
       turnId: "turn-1",
     },
-    hasProxyInputRequests: false,
     sessionId: "parent-session",
     snapshot: {
       session: {

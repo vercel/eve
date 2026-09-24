@@ -276,8 +276,8 @@ The answer's `status` tells the body what happened:
   immediately instead of waiting for an answer no one can give.
 
 A plain follow-up message answers the request when it is the only pending question and the message
-matches an option or the request allows free text. Answer a question from a subagent with a
-structured response.
+matches an option or the request allows free text. A question a subagent asks counts as a pending
+question too, and plain text answers it by the same rule.
 
 `ctx.ask` composes with the SDK's own constructs; race it against a deadline:
 

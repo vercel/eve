@@ -8,11 +8,6 @@ import type {
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
-import {
-  clearProxyInputRequestsForChild,
-  remoteChildRouteToken,
-} from "#harness/proxy-input-requests.js";
-import type { SessionStateMap } from "#harness/types.js";
 import { AGENT_OTHER_PRINCIPAL } from "#subagents/agent-handle-errors.js";
 import type { AgentTaskCall, WorkflowCallerReply } from "#tasks/owner.js";
 import type { TaskRecord } from "#tasks/record.js";
@@ -88,25 +83,6 @@ export function rejectOtherPrincipal(input: {
   if (agent?.kind !== "agent") return undefined;
   if (sameTaskPrincipal(readTaskCreator(agent.creator).auth, input.caller)) return undefined;
   return { code: AGENT_OTHER_PRINCIPAL, message: renderAgentOtherPrincipal(agent.id) };
-}
-
-/**
- * Retires the input requests a child surfaced that it can no longer take: a
- * local child's once its session ended, a remote child's once it reported.
- */
-export function clearReportedChildRoutes<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  record: TaskRecord,
-  childEnded: boolean,
-): T {
-  const child = record.child;
-  if (child?.kind === "remote") {
-    return clearProxyInputRequestsForChild(session, remoteChildRouteToken(child.sessionId));
-  }
-  if (child?.kind === "local" && childEnded) {
-    return clearProxyInputRequestsForChild(session, child.continuationToken);
-  }
-  return session;
 }
 
 export function readDynamicRemoteAgent(input: {

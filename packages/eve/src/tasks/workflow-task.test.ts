@@ -5,13 +5,10 @@ import type {
   WorkflowToolRunOutcome,
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
-import {
-  getProxyInputRequests,
-  upsertProxyInputRequestState,
-} from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { hasPendingTaskInput } from "#tasks/input.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderBackgroundReceipt, renderTooManyBackgroundTasks } from "#tasks/render.js";
 import { readPendingTaskResults, readTaskCreator } from "#tasks/results.js";
@@ -532,32 +529,24 @@ describe("settleWorkflowTask", () => {
     expect(duplicate.sessionState).toBe(first.sessionState);
   });
 
-  it("withdraws only the finished run's unanswered requests", () => {
-    const answerToken = "eve:workflow-tool-run-answer:run-1:0";
-    let state: SessionStateMap | undefined = taskTableState([WORKING]);
-    state = upsertProxyInputRequestState({
-      entries: [
-        [
-          answerToken,
-          { answerHook: { runId: "run-1" }, childContinuationToken: answerToken, kind: "question" },
-        ],
-      ],
-      forChildContinuationToken: answerToken,
-      state,
-    });
-    state = upsertProxyInputRequestState({
-      entries: [["other-request", { childContinuationToken: "subagent:child", kind: "question" }]],
-      forChildContinuationToken: "subagent:child",
-      state,
-    });
+  it("withdraws the finished run's pending question with its task", () => {
+    const question = {
+      action: { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "deploy" },
+      kind: "question" as const,
+      prompt: "Deploy now?",
+      requestId: "ask-1",
+    };
+    const waiting: TaskRecord = {
+      ...WORKING,
+      input: [{ requests: [question], sequence: 0, stepIndex: 0, turnId: "turn-1" }],
+      status: "input_required",
+    };
 
     const update = settleWorkflowTask(
-      settle(ownerState(state), { output: "done", status: "completed" }),
+      settle(ownerState(taskTableState([waiting])), { output: "done", status: "completed" }),
     );
 
-    expect([...getProxyInputRequests(update.sessionState.snapshot.session.state).keys()]).toEqual([
-      "other-request",
-    ]);
+    expect(hasPendingTaskInput(update.sessionState.snapshot.session)).toBe(false);
   });
 });
 

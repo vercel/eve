@@ -23,6 +23,20 @@ import {
 const NOW = "2026-09-24T14:02:00.000Z";
 const child = { commandToken: "hook_1", kind: "workflow", runId: "run_1" } as const;
 
+const QUESTION = {
+  action: { callId: "c", input: {}, kind: "tool-call", toolName: "t" },
+  kind: "question",
+  prompt: "Which region?",
+  requestId: "r",
+} as const;
+
+function inputMessage(
+  taskId: string,
+  input: Extract<TaskMessage, { kind: "task.input" }>["input"],
+): Extract<TaskMessage, { kind: "task.input" }> {
+  return { generation: 1, input, kind: "task.input", taskId };
+}
+
 function started(
   table: TaskTable = taskTable([]),
   overrides: Partial<Parameters<typeof startTask>[1]> = {},
@@ -375,47 +389,70 @@ describe("applyTaskMessage", () => {
 
   it("stops the deadline clock while input is required and extends it on resume", () => {
     const task = started(undefined, { timeoutMs: 60_000 });
-    const waiting = applyTaskMessage(
-      task.table,
-      {
-        generation: 1,
-        kind: "task.input",
-        requests: [
-          {
-            action: { callId: "c", input: {}, kind: "tool-call", toolName: "t" },
-            kind: "question",
-            prompt: "?",
-            requestId: "r",
-          } as never,
-        ],
-        seq: 0,
-        taskId: task.record.id,
-      },
-      NOW,
-    );
+    const input = [{ requests: [QUESTION], sequence: 3, stepIndex: 1, turnId: "turn_c" }];
+    const waiting = applyTaskMessage(task.table, inputMessage(task.record.id, input), NOW);
+    expect(waiting.effects).toEqual([]);
     expect(waiting.table.records[0]).toMatchObject({
       clockStoppedAt: NOW,
+      input,
       status: "input_required",
     });
     expect(nextTaskWakeAt(waiting.table)).toBeUndefined();
+    // A later snapshot that still waits keeps the time the clock stopped.
+    const more = [...input, { ...input[0]!, sequence: 4 }];
+    const still = applyTaskMessage(waiting.table, inputMessage(task.record.id, more), NOW);
+    expect(still.table.records[0]).toMatchObject({ clockStoppedAt: NOW, input: more });
     const later = "2026-09-24T15:02:00.000Z";
-    const resumed = applyTaskMessage(
-      waiting.table,
-      { generation: 1, kind: "task.input", requests: [], seq: 1, taskId: task.record.id },
-      later,
-    );
+    const resumed = applyTaskMessage(still.table, inputMessage(task.record.id, []), later);
     expect(resumed.table.records[0]).toMatchObject({
       deadlineAt: "2026-09-24T15:03:00.000Z",
       status: "working",
     });
-    // A stale report is ignored.
-    expect(
+    expect(resumed.table.records[0]).not.toHaveProperty("input");
+    expect(resumed.table.records[0]).not.toHaveProperty("clockStoppedAt");
+  });
+
+  it("clears a task's surfaced input when it settles, is cancelled, or starts a new generation", () => {
+    const input = [{ requests: [QUESTION], sequence: 0, stepIndex: 0, turnId: "turn_c" }];
+    const agent = started(undefined, { kind: "agent", name: "researcher", nodeId: "n1" });
+    const address = { continuationToken: "c", kind: "local", sessionId: "s" } as const;
+    const waiting = applyTaskMessage(
       applyTaskMessage(
-        resumed.table,
-        { generation: 1, kind: "task.input", requests: [], seq: 0, taskId: task.record.id },
-        later,
+        agent.table,
+        { child: address, generation: 1, kind: "task.started", taskId: agent.record.id },
+        NOW,
       ).table,
-    ).toBe(resumed.table);
+      inputMessage(agent.record.id, input),
+      NOW,
+    ).table;
+    const settled = applyTaskMessage(
+      waiting,
+      {
+        generation: 1,
+        kind: "task.settled",
+        outcome: { output: "done", status: "completed" },
+        taskId: agent.record.id,
+      },
+      NOW,
+    ).table;
+    expect(settled.records[0]).not.toHaveProperty("input");
+    // A terminal task takes no more input.
+    expect(applyTaskMessage(settled, inputMessage(agent.record.id, input), NOW).table).toBe(
+      settled,
+    );
+    expect(cancelTask(waiting, agent.record.id, NOW).table.records[0]).not.toHaveProperty("input");
+    expect(timeOutTask(waiting, agent.record.id, NOW).table.records[0]).not.toHaveProperty("input");
+    const next = startTask(settled, {
+      agentId: agent.record.id,
+      callId: "call_2",
+      kind: "agent",
+      mode: "foreground",
+      name: "researcher",
+      now: NOW,
+      ownerId: "session_1",
+      turnId: "turn_1",
+    });
+    expect(next.kind === "started" && next.record).not.toHaveProperty("input");
   });
 });
 
@@ -668,6 +705,28 @@ describe("persistence", () => {
       ok: false,
       reason: "invalid status",
     });
+  });
+
+  it("decodes the input a task waits on and rejects a malformed batch", () => {
+    const batch = { requests: [QUESTION], sequence: 0, stepIndex: 0, turnId: "turn_c" };
+    const record = { ...started().record, input: [batch], status: "input_required" };
+    expect(decodeTaskRecord(record)).toEqual({ ok: true, record });
+    const dismissible = [{ ...batch, requests: [{ ...QUESTION, dismissible: true }] }];
+    expect(decodeTaskRecord({ ...record, input: dismissible })).toMatchObject({ ok: true });
+    for (const input of [
+      batch,
+      [{ ...batch, requests: [] }],
+      [{ ...batch, sequence: -1 }],
+      [{ ...batch, turnId: "" }],
+      [{ ...batch, requests: [{ ...QUESTION, requestId: 7 }] }],
+      [{ ...batch, requests: [{ ...QUESTION, dismissible: "yes" }] }],
+    ]) {
+      expect(decodeTaskRecord({ ...record, input })).toMatchObject({
+        id: record.id,
+        ok: false,
+        reason: "invalid input",
+      });
+    }
   });
 
   it("prunes delivered workflow tasks but keeps idle agents", () => {

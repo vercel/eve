@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  workflowAskInputEvent,
   workflowToolRunFailureOutput,
-  workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 
 const from = {
@@ -17,79 +17,14 @@ const from = {
 };
 
 describe("workflow-tool task input", () => {
-  it("preserves a forwarded child request id independently of its session route", () => {
-    const request = {
-      action: {
-        callId: "child-call",
-        input: { ticker: "GOOG" },
-        kind: "tool-call" as const,
-        toolName: "get_stock_price",
-      },
-      kind: "tool-approval" as const,
-      prompt: "Approve tool call: get_stock_price",
-      requestId: "approval-1",
-    };
-
-    expect(
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request,
-      }),
-    ).toMatchObject({
-      childContinuationToken: "subagent:parent:call-1",
-      event: {
-        requests: [request],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn-1",
-      },
-    });
-  });
-
-  it("uses child event coordinates for repeated forwarded requests", () => {
-    const request = {
-      action: {
-        callId: "child-call",
-        input: {},
-        kind: "tool-call" as const,
-        toolName: "approval_gate",
-      },
-      kind: "tool-approval" as const,
-      prompt: "Approve?",
-      requestId: "approval-2",
-    };
-
-    expect(
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request,
-        requestCoordinates: { sequence: 4, stepIndex: 2, turnId: "turn-child" },
-      }),
-    ).toMatchObject({
-      childContinuationToken: "subagent:parent:call-1",
-      event: {
-        requests: [request],
-        sequence: 4,
-        stepIndex: 2,
-        turnId: "turn-child",
-      },
-    });
-  });
-
-  it("does not normalize workflow agent requests as human input", () => {
+  it("rejects an ask without a prompt", () => {
     expect(() =>
-      workflowToolRunRequestToInputRequestPayload({
+      workflowAskInputEvent({
         from,
-        replyTo: "subagent:parent:call-1",
-        request: {
-          input: { message: "Find it", target: "research" },
-          invocationId: "call-1",
-          kind: "agent-invoke",
-        },
+        replyTo: "answer-hook",
+        request: { kind: "ask", request: { prompt: "" } },
       }),
-    ).toThrow("A workflow agent request cannot be normalized as human input.");
+    ).toThrow("A workflow tool run request needs a non-empty `prompt`.");
   });
 });
 

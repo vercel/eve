@@ -1,6 +1,5 @@
 import type { UserContent } from "ai";
 
-import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -9,7 +8,8 @@ import type {
   RuntimeSubagentDispatchFailure,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { InputResponse } from "#shared/input.js";
+import type { TaskInputHookPayload } from "#tasks/protocol.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -318,67 +318,6 @@ export interface RuntimeActionResultHookPayload {
 }
 
 /**
- * Event coordinates attached to a proxied `input.requested` batch.
- *
- * Mirrors the `data` payload of the child's `input.requested` stream event so
- * the parent re-emits the same semantics without inventing new identifiers.
- */
-export interface SubagentInputRequestEvent {
-  readonly requests: readonly InputRequest[];
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}
-
-/**
- * Proxy payload sent from a child subagent to its parent when the child parks
- * on a pending input batch.
- *
- * Runtime-internal. Channel adapters and authored code never observe this
- * kind: it exists only on the durable hook between the subagent adapter's
- * `input.requested` handler and the parent's runtime loop.
- */
-export interface SubagentInputRequestHookPayload {
-  readonly callId: string;
-  readonly childContinuationToken: string;
-  readonly childSessionId: string;
-  readonly childSessionInbox?: SessionInboxAddress;
-  readonly event: SubagentInputRequestEvent;
-  readonly kind: "subagent-input-request";
-  /** Set by the remote callback route; the owner applies it only to remote tasks. */
-  readonly source?: { readonly kind: "remote" };
-  readonly subagentName: string;
-}
-
-/** Responder-specific lifecycle event forwarded from a delegated child. */
-export type SubagentAuthorizationEvent = Extract<
-  UnstampedMessageStreamEvent,
-  {
-    type:
-      | "approval.candidate"
-      | "approval.settled"
-      | "authorization.required"
-      | "authorization.completed";
-  }
->;
-
-/**
- * Proxy payload sent from a child subagent while it waits for authorization.
- *
- * Runtime-internal. The parent re-emits the unchanged event through its own
- * channel; the authorization callback continues to target the child directly.
- */
-export interface SubagentAuthorizationEventHookPayload {
-  readonly callId: string;
-  readonly childSessionId: string;
-  readonly event: SubagentAuthorizationEvent;
-  readonly kind: "subagent-authorization-event";
-  /** Set by the remote callback route; the owner applies it only to remote tasks. */
-  readonly source?: { readonly kind: "remote" };
-  readonly subagentName: string;
-}
-
-/**
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
@@ -387,8 +326,7 @@ export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
-  | SubagentAuthorizationEventHookPayload
-  | SubagentInputRequestHookPayload
+  | TaskInputHookPayload
   | TaskStartedHookPayload;
 
 /**

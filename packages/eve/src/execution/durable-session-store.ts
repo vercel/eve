@@ -1,6 +1,5 @@
 import { getHarnessEmissionState, type HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
@@ -14,10 +13,7 @@ export const DURABLE_SESSION_VERSION = 1;
  *
  * Carries the current session snapshot plus the small projections the
  * workflow body needs without taking a step boundary: identity, the
- * hook continuation token,
- * `hasProxyInputRequests` (a closed-contract short-circuit that lets
- * the owner skip a per-delivery proxy-routing step when no
- * descendant subagent is active), and `emissionState` (so workflow-body
+ * hook continuation token, and `emissionState` (so workflow-body
  * framework steps can stamp protocol events
  * with `{ turnId, sequence, stepIndex }` without reading the full
  * durable session). Turn steps return state transitions to the owning
@@ -27,7 +23,6 @@ export interface DurableSessionState {
   readonly version: typeof DURABLE_SESSION_VERSION;
   readonly sessionId: string;
   readonly continuationToken: string;
-  readonly hasProxyInputRequests: boolean;
   readonly emissionState: HarnessEmissionState;
   readonly snapshot: DurableSessionSnapshot;
 }
@@ -103,7 +98,6 @@ function projectDurableSessionState(session: DurableSession): DurableSessionStat
   return {
     continuationToken: session.continuationToken,
     emissionState: getHarnessEmissionState(session.state),
-    hasProxyInputRequests: hasProxyInputRequests(session.state),
     sessionId: session.sessionId,
     version: DURABLE_SESSION_VERSION,
     snapshot: { session },
