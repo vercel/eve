@@ -1621,65 +1621,6 @@ export default githubExtension({
 For local or non-Vercel deployments, omit \`connector\` and set \`GITHUB_TOKEN\`; the extension also accepts an explicit \`token\`. Prefer fine-grained credentials, expose only the presets the agent needs, and keep approval enabled for writes. See the [GitHub Tools eve documentation](https://github-tools.com/frameworks/eve#eve-extension) for token authentication, per-tool overrides, commit attribution, and the complete tool catalog.`,
     relatedResources: [softwareFactoryGuide, incidentResponseGuide],
   },
-  hindsight: {
-    logo: "hindsight",
-    docsHref: "https://hindsight.vectorize.io/sdks/integrations/eve",
-    keywords: [
-      "memory",
-      "long-term memory",
-      "automatic recall",
-      "retention",
-      "user profile",
-      "context",
-      "Hindsight Cloud",
-      "self-hosted",
-      "Vectorize",
-    ],
-    install: `Install Hindsight memory for eve:
-
-\`\`\`bash
-eve add extension/hindsight
-\`\`\`
-
-This installs \`@vectorize-io/hindsight-eve\` and writes \`agent/instructions/hindsight.ts\` for recall plus \`agent/hooks/hindsight.ts\` for retention. The package requires Node.js 24 or later.`,
-    quickStart: `Create a Hindsight Cloud API key and add it to the agent's environment. The API URL defaults to Hindsight Cloud, and the bank defaults to \`default\`:
-
-\`\`\`bash title=".env.local"
-HINDSIGHT_API_KEY=...
-HINDSIGHT_BANK_ID=my-agent
-\`\`\`
-
-The registry creates both capability files:
-
-\`\`\`ts title="agent/instructions/hindsight.ts"
-import { hindsightMemory } from "@vectorize-io/hindsight-eve";
-
-export default hindsightMemory();
-\`\`\`
-
-\`\`\`ts title="agent/hooks/hindsight.ts"
-import { hindsightRetainHook } from "@vectorize-io/hindsight-eve";
-
-export default hindsightRetainHook();
-\`\`\`
-
-Before each turn, the dynamic instructions resolver recalls the user's ambient profile and working context. After the turn, the hook retains the user message and assistant reply. Neither path depends on the model choosing to call a tool.`,
-    configure: `Recall uses a fixed broad query rather than the live user message. Tune the profile context and response budget in the instructions file when needed:
-
-\`\`\`ts title="agent/instructions/hindsight.ts"
-import { hindsightMemory } from "@vectorize-io/hindsight-eve";
-
-export default hindsightMemory({
-  recallQuery: "user preferences, identity, projects, and working context",
-  budget: "high",
-  maxTokens: 2048,
-});
-\`\`\`
-
-For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` to both factories when the server has no authentication. Other shared options include \`bankId\`, \`context\`, \`includeAssistantReply\`, \`timeoutMs\`, and \`onError\`.
-
-A bank is one isolated memory store, and both files must use the same bank. Do not share the default bank across untrusted users; use separate agent deployments with distinct \`HINDSIGHT_BANK_ID\` values for separate users or tenants. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and factory configuration.`,
-  },
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {
@@ -1859,6 +1800,63 @@ The filename creates the \`supermemory\` memory slot, so the provider's tools ar
 Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
 
 Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://supermemory.ai/docs/integrations/eve) for all options and tool behavior.`,
+  },
+  hindsight: {
+    logo: "hindsight",
+    docsHref: "https://hindsight.vectorize.io/sdks/integrations/eve",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "automatic recall",
+      "automatic capture",
+      "reflect",
+      "user profile",
+      "multi-tenant",
+      "Hindsight Cloud",
+      "self-hosted",
+      "Vectorize",
+    ],
+    install: `Install the Hindsight provider for eve:
+
+\`\`\`bash
+eve add memory/hindsight
+\`\`\`
+
+This installs \`@vectorize-io/hindsight-eve\` and writes a memory slot. The package requires Node.js 24 or later and eve 0.45.1 or later.`,
+    quickStart: `Create a Hindsight Cloud API key and add it to the agent's environment. The API URL defaults to Hindsight Cloud:
+
+\`\`\`bash title=".env.local"
+HINDSIGHT_API_KEY=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/hindsight.ts"
+import { hindsightMemory } from "@vectorize-io/hindsight-eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Long-term memory about the current user.",
+  provider: hindsightMemory(),
+  scope: byPrincipal,
+});
+\`\`\`
+
+Before each turn, the provider recalls memories relevant to the user's message and places them in context. After the turn, it retains the user message and the assistant's reply. Neither path depends on the model choosing to call a tool. The filename creates the \`hindsight\` memory slot, so the provider's tool is named \`hindsight__reflect\`.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Every read and write is partitioned by eve's locked scope key: each scope gets its own Hindsight bank, created on first use. Pass a \`bankId\` resolver to name banks yourself, or a string to pin every scope to one shared bank for a single-user agent:
+
+\`\`\`ts title="agent/memory/hindsight.ts"
+provider: hindsightMemory({
+  bankId: (scope) => \`eve-\${scope.value}\`,
+  budget: "high",
+  maxTokens: 2048,
+}),
+\`\`\`
+
+For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` when the server has no authentication. Other options include \`includeAssistantReply\`, \`capture\`, \`tools\`, \`timeoutMs\`, and \`onError\`. Keep \`HINDSIGHT_API_KEY\` in the environment rather than prompts or source control. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and bank configuration.`,
   },
 };
 

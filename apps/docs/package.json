@@ -87,7 +87,7 @@
     "@types/three": "0.184.1",
     "@upstash/agentkit-eve": "0.9.0",
     "@upstash/redis": "^1.38.4",
-    "@vectorize-io/hindsight-eve": "^0.2.1",
+    "@vectorize-io/hindsight-eve": "^0.3.0",
     "@veltdev/chat-sdk-adapter": "0.2.4",
     "@vercel/connect": "2.2.0",
     "@vercel/otel": "catalog:",
