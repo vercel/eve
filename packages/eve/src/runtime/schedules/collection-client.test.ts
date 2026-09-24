@@ -90,6 +90,55 @@ describe("bindScheduleCollection", () => {
     ]);
   });
 
+  it("resolves typed input from trusted channel context before create and update", async () => {
+    const deliveries: unknown[] = [];
+    const resolveInput = vi.fn(
+      (
+        input: { message: string; destination: string },
+        context: { channel: { metadata?: Readonly<Record<string, unknown>> } },
+      ) => ({
+        ...input,
+        destination: String(context.channel.metadata?.channelId),
+      }),
+    );
+    const definition = defineScheduleCollection({
+      inputSchema: z.object({ message: z.string().min(1), destination: z.string() }),
+      provider: inMemoryScheduleProvider(),
+      resolveInput,
+      run() {},
+      scope: "fixture",
+    });
+    const client = await bindScheduleCollection(
+      "reminders",
+      definition,
+      {
+        ...binding("alice", ["create", "update", "invoke"]),
+        channel: { kind: "slack", metadata: { channelId: "C0123" } },
+      },
+      async (delivery) => {
+        deliveries.push(delivery.input);
+      },
+    );
+    await client!.create({
+      expression: { type: "cron", cron: "0 9 * * *" },
+      input: { message: "First", destination: "here" },
+      name: "reminder",
+    });
+    await client!.update("reminder", { input: { message: "Second", destination: "here" } });
+    await client!.invoke("reminder");
+    expect(resolveInput).toHaveBeenCalledTimes(2);
+    expect(resolveInput).toHaveBeenCalledWith(
+      { message: "First", destination: "here" },
+      expect.objectContaining({
+        auth: expect.objectContaining({
+          current: expect.objectContaining({ principalId: "alice" }),
+        }),
+        channel: { kind: "slack", metadata: { channelId: "C0123" } },
+      }),
+    );
+    expect(deliveries).toEqual([{ message: "Second", destination: "C0123" }]);
+  });
+
   it("isolates principals and returns null for disabled scope", async () => {
     const provider = inMemoryScheduleProvider();
     const definition = defineScheduleCollection({

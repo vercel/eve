@@ -36,7 +36,15 @@ const expressionSchema = z.discriminatedUnion("type", [
     type: z.literal("cron"),
     cron: z.string().describe("Standard five-field cron expression."),
     timezone: timezoneSchema.optional(),
-    jitter: z.number().int().min(1).max(15).optional(),
+    jitter: z
+      .number()
+      .int()
+      .min(1)
+      .max(15)
+      .optional()
+      .describe(
+        "Optional maximum random delay in minutes. Omit to use the provider and plan default; set only when the user requests a jitter window.",
+      ),
   }),
   z.object({
     type: z.literal("single"),
@@ -209,12 +217,12 @@ function resolveToolOptions(tools: ScheduleCollectionDefinition["tools"]): {
 } | null {
   if (tools === false) return null;
   if (tools === undefined || tools === true) {
-    return { create: true, delete: true, invoke: false, read: true, update: true };
+    return { create: true, delete: true, invoke: true, read: true, update: true };
   }
   return {
     create: tools.create ?? true,
     delete: tools.delete ?? true,
-    invoke: tools.invoke ?? false,
+    invoke: tools.invoke ?? true,
     read: tools.read ?? true,
     update: tools.update ?? true,
   };

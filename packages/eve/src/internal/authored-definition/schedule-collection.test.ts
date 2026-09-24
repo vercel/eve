@@ -41,6 +41,19 @@ describe("normalizeScheduleCollectionDefinition", () => {
     );
   });
 
+  it("accepts an input resolver and rejects non-functions", () => {
+    const valid = defineScheduleCollection({
+      ...definition(),
+      resolveInput: (input) => input,
+    });
+    expect(normalizeScheduleCollectionDefinition(valid, "invalid")).toBe(valid);
+
+    Object.assign(valid, { resolveInput: "not a function" });
+    expect(() => normalizeScheduleCollectionDefinition(valid, "invalid")).toThrow(
+      '"resolveInput" must be a function',
+    );
+  });
+
   it("rejects unknown and invalid tool options", () => {
     const unknown = definition() as typeof definition extends () => infer T ? T : never;
     Object.assign(unknown, { extra: true });

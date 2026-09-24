@@ -27,6 +27,13 @@ export type ScheduleScopeDefinition =
       context: ScheduleScopeContext,
     ) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>);
 
+/** Trusted context available while resolving schedule input for storage. */
+export interface ScheduleCollectionInputResolveContext {
+  readonly abortSignal: AbortSignal;
+  readonly auth: SessionAuth;
+  readonly channel: ScheduleScopeContext["channel"];
+}
+
 export interface ScheduleProviderContext {
   readonly abortSignal: AbortSignal;
   readonly collection: string;
@@ -138,6 +145,11 @@ export interface ScheduleCollectionDefinition<
   readonly inputSchema: TInputSchema;
   readonly provider: ScheduleProvider;
   readonly scope: ScheduleScopeDefinition;
+  /** Resolve validated input with trusted creation context before storing it. */
+  readonly resolveInput?: (
+    input: TInput,
+    context: ScheduleCollectionInputResolveContext,
+  ) => TInput | Promise<TInput>;
   readonly tools?: boolean | ScheduleCollectionToolOptions;
   readonly run: (args: ScheduleCollectionRunArgs<TInput>) => Promise<void> | void;
 }

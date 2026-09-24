@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SessionAuth } from "#context/keys.js";
 import type {
   ScheduleCollectionDefinition,
+  ScheduleCollectionInputResolveContext,
   ScheduleCreate,
   ScheduleDelivery,
   ScheduleList,
@@ -62,10 +63,10 @@ export async function bindScheduleCollection<TInput>(
 
   return {
     create: async (input) =>
-      provider.create(providerContext(), {
+      await provider.create(providerContext(), {
         ...input,
         expression: validateScheduleExpression(input.expression),
-        input: await validateCollectionInput(definition, input.input),
+        input: await resolveCollectionInput(definition, input.input, binding),
         name: validateScheduleName(input.name),
       }),
     delete: async (name) => provider.delete(providerContext(), validateScheduleName(name)),
@@ -94,13 +95,30 @@ export async function bindScheduleCollection<TInput>(
       const input =
         patch.input === undefined
           ? undefined
-          : await validateCollectionInput(definition, patch.input);
+          : await resolveCollectionInput(definition, patch.input, binding);
       let normalized: SchedulePatch<TInput> = {};
       if (expression !== undefined) normalized = { ...normalized, expression };
       if (input !== undefined) normalized = { ...normalized, input };
       return provider.update(providerContext(), normalizedName, normalized);
     },
   };
+}
+
+async function resolveCollectionInput<TInput>(
+  definition: ScheduleCollectionDefinition<TInput>,
+  input: unknown,
+  binding: ScheduleCollectionBindingContext,
+): Promise<TInput> {
+  const validated = await validateCollectionInput(definition, input);
+  const context: ScheduleCollectionInputResolveContext = {
+    abortSignal: binding.abortSignal,
+    auth: binding.session.auth,
+    channel: binding.channel,
+  };
+  const resolved = definition.resolveInput
+    ? await definition.resolveInput(validated, context)
+    : validated;
+  return await validateCollectionInput(definition, resolved);
 }
 
 export function createScheduleScopeContext(input: {
@@ -130,7 +148,7 @@ function deriveScheduleNamespace(
 
 async function validateCollectionInput<TInput>(
   definition: ScheduleCollectionDefinition<TInput>,
-  input: TInput,
+  input: unknown,
 ): Promise<TInput> {
   const result = await definition.inputSchema["~standard"].validate(input);
   if (result.issues !== undefined) {

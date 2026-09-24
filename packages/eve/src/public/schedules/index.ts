@@ -14,6 +14,7 @@ export {
   defineScheduleCollection,
   type DefinedScheduleCollection,
   type ScheduleCollectionDefinition,
+  type ScheduleCollectionInputResolveContext,
   type ScheduleCollectionRunArgs,
   type ScheduleCollectionToolOptions,
   type ScheduleCreate,

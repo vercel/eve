@@ -39,7 +39,7 @@ export function normalizeScheduleCollectionDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["description", "inputSchema", "provider", "scope", "tools", "run"],
+    ["description", "inputSchema", "provider", "scope", "resolveInput", "tools", "run"],
     message,
   );
 
@@ -58,6 +58,9 @@ export function normalizeScheduleCollectionDefinition(
     typeof record.scope !== "function"
   ) {
     throw new Error(`${message} "scope" must be a string, null, or resolver.`);
+  }
+  if (record.resolveInput !== undefined && typeof record.resolveInput !== "function") {
+    throw new Error(`${message} "resolveInput" must be a function when provided.`);
   }
   if (typeof record.run !== "function") {
     throw new Error(`${message} "run" must be a function.`);

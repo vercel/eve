@@ -26,7 +26,7 @@ const resolveContext = {
 };
 
 describe("schedule collection tools", () => {
-  it("contributes management tools automatically and keeps invoke disabled by default", async () => {
+  it("contributes every management tool by default", async () => {
     const definition = defineScheduleCollection({
       inputSchema: z.object({ message: z.string().min(1) }),
       provider: inMemoryScheduleProvider(),
@@ -48,8 +48,8 @@ describe("schedule collection tools", () => {
       "schedule__collection__enable",
       "schedule__collection__disable",
       "schedule__collection__delete",
+      "schedule__collection__invoke",
     ]);
-    expect(tools).not.toHaveProperty("schedule__collection__invoke");
     const callbacks = readDurableDynamicToolCallbacks(tools!.schedule__collection__create!);
     expect(callbacks?.execute).toBeDefined();
     expect(callbacks?.inputSchema).toBeDefined();

@@ -146,8 +146,8 @@ product docs.
 ### Runtime API and CLI
 
 The JavaScript SDK exposes `Schedules` and `SchedulesClient`. It authenticates
-with Vercel OIDC automatically on Vercel; local use requires pulled credentials
-or an explicit token. Dynamic schedules target queue topics only.
+with ambient Vercel OIDC in production. `eve dev` uses the in-memory provider
+and does not mutate production schedules. Dynamic schedules target queue topics only.
 
 The supported lifecycle is:
 
@@ -281,13 +281,34 @@ type ScheduleExpression =
 ```
 
 The dynamic handler receives validated `input` and occurrence metadata in
-addition to today's `to`, `waitUntil`, and `appAuth`. Prototype occurrences run
-with `appAuth`. eve does not implicitly persist the creating user's full
-`SessionAuthContext`: it may contain sensitive or application-specific
-attributes and can become stale. Work that must run on behalf of a user places
-an application-owned, bounded principal reference in `input` and resolves fresh
-authorization in authored code before handoff. User-auth replay is outside the
-prototype.
+addition to today's `to`, `waitUntil`, and `appAuth`. The collection author
+defines the payload schema, including any task, destination, and execution
+identity choice. When generated management tools need trusted creation context,
+an optional `resolveInput(input, context)` hook resolves validated proposed
+input using trusted creation context before storing it. It can resolve relative
+destinations and derive an owner reference from the authenticated caller. It is not a framework-defined
+destination or delegation policy.
+
+The collection decides which identity to use when handing off work: pass
+`appAuth` for app-owned tasks, or call an application-owned resolver for an
+explicit `runAs: "author"` request and pass its freshly resolved user auth.
+`runAs` is an example of an author-defined payload field, not an eve option.
+Keep resolution and platform-specific authorization checks in application
+helpers so `run` only selects an identity and dispatches the task. eve does not
+implicitly persist the creator's full `SessionAuthContext` or reconstruct a
+user from a thread, namespace, or model-supplied ID; those values do not prove
+current authority. Store only a bounded author reference, establish its
+binding to the schedule at creation, and recheck current identity and grants
+at delivery. If those checks cannot be made, fail closed rather than falling
+back to app auth. Do not treat `byPrincipal` management scope as delegation.
+
+Documentation should show both modes and state their consequences: app auth
+cannot access the creator's principal-scoped memory or personal connections;
+on-behalf-of execution can, subject to current grants and the application's
+scheduled-run restrictions. Neither mode should gain schedule-management
+rights solely from replying in an existing conversation. The framework must
+also recover a previous turn's durable tool callbacks independently of the
+next turn's caller; choosing author auth does not replace that recovery fix.
 
 ### Scope and namespace
 
@@ -323,13 +344,11 @@ and opaque scope key. Cross-scope reads and mutations return not found.
 - `<collection>__enable_schedule`
 - `<collection>__disable_schedule`
 - `<collection>__delete_schedule`
+- `<collection>__invoke_schedule`
 
-`invoke` remains part of the provider and programmatic runtime contract for
-manual testing, smoke checks, recovery, and `eve dev`, but is not model-facing
-by default. It does not manage configuration, is independently side-effecting,
-and can produce an unexpected duplicate notification. A later tool option may
-expose it with `always()` approval when an application needs requests such as
-"run my Sunday report now."
+`invoke` runs a schedule immediately without changing its timing or state. Like
+create, update, enable, disable, and delete, it is model-facing by default and
+uses `always()` approval.
 
 The implementation uses the same programmatic source-template and
 `defineDynamic` tool machinery proposed for first-class memory. Schedule tools
@@ -349,14 +368,15 @@ invoke boundary explicit:
    read: true,
    update: true,
    delete: true,
-   invoke: false,
+   invoke: true,
  },
 ```
 
-`tools: true` means the same defaults. Enable and disable belong to update
-management and remain available. The prototype implements provider-level
-`invoke` for application code, smoke tests, and local manual dispatch, while
-keeping `invoke: false` as the model-facing default.
+`tools: true` means the same defaults. Omitted object properties also default
+to `true`, so an application that does not want immediate execution can use
+`tools: { invoke: false }`. Enable and disable belong to update management and
+remain available. The provider-level `invoke` operation also supports
+application code, smoke tests, and local manual dispatch.
 
 Generated read/list results expose only what the provider can read. For the
 initial Vercel provider, this means name, expression, timezone, jitter, target
