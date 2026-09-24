@@ -6678,6 +6678,33 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("dispatches resumed approval model selection with the active turn ID", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Done", role: "assistant" }] },
+      text: "Done",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const dispatchDynamicModelEvent = vi.fn();
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { dispatchDynamicModelEvent, tools: new Map() }),
+    );
+
+    await contextStorage.run(new ContextContainer(), () =>
+      harness(createPendingBashApprovalSession(), {
+        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+      }),
+    );
+
+    expect(dispatchDynamicModelEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ data: expect.objectContaining({ turnId: "turn_0" }) }),
+      }),
+    );
+  });
+
   it("persists the SDK's accumulated approval-resume messages into session history", async () => {
     /*
      * The real AI SDK contract is covered in

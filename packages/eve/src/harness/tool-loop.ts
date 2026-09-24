@@ -1185,7 +1185,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             data: {
               sequence: emissionState.sequence,
               stepIndex: emissionState.stepIndex,
-              turnId: emissionState.turnId,
+              turnId: activeTurnId(emissionState),
             },
             type: "step.started",
           } as UnstampedMessageStreamEvent,
