@@ -1722,6 +1722,9 @@ importers:
       '@photon-ai/chat-adapter-imessage':
         specifier: 3.2.0
         version: 3.2.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(supports-color@10.2.2)(typescript@7.0.2)(zod@4.5.4)
+      '@slack/web-api':
+        specifier: 7.19.0
+        version: 7.19.0(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)
       '@standard-schema/spec':
         specifier: 1.1.0
         version: 1.1.0
