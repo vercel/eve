@@ -32,6 +32,7 @@ import {
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicSubagentSelectionsKey,
+  SessionDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
   TaskDeliveryPolicyKey,
@@ -3927,6 +3928,83 @@ describe("createToolLoopHarness", () => {
       stepIndex: 0,
       status: "completed",
       turnId: "turn_0",
+    });
+  });
+
+  it("projects label presentation for session-scoped dynamic tools", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: { ok: true },
+                toolCallId: "call-1",
+                toolName: "lookup",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+      toolResults: [
+        {
+          input: {},
+          output: { ok: true },
+          toolCallId: "call-1",
+          toolName: "lookup",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const owner = {
+      sessionId: "test-session",
+      scope: "session" as const,
+      resolverSlug: "lookup",
+      entryKey: "lookup",
+      name: "lookup",
+    };
+    registerDurableDynamicCallback({ callback: () => ({ ok: true }), phase: "execute", owner });
+    registerDurableDynamicCallback({
+      callback: () => "Looking it up",
+      phase: "labelStart",
+      owner,
+    });
+    registerDurableDynamicCallback({ callback: () => "Done", phase: "labelComplete", owner });
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: { closure: {} },
+          label: { complete: { closure: {} }, start: { closure: {} } },
+        },
+        description: "Look something up.",
+        entryKey: "lookup",
+        inputSchema: { type: "object" },
+        name: "lookup",
+        resolverSlug: "lookup",
+      },
+    ]);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
+
+    expect(events.find((e) => e.type === "actions.requested")?.data.presentation).toEqual({
+      "call-1": { label: "Looking it up" },
+    });
+    expect(events.find((e) => e.type === "action.result")?.data.presentation).toEqual({
+      "call-1": { label: "Done" },
     });
   });
 
