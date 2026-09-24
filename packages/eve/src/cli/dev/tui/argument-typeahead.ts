@@ -1,6 +1,7 @@
 import { sanitizeForTerminal } from "#cli/ui/output.js";
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
+import { PROMPT_COMMANDS, type ArgumentTypeaheadCommand } from "./prompt-commands.js";
 import type { Theme } from "./theme.js";
 
 export interface PromptArgumentSuggestion {
@@ -10,8 +11,6 @@ export interface PromptArgumentSuggestion {
   /** Follow-up values available after selecting this exact value. */
   readonly next?: readonly PromptArgumentSuggestion[];
 }
-
-export type ArgumentTypeaheadCommand = "model" | "add" | "login" | "loglevel";
 
 export interface ArgumentTypeaheadQuery {
   readonly command: ArgumentTypeaheadCommand;
@@ -27,22 +26,20 @@ export interface ArgumentTypeaheadState extends ArgumentTypeaheadQuery {
   readonly selectedIndex: number;
 }
 
-const ARGUMENT_LIMIT: Record<ArgumentTypeaheadCommand, number> = {
-  add: 1,
-  login: 1,
-  loglevel: 1,
-  model: 2,
-};
-
-export function isArgumentTypeaheadCommand(command: string): command is ArgumentTypeaheadCommand {
-  return command === "model" || command === "add" || command === "login" || command === "loglevel";
+function typeaheadCommand(command: string):
+  | {
+      readonly name: ArgumentTypeaheadCommand;
+      readonly maxArguments: number;
+      readonly loadingLabel: string;
+    }
+  | undefined {
+  const spec = PROMPT_COMMANDS.find((candidate) => candidate.name === command);
+  if (spec?.typeahead === undefined) return undefined;
+  return { name: spec.name as ArgumentTypeaheadCommand, ...spec.typeahead };
 }
 
 export function argumentTypeaheadLoadingLabel(command: ArgumentTypeaheadCommand): string {
-  if (command === "model") return "models";
-  if (command === "add") return "registry";
-  if (command === "login") return "connections";
-  return "log levels";
+  return typeaheadCommand(command)?.loadingLabel ?? "suggestions";
 }
 
 /**
@@ -53,8 +50,8 @@ export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | u
   if (!text.startsWith("/")) return undefined;
   const commandEnd = text.indexOf(" ");
   if (commandEnd < 0) return undefined;
-  const command = text.slice(1, commandEnd);
-  if (!isArgumentTypeaheadCommand(command)) return undefined;
+  const typeahead = typeaheadCommand(text.slice(1, commandEnd));
+  if (typeahead === undefined) return undefined;
 
   const tokens: { value: string; start: number }[] = [];
   let cursor = commandEnd;
@@ -66,14 +63,14 @@ export function argumentTypeaheadQuery(text: string): ArgumentTypeaheadQuery | u
     tokens.push({ value: text.slice(start, cursor), start });
   }
   const argumentCount = tokens.length + (text.endsWith(" ") ? 1 : 0);
-  if (text.slice(commandEnd).includes("\n") || argumentCount > ARGUMENT_LIMIT[command]) {
+  if (text.slice(commandEnd).includes("\n") || argumentCount > typeahead.maxArguments) {
     return undefined;
   }
   const active = tokens.at(-1);
   const completed = tokens.map((token) => token.value);
   if (!text.endsWith(" ") && active !== undefined) completed.pop();
   return {
-    command,
+    command: typeahead.name,
     argument: text.endsWith(" ") ? "" : (active?.value ?? ""),
     completed,
     argumentStart: text.endsWith(" ") ? text.length : (active?.start ?? text.length),

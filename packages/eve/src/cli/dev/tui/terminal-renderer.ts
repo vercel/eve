@@ -46,6 +46,7 @@ import {
   parsePromptCommand,
   promptCommandSpec,
   PROMPT_COMMANDS,
+  type ArgumentTypeaheadCommand,
   type PromptCommandSpec,
 } from "./prompt-commands.js";
 import {
@@ -294,7 +295,7 @@ export type TerminalRendererOptions = {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
-    command: "model" | "add" | "login" | "loglevel",
+    command: ArgumentTypeaheadCommand,
   ) => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };

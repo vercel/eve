@@ -32,6 +32,8 @@ export interface PromptCommandSpec {
   readonly takesArgument: boolean;
   /** Whether recalling this command would reopen a modal or take over prompt navigation. */
   readonly history: "keep" | "omit";
+  /** Inline argument suggestions, when this command has a catalog-backed grammar. */
+  readonly typeahead?: { readonly maxArguments: number; readonly loadingLabel: string };
   /** Maps a recognized invocation to its parsed command. */
   readonly build: (argument: string) => PromptCommand;
 }
@@ -53,6 +55,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Choose a model, speed, and reasoning",
     argumentHint: "[provider/model]",
     takesArgument: true,
+    typeahead: { maxArguments: 2, loadingLabel: "models" },
     build: (argument) => ({ type: "extension", name: "model", argument }),
     targets: ["local"],
   },
@@ -99,6 +102,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Connect a model provider",
     argumentHint: "[connection]",
     takesArgument: true,
+    typeahead: { maxArguments: 1, loadingLabel: "connections" },
     build: (argument) => ({ type: "extension", name: "login", argument }),
     targets: ["local"],
   },
@@ -108,6 +112,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     aliases: [],
     description: "Add an integration from the registry",
     takesArgument: true,
+    typeahead: { maxArguments: 1, loadingLabel: "registry" },
     build: (argument) => ({ type: "extension", name: "add", argument }),
     targets: ["local"],
   },
@@ -137,6 +142,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
     description: "Show or hide captured stdout/stderr/sandbox logs",
     argumentHint: "[all|stderr|sandbox|none]",
     takesArgument: true,
+    typeahead: { maxArguments: 1, loadingLabel: "log levels" },
     build: (argument) => ({ type: "loglevel", argument }),
     targets: ["local", "remote"],
   },
@@ -168,6 +174,11 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
 ] satisfies readonly PromptCommandDefinition[];
+
+export type ArgumentTypeaheadCommand = Extract<
+  (typeof PROMPT_COMMAND_DEFINITIONS)[number],
+  { typeahead: object }
+>["name"];
 
 export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = PROMPT_COMMAND_DEFINITIONS;
 

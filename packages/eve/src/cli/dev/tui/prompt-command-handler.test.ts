@@ -87,7 +87,6 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "",
       summary: "Model set to anthropic/claude-opus-4.6",
-      tone: "success",
     });
     expect(applyModel).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
@@ -107,7 +106,6 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "",
       summary: "Model already set to openai/gpt-5.5",
-      tone: "neutral",
     });
   });
 
@@ -127,7 +125,7 @@ describe("createPromptCommandHandler", () => {
     ).resolves.toEqual({
       message: "Model is pinned to the external provider `anthropic`.",
       summary: "Couldn't change the model",
-      tone: "error",
+      failed: true,
     });
     expect(applyModel).not.toHaveBeenCalled();
   });
@@ -276,7 +274,7 @@ describe("createPromptCommandHandler", () => {
       const settleOutcome = vi.fn(async () => {
         await pending;
         return fail
-          ? { tone: "error" as const, message: "The agent could not reload." }
+          ? { failed: true as const, message: "The agent could not reload." }
           : { message: "Connected." };
       });
       const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
@@ -292,7 +290,7 @@ describe("createPromptCommandHandler", () => {
       expect(setupFlow.end).toHaveBeenCalledOnce();
       expect(outcome.effect).toBeUndefined();
       if (fail) {
-        expect(outcome.tone).toBe("error");
+        expect(outcome.failed).toBe(true);
         expect(outcome.message).toContain("could not reload");
         expect(outcome.message).not.toContain("private runtime failure");
       } else {

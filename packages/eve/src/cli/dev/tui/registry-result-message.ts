@@ -4,8 +4,6 @@ import type {
   RegistrySessionResult,
 } from "#setup/flows/registry-session.js";
 
-import type { CommandResultStatus } from "./runner.js";
-
 /** Builds the shared transient progress update for `/add` and initial onboarding. */
 export function registryItemProgress(renderer: {
   replaceContent?(content?: {
@@ -23,7 +21,7 @@ export function registryItemProgress(renderer: {
 }
 
 export interface RegistryCommandOutcome {
-  status: CommandResultStatus;
+  failed: boolean;
   /** Replaces the echoed `/add` once it settles. */
   summary: string;
   /** Detail hung under the summary; empty when the summary says it all. */
@@ -65,10 +63,8 @@ export function registryOutcomeSummary(outcome: RegistrySessionOutcome): string 
   }
 }
 
-function outcomeStatus(outcomes: readonly RegistrySessionOutcome[]): CommandResultStatus {
-  if (outcomes.some((outcome) => outcome.kind === "failed")) return "error";
-  if (outcomes.every((outcome) => outcome.kind === "installed")) return "success";
-  return "neutral";
+function hasFailedOutcome(outcomes: readonly RegistrySessionOutcome[]): boolean {
+  return outcomes.some((outcome) => outcome.kind === "failed");
 }
 
 /**
@@ -95,5 +91,5 @@ export function registryCommandOutcome(
           ...outcomeDetails(outcome).map((line) => `  ${line}`),
         ]);
   lines.push(...notes.map((note) => `⚠ ${note}`));
-  return { status: outcomeStatus(outcomes), summary, message: lines.join("\n") };
+  return { failed: hasFailedOutcome(outcomes), summary, message: lines.join("\n") };
 }

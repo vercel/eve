@@ -61,6 +61,7 @@ import {
   PROMPT_COMMANDS,
   type PromptCommand,
   type PromptCommandSpec,
+  type ArgumentTypeaheadCommand,
 } from "./prompt-commands.js";
 import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
 import {
@@ -408,9 +409,6 @@ export interface PromptCommandHandlerContext {
   readonly disabledConnectionReasons?: Readonly<Record<string, string>>;
 }
 
-/** How a settled slash command marks its echoed invocation. */
-export type CommandResultStatus = "success" | "error" | "neutral";
-
 /** One atomic transcript decision for an invocation, including no-output commands. */
 export type CommandPresentation =
   | { kind: "dismiss" }
@@ -420,8 +418,8 @@ export type CommandPresentation =
 export interface PromptCommandOutcome {
   /** Outcome line rendered under the echoed command; absent renders nothing. */
   message?: string;
-  /** Marks the settled command; a cancelled outcome is neutral too. */
-  tone?: CommandResultStatus;
+  /** The command failed; completed and cancelled commands share the normal settled presentation. */
+  failed?: true;
   /** Replaces the echoed invocation once the command settles. */
   summary?: string;
   /** Post-command work after setup settles. */
@@ -485,7 +483,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
-    command: "model" | "add" | "login" | "loglevel",
+    command: ArgumentTypeaheadCommand,
   ) => Promise<readonly PromptArgumentSuggestion[]>;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -825,7 +823,7 @@ export class EveTUIRunner {
         if (connection.state === "ready") this.#replaceAgentInfo(connection.info);
       } else if (access?.kind === "failed" || access?.kind === "unavailable") {
         startupOutcome = {
-          tone: "error",
+          failed: true,
           message: access.kind === "failed" ? access.message : access.failure.message,
         };
       } else if (access?.kind === "cancelled") {
@@ -841,7 +839,7 @@ export class EveTUIRunner {
     }
 
     let initialDraft = this.#finishStartup();
-    if (startupOutcome?.cancelled || startupOutcome?.tone === "error") {
+    if (startupOutcome?.cancelled || startupOutcome?.failed) {
       initialDraft = [this.#startupPrompt, initialDraft].filter(Boolean).join("\n\n") || undefined;
     } else {
       prompt = this.#startupPrompt;
@@ -850,7 +848,7 @@ export class EveTUIRunner {
     this.#replaceAgentInfo(this.#agentInfo);
     this.#paintSetupAttention();
     this.#renderer.setStartupPhase?.(undefined);
-    if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.tone === "error") {
+    if (!initialAgentOnboarding || startupOutcome?.cancelled || startupOutcome?.failed) {
       if (startupOutcome?.message !== undefined)
         this.#finishCommand({ kind: "result", message: startupOutcome.message });
     }
@@ -930,46 +928,16 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "cancel") {
-          if (this.#session === undefined) {
-            this.#finishCommand({ kind: "result", summary: "No active turn to cancel" });
-            pendingInputResponses = undefined;
-            followCurrentSession = false;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
-          try {
-            const result = await this.#session.cancel();
-            this.#finishCommand({
-              kind: "result",
-              summary:
-                result.status === "accepted"
-                  ? "Cancellation requested"
-                  : "No active turn to cancel",
-            });
-            if (result.status === "no_active_turn") {
-              pendingInputResponses = undefined;
-              followCurrentSession = false;
-              streamWithoutPrompt = false;
-              prompt = undefined;
-              continue;
-            }
-          } catch (error) {
-            this.#finishCommand({
-              kind: "result",
-              message: toErrorMessage(error),
-              summary: "Couldn't cancel the turn",
-            });
-            pendingInputResponses = undefined;
-            followCurrentSession = false;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
+          followCurrentSession = await this.#runSessionCommand({
+            absent: "No active turn to cancel",
+            accepted: "Cancellation requested",
+            failed: "Couldn't cancel the turn",
+            invoke: (session) => session.cancel(),
+          });
           pendingInputResponses = undefined;
-          followCurrentSession = true;
           streamWithoutPrompt = false;
           prompt = undefined;
+          if (!followCurrentSession) continue;
         }
 
         if (command?.type === "reset") {
@@ -987,96 +955,37 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "compact") {
-          if (this.#session === undefined) {
-            this.#finishCommand({ kind: "result", summary: "No active session to compact" });
-            pendingInputResponses = undefined;
-            followCurrentSession = false;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
-          try {
-            const result = await this.#session.compact();
-            this.#finishCommand({
-              kind: "result",
-              summary:
-                result.status === "accepted"
-                  ? "Compaction requested"
-                  : "No active session to compact",
-            });
-            if (result.status === "no_active_session") {
-              pendingInputResponses = undefined;
-              followCurrentSession = false;
-              streamWithoutPrompt = false;
-              prompt = undefined;
-              continue;
-            }
-          } catch (error) {
-            this.#finishCommand({
-              kind: "result",
-              message: toErrorMessage(error),
-              summary: "Couldn't compact the session",
-            });
-            pendingInputResponses = undefined;
-            followCurrentSession = false;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
+          followCurrentSession = await this.#runSessionCommand({
+            absent: "No active session to compact",
+            accepted: "Compaction requested",
+            failed: "Couldn't compact the session",
+            invoke: (session) => session.compact(),
+          });
           pendingInputResponses = undefined;
-          followCurrentSession = true;
           streamWithoutPrompt = false;
           prompt = undefined;
+          if (!followCurrentSession) continue;
         }
 
         if (command?.type === "clear") {
-          if (this.#session === undefined) {
-            this.#finishCommand({ kind: "result", summary: "No active session to clear" });
-            pendingInputResponses = undefined;
-            followCurrentSession = false;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
-          try {
-            const result = await this.#session.clear();
-            if (result.status === "accepted") this.#finishCommand({ kind: "dismiss" });
-            else
-              this.#finishCommand({
-                kind: "result",
-                summary: "No active session to clear",
-              });
-            if (result.status === "no_active_session") {
-              pendingInputResponses = undefined;
-              followCurrentSession = false;
-              streamWithoutPrompt = false;
-              prompt = undefined;
-              continue;
-            }
-          } catch (error) {
-            this.#finishCommand({
-              kind: "result",
-              message: toErrorMessage(error),
-              summary: "Couldn't clear the session",
-            });
-            pendingInputResponses = undefined;
-            followCurrentSession = false;
-            streamWithoutPrompt = false;
-            prompt = undefined;
-            continue;
-          }
+          followCurrentSession = await this.#runSessionCommand({
+            absent: "No active session to clear",
+            failed: "Couldn't clear the session",
+            dismissOnAccepted: true,
+            invoke: (session) => session.clear(),
+          });
           pendingInputResponses = undefined;
-          followCurrentSession = true;
           streamWithoutPrompt = false;
           prompt = undefined;
+          if (!followCurrentSession) continue;
         }
 
         // Help renders locally; unlike extension commands it must work even
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
           if (this.#renderer.choosePromptCommand !== undefined) {
-            const selected = await this.#runTransientCommand(() =>
-              this.#renderer.choosePromptCommand!(this.#availablePromptCommands),
+            const selected = await this.#renderer.choosePromptCommand!(
+              this.#availablePromptCommands,
             );
             if (selected !== undefined) initialDraft = selected;
           } else
@@ -1091,7 +1000,7 @@ export class EveTUIRunner {
         }
 
         if (command?.type === "info") {
-          await this.#runTransientCommand(() => this.#showApplicationInfo());
+          await this.#showApplicationInfo();
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1117,7 +1026,7 @@ export class EveTUIRunner {
         // /traces is renderer-local too: the viewer reads the local spool
         // from disk and owns the screen until the user closes it.
         if (command?.type === "traces") {
-          await this.#runTransientCommand(() => this.#openTraceViewer(command.argument));
+          await this.#openTraceViewer(command.argument);
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1327,6 +1236,41 @@ export class EveTUIRunner {
       this.#renderer.renderNotice?.(
         "Session ended — started a new session. Earlier context was cleared.",
       );
+    }
+  }
+
+  /** Runs a session mutation and gives every control command one completion policy. */
+  async #runSessionCommand(input: {
+    readonly absent: string;
+    readonly accepted?: string;
+    readonly failed: string;
+    readonly dismissOnAccepted?: boolean;
+    readonly invoke: (session: ClientSession) => Promise<{ status: string }>;
+  }): Promise<boolean> {
+    const session = this.#session;
+    if (session === undefined) {
+      this.#finishCommand({ kind: "result", summary: input.absent });
+      return false;
+    }
+    try {
+      const result = await input.invoke(session);
+      if (result.status !== "accepted") {
+        this.#finishCommand({ kind: "result", summary: input.absent });
+        return false;
+      }
+      this.#finishCommand(
+        input.dismissOnAccepted === true
+          ? { kind: "dismiss" }
+          : { kind: "result", summary: input.accepted },
+      );
+      return true;
+    } catch (error) {
+      this.#finishCommand({
+        kind: "result",
+        message: toErrorMessage(error),
+        summary: input.failed,
+      });
+      return false;
     }
   }
 
@@ -1794,14 +1738,6 @@ export class EveTUIRunner {
     }
   }
 
-  async #runTransientCommand<T>(run: () => Promise<T>): Promise<T> {
-    try {
-      return await run();
-    } finally {
-      this.#finishCommand({ kind: "dismiss" });
-    }
-  }
-
   #finishCommand(outcome: CommandPresentation): void {
     if (this.#renderer.finishCommand !== undefined) {
       this.#renderer.finishCommand(outcome);
@@ -1869,7 +1805,7 @@ export class EveTUIRunner {
       return settled;
     } catch {
       return {
-        tone: "error",
+        failed: true,
         message:
           "Settings were saved, but the agent could not reload. Retry the command or restart eve dev.",
       };
@@ -1893,7 +1829,7 @@ export class EveTUIRunner {
     const outcome =
       pendingOutcome === undefined ? undefined : await this.#settleCommandOutcome(pendingOutcome);
     const suppressTranscript =
-      (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
+      (input.suppressSuccessfulTranscript === true && outcome?.failed !== true) ||
       (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
     if (!suppressTranscript && input.trigger !== "startup") {
       if (outcome === undefined) this.#finishCommand({ kind: "result" });
@@ -1911,12 +1847,12 @@ export class EveTUIRunner {
       title,
       { trigger: "startup", initialModelStep: "provider" },
     );
-    if (!outcome?.cancelled && outcome?.tone !== "error")
+    if (!outcome?.cancelled && outcome?.failed !== true)
       this.#onOnboardingStep?.({ flow: "onboarding", step: "connection_ready" });
     this.#onOnboardingTerminal?.({
       flow: "onboarding",
       step: "model_provider",
-      result: outcome?.cancelled ? "cancelled" : outcome?.tone === "error" ? "error" : "completed",
+      result: outcome?.cancelled ? "cancelled" : outcome?.failed === true ? "error" : "completed",
     });
     return outcome;
   }
@@ -1956,6 +1892,8 @@ export class EveTUIRunner {
     } catch (error) {
       if (isInterruptedError(error)) return;
       throw error;
+    } finally {
+      this.#finishCommand({ kind: "dismiss" });
     }
   }
 

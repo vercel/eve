@@ -191,12 +191,12 @@ describe("runTuiSetupCommand", () => {
     [
       "added",
       registryResult({ outcomes: [installed] }),
-      { message: "", tone: "success", preserveFlowDiagnostics: false },
+      { message: "", preserveFlowDiagnostics: false },
     ],
     [
       "deployed",
       registryResult({ outcomes: [installed], deployed: "production" }),
-      { message: "", tone: "success", effect: { kind: "deployed" } },
+      { message: "", effect: { kind: "deployed" } },
     ],
     ["empty", registryResult(), { message: "", cancelled: true }],
     ["cancelled", { kind: "cancelled" as const }, { message: "", cancelled: true }],
@@ -274,7 +274,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "add", flows })).resolves.toEqual({
       message: "Refusing to overwrite github.ts",
       summary: "Couldn't add connection/github",
-      tone: "error",
+      failed: true,
       preserveFlowDiagnostics: false,
     });
   });
@@ -289,7 +289,6 @@ describe("runTuiSetupCommand", () => {
     ).resolves.toMatchObject({
       message: "",
       summary: "Connected with Vercel Account",
-      tone: "success",
     });
   });
 
@@ -311,7 +310,6 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message: "",
       summary: "Deployed to https://my-agent.vercel.app",
-      tone: "success",
       preserveFlowDiagnostics: true,
       effect: { kind: "deployed" },
     });
@@ -359,7 +357,7 @@ describe("runTuiSetupCommand", () => {
     ).resolves.toEqual({
       message: "Registry unavailable.",
       summary: "Couldn't add connection/sentry",
-      tone: "error",
+      failed: true,
       preserveFlowDiagnostics: false,
     });
   });
@@ -440,7 +438,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
       message: expect.stringMatching(/^URL {2}http:\/\/localhost:3000\n[\s\S]*run \/deploy/),
       partial: true,
-      tone: "error",
+      failed: true,
     });
   });
 
@@ -458,7 +456,7 @@ describe("runTuiSetupCommand", () => {
       message:
         "Vercel denied access to that team — check your team access and SSO, then retry /deploy.",
       summary: "Couldn't deploy",
-      tone: "error",
+      failed: true,
       preserveFlowDiagnostics: true,
     });
   });
@@ -476,7 +474,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toMatchObject({
       message:
         "Human action required: `vercel link` — Deployment needs this directory linked to a Vercel project.",
-      tone: "error",
+      failed: true,
     });
   });
 
@@ -493,7 +491,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message: "The Vercel CLI isn't installed — run /deploy to install it, then retry /deploy.",
       summary: "Couldn't deploy",
-      tone: "error",
+      failed: true,
       preserveFlowDiagnostics: true,
     });
   });

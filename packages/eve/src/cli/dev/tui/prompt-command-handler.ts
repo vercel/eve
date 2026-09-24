@@ -94,15 +94,15 @@ export function createPromptCommandHandler(
             });
             if (outcome.kind === "rejected") return modelFailure(outcome.message);
             return outcome.kind === "unchanged"
-              ? { message: "", summary: `Model already set to ${requested}`, tone: "neutral" }
-              : { message: "", summary: `Model set to ${requested}`, tone: "success" };
+              ? { message: "", summary: `Model already set to ${requested}` }
+              : { message: "", summary: `Model set to ${requested}` };
           }
           const applyModel = options.applyModel ?? changeAgentModel;
           const outcome = await applyModel({ appRoot, slug });
           if (outcome.kind === "rejected") return modelFailure(outcome.message);
           return outcome.kind === "unchanged"
-            ? { message: "", summary: `Model already set to ${outcome.model}`, tone: "neutral" }
-            : { message: "", summary: `Model set to ${outcome.to}`, tone: "success" };
+            ? { message: "", summary: `Model already set to ${outcome.model}` }
+            : { message: "", summary: `Model set to ${outcome.to}` };
         } catch (error) {
           return modelFailure(toErrorMessage(error));
         }
@@ -137,9 +137,8 @@ export function createPromptCommandHandler(
       } catch (error) {
         return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
       }
-      const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
-      const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(flowConfig.title);
+      const { runTuiSetupCommand } = setupCommands;
+      flow.begin("");
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -172,5 +171,5 @@ export function createPromptCommandHandler(
 }
 
 function modelFailure(message: string): PromptCommandOutcome {
-  return { message, summary: "Couldn't change the model", tone: "error" };
+  return { message, summary: "Couldn't change the model", failed: true };
 }

@@ -252,7 +252,6 @@ describe("registryHandoffAddress", () => {
     const promptSuspended = createDeferred<void>();
     const handle = vi.fn(async () => ({
       message: "Slack setup completed.",
-      tone: "success" as const,
     }));
     const client = stubClient();
     const fetchChild = vi
@@ -2134,7 +2133,7 @@ describe("EveTUIRunner initial input", () => {
         await login.promise;
         return result === "cancelled"
           ? { cancelled: true as const, message: "Connect a model with /login when you’re ready." }
-          : { tone: "error" as const, message: "Could not connect. Retry with /login." };
+          : { failed: true as const, message: "Could not connect. Retry with /login." };
       });
       const session = stubSession();
       vi.spyOn(session, "send");

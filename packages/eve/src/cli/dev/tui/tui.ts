@@ -26,6 +26,7 @@ import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
+import type { ArgumentTypeaheadCommand } from "./prompt-commands.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
@@ -54,7 +55,7 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 
 function inlineArgumentSuggestions(appRoot: string) {
   return async (
-    command: "model" | "add" | "login" | "loglevel",
+    command: ArgumentTypeaheadCommand,
   ): Promise<readonly PromptArgumentSuggestion[]> => {
     if (command === "loglevel") {
       return [
