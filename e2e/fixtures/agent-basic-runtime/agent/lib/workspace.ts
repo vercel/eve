@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "eve/context";
+import { defineState, type SessionAuthContext } from "eve/context";
 
 /**
  * Workspace member directory. A deployed agent would read members from its
@@ -47,6 +47,11 @@ function findMember(principal: SessionAuthContext | null): [string, WorkspaceMem
   return name === undefined || member === undefined ? undefined : [name, member];
 }
 
+/** True for callers who signed in as workspace members. */
+export function isWorkspaceMember(principal: SessionAuthContext | null): boolean {
+  return findMember(principal) !== undefined;
+}
+
 /** Loads the caller's workspace credentials; callers outside the workspace need none. */
 export async function loadWorkspaceCredentials(
   principal: SessionAuthContext | null,
@@ -72,3 +77,11 @@ export async function exportAuditEvent(
     throw new Error(`The audit sink for ${name}'s workspace is unreachable (${event.type}).`);
   }
 }
+
+export interface QueuedAuditEvent {
+  readonly eventId: string;
+  readonly type: string;
+}
+
+/** Audit events kept for retry while the workspace audit sink is unreachable. */
+export const auditOutbox = defineState<QueuedAuditEvent[]>("basic-runtime.audit-outbox", () => []);
