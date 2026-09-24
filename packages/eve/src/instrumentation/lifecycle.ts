@@ -45,12 +45,8 @@ export interface InstrumentationUsage {
 }
 
 /**
- * Usage of the agents an action invoked, as settled by the parent before the
- * action's terminal event. Later child spend is not included.
- *
- * `costUsd` is the provider-reported model cost. It is absent when a settled
- * agent turn reported no cost or an agent turn was still unsettled when the
- * action ended. Its presence does not mean every model call was priced.
+ * Agent usage settled before the terminal event. Cost is absent for unpriced or
+ * unsettled turns; reported cost excludes later spend and may omit unpriced calls.
  */
 export interface InstrumentationActionUsage extends InstrumentationUsage {
   readonly costUsd?: number;
