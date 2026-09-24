@@ -74,7 +74,7 @@ export async function runDeployCommand(
           onCreatedProject:
             options.traceSampling === false
               ? undefined
-              : (link) => configureTraceSampling(link, prompter),
+              : (link) => configureTraceSampling(link, appRoot, prompter),
           onProjectCreationUnknown:
             options.traceSampling === false
               ? undefined

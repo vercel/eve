@@ -664,7 +664,7 @@ export async function linkProject(
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
     if (options.traceSampling === true)
-      await configureTraceSampling(link, prompter, options.signal);
+      await configureTraceSampling(link, projectRoot, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,
       projectRoot,

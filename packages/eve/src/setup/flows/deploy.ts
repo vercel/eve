@@ -17,6 +17,7 @@ import {
 import type { Prompter } from "../prompter.js";
 import { runHeadless, runInteractive, type AnySetupBox } from "../runner.js";
 import { snapshotSetupState, type SetupState } from "../state.js";
+import { offerTraceSampling } from "../vercel-trace-sampling.js";
 import { withSpinner } from "../with-spinner.js";
 
 import { inProjectSetupState, prompterSink } from "./in-project.js";
@@ -32,6 +33,7 @@ export interface DeployFlowDeps {
   resolveProvisioning?: ResolveProvisioningDeps;
   linkProject?: LinkProjectDeps;
   deployProject?: DeployProjectDeps;
+  offerTraceSampling: typeof offerTraceSampling;
 }
 
 export type DeployFlowResult =
@@ -64,6 +66,7 @@ export async function runDeployFlow(input: {
     inspectApplication,
     runLoginFlow,
     runInstallVercelCliFlow,
+    offerTraceSampling,
     ...input.deps,
   };
 
@@ -77,11 +80,16 @@ export async function runDeployFlow(input: {
     // Existing deploy behavior remains authoritative when the app has not compiled yet.
   }
 
-  const project = await withSpinner(prompter, "Checking the current Vercel link...", async () => {
-    const deployment = await deps.detectDeployment(appRoot, { signal });
-    signal?.throwIfAborted();
-    return projectResolutionFromDeployment(deployment);
-  });
+  const deployment = await withSpinner(
+    prompter,
+    "Checking the current Vercel link...",
+    async () => {
+      const deployment = await deps.detectDeployment(appRoot, { signal });
+      signal?.throwIfAborted();
+      return deployment;
+    },
+  );
+  const project = projectResolutionFromDeployment(deployment);
 
   const linked = isProjectResolved(project);
   if (!linked && !interactive) {
@@ -141,5 +149,19 @@ export async function runDeployFlow(input: {
   if (result.kind === "cancelled") {
     return { kind: "cancelled" };
   }
-  return { kind: "deployed", productionUrl: productionUrlOf(result.state.project) };
+  const deployedProject = result.state.project;
+  if (
+    input.traceSampling !== false &&
+    (linked || result.state.vercelProject.kind === "existing") &&
+    deployedProject.kind !== "unresolved"
+  ) {
+    try {
+      await deps.offerTraceSampling(appRoot, deployedProject.projectId, prompter, signal);
+    } catch {
+      prompter.log.warning(
+        "Deployment succeeded, but eve could not check trace sampling. Check the Vercel project's Tracing settings if you need Agent Runs.",
+      );
+    }
+  }
+  return { kind: "deployed", productionUrl: productionUrlOf(deployedProject) };
 }
