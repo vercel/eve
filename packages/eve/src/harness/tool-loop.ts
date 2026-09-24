@@ -1384,6 +1384,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session,
         tools: harnessTools,
       });
+      const emissionTools = new Map(advertisedHarnessTools);
       modelCallCoordinationTools = advertisedHarnessTools;
 
       const flatTools = await buildToolSetWithProviderTools({
@@ -1405,6 +1406,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           disabledProviderTools: opts.disabledProviderTools,
           tools: dynamicTools,
         });
+        const emittedDynamicToolNames = new Set<string>();
+        for (const dynamicTool of dynamicTools) {
+          if (emittedDynamicToolNames.has(dynamicTool.name)) continue;
+          emittedDynamicToolNames.add(dynamicTool.name);
+          emissionTools.set(dynamicTool.name, dynamicTool);
+        }
         // Dynamic tools override a same-named authored tool.
         for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
           const advertised = advertisedHarnessTools.get(name);
@@ -1451,13 +1458,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           };
       }
 
-      return { effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools };
+      return { effectiveTools, backgroundBatch, advertisedHarnessTools, emissionTools, modelTools };
     };
 
     const runSingleModelCall = async (
       opts: ModelCallOptions & { readonly attemptIndex: number },
     ): Promise<HarnessStepResult> => {
-      let { effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools } =
+      let { effectiveTools, backgroundBatch, advertisedHarnessTools, emissionTools, modelTools } =
         await prepareModelTools(opts);
       currentMessages = createRequestMessages();
       requestEnvelopeTokens = await estimateRequestEnvelope({
@@ -1514,7 +1521,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
         );
         currentMessages = createRequestMessages();
-        ({ effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools } =
+        ({ effectiveTools, backgroundBatch, advertisedHarnessTools, emissionTools, modelTools } =
           await prepareModelTools(opts));
         requestEnvelopeTokens = await estimateRequestEnvelope({
           history: projectedMessages,
@@ -1644,7 +1651,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             interruptStreamOnFailure(streamResult.fullStream, generation.signal),
             {
               excludedActionToolNames,
-              tools: advertisedHarnessTools,
+              tools: emissionTools,
             },
           );
           throwIfTurnAborted(config.abortSignal);
