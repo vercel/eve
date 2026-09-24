@@ -316,6 +316,10 @@ async function runSessionLoop(
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
+        // A task with no caller, such as a schedule, gets no further work; waiting would leak the run.
+        if (boot.mode === "task" && cancelledCaller.caller === undefined) {
+          return { kind: "terminal", outcome: { kind: "cancelled" } };
+        }
       } else if (action.settled?.notifyCaller === true) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({

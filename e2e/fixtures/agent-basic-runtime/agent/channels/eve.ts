@@ -1,6 +1,7 @@
 import type { AuthFn } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
 import type { SessionAuthContext } from "eve/context";
+import { authenticateWorkspaceMember } from "../lib/workspace";
 
 const PRINCIPAL_A = "Bearer e2e-create-once-a";
 const PRINCIPAL_B = "Bearer e2e-create-once-b";
@@ -20,12 +21,10 @@ const authenticateA: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_A ? principal("issuer-a") : null;
 const authenticateB: AuthFn<Request> = (request) =>
   request.headers.get("authorization") === PRINCIPAL_B ? principal("issuer-b") : null;
-const authenticateEvalDriver: AuthFn<Request> = (request) => ({
-  ...principal("eval-driver"),
-  attributes: {
-    failHookEvent: request.headers.get("x-e2e-fail-hook") ?? "",
-    workspaceCredentials: request.headers.get("x-e2e-workspace-credentials") ?? "active",
-  },
-});
+const authenticateMember: AuthFn<Request> = (request) =>
+  authenticateWorkspaceMember(request.headers.get("authorization"));
+const authenticateEvalDriver: AuthFn<Request> = () => principal("eval-driver");
 
-export default eveChannel({ auth: [authenticateA, authenticateB, authenticateEvalDriver] });
+export default eveChannel({
+  auth: [authenticateA, authenticateB, authenticateMember, authenticateEvalDriver],
+});

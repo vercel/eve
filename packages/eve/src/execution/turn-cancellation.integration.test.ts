@@ -482,6 +482,61 @@ describe("turn cancellation integration", () => {
     60_000,
   );
 
+  it("ends a task session with no caller when its turn is cancelled", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "task-hook-cancel" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                "turn.started"(_event, ctx) {
+                  ctx.cancel();
+                },
+              },
+            }),
+          }),
+          logicalPath: "hooks/gate.ts",
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Prepare the nightly report." },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "http:task-hook-cancel",
+            mode: "task",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        await expect(run.returnValue).resolves.toEqual({ output: "The turn was cancelled." });
+        await expect(run.status).resolves.toBe("completed");
+        const cancelledTurn = await stream.nextTurn();
+        expect(
+          containsEventSequence(cancelledTurn, [
+            "turn.started",
+            "turn.cancelled",
+            "session.waiting",
+          ]),
+        ).toBe(true);
+        expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(0);
+        expectNoFailureEvents(cancelledTurn);
+        const ending = await stream.nextTurn();
+        expect(ending.map((event) => event.type)).toEqual(["session.completed"]);
+      } finally {
+        stream.dispose();
+      }
+    });
+  }, 60_000);
+
   it("keeps an abort-shaped memory recall error terminal while the turn signal is active", async () => {
     const fixture = await createAbortRecallRuntime("turn-active-memory-abort", {
       waitForAbort: false,

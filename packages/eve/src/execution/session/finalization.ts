@@ -16,9 +16,10 @@ import {
   createDelegatedSubagentSuccessResult,
 } from "#subagents/parent-result.js";
 
-/** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
+/** The ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
   | { readonly kind: "done"; readonly action: TurnOutcome & { readonly kind: "done" } }
+  | { readonly kind: "cancelled" }
   | { readonly kind: "expired" }
   | { readonly kind: "failed"; readonly error: unknown; readonly turnId?: string };
 
@@ -45,7 +46,7 @@ export async function finalizeSession(
   if (sessionState !== undefined) {
     await terminateChildSessionsStep({ serializedContext, sessionState });
   }
-  if (outcome.kind === "expired") {
+  if (outcome.kind === "expired" || outcome.kind === "cancelled") {
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
@@ -128,6 +129,8 @@ function settledResult(
         sessionUsage: outcome.action.usage,
         turnUsage: outcome.action.usageDelta,
       };
+    case "cancelled":
+      return { isError: true, output: "The turn was cancelled." };
     case "expired":
       return context.caller === undefined
         ? { isError: false, output: "" }
