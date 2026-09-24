@@ -107,3 +107,19 @@ A `LanguageModel` entry compiles to a source-backed reference that the runtime
 reloads from `agent.ts` by slug, the same way a direct static `model` reloads
 today. The manifest keeps choices as data because the parent needs the slugs
 and descriptions at build time to render its tool schema.
+
+## Alternatives considered
+
+- **`model: ["a", "b"]`.** Smallest change, but it reads like an AI Gateway
+  fallback list ("try a, then b"), gives the parent no hint about when to pick
+  each model, and blocks per-choice `modelOptions`.
+- **`model: { choices: [...] }`.** Removes the fallback confusion, but adds a
+  config shape that exists nowhere else and still carries no descriptions.
+- **`defineDynamic`.** The author's resolver returns the decision. Here the
+  decision belongs to the parent model, so a resolver has nothing to decide.
+- **`choice({ options: { ... } })`.** Mirrors `auto` exactly, but the `options`
+  wrapper is noise when the entries are the whole argument.
+
+`choice(entries)` keeps the `auto` idea of described options under an
+`eve/models` helper, drops the wrapper, and accepts a plain slug list for the
+common case.
