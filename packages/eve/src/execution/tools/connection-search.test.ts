@@ -362,6 +362,107 @@ describe("connection_search", () => {
     ]);
   });
 
+  it("recognizes qualified exact names across case and separator styles", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "Searches records after list-records is used.",
+            inputSchema: { type: "object" },
+            name: "search-records",
+          },
+          {
+            description: "Lists CRM records.",
+            inputSchema: { type: "object" },
+            name: "list-records",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "CRM__LIST.RECORDS", limit: 2 }),
+    ).resolves.toMatchObject([
+      { qualifiedName: "crm__list-records" },
+      { qualifiedName: "crm__search-records" },
+    ]);
+  });
+
+  it("ranks partial name matches above description-only matches", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "Update, update, update, and update records before auditing.",
+            inputSchema: { type: "object" },
+            name: "audit-records",
+          },
+          {
+            description: "Modify a CRM record.",
+            inputSchema: { type: "object" },
+            name: "update-record",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "update", limit: 2 }),
+    ).resolves.toMatchObject([
+      { qualifiedName: "crm__update-record" },
+      { qualifiedName: "crm__audit-records" },
+    ]);
+  });
+
+  it("does not rank repeated description tokens above the same shorter match", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "List customer records.",
+            inputSchema: { type: "object" },
+            name: "browse",
+          },
+          {
+            description: "List, list, list, list, and list customer records.",
+            inputSchema: { type: "object" },
+            name: "search",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "list records", limit: 2 }),
+    ).resolves.toMatchObject([{ qualifiedName: "crm__browse" }, { qualifiedName: "crm__search" }]);
+  });
+
+  it("keeps description-only matches discoverable", async () => {
+    const crm = connection("crm");
+    const connectionRegistry = registry({
+      connections: [crm],
+      loadTools: {
+        crm: async () => [
+          {
+            description: "Find customer accounts.",
+            inputSchema: { type: "object" },
+            name: "lookup",
+          },
+        ],
+      },
+    });
+
+    await expect(
+      executeConnectionSearch(connectionRegistry, { keywords: "accounts" }),
+    ).resolves.toMatchObject([{ qualifiedName: "crm__lookup" }]);
+  });
+
   it("returns connection summaries when loading succeeds without a keyword match", async () => {
     const incident = connection("incident");
     const connectionRegistry = registry({
