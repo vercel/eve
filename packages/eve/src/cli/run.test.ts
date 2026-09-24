@@ -107,6 +107,17 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("setup [options] <item>");
   });
 
+  it("lists the trace sampling opt-out on deploy", async () => {
+    const output: string[] = [];
+
+    await runCli(["deploy", "--help"], {
+      error: (message) => output.push(message),
+      log: (message) => output.push(message),
+    });
+
+    expect(output.join("\n")).toContain("--no-trace-sampling");
+  });
+
   it("forwards model settings to the set command", async () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runSetCommand.mockClear();
@@ -133,6 +144,22 @@ describe("CLI command registration", () => {
       nonInteractive: undefined,
       project: undefined,
       team: undefined,
+      traceSampling: true,
+      yes: undefined,
+    });
+  });
+
+  it("lets deploy opt out of default trace sampling for a new project", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runDeployCommand.mockClear();
+
+    await runCli(["deploy", "--no-trace-sampling"], logger);
+
+    expect(runDeployCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
+      nonInteractive: undefined,
+      project: undefined,
+      team: undefined,
+      traceSampling: false,
       yes: undefined,
     });
   });

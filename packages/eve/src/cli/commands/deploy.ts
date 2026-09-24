@@ -38,7 +38,7 @@ export async function runDeployCommand(
   logger: DeployCliLogger,
   appRoot: string,
   dependencies: DeployCommandDependencies = defaultDependencies,
-  options: VercelProjectCliOptions & { yes?: boolean } = {},
+  options: VercelProjectCliOptions & { yes?: boolean; traceSampling?: boolean } = {},
 ): Promise<void> {
   if (
     !(await validateWorkspaceProjectCommand({
@@ -69,6 +69,7 @@ export async function runDeployCommand(
     const result = await runDeployFlow({
       appRoot,
       prompter,
+      traceSampling: options.traceSampling,
       interactive: isNonInteractiveProjectCommand(options)
         ? false
         : dependencies.hasInteractiveTerminal(),

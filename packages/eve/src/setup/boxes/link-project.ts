@@ -8,7 +8,11 @@ import {
 import type { Prompter } from "../prompter.js";
 import { requireProjectPath, type SetupState } from "../state.js";
 import type { SetupBox } from "../step.js";
-import { linkProject, unresolvedProject } from "../vercel-project.js";
+import {
+  linkProject,
+  unresolvedProject,
+  type LinkProjectOperationOptions,
+} from "../vercel-project.js";
 
 /** Injected for tests; defaults to the real Vercel project helpers. */
 export interface LinkProjectDeps {
@@ -22,6 +26,8 @@ export interface LinkProjectOptions {
   prompter: Prompter;
   /** Headless runs must not ask follow-up questions after the plan is fixed. */
   headless?: boolean;
+  /** Skip default 100% trace sampling for a newly created project. */
+  traceSampling?: boolean;
   deps?: LinkProjectDeps;
 }
 
@@ -64,12 +70,15 @@ export function linkVercelProject(
       }
       const projectRoot = requireProjectPath(state);
       const onOutput = createPromptCommandOutput(options.prompter.log);
+      const linkOptions: LinkProjectOperationOptions = { signal };
+      if (options.headless) linkOptions.headless = true;
+      if (options.traceSampling === false) linkOptions.traceSampling = false;
       const linked = await deps.linkProject(
         options.prompter,
         projectRoot,
         plan,
         onOutput,
-        options.headless ? { signal, headless: true } : { signal },
+        linkOptions,
       );
       signal?.throwIfAborted();
       if (!linked) {

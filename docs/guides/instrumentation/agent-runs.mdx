@@ -28,10 +28,10 @@ Omitting `agent/instrumentation/agent-runs.ts` preserves that default. Export
 
 ## Enable tracing on Vercel
 
-New eve deployments automatically sample 100% of requests. Existing eve
-deployments need a sampling rule configured for the Vercel project to collect
-traces. To enable tracing for an existing deployment, select your team and
-project, then open
+When `eve deploy` creates a new Vercel project, it configures 100% trace
+sampling for all environments. Existing Vercel projects need a sampling rule
+configured to collect traces. To enable tracing for an existing project, select
+your team and project, then open
 [**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):
 
 1. Select **Add Sampling Rule**.

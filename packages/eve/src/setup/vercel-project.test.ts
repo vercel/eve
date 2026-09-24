@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readVercelCliConnection } from "#internal/model-auth/vercel-cli.js";
+import { vercelApiJson } from "#internal/model-auth/vercel.js";
 import { createPromptCommandOutput, WHIMSY_POOLS } from "#setup/cli/index.js";
 import { captureVercel, runVercel, type VercelCaptureResult } from "#setup/primitives/index.js";
 
@@ -30,6 +32,16 @@ vi.mock("#setup/primitives/index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("#internal/model-auth/vercel-cli.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#internal/model-auth/vercel-cli.js")>();
+  return { ...original, readVercelCliConnection: vi.fn() };
+});
+
+vi.mock("#internal/model-auth/vercel.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#internal/model-auth/vercel.js")>();
+  return { ...original, vercelApiJson: vi.fn() };
+});
+
 vi.mock("./project-resolution.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("./project-resolution.js")>();
   return {
@@ -40,6 +52,8 @@ vi.mock("./project-resolution.js", async (importOriginal) => {
 
 const mockedCaptureVercel = vi.mocked(captureVercel);
 const mockedRunVercel = vi.mocked(runVercel);
+const mockedReadVercelCliConnection = vi.mocked(readVercelCliConnection);
+const mockedVercelApiJson = vi.mocked(vercelApiJson);
 const mockedReadProjectLink = vi.mocked(readProjectLink);
 
 /** Wraps stdout as a successful capture result for the mocked `captureVercel`. */
@@ -71,6 +85,10 @@ beforeEach(() => {
   mockedCaptureVercel.mockReset();
   mockedRunVercel.mockReset();
   mockedRunVercel.mockResolvedValue(true);
+  mockedReadVercelCliConnection.mockReset();
+  mockedReadVercelCliConnection.mockResolvedValue({ token: "vercel-token", teamId: "team-a" });
+  mockedVercelApiJson.mockReset();
+  mockedVercelApiJson.mockResolvedValue({});
   mockedReadProjectLink.mockReset();
 });
 
@@ -702,7 +720,7 @@ describe("linkProject", () => {
       )
       .mockResolvedValueOnce(captured({ framework: "eve" }));
     mockedReadProjectLink.mockResolvedValueOnce({
-      orgId: "team-a",
+      orgId: "team_123",
       projectId: "prj_new",
       projectName: "my-agent",
     });
@@ -730,6 +748,80 @@ describe("linkProject", () => {
     expect(mockedRunVercel).toHaveBeenCalledWith(
       ["link", "--project", "my-agent", "--scope", "team-a", "--yes"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
+    );
+    expect(mockedVercelApiJson).toHaveBeenCalledWith(
+      "https://api.vercel.com/v1/drains/tracing/config?projectId=prj_new&teamId=team_123",
+      {
+        body: JSON.stringify({
+          enabled: true,
+          sampling: [{ type: "head_sampling", rate: 1 }],
+        }),
+        headers: {
+          authorization: "Bearer vercel-token",
+          "content-type": "application/json",
+        },
+        method: "PUT",
+        signal: undefined,
+      },
+    );
+  });
+
+  it("skips trace sampling when requested for a newly created project", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+        { traceSampling: false },
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(mockedReadVercelCliConnection).not.toHaveBeenCalled();
+    expect(mockedVercelApiJson).not.toHaveBeenCalled();
+  });
+
+  it("warns but keeps the new project when trace sampling configuration fails", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(
+        failedCapture(
+          JSON.stringify({ error: { code: "not_found", message: "Project not found" } }),
+        ),
+      )
+      .mockResolvedValueOnce(captured({ framework: "eve" }));
+    mockedReadProjectLink.mockResolvedValueOnce({
+      orgId: "team-a",
+      projectId: "prj_new",
+      projectName: "my-agent",
+    });
+    mockedVercelApiJson.mockRejectedValueOnce(new Error("Vercel rejected the request."));
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      linkProject(
+        prompter,
+        "/tmp/eve-agent",
+        { kind: "new", project: "my-agent", team: "team-a" },
+        createPromptCommandOutput(prompter.log),
+      ),
+    ).resolves.toEqual({ projectId: "prj_new", projectName: "my-agent" });
+
+    expect(prompter.log.warning).toHaveBeenCalledWith(
+      expect.stringContaining("100% for all environments"),
     );
   });
 
