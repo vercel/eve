@@ -4645,7 +4645,7 @@ describe("TerminalRenderer setup flow session", () => {
     expect(inherited).toBe(true);
     expect(input.resumeCalls).toBe(2);
     expect(screen.snapshot()).toContain("anchor");
-    expect(screen.snapshot()).toContain("Add integration");
+    expect(screen.snapshot()).not.toContain("┃ Add integration");
     expect(screen.snapshot()).not.toContain("temporary OAuth instructions");
     renderer.setupFlow.end();
     renderer.shutdown();
@@ -4744,7 +4744,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.setStatus("Loading teams…");
 
     let snapshot = screen.snapshot();
-    expect(snapshot).toContain("/deploy");
+    expect(snapshot).not.toContain("┃ /deploy");
     expect(snapshot).toContain("Creating Vercel project…");
     expect(snapshot).toContain("Loading teams…");
 
@@ -4790,7 +4790,9 @@ describe("TerminalRenderer setup flow session", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("┃ /deploy");
+    expect(snapshot).not.toContain("┃ /deploy");
+    expect(snapshot).toContain("Vercel project");
+    expect(snapshot).toMatch(/─{20,}/);
     expect(snapshot).toContain("This directory is not linked yet.");
     expect(snapshot).toContain("Vercel project");
 
@@ -5281,8 +5283,8 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
     expect(snapshot).toContain("Choose a model, speed, and reasoning");
-    const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
-    expect(promptLine?.startsWith("❯ /")).toBe(true);
+    const promptLine = snapshot.split("\n").find((line) => line.includes("│ /"));
+    expect(promptLine?.startsWith("│ /")).toBe(true);
 
     input.enter();
     // The highlighted default — /model leads the registry — is what a bare
@@ -5393,7 +5395,7 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/model sol");
     await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-6-sol"));
     input.enter();
-    expect(screen.snapshot()).toContain("❯ /model openai/gpt-6-sol ");
+    expect(screen.snapshot()).toContain("│ /model openai/gpt-6-sol ");
     expect(screen.snapshot()).toContain("high");
     input.enter();
 
@@ -5492,7 +5494,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(screen.snapshot()).toContain("│ /quit");
   });
 
-  it("replaces a submitted /help invocation with its transient drawer", async () => {
+  it("keeps a submitted /help invocation above its transient drawer", async () => {
     const { input, renderer, screen } = makeRenderer();
     const prompt = renderer.readPrompt();
     input.type("/help");
@@ -5500,12 +5502,13 @@ describe("TerminalRenderer command typeahead", () => {
     expect(await prompt).toBe("/help");
 
     const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
-    expect(screen.snapshot()).toContain("┃ /help");
-    expect(screen.snapshot()).not.toContain("│ /help");
+    const open = screen.snapshot().split("\n");
+    expect(open.filter((line) => line.startsWith("│ /help"))).toEqual(["│ /help"]);
+    expect(open.indexOf("│ /help")).toBeLessThan(open.findIndex((line) => /^─{20,}$/.test(line)));
     input.send("\x1b");
     expect(await choice).toBeUndefined();
-    expect(screen.snapshot()).not.toContain("┃ /help");
-    expect(screen.snapshot()).not.toContain("│ /help");
+    expect(screen.snapshot()).not.toContain("Show available commands");
+    expect(screen.snapshot()).toContain("│ /help");
     renderer.shutdown();
   });
 
@@ -5514,7 +5517,7 @@ describe("TerminalRenderer command typeahead", () => {
     const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
 
     const open = screen.snapshot();
-    expect(open).toContain("┃ /help");
+    expect(open).not.toContain("┃ Commands");
     expect(open).toContain("/model");
     expect(open).toContain("↑/↓ move · Enter select · Esc close");
     expect(open.match(/─{20,}/g)).toHaveLength(2);
@@ -5522,7 +5525,30 @@ describe("TerminalRenderer command typeahead", () => {
     input.down();
     input.enter();
     expect(await choice).toBe("/reset");
-    expect(screen.snapshot()).not.toContain("┃ /help");
+    expect(screen.snapshot()).not.toContain("Choose a model, speed, and reasoning");
+    renderer.shutdown();
+  });
+
+  it("restores a help selection as a command-gutter composer with argument suggestions", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => [{ value: "openai/gpt-5", label: "GPT-5" }],
+    });
+    const help = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    input.enter();
+    const selection = await help;
+    expect(selection).toBe("/model ");
+    const prompt = renderer.readPrompt({ initialDraft: selection });
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
+    expect(screen.snapshot()).toContain("│ /model");
+    expect(screen.snapshot()).not.toContain("❯ /model");
+    input.enter();
+    expect(await prompt).toBe("/model openai/gpt-5");
     renderer.shutdown();
   });
 
@@ -5531,13 +5557,13 @@ describe("TerminalRenderer command typeahead", () => {
     const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
     for (let i = 0; i < 8; i += 1) input.down();
     expect(screen.snapshot()).toContain("/traces");
-    expect(screen.snapshot()).toContain("┃ /help");
+    expect(screen.snapshot()).not.toContain("┃ Commands");
     input.enter();
     expect(await choice).toBe("/traces ");
     renderer.shutdown();
   });
 
-  it("replaces a submitted /info invocation with its transient drawer", async () => {
+  it("keeps a submitted /info invocation above its transient drawer", async () => {
     const { input, renderer, screen } = makeRenderer();
     const prompt = renderer.readPrompt();
     input.type("/info");
@@ -5545,12 +5571,13 @@ describe("TerminalRenderer command typeahead", () => {
     expect(await prompt).toBe("/info");
 
     const panel = renderer.showInfoPanel("Application");
-    expect(screen.snapshot()).toContain("┃ /info");
-    expect(screen.snapshot()).not.toContain("│ /info");
+    const open = screen.snapshot().split("\n");
+    expect(open.filter((line) => line.includes("/info"))).toEqual(["│ /info"]);
+    expect(open.indexOf("│ /info")).toBeLessThan(open.findIndex((line) => /^─{20,}$/.test(line)));
     input.send("\x1b");
     await panel;
-    expect(screen.snapshot()).not.toContain("┃ /info");
-    expect(screen.snapshot()).not.toContain("│ /info");
+    expect(screen.snapshot()).not.toContain("Application");
+    expect(screen.snapshot()).toContain("│ /info");
     renderer.shutdown();
   });
 
@@ -5561,7 +5588,7 @@ describe("TerminalRenderer command typeahead", () => {
     );
 
     const open = screen.snapshot();
-    expect(open).toContain("┃ /info");
+    expect(open).not.toContain("┃ Application info");
     expect(open).toContain("Application");
     expect(open).toContain("Agent: Weather");
     expect(open).toContain("Esc to close");
@@ -5569,7 +5596,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(open).not.toContain("[36m");
     input.send("\x1b");
     await panel;
-    expect(screen.snapshot()).not.toContain("┃ /info");
+    expect(screen.snapshot()).not.toContain("Application");
     expect(screen.snapshot()).not.toContain("Agent: Weather");
     renderer.shutdown();
   });
@@ -6061,10 +6088,11 @@ describe("setup interaction transitions", () => {
           { value: "linear", label: "Linear" },
         ],
       });
-      expect(titleRow()).toBe(initialRow);
+      const questionRow = titleRow();
+      expect(questionRow).toBeGreaterThan(initialRow);
       expect(screen.snapshot().split("Add to your agent")).toHaveLength(2);
       input.type("sl");
-      expect(titleRow()).toBe(initialRow);
+      expect(titleRow()).toBe(questionRow);
       input.send("\x1b");
       input.send("\x1b");
       await expect(answer).resolves.toBeUndefined();

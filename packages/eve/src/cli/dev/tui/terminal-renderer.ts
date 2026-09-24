@@ -2013,7 +2013,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Lets `/help` select a command without leaving a transcript row. */
   async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
     this.#start();
-    this.dismissCommandInvocation();
+    this.#settleCommandEcho();
     this.#inputActive = false;
     let state = typeaheadFor(commands, "/");
     this.#transientPanel = (width) => {
@@ -2021,7 +2021,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const visible = Math.max(1, this.#height() - 7);
       const start = Math.max(0, Math.min(state.selectedIndex - visible + 1, rows.length - visible));
       return renderTransientDrawer(
-        "/help",
         rows.slice(start, start + visible),
         ["↑/↓ move · Enter select · Esc close"],
         this.#theme,
@@ -2055,7 +2054,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Shows local application metadata without retaining it in the transcript. */
   async showInfoPanel(text: string): Promise<void> {
     this.#start();
-    this.dismissCommandInvocation();
+    this.#settleCommandEcho();
     this.#inputActive = false;
     const plainText = stripAnsi(text);
     let scroll = 0;
@@ -2070,7 +2069,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const visible = Math.max(1, this.#height() - 7);
       scroll = Math.min(scroll, Math.max(0, rows.length - visible));
       return renderTransientDrawer(
-        "/info",
         rows.slice(scroll, scroll + visible),
         [rows.length > visible ? "↑/↓ scroll · Esc close" : "Esc to close"],
         this.#theme,
@@ -5252,7 +5250,12 @@ function promptInputRows({
     Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
   );
   // An inert prompt's typed draft keeps the mark dim: the state is legible without claiming readiness.
-  const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : theme.glyph.prompt;
+  const promptGlyph =
+    inert === true
+      ? c.dim(theme.glyph.prompt)
+      : text.startsWith("/")
+        ? theme.glyph.user
+        : theme.glyph.prompt;
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
   // The gutter sits at column 0, sharing a column with the conversation

@@ -204,7 +204,7 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderFlowDrawer", () => {
-  it("frames an active flow while keeping its title out of the body", () => {
+  it("frames an active flow without repeating its command title", () => {
     const rows = renderFlowDrawer(
       {
         title: "add to your agent",
@@ -221,7 +221,7 @@ describe("renderFlowDrawer", () => {
 
     expect(rows.rows[0]).toBe("─".repeat(60));
     expect(rows.rows[1]).toBe("");
-    expect(rows.rows[2]).toBe(" ┃ add to your agent");
+    expect(rows.rows[2]).toBe("   add to your agent");
     expect(rows.rows.at(-2)).toBe("");
     expect(rows.rows.at(-1)).toBe("─".repeat(60));
     expect(rows.rows.join("\n").split("add to your agent")).toHaveLength(2);
@@ -245,7 +245,7 @@ describe("renderFlowDrawer", () => {
     expect(drawer.controls).toEqual(["↑/↓ move · Enter select · Esc close"]);
   });
 
-  it("omits the drawer header for a titleless flow", () => {
+  it("frames a flow without a redundant header", () => {
     const rows = renderFlowDrawer(
       {
         title: "",
