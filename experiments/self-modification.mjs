@@ -27,10 +27,16 @@ export default {
       grok47: {
         selfModification: { model: "spacexai/grok-4.7" },
       },
+      glm52: {
+        selfModification: { model: "zai/glm-5.2" },
+      },
+      sonnet5: {
+        selfModification: { model: "anthropic/claude-sonnet-5" },
+      },
     },
   },
   measurements: { selfModification: selfModificationMetrics },
-  sampling: { repetitions: 2, seed: 42 },
+  sampling: { repetitions: 5, seed: 42 },
   analysis: {
     compare: { axis: "configuration", baseline: "lunaFastXhigh" },
     primaryMetric: "selfModification.totalChildDuration",
