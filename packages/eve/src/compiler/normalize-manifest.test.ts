@@ -436,7 +436,7 @@ describe("compileAgentManifest source graph", () => {
     );
     const collectionFactory = vi.fn(() =>
       defineScheduleCollection({
-        inputSchema: z.object({ query: z.string() }),
+        payloadSchema: z.object({ query: z.string() }),
         provider: inMemoryScheduleProvider(),
         run() {},
         scope: "test",
@@ -521,7 +521,7 @@ describe("compileAgentManifest source graph", () => {
         loadNamespace: async () => ({
           default: defineScheduleCollection({
             description: "Run saved queries.",
-            inputSchema: z.object({ query: z.string() }),
+            payloadSchema: z.object({ query: z.string() }),
             provider: inMemoryScheduleProvider(),
             run: async () => {},
             scope: "principal_1",

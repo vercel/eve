@@ -5,6 +5,7 @@ import { createScheduleCollectionToolDynamicDefinition } from "#context/schedule
 import { defineScheduleCollection } from "#public/schedules/collection.js";
 import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import { serializeInputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 const resolveContext = {
   abortSignal: new AbortController().signal,
@@ -28,7 +29,10 @@ const resolveContext = {
 describe("schedule collection tools", () => {
   it("contributes every management tool by default", async () => {
     const definition = defineScheduleCollection({
-      inputSchema: z.object({ message: z.string().min(1) }),
+      payloadSchema: z.object({
+        message: z.string().min(1).describe("The message to send."),
+        priority: z.enum(["low", "high"]).describe("Delivery priority."),
+      }),
       provider: inMemoryScheduleProvider(),
       run() {},
       scope: "fixture",
@@ -54,11 +58,33 @@ describe("schedule collection tools", () => {
     expect(callbacks?.execute).toBeDefined();
     expect(callbacks?.inputSchema).toBeDefined();
     expect(callbacks?.approvalRequest).toBeDefined();
+
+    for (const operation of ["create", "update"] as const) {
+      const tool = tools![`schedule__collection__${operation}`] as {
+        readonly inputSchema: ToolSchemaSource;
+      };
+      expect(serializeInputSchema(tool.inputSchema)).toMatchObject({
+        properties: {
+          payload: {
+            properties: {
+              message: { description: "The message to send.", minLength: 1, type: "string" },
+              priority: {
+                description: "Delivery priority.",
+                enum: ["low", "high"],
+                type: "string",
+              },
+            },
+            required: ["message", "priority"],
+            type: "object",
+          },
+        },
+      });
+    }
   });
 
   it("omits every generated tool when tools is false", async () => {
     const definition = defineScheduleCollection({
-      inputSchema: z.object({ message: z.string() }),
+      payloadSchema: z.object({ message: z.string() }),
       provider: inMemoryScheduleProvider(),
       run() {},
       scope: "fixture",

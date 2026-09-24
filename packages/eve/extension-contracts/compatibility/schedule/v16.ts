@@ -5,7 +5,7 @@ import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.
 
 export default defineScheduleCollection({
   description: "Run saved queries.",
-  inputSchema: z.object({ query: z.string() }),
+  payloadSchema: z.object({ query: z.string() }),
   provider: inMemoryScheduleProvider(),
   scope: () => "queries",
   tools: true,

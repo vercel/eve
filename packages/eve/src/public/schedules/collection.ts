@@ -28,7 +28,7 @@ export type ScheduleScopeDefinition =
     ) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>);
 
 /** Trusted context available while resolving schedule input for storage. */
-export interface ScheduleCollectionInputResolveContext {
+export interface ScheduleCollectionPayloadResolveContext {
   readonly abortSignal: AbortSignal;
   readonly auth: SessionAuth;
   readonly channel: ScheduleScopeContext["channel"];
@@ -42,8 +42,8 @@ export interface ScheduleProviderContext {
   readonly target: ScheduleDeliveryTarget;
 }
 
-export interface ScheduleDelivery<TInput = unknown> {
-  readonly input: TInput;
+export interface ScheduleDelivery<TPayload = unknown> {
+  readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrence;
 }
 
@@ -81,9 +81,9 @@ export interface SchedulePage {
   readonly data: readonly ScheduleRecord[];
 }
 
-export interface ScheduleCreate<TInput> {
+export interface ScheduleCreate<TPayload> {
   readonly expression: ScheduleExpression;
-  readonly input: TInput;
+  readonly payload: TPayload;
   readonly name: string;
   readonly state?: ScheduleState;
 }
@@ -93,23 +93,23 @@ export interface ScheduleList {
   readonly limit?: number;
 }
 
-export interface SchedulePatch<TInput> {
+export interface SchedulePatch<TPayload> {
   readonly expression?: ScheduleExpression;
-  readonly input?: TInput;
+  readonly payload?: TPayload;
 }
 
 export interface ScheduleProvider {
   readonly kind: string;
-  create<TInput>(
+  create<TPayload>(
     context: ScheduleProviderContext,
-    input: ScheduleCreate<TInput>,
+    schedule: ScheduleCreate<TPayload>,
   ): Promise<ScheduleRecord>;
-  list(context: ScheduleProviderContext, input: ScheduleList): Promise<SchedulePage>;
+  list(context: ScheduleProviderContext, query: ScheduleList): Promise<SchedulePage>;
   get(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord | null>;
-  update<TInput>(
+  update<TPayload>(
     context: ScheduleProviderContext,
     name: string,
-    patch: SchedulePatch<TInput>,
+    patch: SchedulePatch<TPayload>,
   ): Promise<ScheduleRecord>;
   enable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
   disable(context: ScheduleProviderContext, name: string): Promise<ScheduleRecord>;
@@ -124,8 +124,8 @@ export interface ScheduleOccurrence {
   readonly scheduledAt: string;
 }
 
-export interface ScheduleCollectionRunArgs<TInput> extends ScheduleHandlerArgs {
-  readonly input: TInput;
+export interface ScheduleCollectionRunArgs<TPayload> extends ScheduleHandlerArgs {
+  readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrence;
 }
 
@@ -138,20 +138,20 @@ export interface ScheduleCollectionToolOptions {
 }
 
 export interface ScheduleCollectionDefinition<
-  TInput = unknown,
-  TInputSchema extends StandardSchemaV1<unknown, TInput> = StandardSchemaV1<unknown, TInput>,
+  TPayload = unknown,
+  TPayloadSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,
 > {
   readonly description?: string;
-  readonly inputSchema: TInputSchema;
+  readonly payloadSchema: TPayloadSchema;
   readonly provider: ScheduleProvider;
   readonly scope: ScheduleScopeDefinition;
-  /** Resolve validated input with trusted creation context before storing it. */
-  readonly resolveInput?: (
-    input: TInput,
-    context: ScheduleCollectionInputResolveContext,
-  ) => TInput | Promise<TInput>;
+  /** Resolve validated payload with trusted creation context before storing it. */
+  readonly resolvePayload?: (
+    payload: TPayload,
+    context: ScheduleCollectionPayloadResolveContext,
+  ) => TPayload | Promise<TPayload>;
   readonly tools?: boolean | ScheduleCollectionToolOptions;
-  readonly run: (args: ScheduleCollectionRunArgs<TInput>) => Promise<void> | void;
+  readonly run: (args: ScheduleCollectionRunArgs<TPayload>) => Promise<void> | void;
 }
 
 export type DefinedScheduleCollection<
@@ -160,13 +160,13 @@ export type DefinedScheduleCollection<
   readonly [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true;
 };
 
-export function defineScheduleCollection<TInputSchema extends StandardSchemaV1<unknown, unknown>>(
+export function defineScheduleCollection<TPayloadSchema extends StandardSchemaV1<unknown, unknown>>(
   definition: ExactDefinition<
-    ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TInputSchema>, TInputSchema>,
-    ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TInputSchema>, TInputSchema>
+    ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TPayloadSchema>, TPayloadSchema>,
+    ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TPayloadSchema>, TPayloadSchema>
   >,
 ): DefinedScheduleCollection<
-  ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TInputSchema>, TInputSchema>
+  ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TPayloadSchema>, TPayloadSchema>
 >;
 export function defineScheduleCollection(
   definition: ScheduleCollectionDefinition,

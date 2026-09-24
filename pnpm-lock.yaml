@@ -584,6 +584,18 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/eve
 
+  apps/fixtures/dynamic-schedules:
+    dependencies:
+      '@vercel/connect':
+        specifier: 2.3.2
+        version: 2.3.2(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.5.4
+
   apps/fixtures/weather-agent:
     dependencies:
       eve:
@@ -7416,6 +7428,9 @@ packages:
   '@vercel/cli-config@0.2.7':
     resolution: {integrity: sha512-KeSN2HBp8puZrj7kVjSEneDi9yBqW4nAD9AnhGhdYjGNpHl7IkXZVb3HnNe0WWc5+20RlUtmAGWNPQ8qP5QBhQ==}
 
+  '@vercel/cli-config@0.3.0':
+    resolution: {integrity: sha512-kQLt5Pm8wKd7/imzDY9/9u0tf8OuRkAuXI+s7j057FSUrXapAmumJSKwDqnR4ZZqdWoUcNLlFAgVIAdiwcGTcw==}
+
   '@vercel/cli-exec@1.0.0':
     resolution: {integrity: sha512-kQF8LGie/Hbdq9/psJxLE7owRTcqMQMhgybU04gCeR7cbQAr5t8OrjefDNColJv1QSSucFt4pLwRiARVmlOnug==}
     engines: {node: '>= 18'}
@@ -7462,6 +7477,32 @@ packages:
       '@auth/core':
         optional: true
       '@chat-adapter/slack':
+        optional: true
+      ai:
+        optional: true
+      better-auth:
+        optional: true
+      eve:
+        optional: true
+
+  '@vercel/connect@2.3.2':
+    resolution: {integrity: sha512-qNRdUI6h2zbTruYU92leapFvBRjwF70gewwuj0rBPBHyu2Bnfzm//k4Sc8kA8e/zQfwKbdpYVk8oWe3fNqImzA==}
+    peerDependencies:
+      '@ai-sdk/mcp': ^1 || ^2
+      '@auth/core': '>=0.37.0'
+      '@chat-adapter/slack': ^4.0.0
+      '@modelcontextprotocol/sdk': ^1.29.0
+      ai: ^6 || ^7.0.0-beta.0
+      better-auth: '>=1.5.0'
+      eve: '>=0.39.1'
+    peerDependenciesMeta:
+      '@ai-sdk/mcp':
+        optional: true
+      '@auth/core':
+        optional: true
+      '@chat-adapter/slack':
+        optional: true
+      '@modelcontextprotocol/sdk':
         optional: true
       ai:
         optional: true
@@ -7527,6 +7568,10 @@ packages:
 
   '@vercel/oidc@3.8.8':
     resolution: {integrity: sha512-aeq4/sgVh80zO6j2H+7FRfsG6NOXBrvzV1EEO8IdXPEJgwHIPakP+BFq3QmprsEQ18bIimds07kvaYhm2lehtg==}
+    engines: {node: '>= 20'}
+
+  '@vercel/oidc@3.8.9':
+    resolution: {integrity: sha512-TcbdH3YtGS2KU98T99dN4sbf+E4vbJZsJTRN97wKQ7QWQ0BR7U02QX3KN4+5GHxBtKTj1c5CnvTTitc2ZRad0A==}
     engines: {node: '>= 20'}
 
   '@vercel/otel@2.1.3':
@@ -16945,6 +16990,31 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4)':
+    dependencies:
+      '@hono/node-server': 2.1.1(hono@4.13.8)
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      content-type: 1.0.5
+      cors: 2.8.6
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.1.0
+      express: 5.2.1(supports-color@10.2.2)
+      express-rate-limit: 8.7.0(express@5.2.1(supports-color@10.2.2))(supports-color@10.2.2)
+      hono: 4.13.8
+      jose: 6.2.3
+      json-schema-typed: 8.0.2
+      pkce-challenge: 5.0.1
+      raw-body: 3.0.2
+      zod: 4.5.4
+      zod-to-json-schema: 3.25.2(zod@4.5.4)
+    optionalDependencies:
+      '@cfworker/json-schema': 4.1.1
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
   '@modelcontextprotocol/server@2.0.0':
     dependencies:
       '@modelcontextprotocol/core': 2.0.0
@@ -20983,6 +21053,11 @@ snapshots:
       xdg-app-paths: 5.5.1
       zod: 4.5.4
 
+  '@vercel/cli-config@0.3.0':
+    dependencies:
+      xdg-app-paths: 5.5.1
+      zod: 4.5.4
+
   '@vercel/cli-exec@1.0.0':
     dependencies:
       execa: 5.1.1
@@ -21020,6 +21095,17 @@ snapshots:
       '@chat-adapter/slack': 4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
       ai: 7.0.105(zod@4.5.4)
       eve: 0.65.0(@opentelemetry/api@1.9.1)(ai@7.0.105(zod@4.5.4))(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(dd-trace@6.13.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5)
+
+  '@vercel/connect@2.3.2(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)':
+    dependencies:
+      '@vercel/oidc': 3.8.9
+    optionalDependencies:
+      '@ai-sdk/mcp': 2.0.52(zod@4.5.4)
+      '@auth/core': 0.41.2
+      '@chat-adapter/slack': 4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
+      '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.5.4)
+      ai: 7.0.105(zod@4.5.4)
+      eve: link:packages/eve
 
   '@vercel/detect-agent@1.2.3': {}
 
@@ -21142,6 +21228,12 @@ snapshots:
   '@vercel/oidc@3.8.8':
     dependencies:
       '@vercel/cli-config': 0.2.7
+      '@vercel/cli-exec': 1.0.1
+      jose: 5.10.0
+
+  '@vercel/oidc@3.8.9':
+    dependencies:
+      '@vercel/cli-config': 0.3.0
       '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
 

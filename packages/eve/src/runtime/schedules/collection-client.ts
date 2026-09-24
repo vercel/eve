@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SessionAuth } from "#context/keys.js";
 import type {
   ScheduleCollectionDefinition,
-  ScheduleCollectionInputResolveContext,
+  ScheduleCollectionPayloadResolveContext,
   ScheduleCreate,
   ScheduleDelivery,
   ScheduleList,
@@ -25,7 +25,7 @@ export interface ScheduleCollectionBindingContext extends ScheduleScopeContext {
 }
 
 export interface BoundScheduleCollection<TInput> {
-  create(input: ScheduleCreate<TInput>): Promise<ScheduleRecord>;
+  create(payload: ScheduleCreate<TInput>): Promise<ScheduleRecord>;
   delete(name: string): Promise<boolean>;
   disable(name: string): Promise<ScheduleRecord>;
   enable(name: string): Promise<ScheduleRecord>;
@@ -62,12 +62,12 @@ export async function bindScheduleCollection<TInput>(
   const provider = definition.provider;
 
   return {
-    create: async (input) =>
+    create: async (schedule) =>
       await provider.create(providerContext(), {
-        ...input,
-        expression: validateScheduleExpression(input.expression),
-        input: await resolveCollectionInput(definition, input.input, binding),
-        name: validateScheduleName(input.name),
+        ...schedule,
+        expression: validateScheduleExpression(schedule.expression),
+        payload: await resolveCollectionInput(definition, schedule.payload, binding),
+        name: validateScheduleName(schedule.name),
       }),
     delete: async (name) => provider.delete(providerContext(), validateScheduleName(name)),
     disable: async (name) => provider.disable(providerContext(), validateScheduleName(name)),
@@ -93,12 +93,12 @@ export async function bindScheduleCollection<TInput>(
         }
       }
       const input =
-        patch.input === undefined
+        patch.payload === undefined
           ? undefined
-          : await resolveCollectionInput(definition, patch.input, binding);
+          : await resolveCollectionInput(definition, patch.payload, binding);
       let normalized: SchedulePatch<TInput> = {};
       if (expression !== undefined) normalized = { ...normalized, expression };
-      if (input !== undefined) normalized = { ...normalized, input };
+      if (input !== undefined) normalized = { ...normalized, payload: input };
       return provider.update(providerContext(), normalizedName, normalized);
     },
   };
@@ -106,17 +106,17 @@ export async function bindScheduleCollection<TInput>(
 
 async function resolveCollectionInput<TInput>(
   definition: ScheduleCollectionDefinition<TInput>,
-  input: unknown,
+  payload: unknown,
   binding: ScheduleCollectionBindingContext,
 ): Promise<TInput> {
-  const validated = await validateCollectionInput(definition, input);
-  const context: ScheduleCollectionInputResolveContext = {
+  const validated = await validateCollectionInput(definition, payload);
+  const context: ScheduleCollectionPayloadResolveContext = {
     abortSignal: binding.abortSignal,
     auth: binding.session.auth,
     channel: binding.channel,
   };
-  const resolved = definition.resolveInput
-    ? await definition.resolveInput(validated, context)
+  const resolved = definition.resolvePayload
+    ? await definition.resolvePayload(validated, context)
     : validated;
   return await validateCollectionInput(definition, resolved);
 }
@@ -148,9 +148,9 @@ function deriveScheduleNamespace(
 
 async function validateCollectionInput<TInput>(
   definition: ScheduleCollectionDefinition<TInput>,
-  input: unknown,
+  payload: unknown,
 ): Promise<TInput> {
-  const result = await definition.inputSchema["~standard"].validate(input);
+  const result = await definition.payloadSchema["~standard"].validate(payload);
   if (result.issues !== undefined) {
     const details = result.issues.map((issue) => issue.message).join("; ");
     throw new Error(`Invalid schedule input${details ? `: ${details}` : "."}`);

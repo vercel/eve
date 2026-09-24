@@ -17,7 +17,7 @@ export function compileScheduleCollectionDefinition(
   );
 
   const compiled: CompiledScheduleCollectionDefinition = {
-    inputSchema: serializeInputSchema(definition.inputSchema),
+    inputSchema: serializeInputSchema(definition.payloadSchema),
     logicalPath: source.logicalPath,
     name: stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, ""),
     providerKind: definition.provider.kind,

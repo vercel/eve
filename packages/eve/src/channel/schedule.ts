@@ -65,11 +65,11 @@ export interface ScheduleDispatchResult {
   readonly waitUntilTasks: readonly Promise<unknown>[];
 }
 
-export interface ScheduleCollectionDispatchInput<TInput> {
+export interface ScheduleCollectionDispatchInput<TPayload> {
   readonly collectionId: string;
-  readonly input: TInput;
+  readonly payload: TPayload;
   readonly occurrence: ScheduleOccurrence;
-  readonly run: (args: ScheduleCollectionRunArgs<TInput>) => Promise<void> | void;
+  readonly run: (args: ScheduleCollectionRunArgs<TPayload>) => Promise<void> | void;
 }
 
 export class ScheduleDispatcher {
@@ -90,14 +90,14 @@ export class ScheduleDispatcher {
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 
-  async triggerCollection<TInput>(
-    input: ScheduleCollectionDispatchInput<TInput>,
+  async triggerCollection<TPayload>(
+    input: ScheduleCollectionDispatchInput<TPayload>,
   ): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.collectionId);
     return await contextStorage.run(scope, async () => {
       const { args, sessions, waitUntilTasks } = this.createHandlerContext();
-      await input.run({ ...args, input: input.input, occurrence: input.occurrence });
+      await input.run({ ...args, payload: input.payload, occurrence: input.occurrence });
       return { sessions, waitUntilTasks };
     });
   }

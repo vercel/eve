@@ -100,7 +100,7 @@ describe("ScheduleDispatcher", () => {
 
       const result = await dispatcher.triggerCollection({
         collectionId: "queries",
-        input: { query: "open incidents" },
+        payload: { query: "open incidents" },
         occurrence: {
           scheduledAt: "2026-09-20T12:00:00.000Z",
           executionId: "occurrence_1",
@@ -108,7 +108,7 @@ describe("ScheduleDispatcher", () => {
           scheduleId: "schedule_1",
         },
         run(args) {
-          observed.push(args.input, args.occurrence, args.appAuth);
+          observed.push(args.payload, args.occurrence, args.appAuth);
           expect(contextStorage.getStore()?.get(ScheduleIdKey)).toBe("queries");
           args.waitUntil(Promise.resolve());
         },

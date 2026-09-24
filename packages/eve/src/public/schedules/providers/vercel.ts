@@ -37,7 +37,7 @@ export function vercelScheduleProvider(
         jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
         name: input.name,
         namespace: context.namespace,
-        payload: createDispatchPayload(context, input.input),
+        payload: createDispatchPayload(context, input.payload),
         target: { topic: deriveEveScheduleQueueTopic(context.target.key) },
         timezone: input.expression.timezone,
       });
@@ -71,7 +71,8 @@ export function vercelScheduleProvider(
         params.timezone = patch.expression.timezone;
         if (patch.expression.type === "cron") params.jitter = patch.expression.jitter;
       }
-      if (patch.input !== undefined) params.payload = createDispatchPayload(context, patch.input);
+      if (patch.payload !== undefined)
+        params.payload = createDispatchPayload(context, patch.payload);
       return fromVercelSchedule(await schedules.update(params));
     },
     async enable(context, name) {
@@ -102,14 +103,14 @@ async function createClient(options: VercelScheduleProviderOptions): Promise<Sch
   return new SchedulesClient(options);
 }
 
-function createDispatchPayload(context: ScheduleProviderContext, input: unknown) {
+function createDispatchPayload(context: ScheduleProviderContext, payload: unknown) {
   return {
     eve: {
       application: context.target.key,
       collection: context.collection,
       version: 1,
     },
-    input,
+    payload,
   };
 }
 

@@ -13,7 +13,7 @@ export interface ScheduleQueueMessage {
       readonly collection?: string;
       readonly version?: number;
     };
-    readonly input?: unknown;
+    readonly payload?: unknown;
   };
   readonly scheduleId: string;
   readonly scheduledAt?: string;
@@ -27,7 +27,7 @@ export interface VerifiedScheduleMessage extends ScheduleQueueMessage {
       readonly collection: string;
       readonly version: 1;
     };
-    readonly input: unknown;
+    readonly payload: unknown;
   };
 }
 

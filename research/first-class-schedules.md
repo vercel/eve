@@ -1,7 +1,7 @@
 ---
 issue: "None (maintainer-requested prototype; no tracking issue)"
 status: proposed
-last_updated: "2026-09-20"
+last_updated: "2026-09-24"
 ---
 
 # First-class schedules
@@ -20,7 +20,7 @@ import { vercelScheduleProvider } from "eve/schedules/vercel";
 export default defineScheduleCollection({
   provider: vercelScheduleProvider(),
   scope: byPrincipal,
-  // inputSchema, tools, and run omitted
+  // payloadSchema, tools, and run omitted
 });
 ```
 
@@ -73,7 +73,7 @@ defineMemory({
 defineScheduleCollection({
   provider: vercelScheduleProvider(),
   scope: byPrincipal,
-  inputSchema,
+  payloadSchema,
   tools: true,
   run,
 });
@@ -242,7 +242,7 @@ export default defineScheduleCollection({
   description: "Run saved queries on a user-defined schedule.",
   provider: vercelScheduleProvider(),
   scope: byPrincipal,
-  inputSchema: z.object({
+  payloadSchema: z.object({
     query: z.string().min(1).max(20_000),
   }),
   tools: true,
@@ -284,10 +284,25 @@ The dynamic handler receives validated `input` and occurrence metadata in
 addition to today's `to`, `waitUntil`, and `appAuth`. The collection author
 defines the payload schema, including any task, destination, and execution
 identity choice. When generated management tools need trusted creation context,
-an optional `resolveInput(input, context)` hook resolves validated proposed
+an optional `resolvePayload(input, context)` hook resolves validated proposed
 input using trusted creation context before storing it. It can resolve relative
 destinations and derive an owner reference from the authenticated caller. It is not a framework-defined
 destination or delegation policy.
+
+Collection input follows this lifecycle:
+
+1. A generated create or input-bearing update tool receives proposed input from
+   the model and validates it with `payloadSchema`.
+2. `resolvePayload`, when present, resolves, normalizes, or supplements that
+   value with trusted creation context.
+3. eve validates the resolved value with `payloadSchema` again before persisting
+   it as canonical collection input.
+4. A later occurrence validates that persisted input before passing it to
+   `run({ payload })`. It does not rerun `resolvePayload`, because the creator's
+   trusted context is unavailable and must not be replayed.
+
+`resolvePayload` is not a validation hook. Collections whose model-provided
+input is already safe and complete omit it.
 
 The collection decides which identity to use when handing off work: pass
 `appAuth` for app-owned tasks, or call an application-owned resolver for an
@@ -400,8 +415,8 @@ interface ScheduleProviderContext {
 }
 
 interface ScheduleProvider {
-  create<T>(ctx: ScheduleProviderContext, input: ScheduleCreate<T>): Promise<ScheduleRecord>;
-  list(ctx: ScheduleProviderContext, input: ScheduleList): Promise<SchedulePage>;
+  create<T>(ctx: ScheduleProviderContext, payload: ScheduleCreate<T>): Promise<ScheduleRecord>;
+  list(ctx: ScheduleProviderContext, payload: ScheduleList): Promise<SchedulePage>;
   get(ctx: ScheduleProviderContext, name: string): Promise<ScheduleRecord | null>;
   update<T>(
     ctx: ScheduleProviderContext,
@@ -471,8 +486,21 @@ long or parked agent session completes.
 Dynamic occurrences then call the existing `ScheduleDispatcher` through a
 collection-aware dispatch input. Collections can start durable task-mode work
 or hand work to channels using the same runtime primitives as existing schedule
-handlers. Current schedule provenance and conditional-delivery behavior remain
-intact.
+handlers.
+
+### Explicit channel delivery
+
+A first turn with schedule provenance currently receives conditional-delivery
+guidance: it may return `<eve-empty-delivery/>` when it believes there is
+nothing to report. That is correct for a channel-less scheduled task, but not
+for `to(channel, target).send(...)`, which has an explicit delivery target.
+The dispatcher must carry that target intent into the created session and
+require a user-facing result. It must not remove schedule provenance, because
+occurrence observability still depends on it.
+
+Until that distinction exists, the local Slack fixture explicitly instructs
+its scheduled prompt to return a non-empty message. This is a dogfood
+workaround, not an authoring contract or a Slack-specific framework policy.
 
 Configure a finite queue delivery limit. A malformed, permanently incompatible,
 or unauthorized message becomes a content-free diagnostic and is acknowledged

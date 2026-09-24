@@ -7,7 +7,7 @@ import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.
 
 const definition = () =>
   defineScheduleCollection({
-    inputSchema: z.object({ query: z.string() }),
+    payloadSchema: z.object({ query: z.string() }),
     provider: inMemoryScheduleProvider(),
     scope: "principal_1",
     tools: true,
@@ -24,7 +24,7 @@ describe("normalizeScheduleCollectionDefinition", () => {
     expect(() =>
       normalizeScheduleCollectionDefinition(
         {
-          inputSchema: z.object({ query: z.string() }),
+          payloadSchema: z.object({ query: z.string() }),
           provider: inMemoryScheduleProvider(),
           scope: "principal_1",
           tools: true,
@@ -44,13 +44,13 @@ describe("normalizeScheduleCollectionDefinition", () => {
   it("accepts an input resolver and rejects non-functions", () => {
     const valid = defineScheduleCollection({
       ...definition(),
-      resolveInput: (input) => input,
+      resolvePayload: (input) => input,
     });
     expect(normalizeScheduleCollectionDefinition(valid, "invalid")).toBe(valid);
 
-    Object.assign(valid, { resolveInput: "not a function" });
+    Object.assign(valid, { resolvePayload: "not a function" });
     expect(() => normalizeScheduleCollectionDefinition(valid, "invalid")).toThrow(
-      '"resolveInput" must be a function',
+      '"resolvePayload" must be a function',
     );
   });
 

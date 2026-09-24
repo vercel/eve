@@ -10,6 +10,7 @@ import { bindScheduleCollection } from "#runtime/schedules/collection-client.js"
 import { defineTool } from "#tools/definition.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 import { parseJsonObject } from "#shared/json.js";
+import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 import {
   readDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -86,19 +87,16 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
               description: description(
                 "Create a recurring or one-time schedule in this collection.",
               ),
-              inputSchema: z.object({
-                expression: expressionSchema,
-                input: z.unknown(),
-                name: scheduleNameSchema,
-                state: z.enum(["active", "inactive"]).optional(),
-              }),
-              execute: async (toolInput) =>
-                await client.create({
-                  expression: toolInput.expression as ScheduleExpression,
-                  input: toolInput.input as TInput,
-                  name: toolInput.name,
-                  state: toolInput.state,
-                }),
+              inputSchema: scheduleCreateToolSchema(definition.payloadSchema),
+              execute: async (toolInput) => {
+                const input = toolInput as {
+                  readonly expression: ScheduleExpression;
+                  readonly name: string;
+                  readonly payload: TInput;
+                  readonly state?: "active" | "inactive";
+                };
+                return await client.create(input);
+              },
             });
           }
           if (options.read) {
@@ -125,15 +123,16 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
             tools[toolName("update")] = defineTool({
               approval: always(),
               description: description("Update the timing or typed input of an existing schedule."),
-              inputSchema: z.object({
-                expression: expressionSchema.optional(),
-                input: z.unknown().optional(),
-                name: scheduleNameSchema,
-              }),
-              execute: async ({ name, ...patch }) => {
-                const update: { expression?: ScheduleExpression; input?: TInput } = {};
+              inputSchema: scheduleUpdateToolSchema(definition.payloadSchema),
+              execute: async (toolInput) => {
+                const { name, ...patch } = toolInput as {
+                  readonly expression?: ScheduleExpression;
+                  readonly name: string;
+                  readonly payload?: TInput;
+                };
+                const update: { expression?: ScheduleExpression; payload?: TInput } = {};
                 if (patch.expression !== undefined) update.expression = patch.expression;
-                if (patch.input !== undefined) update.input = patch.input as TInput;
+                if (patch.payload !== undefined) update.payload = patch.payload;
                 return await client.update(name, update);
               },
             });
@@ -179,6 +178,33 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
       },
     }),
   );
+}
+
+function scheduleCreateToolSchema(payloadSchema: unknown) {
+  return toInputSchema({
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      expression: serializeInputSchema(expressionSchema),
+      name: serializeInputSchema(scheduleNameSchema),
+      payload: serializeInputSchema(payloadSchema as never),
+      state: { enum: ["active", "inactive"], type: "string" },
+    },
+    required: ["expression", "name", "payload"],
+  });
+}
+
+function scheduleUpdateToolSchema(payloadSchema: unknown) {
+  return toInputSchema({
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      expression: serializeInputSchema(expressionSchema.optional()),
+      name: serializeInputSchema(scheduleNameSchema),
+      payload: serializeInputSchema(payloadSchema as never),
+    },
+    required: ["name"],
+  });
 }
 
 function stampGeneratedToolCallbacks(tool: unknown): void {

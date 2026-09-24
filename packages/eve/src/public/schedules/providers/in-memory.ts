@@ -16,7 +16,7 @@ export interface InMemoryScheduleProviderOptions {
 }
 
 interface StoredSchedule extends ScheduleRecord {
-  readonly input: unknown;
+  readonly payload: unknown;
   readonly target: ScheduleProviderContext["target"];
 }
 
@@ -30,20 +30,20 @@ export function inMemoryScheduleProvider(
   return {
     kind: "in-memory",
 
-    async create<TInput>(context: ScheduleProviderContext, input: ScheduleCreate<TInput>) {
+    async create<TPayload>(context: ScheduleProviderContext, schedule: ScheduleCreate<TPayload>) {
       return withOperationResult(operationResults, context.operationId, () => {
-        const key = scheduleKey(context, input.name);
+        const key = scheduleKey(context, schedule.name);
         if (schedules.has(key)) {
-          throw new Error(`Schedule ${JSON.stringify(input.name)} already exists.`);
+          throw new Error(`Schedule ${JSON.stringify(schedule.name)} already exists.`);
         }
         const timestamp = now().getTime();
         const record: StoredSchedule = {
           createdAt: timestamp,
-          expression: normalizeExpression(input.expression),
-          input: input.input,
-          name: input.name,
-          scheduleId: createScheduleId(context, input.name),
-          state: input.state ?? "active",
+          expression: normalizeExpression(schedule.expression),
+          payload: schedule.payload,
+          name: schedule.name,
+          scheduleId: createScheduleId(context, schedule.name),
+          state: schedule.state ?? "active",
           target: context.target,
           updatedAt: timestamp,
         };
@@ -52,13 +52,13 @@ export function inMemoryScheduleProvider(
       });
     },
 
-    async list(context: ScheduleProviderContext, input: ScheduleList): Promise<SchedulePage> {
+    async list(context: ScheduleProviderContext, query: ScheduleList): Promise<SchedulePage> {
       const records = [...schedules.entries()]
         .filter(([key]) => key.startsWith(collectionPrefix(context)))
         .map(([, record]) => publicRecord(record))
         .sort((left, right) => left.name.localeCompare(right.name));
-      const start = decodeCursor(input.cursor);
-      const limit = normalizeLimit(input.limit);
+      const start = decodeCursor(query.cursor);
+      const limit = normalizeLimit(query.limit);
       const data = records.slice(start, start + limit);
       const next = start + data.length;
       return { cursor: next < records.length ? String(next) : null, data };
@@ -69,10 +69,10 @@ export function inMemoryScheduleProvider(
       return record === undefined ? null : publicRecord(record);
     },
 
-    async update<TInput>(
+    async update<TPayload>(
       context: ScheduleProviderContext,
       name: string,
-      patch: SchedulePatch<TInput>,
+      patch: SchedulePatch<TPayload>,
     ) {
       return withOperationResult(operationResults, context.operationId, () => {
         const key = scheduleKey(context, name);
@@ -83,7 +83,7 @@ export function inMemoryScheduleProvider(
             patch.expression === undefined
               ? current.expression
               : normalizeExpression(patch.expression),
-          input: patch.input === undefined ? current.input : patch.input,
+          payload: patch.payload === undefined ? current.payload : patch.payload,
           updatedAt: now().getTime(),
         };
         schedules.set(key, updated);
@@ -104,7 +104,7 @@ export function inMemoryScheduleProvider(
       const schedule = requireSchedule(schedules, scheduleKey(context, name), name);
       const scheduledAt = now().toISOString();
       const delivery = {
-        input: schedule.input,
+        payload: schedule.payload,
         occurrence: {
           executionId: `${schedule.scheduleId}:${scheduledAt}`,
           name: schedule.name,

@@ -70,7 +70,9 @@ export async function handleScheduleCollectionConsumer(
         value,
         `Expected schedule collection "${collectionName}" to match the public eve shape.`,
       );
-      const validation = await definition.inputSchema["~standard"].validate(payload.payload.input);
+      const validation = await definition.payloadSchema["~standard"].validate(
+        payload.payload.payload,
+      );
       if (validation.issues !== undefined) {
         throw new PermanentScheduleMessageError("Scheduled collection input is invalid.");
       }
@@ -83,7 +85,7 @@ export async function handleScheduleCollectionConsumer(
       });
       const result = await dispatcher.triggerCollection({
         collectionId: collectionName,
-        input: validation.value,
+        payload: validation.value,
         occurrence: {
           executionId,
           name: payload.name,

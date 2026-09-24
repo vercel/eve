@@ -23,12 +23,12 @@ describe("schedule collections", () => {
     const provider = inMemoryScheduleProvider();
     const definition = defineScheduleCollection({
       description: "Run saved queries.",
-      inputSchema: z.object({ query: z.string() }),
+      payloadSchema: z.object({ query: z.string() }),
       provider,
       scope: byPrincipal,
       tools: true,
-      run: async ({ input }) => {
-        input.query.toUpperCase();
+      run: async ({ payload }) => {
+        payload.query.toUpperCase();
       },
     });
 
@@ -74,7 +74,7 @@ describe("inMemoryScheduleProvider", () => {
 
     const created = await provider.create(providerContext("create_1"), {
       expression: { type: "cron", cron: " 0   9 * * 0 ", timezone: "UTC" },
-      input: { query: "open incidents" },
+      payload: { query: "open incidents" },
       name: "weekly-incidents",
     });
 
@@ -95,7 +95,7 @@ describe("inMemoryScheduleProvider", () => {
 
     const updated = await provider.update(providerContext("update_1"), created.name, {
       expression: { type: "single", at: "2026-10-01T09:00:00", timezone: "UTC" },
-      input: { query: "failed deployments" },
+      payload: { query: "failed deployments" },
     });
     expect(updated.expression).toEqual({
       type: "single",
@@ -120,7 +120,7 @@ describe("inMemoryScheduleProvider", () => {
     };
     const created = await provider.create(context, {
       expression: { type: "cron", cron: "0 9 * * *" },
-      input: { query: "test" },
+      payload: { query: "test" },
       name: "reminder",
     });
     expect(created.scheduleId).toMatch(/^mem_[0-9a-f]{64}$/u);
@@ -132,7 +132,7 @@ describe("inMemoryScheduleProvider", () => {
     const firstContext = providerContext("create_1");
     const input = {
       expression: { type: "cron" as const, cron: "0 9 * * 0" },
-      input: { query: "open incidents" },
+      payload: { query: "open incidents" },
       name: "weekly-incidents",
     };
 
@@ -155,7 +155,7 @@ describe("inMemoryScheduleProvider", () => {
     };
     await provider.create(createContext, {
       expression: { type: "cron", cron: "0 9 * * 0" },
-      input: { query: "open incidents" },
+      payload: { query: "open incidents" },
       name: "weekly-incidents",
     });
     const invokeContext = { ...providerContext("invoke"), target: { key: "queries" } };

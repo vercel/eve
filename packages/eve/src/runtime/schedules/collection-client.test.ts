@@ -45,12 +45,12 @@ describe("bindScheduleCollection", () => {
   it("binds scope, validates input, and dispatches an in-memory occurrence", async () => {
     const runs: unknown[] = [];
     const definition = defineScheduleCollection({
-      inputSchema: z.object({ query: z.string().trim().min(1) }),
+      payloadSchema: z.object({ query: z.string().trim().min(1) }),
       provider: inMemoryScheduleProvider({
         now: () => new Date("2026-09-20T12:00:00.000Z"),
       }),
-      run({ input, occurrence }) {
-        runs.push({ input, occurrence });
+      run({ payload, occurrence }) {
+        runs.push({ payload, occurrence });
       },
       scope: byPrincipal,
       tools: false,
@@ -61,11 +61,11 @@ describe("bindScheduleCollection", () => {
       definition,
       binding("alice", ["create", "invoke"]),
       async (delivery) => {
-        const validation = await definition.inputSchema["~standard"].validate(delivery.input);
+        const validation = await definition.payloadSchema["~standard"].validate(delivery.payload);
         if (validation.issues !== undefined) throw new Error("Invalid scheduled input.");
         await dispatcher.triggerCollection({
           collectionId: "queries",
-          input: validation.value,
+          payload: validation.value,
           occurrence: delivery.occurrence,
           run: definition.run,
         });
@@ -74,14 +74,14 @@ describe("bindScheduleCollection", () => {
 
     await client!.create({
       expression: { type: "cron", cron: " 0  9 * * 0 ", timezone: "UTC" },
-      input: { query: " open incidents " },
+      payload: { query: " open incidents " },
       name: "weekly-incidents",
     });
     await client!.invoke("weekly-incidents");
 
     expect(runs).toEqual([
       {
-        input: { query: "open incidents" },
+        payload: { query: "open incidents" },
         occurrence: expect.objectContaining({
           scheduledAt: "2026-09-20T12:00:00.000Z",
           name: "weekly-incidents",
@@ -92,19 +92,19 @@ describe("bindScheduleCollection", () => {
 
   it("resolves typed input from trusted channel context before create and update", async () => {
     const deliveries: unknown[] = [];
-    const resolveInput = vi.fn(
+    const resolvePayload = vi.fn(
       (
-        input: { message: string; destination: string },
+        payload: { message: string; destination: string },
         context: { channel: { metadata?: Readonly<Record<string, unknown>> } },
       ) => ({
-        ...input,
+        ...payload,
         destination: String(context.channel.metadata?.channelId),
       }),
     );
     const definition = defineScheduleCollection({
-      inputSchema: z.object({ message: z.string().min(1), destination: z.string() }),
+      payloadSchema: z.object({ message: z.string().min(1), destination: z.string() }),
       provider: inMemoryScheduleProvider(),
-      resolveInput,
+      resolvePayload,
       run() {},
       scope: "fixture",
     });
@@ -116,18 +116,18 @@ describe("bindScheduleCollection", () => {
         channel: { kind: "slack", metadata: { channelId: "C0123" } },
       },
       async (delivery) => {
-        deliveries.push(delivery.input);
+        deliveries.push(delivery.payload);
       },
     );
     await client!.create({
       expression: { type: "cron", cron: "0 9 * * *" },
-      input: { message: "First", destination: "here" },
+      payload: { message: "First", destination: "here" },
       name: "reminder",
     });
-    await client!.update("reminder", { input: { message: "Second", destination: "here" } });
+    await client!.update("reminder", { payload: { message: "Second", destination: "here" } });
     await client!.invoke("reminder");
-    expect(resolveInput).toHaveBeenCalledTimes(2);
-    expect(resolveInput).toHaveBeenCalledWith(
+    expect(resolvePayload).toHaveBeenCalledTimes(2);
+    expect(resolvePayload).toHaveBeenCalledWith(
       { message: "First", destination: "here" },
       expect.objectContaining({
         auth: expect.objectContaining({
@@ -142,7 +142,7 @@ describe("bindScheduleCollection", () => {
   it("isolates principals and returns null for disabled scope", async () => {
     const provider = inMemoryScheduleProvider();
     const definition = defineScheduleCollection({
-      inputSchema: z.object({ query: z.string() }),
+      payloadSchema: z.object({ query: z.string() }),
       provider,
       run() {},
       scope: byPrincipal,
@@ -151,7 +151,7 @@ describe("bindScheduleCollection", () => {
     const bob = await bindScheduleCollection("queries", definition, binding("bob", ["get"]));
     await alice!.create({
       expression: { type: "single", at: "2026-10-01T09:00:00", timezone: "UTC" },
-      input: { query: "open incidents" },
+      payload: { query: "open incidents" },
       name: "reminder",
     });
     await expect(bob!.get("reminder")).resolves.toBeNull();
@@ -165,7 +165,7 @@ describe("bindScheduleCollection", () => {
 
   it("rejects invalid portable names, expressions, timezones, jitter, and limits", async () => {
     const definition = defineScheduleCollection({
-      inputSchema: z.object({ query: z.string().min(1) }),
+      payloadSchema: z.object({ query: z.string().min(1) }),
       provider: inMemoryScheduleProvider(),
       run() {},
       scope: "test",
@@ -178,19 +178,23 @@ describe("bindScheduleCollection", () => {
     const input = { query: "test" };
 
     await expect(
-      client!.create({ expression: { type: "cron", cron: "0 9 * *" }, input, name: "bad" }),
+      client!.create({
+        expression: { type: "cron", cron: "0 9 * *" },
+        payload: input,
+        name: "bad",
+      }),
     ).rejects.toThrow("exactly five fields");
     await expect(
       client!.create({
         expression: { type: "cron", cron: "0 9 * * 0", timezone: "Not/AZone" },
-        input,
+        payload: input,
         name: "bad-zone",
       }),
     ).rejects.toThrow("Invalid IANA timezone");
     await expect(
       client!.create({
         expression: { type: "cron", cron: "0 9 * * 0", jitter: 16 },
-        input,
+        payload: input,
         name: "bad-jitter",
       }),
     ).rejects.toThrow("1 through 15");
@@ -201,14 +205,14 @@ describe("bindScheduleCollection", () => {
     await expect(
       client!.create({
         expression: { type: "cron", cron: "0 9 * * 0" },
-        input: { query: "" },
+        payload: { query: "" },
         name: "bad-input",
       }),
     ).rejects.toThrow("Invalid schedule input");
 
     await client!.create({
       expression: { type: "cron", cron: "0 9 * * 0" },
-      input,
+      payload: input,
       name: "immutable-type",
     });
     await expect(
