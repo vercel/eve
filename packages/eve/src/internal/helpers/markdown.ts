@@ -194,7 +194,7 @@ function applyOptionalSkillFrontmatter(
     rawDefinition.license = license;
   }
 
-  const metadata = toOptionalStringRecord(frontmatter.metadata, "metadata");
+  const metadata = toOptionalStringRecord(frontmatter.metadata);
   if (metadata !== undefined) {
     rawDefinition.metadata = metadata;
   }
@@ -222,25 +222,18 @@ function requireStringFrontmatter(value: unknown, fieldName: string): string {
   return normalizedValue;
 }
 
-function toOptionalStringRecord(
-  value: unknown,
-  fieldName: string,
-): Record<string, string> | undefined {
-  if (value === undefined || value === null) {
+function toOptionalStringRecord(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null || !isObject(value)) {
     return undefined;
   }
 
-  if (!isObject(value)) {
-    throw new Error(`Expected "${fieldName}" frontmatter to be an object.`);
+  const stringEntries = Object.entries(value).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+
+  if (stringEntries.length === 0) {
+    return undefined;
   }
-
-  const stringEntries = Object.entries(value).map(([key, entryValue]) => {
-    if (typeof entryValue !== "string") {
-      throw new Error(`Expected "${fieldName}.${key}" frontmatter to be a string.`);
-    }
-
-    return [key, entryValue] as const;
-  });
 
   return Object.fromEntries(stringEntries);
 }
