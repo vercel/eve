@@ -1,5 +1,4 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import {
@@ -561,30 +560,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       throwIfTurnAborted(config.abortSignal);
       if (isTurnCancellation(error)) throw error;
       if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
-      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
-        throw error;
-      }
-
-      stepInstrumentation?.recordError(error);
-      const errorId = createErrorId();
-      const message = toErrorMessage(error);
-      log.error("turn boundary handler failed — parking session", {
-        error,
-        errorId,
-        sessionId: session.sessionId,
-        turnId: failureState.turnId,
-      });
-      emissionState = await emitRecoverableFailedTurn(emit, failureState, {
-        code: "EVENT_HANDLER_FAILED",
-        continuationToken: session.continuationToken,
-        details: { errorId },
-        message,
-      });
-      return {
-        next: null,
-        session: setHarnessEmissionState({ ...session, outputSchema: undefined }, emissionState),
-        settledTurn: { isError: true, output: message },
-      };
+      throw error;
     };
     const preparePreambleTrace = async (): Promise<RuntimeTraceContext | undefined> => {
       return await stepInstrumentation?.preparePreamble({

@@ -66,7 +66,12 @@ export async function emitSubagentEventStep(input: {
   const scoped = await withContextScope(ctx, session, async (enriched) => {
     const emitted = await publish();
     if (!emitted.suppressed) {
-      await dispatchStreamEventHooks({ ctx, registry, event: emitted.event });
+      await dispatchStreamEventHooks({
+        cancelTurn: undefined,
+        ctx,
+        registry,
+        event: emitted.event,
+      });
     }
     return { result: undefined, session: enriched };
   });

@@ -77,6 +77,18 @@ export interface HookContext extends SessionContext {
     readonly kind?: string;
     readonly continuationToken?: string;
   };
+  /**
+   * Cancels the running turn. The event's remaining subscribers still run,
+   * then the turn settles like `session.cancel()`: `turn.cancelled`, then
+   * `session.waiting`. Returns `void` because the turn stops after the hook
+   * returns; call it before the handler's promise settles.
+   *
+   * eve logs a warning and ignores the call when the event cannot stop a
+   * running turn (`step.failed`, turn and session terminal events,
+   * `context.cleared`, `subagent.*`, and clear or compact requests) or when
+   * it arrives after the event's hooks returned.
+   */
+  cancel(): void;
 }
 
 /**

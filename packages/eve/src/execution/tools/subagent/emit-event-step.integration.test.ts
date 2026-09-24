@@ -1,4 +1,6 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+import { setLogRecordSubscriber, type LogRecord } from "#internal/logging.js";
 
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import {
@@ -29,7 +31,13 @@ vi.mock("#context/serialize.js", () => ({
   serializeContext: vi.fn(),
 }));
 
-beforeEach(() => vi.resetAllMocks());
+const records: LogRecord[] = [];
+beforeEach(() => {
+  vi.resetAllMocks();
+  records.length = 0;
+  setLogRecordSubscriber((record) => records.push(record));
+});
+afterEach(() => setLogRecordSubscriber(undefined));
 
 const events: UnstampedMessageStreamEvent[] = [
   {
@@ -95,8 +103,8 @@ it.each(
       expect(received).toEqual(JSON.parse(new TextDecoder().decode(chunks[0])));
       expect(ctx.has(SandboxKey)).toBe(true);
       calls.push(kind);
-      if (fails) throw new Error("subagent subscriber failed");
       ctx.set(SessionTitleKey, "Research event received");
+      if (fails) throw new Error("subagent subscriber failed");
     };
     const handlers: Record<string, StreamEventHook<MessageStreamEvent>> = {};
     if (subscription !== "wildcard") handlers[event.type] = handler("typed");
@@ -148,26 +156,36 @@ it.each(
       sessionState,
     });
     const firstHandler = subscription === "wildcard" ? "wildcard" : "typed";
-    if (fails) {
-      await expect(emitted).rejects.toThrow("subagent subscriber failed");
-      expect(calls).toEqual(["adapter", "stream", firstHandler]);
-    } else {
-      const result = await emitted;
-      expect(result.serializedContext[SessionTitleKey.name]).toBe("Research event received");
-      expect(result.serializedContext[SessionKey.name]).toBeUndefined();
-      expect(result.serializedContext[SandboxKey.name]).toBeUndefined();
-      expect(result.sessionState.snapshot.session.sandboxState).toEqual({ session: null });
-      expect(result.serializedContext[DynamicSkillManifestKey.name]).toEqual(
-        ctx.require(DynamicSkillManifestKey),
-      );
-      expect(ctx.require(ChannelKey).state).toEqual({ delivered: true });
-      expect(calls).toEqual([
-        "adapter",
-        "stream",
-        firstHandler,
-        ...(subscription === "both" ? ["wildcard"] : []),
-      ]);
-    }
+    const result = await emitted;
+    expect(result.serializedContext[SessionTitleKey.name]).toBe("Research event received");
+    expect(result.serializedContext[SessionKey.name]).toBeUndefined();
+    expect(result.serializedContext[SandboxKey.name]).toBeUndefined();
+    expect(result.sessionState.snapshot.session.sandboxState).toEqual({ session: null });
+    expect(result.serializedContext[DynamicSkillManifestKey.name]).toEqual(
+      ctx.require(DynamicSkillManifestKey),
+    );
+    expect(ctx.require(ChannelKey).state).toEqual({ delivered: true });
+    expect(calls).toEqual([
+      "adapter",
+      "stream",
+      firstHandler,
+      ...(subscription === "both" ? ["wildcard"] : []),
+    ]);
+    const subscribers = [firstHandler, ...(subscription === "both" ? ["wildcard"] : [])];
+    expect(records).toMatchObject(
+      fails
+        ? subscribers.map((subscriber) => ({
+            level: "error",
+            fields: {
+              hook: "subagent-events",
+              subscription: subscriber === "typed" ? event.type : "*",
+              eventType: event.type,
+              sessionId: "parent",
+              error: { message: expect.stringMatching(/^(?:Error: )?subagent subscriber failed$/) },
+            },
+          }))
+        : [],
+    );
     expect(chunks).toHaveLength(1);
     expect(new TextDecoder().decode(chunks[0])).toContain(`"type":"${event.type}"`);
     expect(stream.locked).toBe(false);

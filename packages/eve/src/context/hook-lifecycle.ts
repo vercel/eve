@@ -1,4 +1,4 @@
-import { BoundaryHookError } from "#shared/boundary-hook-error.js";
+import { createLogger, logError } from "#internal/logging.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
@@ -8,16 +8,19 @@ import type { ContextContainer } from "./container.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ContinuationTokenKey } from "./keys.js";
 
+const log = createLogger("hooks");
+
 /**
  * Fans one runtime stream event out to every matching subscriber.
- * Errors propagate — harness error paths convert them into the
- * recoverable `turn.failed` cascade. Caller must hold an active ALS
- * scope so hooks see the same context as the rest of the step.
+ * Authored handler failures are logged independently. Caller must hold an
+ * active ALS scope so hooks see the same context as the rest of the step.
  */
 export async function dispatchStreamEventHooks(input: {
   readonly ctx: ContextContainer;
   readonly registry: RuntimeHookRegistry;
   readonly event: MessageStreamEvent;
+  /** Stops the running turn for `ctx.cancel()`; `undefined` when this event cannot stop one. */
+  readonly cancelTurn: (() => void) | undefined;
 }): Promise<void> {
   const typed = input.registry.streamEventsByType.get(input.event.type) ?? [];
   const wildcard = input.registry.streamEventsWildcard;
@@ -26,24 +29,47 @@ export async function dispatchStreamEventHooks(input: {
     return;
   }
 
-  const hookCtx = buildHookContext(input.ctx);
-  try {
-    for (const entry of typed) {
+  const baseCtx = buildHookContext(input.ctx);
+  let dispatching = true;
+  for (const entry of [...typed, ...wildcard]) {
+    const hookCtx: HookContext = {
+      ...baseCtx,
+      cancel: () => {
+        if (dispatching && input.cancelTurn !== undefined) {
+          input.cancelTurn();
+          return;
+        }
+        log.warn(
+          dispatching
+            ? "ctx.cancel() ignored: the event is not part of a running turn"
+            : "ctx.cancel() ignored: the event's hooks already returned",
+          {
+            hook: entry.slug,
+            eventId: input.event.meta.id,
+            eventType: input.event.type,
+            sessionId: baseCtx.session.id,
+          },
+        );
+      },
+    };
+    try {
       await entry.handler(input.event, hookCtx);
+    } catch (error) {
+      logError(log, "stream event hook failed", error, {
+        hook: entry.slug,
+        subscription: entry.eventType,
+        eventId: input.event.meta.id,
+        eventType: input.event.type,
+        sessionId: baseCtx.session.id,
+      });
     }
-    for (const entry of wildcard) {
-      await entry.handler(input.event, hookCtx);
-    }
-  } catch (error) {
-    if (input.event.type === "turn.started" || input.event.type === "step.started") {
-      throw new BoundaryHookError(error);
-    }
-    throw error;
   }
+  // Work a hook did not await could otherwise cancel at an arbitrary later point, or never.
+  dispatching = false;
 }
 
-/** Builds the {@link HookContext} surfaced to one handler. */
-function buildHookContext(ctx: ContextContainer): HookContext {
+/** Builds the {@link HookContext} fields shared by every handler of one event. */
+function buildHookContext(ctx: ContextContainer): Omit<HookContext, "cancel"> {
   const bundle = ctx.require(BundleKey);
   const channelAdapter = ctx.get(ChannelKey);
   const continuationToken = ctx.get(ContinuationTokenKey);

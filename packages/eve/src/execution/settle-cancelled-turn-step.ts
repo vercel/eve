@@ -112,6 +112,7 @@ export async function settleCancelledTurnStep(input: {
           await writer.write(encodeMessageStreamEvent(stamped));
           void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
           await dispatchStreamEventHooks({
+            cancelTurn: undefined,
             ctx,
             event: stamped,
             registry: bundle.hookRegistry,
