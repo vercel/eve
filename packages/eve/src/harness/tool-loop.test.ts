@@ -4008,6 +4008,89 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("projects the step-scoped label when a step tool overrides a same-named session tool", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: { ok: true },
+                toolCallId: "call-1",
+                toolName: "lookup",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+      toolResults: [
+        {
+          input: {},
+          output: { ok: true },
+          toolCallId: "call-1",
+          toolName: "lookup",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const metadata = {
+      callbacks: {
+        execute: { closure: {} },
+        label: { complete: { closure: {} }, start: { closure: {} } },
+      },
+      description: "Look something up.",
+      entryKey: "lookup",
+      inputSchema: { type: "object" },
+      name: "lookup",
+      resolverSlug: "lookup",
+    };
+    for (const scope of ["step", "session"] as const) {
+      const owner = {
+        sessionId: "test-session",
+        scope,
+        resolverSlug: "lookup",
+        entryKey: "lookup",
+        name: "lookup",
+      };
+      registerDurableDynamicCallback({ callback: () => ({ ok: true }), phase: "execute", owner });
+      registerDurableDynamicCallback({
+        callback: () => `${scope} start`,
+        phase: "labelStart",
+        owner,
+      });
+      registerDurableDynamicCallback({
+        callback: () => `${scope} complete`,
+        phase: "labelComplete",
+        owner,
+      });
+    }
+    ctx.set(StepDynamicToolMetadataKey, [metadata]);
+    ctx.set(SessionDynamicToolMetadataKey, [metadata]);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
+
+    expect(events.find((e) => e.type === "actions.requested")?.data.presentation).toEqual({
+      "call-1": { label: "step start" },
+    });
+    expect(events.find((e) => e.type === "action.result")?.data.presentation).toEqual({
+      "call-1": { label: "step complete" },
+    });
+  });
+
   it("skips AI-SDK-marked invalid tool calls so a malformed JSON payload does not crash the harness", async () => {
     // Simulates the AI SDK fallback path: when the model emits unparsable
     // JSON for a tool call, `parseToolCall` returns a DynamicToolCall with

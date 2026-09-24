@@ -1418,7 +1418,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }
           flatTools[name] = toolDefinition;
         }
-        for (const tool of dynamicTools) presentationTools.set(tool.name, tool);
+        // Match `buildToolSetFromDefinitions`: the first dynamic definition of a
+        // name (step, then turn, then session) wins, and still overrides authored.
+        const presentedDynamicNames = new Set<string>();
+        for (const tool of dynamicTools) {
+          if (presentedDynamicNames.has(tool.name)) continue;
+          presentedDynamicNames.add(tool.name);
+          presentationTools.set(tool.name, tool);
+        }
       }
 
       if (session.outputSchema !== undefined) {
