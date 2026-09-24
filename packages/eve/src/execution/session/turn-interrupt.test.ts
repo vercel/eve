@@ -231,6 +231,29 @@ describe("the interrupt rule", () => {
     expect(steps()[1]).toMatchObject({ delivery: fromAlice });
   });
 
+  it("keeps acting for the turn's principal when another person's answer resumes the turn", async () => {
+    // Alice's turn parked on her approval request; Bob approves it, and Alice then corrects her turn.
+    const bobApproves: DeliverHookPayload = {
+      auth: BOB,
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+    };
+    const fromAlice: DeliverHookPayload = { ...STEERING, auth: ALICE };
+    const { execution, steps } = setup({
+      auth: ALICE,
+      calls: ["call-deploy"],
+      pendingInput: true,
+      script: [fromAlice],
+    });
+
+    await execution.runTurn({ delivery: bobApproves });
+
+    expect(interruptAttachedCalls).toHaveBeenCalledExactlyOnceWith(expect.anything(), [
+      "call-deploy",
+    ]);
+    expect(steps()[1]).toMatchObject({ delivery: fromAlice });
+  });
+
   it("sends another principal's answer to its request during the wait", async () => {
     const answer: DeliverHookPayload = {
       auth: BOB,
@@ -314,10 +337,12 @@ function setup(input: {
   readonly auth?: SessionAuthContext;
   readonly calls: readonly string[];
   readonly mode?: "conversation" | "task";
+  /** The session waits on a request of its own, as a turn parked for approval does. */
+  readonly pendingInput?: boolean;
   readonly script: ScriptItem[];
   readonly taskWaits?: readonly TaskWaitRegistration[];
 }) {
-  const sessionState = ownerState();
+  const sessionState = ownerState(input.pendingInput === true);
   const queue = new SessionInputQueue();
   const script = [...input.script];
   const inbox: SessionInbox = {
@@ -410,9 +435,20 @@ function outcome(callId: string): SessionInboxPayload {
   };
 }
 
-function ownerState(): DurableSessionState {
-  return createTestSessionState({
+function ownerState(pendingInput = false): DurableSessionState {
+  const state = createTestSessionState({
     emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn_1" },
     sessionId: "owner",
   });
+  if (!pendingInput) return state;
+  const batch = { requests: [{ kind: "approval", requestId: "approval-1" }], responseMessages: [] };
+  return {
+    ...state,
+    snapshot: {
+      session: {
+        ...state.snapshot.session,
+        state: { "eve.runtime.pendingInputBatches": [batch] },
+      },
+    },
+  };
 }

@@ -453,6 +453,93 @@ describe("cancelTasksStep with the turn selector", () => {
     expect(update.events).toEqual([]);
     expect(update.sessionState).toBe(sessionState);
   });
+
+  it("leaves the running turn's task_wait live when the cancel names another turn", async () => {
+    // Alice's current turn waits on a reminder her earlier turn started; a cancel for turn-9 misses it.
+    const waited = { ...REMINDER, wait: { callId: "call-wait", startedAt: NOW } };
+    const sessionState = batchState([waited], ["call-wait"]);
+
+    const update = await cancelTasksStep({
+      selector: { kind: "turn", turnId: "turn-9" },
+      serializedContext: {},
+      sessionState,
+    });
+
+    expect(update.results).toEqual([]);
+    expect(records(update.sessionState)[0]?.wait).toEqual({ callId: "call-wait", startedAt: NOW });
+  });
+
+  it("stops the agent calls a cancelled workflow run awaits, whichever turn started them", async () => {
+    // The reminder's run asked a researcher for help during a later turn.
+    const runAgent = createTaskRecord({
+      callId: "call-nested",
+      child: LOCAL_CHILD,
+      id: "research-b81d0c",
+      turnId: "turn-1",
+      workflowCaller: { replyTo: "reply-hook", runId: RUN.runId },
+    });
+
+    const { events, sessionState } = await cancelTasksStep({
+      selector: { kind: "turn", turnId: "turn-0" },
+      serializedContext: {},
+      sessionState: ownerState([REMINDER, runAgent]),
+    });
+
+    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
+      "remind-q4x1ze",
+      "research-b81d0c",
+    ]);
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "child-session",
+    });
+    expect(records(sessionState).map(({ status }) => status)).toEqual(["cancelled", "cancelled"]);
+  });
+});
+
+describe("cancelTasksStep with a live task_wait", () => {
+  it("gives the wait the cancellation when every task is cancelled", async () => {
+    const waited = { ...REMINDER, wait: { callId: "call-wait", startedAt: NOW } };
+
+    const update = await cancelTasksStep({
+      selector: { kind: "all" },
+      serializedContext: {},
+      sessionState: batchState([waited], ["call-wait"]),
+    });
+
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        callId: "call-wait",
+        output: expect.objectContaining({ outcome: { status: "cancelled" }, status: "settled" }),
+      }),
+    ]);
+    expect(records(update.sessionState)[0]?.wait).toBeUndefined();
+  });
+});
+
+describe("cancelling a workflow task", () => {
+  it("also stops the agent calls its run awaits", () => {
+    const runAgent = createTaskRecord({
+      callId: "call-nested",
+      child: LOCAL_CHILD,
+      id: "research-b81d0c",
+      workflowCaller: { replyTo: "reply-hook", runId: RUN.runId },
+    });
+    const otherRunAgent = createTaskRecord({
+      callId: "call-other",
+      child: { ...LOCAL_CHILD, sessionId: "other-child" },
+      id: "research-3fq8wd",
+      workflowCaller: { replyTo: "other-hook", runId: "run-other" },
+    });
+
+    const { events, session } = cancel([REMINDER, runAgent, otherRunAgent], "remind-q4x1ze");
+
+    expect(events.map((event) => event.data.taskId)).toEqual(["remind-q4x1ze", "research-b81d0c"]);
+    expect(getTaskTable(session).records.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: "remind-q4x1ze", status: "cancelled" },
+      { id: "research-b81d0c", status: "cancelled" },
+      { id: "research-3fq8wd", status: "working" },
+    ]);
+  });
 });
 
 describe("interruptAttachedCalls", () => {
@@ -649,6 +736,20 @@ function withBatch(state: SessionStateMap, callIds: readonly string[]) {
           },
     ),
   });
+}
+
+/** An owner whose turn waits on the given `task_wait` calls. */
+function batchState(existing: readonly TaskRecord[], callIds: readonly string[]) {
+  const base = createTestSessionState({ sessionId: "parent" });
+  return {
+    ...base,
+    snapshot: {
+      session: {
+        ...base.snapshot.session,
+        state: withBatch(taskTableState(existing), callIds).state,
+      },
+    },
+  };
 }
 
 function ownerState(existing: readonly TaskRecord[]): DurableSessionState {

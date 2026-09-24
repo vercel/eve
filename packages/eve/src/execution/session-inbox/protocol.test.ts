@@ -69,4 +69,15 @@ describe("session inbox payloads", () => {
       expect(() => decodeSessionInboxPayload(invalid)).toThrowError(SessionInboxPayloadError);
     }
   });
+
+  it("refuses a cancel that still names the removed task options", () => {
+    for (const removed of [
+      { kind: "cancel", taskId: "research-7k2m9q" },
+      { kind: "cancel", tasks: true },
+    ]) {
+      expect(() => decodeSessionInboxPayload(removed)).toThrowError(
+        "Session cancel: 'taskId' and 'tasks' are no longer supported",
+      );
+    }
+  });
 });

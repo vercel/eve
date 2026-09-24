@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { taskTable } from "#internal/testing/task-records.js";
+import { createTaskRecord, taskTable } from "#internal/testing/task-records.js";
 import type { TaskMessage } from "#tasks/protocol.js";
 import { decodeTaskRecord } from "#tasks/record.js";
 import {
@@ -8,6 +8,7 @@ import {
   cancelTask,
   findTask,
   isReportedLoss,
+  MAX_WORKING_TASKS,
   pruneTaskTable,
   readTaskTable,
   setTaskWait,
@@ -15,6 +16,7 @@ import {
   steerTask,
   TASK_TABLE_STATE_KEY,
   withdrawSteer,
+  workingDetachedTaskIds,
   writeTaskTable,
   type TaskTable,
 } from "#tasks/table.js";
@@ -317,6 +319,63 @@ describe("steerTask", () => {
     );
     expect(done.effects).toEqual([expect.objectContaining({ kind: "settled" })]);
     expect(done.table.records[0]).toMatchObject({ generation: 2, status: "completed" });
+  });
+
+  it("fails a continued generation over the working-task cap at once and asks the agent to stop", () => {
+    // Alice already has the maximum of other tasks working when her researcher's
+    // answer shows it missed her follow-up message.
+    const others = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
+      createTaskRecord({
+        callId: `call-other-${index}`,
+        id: `lookup-${String(index).padStart(6, "0")}`,
+        kind: "workflow",
+        mode: "detached",
+        name: "lookup",
+      }),
+    );
+    const researcher = createTaskRecord({
+      child: { continuationToken: "t", kind: "local", sessionId: "child" },
+      id: "research-7k2m9q",
+      mode: "detached",
+      steers: 1,
+    });
+
+    const answered = applyTaskMessage(
+      taskTable([...others, researcher]),
+      {
+        generation: 1,
+        kind: "task.settled",
+        outcome: { output: "draft", status: "completed" },
+        taskId: researcher.id,
+      },
+      NOW,
+    );
+
+    expect(answered.effects).toEqual([
+      expect.objectContaining({
+        kind: "settled",
+        record: expect.objectContaining({ generation: 1 }),
+      }),
+      expect.objectContaining({
+        kind: "continued",
+        record: expect.objectContaining({ generation: 2 }),
+      }),
+      {
+        kind: "settled",
+        outcome: {
+          error: { code: "TOO_MANY_TASKS", message: expect.stringContaining("20") },
+          status: "failed",
+        },
+        record: expect.objectContaining({ generation: 2, status: "failed" }),
+      },
+      expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
+    ]);
+    expect(findTask(answered.table, researcher.id)).toMatchObject({
+      cancelConfirmBy: expect.any(String),
+      generation: 2,
+      status: "failed",
+    });
+    expect(workingDetachedTaskIds(answered.table)).toHaveLength(MAX_WORKING_TASKS);
   });
 
   it("never settles the next generation with a repeat of the answer that opened it", () => {
@@ -753,6 +812,15 @@ describe("persistence", () => {
         reason: "invalid wait",
       });
     }
+  });
+
+  it("recovers the task_wait of an unreadable record, so the wait takes the loss", () => {
+    const record = { ...started().record, v: 0, wait: { callId: "call-w1", startedAt: NOW } };
+    expect(decodeTaskRecord(record)).toMatchObject({
+      ok: false,
+      wait: { callId: "call-w1", startedAt: NOW },
+    });
+    expect(decodeTaskRecord({ ...record, wait: { callId: "call-w1" } })).not.toHaveProperty("wait");
   });
 
   it("decodes one record without validating others", () => {

@@ -22,14 +22,13 @@ import {
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { continuedEvents, settledEvents, taskStartedEvent } from "#tasks/events.js";
+import { reportedEvents, settledEvents, taskStartedEvent } from "#tasks/events.js";
 import type {
   RuntimeAgentDispatchRequest,
   RuntimeSubagentResult,
@@ -47,7 +46,7 @@ import {
   flushAgentInvocationTraces,
   settleAgentInvocationTrace,
 } from "#tracing/agent-invocation-terminal.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
+import { coordinationTurnId, getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
 import {
   isTerminalTaskStatus,
@@ -67,6 +66,7 @@ import {
   deliverToChild,
   RETIRED_IDLE_AGENT_REASON,
   retireIdleAgent,
+  runCommands,
   type CommandEffect,
 } from "#tasks/transport.js";
 import {
@@ -176,10 +176,8 @@ export async function startAgentTasks(input: {
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const emission = getHarnessEmissionState(durableSession.state);
-  // The pending batch keeps the waiting turn's ID even after a child's
-  // question clears the live one, so a turn cancel still reaches these tasks.
-  const pendingEvent = getPendingCoordinationBatch(durableSession.state)?.event;
-  const turnId = pendingEvent?.turnId ?? activeTurnId(emission);
+  // A turn cancel still reaches these tasks after a child's question clears the live turn.
+  const turnId = coordinationTurnId(durableSession.state, emission);
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -588,22 +586,25 @@ export async function applyTaskReport(input: {
         );
         continue;
       }
-      const settledEffect = applied.effects.find((effect) => effect.kind === "settled");
-      if (settledEffect === undefined) continue;
-      events.push(...settledEvents(applied.effects));
+      if (!applied.effects.some((effect) => effect.kind === "settled")) continue;
+      events.push(...reportedEvents(applied.effects, session.sessionId));
       // An awaited call's result is delivered now; a detached one goes to a
-      // live `task_wait`, or is held for delivery.
+      // live `task_wait`, or is held for delivery. So does the result of a
+      // continued generation that failed at once, over the working-task cap.
       const detached = record.mode === "detached" && record.workflowCaller === undefined;
       let next = setTaskTable(
         session,
         detached ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
       );
-      if (detached) {
-        const routed = routeDetachedResult(next, settledEffect.record, outcome);
+      for (const effect of applied.effects) {
+        if (effect.kind !== "settled") continue;
+        if (!detached && effect.record.generation === record.generation) continue;
+        const routed = routeDetachedResult(next, effect.record, effect.outcome);
         next = routed.session;
         if (routed.result !== undefined) results.push(routed.result);
       }
-      events.push(...continuedEvents(applied.effects, session.sessionId));
+      const stops = commandEffects(applied.effects);
+      if (stops.length > 0) await runCommands(stops, await readContext(input.serializedContext));
       session = setTurnUsageState(
         next,
         accumulateSessionUsage({

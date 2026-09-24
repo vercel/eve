@@ -4559,6 +4559,34 @@ describe("createToolLoopHarness", () => {
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
   });
 
+  it("settles the turn failed when the session's event stream cannot be written", async () => {
+    setupMockAgentError(
+      new Error(
+        "Stream write failed: HTTP 504 (PUT https://vercel-workflow.com/api/v2/runs/wrun_x/stream/strm_x; " +
+          "x-vercel-error=FUNCTION_INVOCATION_TIMEOUT): An error occurred with your deployment",
+      ),
+    );
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
+      message: "Hi",
+    });
+
+    // Like every other failed turn, so the turn's tasks stop and a delegated caller hears of it.
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({
+      isError: true,
+      output: expect.stringMatching(/^The session's event stream could not be written \(error /u),
+    });
+    expect(JSON.stringify(result.settledTurn)).not.toContain("vercel-workflow.com");
+    expect(result.session.outputSchema).toBeUndefined();
+    expect(events.find((event) => event.type === "turn.failed")?.data).toMatchObject({
+      code: "WORKFLOW_STREAM_WRITE_FAILED",
+    });
+  });
+
   it.each([
     {
       message: "AI Gateway requires a valid credit card on file to service requests.",

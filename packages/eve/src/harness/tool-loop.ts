@@ -852,7 +852,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     const pending = resolvePendingInput({
-      activeTurnId: pendingCoordination?.event.turnId ?? activeTurnId(emissionState),
+      activeTurnId: pendingCoordination?.event.turnId || activeTurnId(emissionState),
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedCoordination.messages,
       internalStep: !isHarnessBetweenTurns(session),
@@ -1843,8 +1843,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             details: { ...streamWriteDetails, errorId },
             message: toErrorMessage(finalError),
           });
-          const parkedSession = setHarnessEmissionState(session, emissionState);
-          return { next: null, session: parkedSession };
+          // A failed turn like any other: it stops the tasks it started, and
+          // a delegated caller gets the failure. The endpoint stays in the log.
+          return {
+            next: null,
+            session: setHarnessEmissionState(
+              { ...session, outputSchema: undefined },
+              emissionState,
+            ),
+            settledTurn: {
+              isError: true,
+              output: `The session's event stream could not be written (error ${errorId}).`,
+            },
+          };
         }
 
         const classification = classifyModelCallError(finalError);

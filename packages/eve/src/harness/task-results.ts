@@ -1,16 +1,13 @@
 import type { SessionAuthContext } from "#channel/types.js";
-import { createLogger } from "#internal/logging.js";
 import {
   createFrameworkUserMessage,
   type HarnessModelMessage,
   type UserModelMessage,
 } from "#harness/messages.js";
-import { projectTaskResultBody } from "#harness/coordination.js";
+import { projectTaskResultBody } from "#harness/tool-model-output.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { RESULT_TURN_REPLY_PROMPT, renderTaskResults } from "#tasks/render.js";
-import { takeTaskResults, type PendingTaskResult } from "#tasks/results.js";
-
-const log = createLogger("harness.task-results");
+import { takeTaskResults } from "#tasks/results.js";
 
 /**
  * Takes the deliverable background results created by `principal` and
@@ -34,7 +31,7 @@ export async function takeTaskResultMessage(input: {
   if (taken.results.length === 0) return undefined;
   const blocks = await Promise.all(
     taken.results.map(async (result) => ({
-      body: await projectBody(result, input.tools),
+      body: await projectTaskResultBody(result, input.tools),
       outcome: result.outcome,
       record: { id: result.taskId, name: result.name },
     })),
@@ -70,24 +67,6 @@ export function needsResultTurnReply(history: readonly HarnessModelMessage[]): b
 
 export function createResultTurnReplyPrompt(): UserModelMessage {
   return createFrameworkUserMessage("execution.continuation", RESULT_TURN_REPLY_PROMPT);
-}
-
-/** A definition's `toModelOutput` shapes a completed workflow result, as it does a tool result. */
-async function projectBody(
-  result: PendingTaskResult,
-  tools: HarnessToolMap,
-): Promise<string | undefined> {
-  if (result.kind !== "workflow") return undefined;
-  try {
-    return await projectTaskResultBody(result, tools);
-  } catch (error) {
-    log.warn("toModelOutput failed for a task result; delivering the raw output", {
-      error,
-      taskId: result.taskId,
-      toolName: result.name,
-    });
-    return undefined;
-  }
 }
 
 function hasText(message: Extract<HarnessModelMessage, { readonly role: "assistant" }>): boolean {

@@ -35,12 +35,12 @@ import {
   readTaskCallbackAlias,
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
-import { cancelTask, pruneTaskTable } from "#tasks/table.js";
+import { cancelTask, MAX_WORKING_TASKS, pruneTaskTable } from "#tasks/table.js";
 import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
 import { MAX_RETAINED_IDLE_AGENTS } from "#tasks/owner-calls.js";
 import { armChildHardStop } from "#tasks/timer-steps.js";
 import { renderStartReceipt, renderSteeringReceipt } from "#tasks/render.js";
-import { encodeTaskCreator, MAX_WORKING_TASKS, readPendingTaskResults } from "#tasks/results.js";
+import { encodeTaskCreator, readPendingTaskResults } from "#tasks/results.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
@@ -1000,6 +1000,52 @@ describe("steering a working agent", () => {
         generation: 2,
         outcome: { output: "Draft with pricing.", status: "completed" },
       }),
+    ]);
+  });
+
+  it("fails a missed message's generation at once when the session is at the working-task cap", async () => {
+    // Alice's other tasks fill the cap by the time the writer's answer shows it missed her message.
+    const others = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
+      createTaskRecord({
+        callId: `call-other-${index}`,
+        id: `lookup-${String(index).padStart(6, "0")}`,
+        kind: "workflow",
+        mode: "detached",
+        name: "lookup",
+      }),
+    );
+    const steered = await start(
+      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [working, ...others],
+    );
+    vi.mocked(requestWorkflowTurnCancellation).mockClear();
+
+    const answered = await applyTaskReport({
+      now: NOW,
+      payload: answer("Draft without pricing."),
+      serializedContext: {},
+      sessionState: steered.sessionState,
+    });
+
+    // The next generation opens and fails in order, and the writer is asked to stop it.
+    expect(answered.events.map((event) => event.type)).toEqual([
+      "task.settled",
+      "task.started",
+      "task.settled",
+    ]);
+    expect(answered.events[2]).toMatchObject({
+      data: { error: { code: "TOO_MANY_TASKS" }, status: "failed", taskId: working.id },
+    });
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "child-session",
+    });
+    expect(
+      readPendingTaskResults(readDurableSession(answered.sessionState).state).map(
+        ({ generation, outcome }) => ({ generation, status: outcome.status }),
+      ),
+    ).toEqual([
+      { generation: 1, status: "completed" },
+      { generation: 2, status: "failed" },
     ]);
   });
 

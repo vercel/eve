@@ -3,8 +3,7 @@ import {
   replaceDurableSessionSnapshot,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
+import { coordinationTurnId, getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { TaskSettledStreamEvent } from "#protocol/message.js";
@@ -119,9 +118,7 @@ export async function interruptAttachedCallsStep(input: {
     callIds: input.callIds,
     now,
     session: waits.session,
-    turnId:
-      getPendingCoordinationBatch(durable.state)?.event.turnId ||
-      activeTurnId(input.sessionState.emissionState),
+    turnId: coordinationTurnId(durable.state, input.sessionState.emissionState),
   });
   if (stopped.session === durable) {
     return {
@@ -280,11 +277,44 @@ function selectTasks(selector: TaskCancelSelector): (record: TaskRecord) => bool
   }
 }
 
-function cancelRecords(
+/**
+ * Cancels the working agent calls that the given workflow runs await
+ * through `ctx.agent`. A run that is stopped may never report its outcome,
+ * so its agents would otherwise run until their own time limit.
+ */
+export function cancelRunAgents(
   table: TaskTable,
-  records: readonly TaskRecord[],
+  runIds: ReadonlySet<string>,
   now: string,
 ): CancelledTasks {
+  if (runIds.size === 0) return { commands: [], events: [], table };
+  return cancelRecords(
+    table,
+    table.records.filter(
+      (record) => record.workflowCaller !== undefined && runIds.has(record.workflowCaller.runId),
+    ),
+    now,
+  );
+}
+
+/** Cancels each working record, and the agent calls of each workflow run among them. */
+function cancelRecords(
+  table: TaskTable,
+  selected: readonly TaskRecord[],
+  now: string,
+): CancelledTasks {
+  const runIds = new Set(
+    selected.flatMap((record) => (record.child?.kind === "workflow" ? [record.child.runId] : [])),
+  );
+  const records = [
+    ...selected,
+    ...table.records.filter(
+      (record) =>
+        record.workflowCaller !== undefined &&
+        runIds.has(record.workflowCaller.runId) &&
+        !selected.includes(record),
+    ),
+  ];
   let next = table;
   const commands: CommandEffect[] = [];
   const events: TaskSettledStreamEvent[] = [];

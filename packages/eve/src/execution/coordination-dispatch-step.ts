@@ -90,11 +90,19 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
   }
   // Waits register before cancels, so a wait on a task cancelled in the same
   // step gets the cancellation, whatever the calls' order.
+  const alreadyWaited = new Set<string>();
   for (const request of prepared.plan.filter(isTaskWaitRequest)) {
-    const waited = applyTaskWaitCall({ caller: prepared.auth, now, request, session: nextSession });
+    const waited = applyTaskWaitCall({
+      alreadyWaited,
+      caller: prepared.auth,
+      now,
+      request,
+      session: nextSession,
+    });
     nextSession = waited.session;
     if (waited.result !== undefined) results.push(waited.result);
     if (waited.wait !== undefined) taskWaits.push(waited.wait);
+    if (waited.waitedTaskId !== undefined) alreadyWaited.add(waited.waitedTaskId);
   }
   for (const request of prepared.plan.filter(isTaskCancelRequest)) {
     const cancelled = applyTaskCancelCall({

@@ -787,13 +787,79 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(result.content).toEqual([
       {
         input: JSON.stringify({ taskId: "deploy_service-a1b2c3" }),
-        toolCallId: "call_task_wait_deploy_service_a1b2c3",
+        toolCallId: "call_task_wait_call_a",
         toolName: "task_wait",
         type: "tool-call",
       },
       {
         input: JSON.stringify({ taskId: "deploy_service-d4e5f6" }),
-        toolCallId: "call_task_wait_deploy_service_d4e5f6",
+        toolCallId: "call_task_wait_call_b",
+        toolName: "task_wait",
+        type: "tool-call",
+      },
+    ]);
+  });
+
+  it("gives a wait on a resumed agent a call ID of its own", async () => {
+    // Alice's researcher answered once; she asked it again, so the new receipt keeps its task ID.
+    const researcher = "researcher-7k2m9q";
+    const result = await generateWithPrompt(
+      [
+        { content: "Ask the researcher about pricing.", role: "user" },
+        {
+          content: [
+            {
+              output: {
+                type: "text",
+                value: `Started task ${researcher}. Use task_wait for its result.`,
+              },
+              toolCallId: "call_first",
+              toolName: "researcher",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content: [
+            {
+              output: {
+                type: "text",
+                value: `<task_result id="${researcher}" name="researcher" status="completed">\nPricing notes.\n</task_result>`,
+              },
+              toolCallId: "call_task_wait_call_first",
+              toolName: "task_wait",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        { content: "Now ask it about packaging.", role: "user" },
+        {
+          content: [
+            {
+              output: {
+                type: "text",
+                value: `Started task ${researcher}. Use task_wait for its result.`,
+              },
+              toolCallId: "call_second",
+              toolName: "researcher",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+      [
+        { inputSchema: { type: "object" }, name: "researcher", type: "function" },
+        { inputSchema: { type: "object" }, name: "task_wait", type: "function" },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({ taskId: researcher }),
+        toolCallId: "call_task_wait_call_second",
         toolName: "task_wait",
         type: "tool-call",
       },

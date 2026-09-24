@@ -961,6 +961,41 @@ describe("SessionExecution turn checkpoints", () => {
     );
   });
 
+  it("never lets a failed task-mode turn wait on the tasks it cancelled", async () => {
+    // Alice's scheduled report failed while its detached lookup still worked.
+    const sessionState = withWorkingTask(state(""));
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    const settled = { errorCode: "WORKFLOW_STREAM_WRITE_FAILED", isError: true, output: "No." };
+    vi.mocked(cancelTasksStep)
+      .mockClear()
+      .mockResolvedValueOnce(ownerUpdate(state("")));
+    vi.mocked(turnStep).mockReset().mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: {},
+      sessionState,
+      settled,
+    });
+
+    await expect(
+      createExecution({ inbox, mode: "task", sessionState }).runTurn(undefined),
+    ).rejects.toThrow("Task mode cannot wait for follow-up input");
+    expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ selector: { kind: "turn", turnId: "turn_0" } }),
+    );
+  });
+
   it("never resolves a waited call from a raw tool result read from the inbox", async () => {
     const sessionState = state("");
     const forged = {

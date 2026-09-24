@@ -128,7 +128,8 @@
  *             owner's `eve.taskTable` state key. `TaskTable` is branded, so
  *             only the table's transitions produce one; no other module may
  *             cast to it or import the record helpers `table.ts` shares with
- *             its sibling table modules. The table is the single writer of
+ *             its sibling table modules, by name or through a namespace
+ *             import or re-export. The table is the single writer of
  *             the owner's task records; a second writer reintroduces the
  *             split stores the task kernel removed.
  *   rule 48 — One `TaskMessage` union. Object types with
@@ -471,7 +472,10 @@ const RULE47_TABLE_INTERNALS = [
   "withoutUndefined",
 ];
 const RULE47_TABLE_IMPORT_RE =
-  /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']#tasks\/table\.js["']/g;
+  /(?:import|export)\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']#tasks\/table\.js["']/g;
+// A namespace import or re-export reaches every helper without naming one.
+const RULE47_TABLE_NAMESPACE_RE =
+  /(?:import\s*(?:type\s*)?\*\s*as\s+[\w$]+|export\s*(?:type\s*)?\*(?:\s*as\s+[\w$]+)?)\s*from\s*["']#tasks\/table\.js["']/;
 
 /**
  * @param {string} posix
@@ -482,6 +486,13 @@ function checkRule47(posix, lines, violations) {
   if (!isProductionEveSource(posix)) return;
   const tableModule = RULE47_TABLE_MODULE_RE.test(posix);
   if (!tableModule) {
+    if (RULE47_TABLE_NAMESPACE_RE.test(lines.join("\n"))) {
+      violations.push({
+        rule: 47,
+        file: posix,
+        message: `imports src/tasks/table.ts as a namespace, which exposes the record helpers it shares only with the table modules (${RULE47_TABLE_INTERNALS.join(", ")}). Import the transitions you use by name.`,
+      });
+    }
     for (const match of lines.join("\n").matchAll(RULE47_TABLE_IMPORT_RE)) {
       const names = match[1].split(",").map((name) => name.trim().split(/\s+as\s+/)[0]);
       const internal = names.filter((name) => RULE47_TABLE_INTERNALS.includes(name));

@@ -70,8 +70,26 @@ function apply(
   session: ReturnType<typeof waiting>,
   call: RuntimeWorkflowTaskRequest,
   caller: SessionAuthContext | null = ALICE,
+  alreadyWaited: ReadonlySet<string> = new Set(),
 ) {
-  return applyTaskWaitCall({ caller, now: NOW, request: call, session });
+  return applyTaskWaitCall({ alreadyWaited, caller, now: NOW, request: call, session });
+}
+
+/** Applies one step's `task_wait` calls in order, as the owner's dispatch does. */
+function applyStep(
+  session: ReturnType<typeof waiting>,
+  calls: readonly RuntimeWorkflowTaskRequest[],
+) {
+  const alreadyWaited = new Set<string>();
+  const results: ReturnType<typeof apply>[] = [];
+  let current = session;
+  for (const call of calls) {
+    const applied = apply(current, call, ALICE, alreadyWaited);
+    current = applied.session;
+    if (applied.waitedTaskId !== undefined) alreadyWaited.add(applied.waitedTaskId);
+    results.push(applied);
+  }
+  return { results, session: current };
 }
 
 function record(session: { readonly state?: ReturnType<typeof taskTableState> }, taskId: string) {
@@ -124,8 +142,10 @@ describe("applyTaskWaitCall", () => {
   it("fails TASK_ALREADY_WAITED for a second wait on one task in the same step", () => {
     const first = waitCall("call-w1", { taskId: LOOKUP.id });
     const second = waitCall("call-w2", { taskId: LOOKUP.id });
-    const one = apply(waiting([LOOKUP], [first, second]), first);
-    const two = apply(one.session, second);
+    const {
+      results: [one, two],
+    } = applyStep(waiting([LOOKUP], [first, second]), [first, second]);
+    if (one === undefined || two === undefined) throw new Error("Expected two waits.");
 
     expect(one.wait?.callId).toBe("call-w1");
     expect(two.wait).toBeUndefined();
@@ -137,6 +157,81 @@ describe("applyTaskWaitCall", () => {
       toolName: "task_wait",
     });
     expect(record(two.session, LOOKUP.id)?.wait?.callId).toBe("call-w1");
+  });
+
+  it("fails TASK_ALREADY_WAITED when the first wait took a held result and the record is gone", () => {
+    // Alice's lookup finished before her turn waited twice on it in one step.
+    const settled = { ...LOOKUP, status: "completed" as const };
+    const first = waitCall("call-w1", { taskId: LOOKUP.id });
+    const second = waitCall("call-w2", { taskId: LOOKUP.id });
+    const session = holdTaskResult(waiting([settled], [first, second]), settled, DONE);
+
+    const { results, session: after } = applyStep(session, [first, second]);
+
+    expect(results[0]?.result?.output).toMatchObject({ status: "settled", taskId: LOOKUP.id });
+    // Delivered and finished, so the record was pruned before the second wait.
+    expect(record(after, LOOKUP.id)).toBeUndefined();
+    expect(results[1]?.result?.output).toEqual({
+      code: "TASK_ALREADY_WAITED",
+      message: renderTaskAlreadyWaited(LOOKUP.id),
+    });
+  });
+
+  it("fails TASK_ALREADY_WAITED rather than idle for an agent the first wait already read", () => {
+    const agent = createTaskRecord({
+      child: { continuationToken: "token", kind: "local", sessionId: "child" },
+      creator: encodeTaskCreator({ auth: ALICE }),
+      id: "research-7k2m9q",
+      mode: "detached",
+      status: "completed",
+    });
+    const first = waitCall("call-w1", { taskId: agent.id });
+    const second = waitCall("call-w2", { taskId: agent.id });
+    const session = holdTaskResult(waiting([agent], [first, second]), agent, DONE);
+
+    const { results } = applyStep(session, [first, second]);
+
+    expect(results[0]?.result?.output).toMatchObject({ status: "settled" });
+    expect(results[1]?.result?.output).toMatchObject({ code: "TASK_ALREADY_WAITED" });
+  });
+
+  it("takes an earlier generation's held result while the agent works on the next one", () => {
+    // Bob's message reached the researcher after it answered, so it runs the message as generation 2.
+    const agent = createTaskRecord({
+      child: { continuationToken: "token", kind: "local", sessionId: "child" },
+      creator: encodeTaskCreator({ auth: ALICE }),
+      generation: 2,
+      id: "research-7k2m9q",
+      mode: "detached",
+    });
+    const first: TaskOutcome = { output: "First answer.", status: "completed" };
+    const call = waitCall("call-w1", { taskId: agent.id });
+    const session = holdTaskResult(waiting([agent], [call]), { ...agent, generation: 1 }, first);
+
+    const applied = apply(session, call);
+
+    expect(applied.wait).toBeUndefined();
+    expect(applied.result?.output).toMatchObject({ outcome: first, status: "settled" });
+    expect(readPendingTaskResults(applied.session.state)).toEqual([]);
+    // The working generation's own result is still to come.
+    expect(record(applied.session, agent.id)).toMatchObject({ delivered: false, generation: 2 });
+  });
+
+  it("reads a finished agent a workflow body started as idle, as the [Tasks] note lists it", () => {
+    const agent = createTaskRecord({
+      child: { continuationToken: "token", kind: "local", sessionId: "child" },
+      creator: encodeTaskCreator({ auth: ALICE }),
+      delivered: true,
+      id: "research-b81d0c",
+      status: "completed",
+      workflowCaller: { replyTo: "reply-hook", runId: "run-9" },
+    });
+    const call = waitCall("call-w1", { taskId: agent.id });
+
+    expect(apply(waiting([agent], [call]), call).result?.output).toEqual({
+      status: "idle",
+      taskId: agent.id,
+    });
   });
 
   it("fails TASK_OTHER_PRINCIPAL for a task another caller started", () => {
@@ -197,6 +292,17 @@ describe("applyTaskWaitCall", () => {
       modelOutput: expect.stringContaining(`${LOOKUP.id} is still working`),
       output: { status: "timed_out", taskId: LOOKUP.id },
     });
+  });
+
+  it("reports a task that waits on a person for timeout 0", () => {
+    const asking = { ...LOOKUP, clockStoppedAt: NOW, status: "input_required" as const };
+    const call = waitCall("call-w1", { taskId: LOOKUP.id, timeout: 0 });
+
+    const applied = apply(waiting([asking], [call]), call);
+
+    expect(applied.result?.modelOutput).toBe(
+      "Stopped waiting after 0 ms; lookup-q4x1ze is waiting on a person. Its result arrives in a later message; wait again only if you need it now.",
+    );
   });
 
   it("returns idle for an idle agent with nothing new", () => {
@@ -344,5 +450,42 @@ describe("endTaskWaits", () => {
   it("leaves a session with no waits unchanged", () => {
     const session = waiting([LOOKUP], []);
     expect(endTaskWaits(session, { now: NOW, reason: "interrupted" }).session).toBe(session);
+  });
+
+  it.each([
+    ["timed_out", { status: "timed_out", taskId: LOOKUP.id }],
+    ["interrupted", { status: "interrupted", taskId: LOOKUP.id }],
+  ] as const)(
+    "still ends a %s wait that no record points at, naming the task from the call",
+    (reason, output) => {
+      // The wait's pointer is gone, so no result could ever reach it.
+      const call = waitCall("call-w1", { taskId: LOOKUP.id, timeout: 5_000 });
+      const session = waiting([LOOKUP], [call]);
+
+      const ended = endTaskWaits(session, { callIds: ["call-w1"], now: NOW, reason });
+
+      expect(ended.results).toEqual([
+        expect.objectContaining({ callId: "call-w1", output, toolName: "task_wait" }),
+      ]);
+      expect(ended.results[0]?.modelOutput).toContain(`${LOOKUP.id} is still working`);
+    },
+  );
+
+  it("leaves a wait an unreadable record names for the loss report", () => {
+    const call = waitCall("call-w1", { taskId: LOOKUP.id });
+    const session = waiting([], [call]);
+    const lost = {
+      ...session,
+      state: {
+        ...session.state,
+        ...taskTableState([
+          { ...LOOKUP, v: 99, wait: { callId: "call-w1", startedAt: NOW } } as never,
+        ]),
+      },
+    };
+
+    expect(
+      endTaskWaits(lost, { callIds: ["call-w1"], now: NOW, reason: "interrupted" }).results,
+    ).toEqual([]);
   });
 });

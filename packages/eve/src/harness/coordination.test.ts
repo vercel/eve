@@ -15,7 +15,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
-import { truncateTaskResult } from "#tasks/render.js";
+import { renderTaskResults, truncateTaskResult } from "#tasks/render.js";
 import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 
 describe("createRuntimeActionRequestFromToolCall", () => {
@@ -598,6 +598,73 @@ describe("resolvePendingCoordination", () => {
         toolName: "task_wait",
         type: "tool-result",
       },
+    ]);
+  });
+
+  it("shows a settled task_wait the raw output when the tool's toModelOutput throws, as task.result does", async () => {
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-wait",
+          input: { taskId: "remind-q4x1ze" },
+          kind: "workflow-task",
+          toolName: "task_wait",
+          workflowId: TASK_WAIT_WORKFLOW_ID,
+        },
+      ],
+    });
+    const outcome = { output: { note: "stand-up at 10" }, status: "completed" } as const;
+
+    const resolved = await resolvePendingCoordination({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-wait",
+            kind: "tool-result",
+            output: { name: "remind", outcome, status: "settled", taskId: "remind-q4x1ze" },
+            toolName: "task_wait",
+          },
+        ],
+      },
+      tools: new Map<string, HarnessToolDefinition>([
+        [
+          "remind",
+          {
+            description: "Remind.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "remind",
+            toModelOutput: () => {
+              throw new Error("The reminder formatter is broken.");
+            },
+          },
+        ],
+        [
+          "task_wait",
+          {
+            description: "Wait.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "task_wait",
+            workflowId: TASK_WAIT_WORKFLOW_ID,
+          },
+        ],
+      ]),
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(resolved.messages.at(-1)?.content).toEqual([
+      expect.objectContaining({
+        output: {
+          type: "text",
+          value: renderTaskResults([
+            { body: undefined, outcome, record: { id: "remind-q4x1ze", name: "remind" } },
+          ]),
+        },
+        toolCallId: "call-wait",
+      }),
     ]);
   });
 

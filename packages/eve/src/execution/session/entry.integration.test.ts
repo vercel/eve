@@ -5,6 +5,7 @@ import { assert, afterEach, describe, expect, it, vi } from "vitest";
 import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import {
   dehydrateWorkflowArguments,
+  hydrateStepArguments,
   hydrateWorkflowArguments,
   hydrateStepReturnValue,
 } from "@workflow/core/serialization";
@@ -1149,6 +1150,82 @@ describe("workflowEntry integration", () => {
       }
     });
   });
+
+  it("ends a delegated session that expires during its turn and tells the caller it ended", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-expiry-during-turn" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Keep working until the turn stops.",
+              execute: (_input, ctx) =>
+                new Promise((_resolve, reject) => {
+                  const abort = () => reject(ctx.abortSignal.reason);
+                  if (ctx.abortSignal.aborted) return abort();
+                  ctx.abortSignal.addEventListener("abort", abort, { once: true });
+                }),
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/keep_working.ts",
+        },
+      ],
+    });
+    const childContinuationToken = "subagent:parent-session:call-1";
+
+    await runtime.run(async () => {
+      const child = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use the keep_working tool exactly once." },
+          serializedContext: buildSerializedContext({
+            channelKind: "subagent",
+            channelState: {
+              callId: "call-1",
+              parentContinuationToken: sessionInboxHookToken(childContinuationToken),
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+            continuationToken: childContinuationToken,
+            mode: "conversation",
+          }),
+          sessionTimeoutMs: 2_000,
+        },
+      ]);
+      const stream = captureEvents(child);
+
+      try {
+        const events = await stream.nextUntil(
+          "session completion",
+          (event) => event.type === "session.completed",
+        );
+
+        // The expiry stopped the turn in flight, settled it, and ended the session.
+        expect(filterEventsByType(events, "turn.started")).toHaveLength(1);
+        expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
+        expect(filterEventsByType(events, "turn.completed")).toHaveLength(0);
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(0);
+        await expect(child.returnValue).resolves.toMatchObject({
+          output: "The agent's session ended before it replied.",
+        });
+        // The caller's call settles once, as ended rather than answered.
+        const notified = await listStepArguments(child.runId, "notifyTurnCallerStep");
+        expect(notified).toEqual([
+          [
+            expect.objectContaining({
+              caller: expect.objectContaining({ callId: "call-1" }),
+              lifecycle: "terminal",
+              settled: expect.objectContaining({ errorCode: "AGENT_SESSION_ENDED", isError: true }),
+            }),
+          ],
+        ]);
+      } finally {
+        stream.dispose();
+      }
+    });
+  }, 60_000);
 
   it("notifies each delegated conversation turn and remains available via agentId", async () => {
     const runtime = await createTestRuntime({
@@ -2326,6 +2403,26 @@ const CALLER_STEP_NAMES = new Set([
 
 async function listCallerStepNames(runId: string): Promise<string[]> {
   return (await listStepNames(runId)).filter((name) => CALLER_STEP_NAMES.has(name)).sort();
+}
+
+/** The hydrated arguments of each call of one step in a run. */
+async function listStepArguments(runId: string, stepName: string): Promise<unknown[]> {
+  const world = await getWorld();
+  const steps = await world.steps.list({
+    pagination: { limit: 1_000 },
+    resolveData: "all",
+    runId,
+  });
+  return await Promise.all(
+    steps.data
+      .filter((step) => step.stepName.endsWith(`//${stepName}`))
+      .map(async (step) => {
+        const hydrated = (await hydrateStepArguments(step.input, runId, undefined)) as {
+          readonly args: readonly unknown[];
+        };
+        return hydrated.args;
+      }),
+  );
 }
 
 async function listStepNames(runId: string): Promise<string[]> {

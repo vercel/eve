@@ -1,5 +1,7 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
+import { activeTurnId } from "#harness/active-turn-id.js";
+import type { HarnessEmissionState } from "#harness/emission.js";
 import { createActionResultEvent } from "#protocol/message.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type {
@@ -9,14 +11,8 @@ import type {
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
-import type { TaskOutcome } from "#tasks/protocol.js";
-import {
-  renderModelOutputBody,
-  renderTaskResults,
-  truncateTaskResult,
-  truncateTaskResultParts,
-} from "#tasks/render.js";
+import { normalizeToolModelOutput, projectTaskResultBody } from "#harness/tool-model-output.js";
+import { renderTaskResults, truncateTaskResult, truncateTaskResultParts } from "#tasks/render.js";
 import { isTaskWaitTool, readSettledTaskWaitOutput } from "#tasks/wait-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type {
@@ -89,6 +85,17 @@ export function getPendingCoordinationBatch(
   }
 
   return batch;
+}
+
+/**
+ * The turn that owns the pending batch, else the active turn. The batch
+ * keeps its turn's ID even after a child's question clears the live one.
+ */
+export function coordinationTurnId(
+  state: SessionStateMap | undefined,
+  emission: HarnessEmissionState,
+): string {
+  return getPendingCoordinationBatch(state)?.event.turnId || activeTurnId(emission);
 }
 
 /**
@@ -407,25 +414,6 @@ async function renderSettledTaskWait(
       record: { id: settled.taskId, name: settled.name },
     },
   ]);
-}
-
-/**
- * The `<task_result>` body a completed task's tool shapes with its
- * `toModelOutput`, as it shapes that tool's own result. Throws when the
- * projection fails.
- */
-export async function projectTaskResultBody(
-  task: { readonly name: string; readonly outcome: TaskOutcome },
-  tools: HarnessToolMap | undefined,
-): Promise<string | undefined> {
-  const toModelOutput = tools?.get(task.name)?.toModelOutput;
-  if (task.outcome.status !== "completed" || toModelOutput === undefined) return undefined;
-  return renderModelOutputBody(
-    normalizeToolModelOutput({
-      output: await toModelOutput(task.outcome.output),
-      toolName: task.name,
-    }),
-  );
 }
 
 /**

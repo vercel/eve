@@ -206,21 +206,31 @@ export const TASK_WAIT_TIMEOUT_DESCRIPTION =
 export const TASK_WAIT_INVALID_INPUT_MESSAGE =
   "task_wait needs taskId, the id of one task or agent, and an optional timeout in milliseconds (0 or more).";
 
-/** Result of a `task_wait` whose timeout passed first. */
-export function renderWaitTimedOut(taskId: string, waitedMs: number): string {
-  return `Stopped waiting after ${formatDuration(waitedMs)}; ${taskId} is still working. Its result arrives in a later message; wait again only if you need it now.`;
+/** Result of a `task_wait` whose timeout passed first, including a timeout of 0. */
+export function renderWaitTimedOut(
+  record: Pick<TaskRecord, "id" | "status">,
+  waitedMs: number,
+): string {
+  return `Stopped waiting after ${formatDuration(waitedMs)}; ${describeOpenTask(record)}. Its result arrives in a later message; wait again only if you need it now.`;
 }
 
 /** Result of a `task_wait` that a new message ended. */
 export function renderWaitInterrupted(
-  record: Pick<TaskRecord, "id" | "kind" | "name">,
+  record: Pick<TaskRecord, "id" | "kind" | "name" | "status">,
   waitedMs: number,
 ): string {
   const choices =
     record.kind === "agent"
       ? `keep the task, pass its id as agentId to ${record.name} to correct it, or stop it with task_cancel`
       : "keep the task or stop it with task_cancel";
-  return `A new message arrived, so the wait ended after ${formatDuration(waitedMs)}; ${record.id} is still working. Read the message and decide whether it changes this work: ${choices}.`;
+  return `A new message arrived, so the wait ended after ${formatDuration(waitedMs)}; ${describeOpenTask(record)}. Read the message and decide whether it changes this work: ${choices}.`;
+}
+
+/** The current state of a task a wait ended on before it finished. */
+function describeOpenTask(record: Pick<TaskRecord, "id" | "status">): string {
+  return record.status === "input_required"
+    ? `${record.id} is waiting on a person`
+    : `${record.id} is still working`;
 }
 
 /** Result of a `task_wait` on an idle agent with nothing new. */

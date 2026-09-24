@@ -1,11 +1,9 @@
-import { isTerminalTaskStatus, type TaskOutcome } from "#tasks/protocol.js";
+import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { renderTimedOut } from "#tasks/render.js";
 import {
-  cancelConfirmBy,
+  failTask,
   findTask,
-  issueCommand,
   replaceRecord,
-  settleRecord,
   withoutUndefined,
   type TaskEffect,
   type TaskTable,
@@ -18,20 +16,11 @@ import {
 /** Settles a task that did not finish in time and asks its child to stop. */
 export function timeOutTask(table: TaskTable, taskId: string, now: string): TaskTransition {
   const record = findTask(table, taskId);
-  if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
-  const outcome: TaskOutcome = {
-    error: { code: "TIMED_OUT", message: renderTimedOut(record.kind, record.timeoutMs) },
-    status: "failed",
-  };
-  const timedOut = withoutUndefined({
-    ...settleRecord(record, outcome),
-    cancelConfirmBy: cancelConfirmBy(record, now),
+  if (record === undefined) return { effects: [], table };
+  return failTask(table, taskId, now, {
+    code: "TIMED_OUT",
+    message: renderTimedOut(record.kind, record.timeoutMs),
   });
-  const commanded = issueCommand(replaceRecord(table, timedOut), timedOut, { kind: "cancel" });
-  return {
-    effects: [{ kind: "settled", outcome, record: timedOut }, ...commanded.effects],
-    table: commanded.table,
-  };
 }
 
 /**

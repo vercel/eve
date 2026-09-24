@@ -87,6 +87,17 @@ describe("createSession#cancel", () => {
     expect(runtime.dispatchSession).not.toHaveBeenCalled();
   });
 
+  it("refuses the removed task options instead of cancelling every task", async () => {
+    const runtime = createRuntime();
+    // A caller written against the old options, which the types no longer allow.
+    const legacy: Record<string, unknown> = { taskId: "research-7k2m9q" };
+
+    await expect(createSession("sess_1", runtime).cancel(legacy)).rejects.toThrow(
+      "'taskId' and 'tasks' are no longer supported",
+    );
+    expect(runtime.dispatchSession).not.toHaveBeenCalled();
+  });
+
   it("is available on sessions returned by attachSession", async () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime)("sess_2");

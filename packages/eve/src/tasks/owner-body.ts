@@ -213,14 +213,17 @@ export async function cancelTasks(
 /**
  * Ends `task_wait` calls that got no result: the given calls, or every wait
  * when `callIds` is absent. Returns their tool results; a cancelled turn's
- * waits get none.
+ * waits get none. A given call gets its result even when no record points at
+ * it any more, so the step runs whenever calls are named.
  */
 export async function endTaskWaits(
   cursor: SessionStateCursor,
   input: { readonly callIds?: readonly string[]; readonly reason: TaskWaitEnd },
 ): Promise<readonly RuntimeToolResultActionResult[]> {
   const table = getTaskTable(cursor.sessionState.snapshot.session);
-  if (!table.records.some((record) => record.wait !== undefined)) return [];
+  if (input.callIds === undefined && !table.records.some((record) => record.wait !== undefined)) {
+    return [];
+  }
   return await applyTaskOwnerUpdate(
     cursor,
     await endTaskWaitsStep({

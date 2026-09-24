@@ -1385,6 +1385,89 @@ describe("turnStep", () => {
     });
   });
 
+  it.each([
+    ["keeps the turn's principal when another person answers its pending request", true],
+    ["acts for the sender of an answer the session is not waiting on", false],
+  ] as const)("in a root session, %s", async (_label, pending) => {
+    const plainAdapter: ChannelAdapter = { kind: "plain" };
+    const bundle = {
+      adapterRegistry: { adaptersByKind: new Map([[plainAdapter.kind, plainAdapter]]) },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const answer = { optionId: "approve", requestId: "approval-1" };
+    // Alice's turn asked for approval to refund an order; Bob, in the same thread, approves it.
+    installSessionStoreMocks([
+      createStubSession(
+        pending
+          ? {
+              state: {
+                "eve.runtime.pendingInputBatches": [
+                  {
+                    requests: [{ kind: "approval", requestId: "approval-1" }],
+                    responseMessages: [],
+                  },
+                ],
+              },
+            }
+          : {},
+      ),
+    ]);
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      principalId: "slack:U-alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "slack:U-bob" };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, alice);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, plainAdapter);
+    ctx.set(ContinuationTokenKey, "http:root-answer");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+
+    let observed: { auth: SessionAuthContext | null | undefined; input: StepInput | undefined } = {
+      auth: undefined,
+      input: undefined,
+    };
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session, input): Promise<StepResult> => {
+        observed = { auth: loadContext().get(AuthKey), input };
+        return { next: null, session };
+      };
+    });
+
+    await turnStep({
+      input: { auth: bob, kind: "deliver", payloads: [{ inputResponses: [answer] }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    if (pending) {
+      // Bob's answer is checked as Bob's; the turn that asked keeps acting as Alice.
+      expect(observed.auth).toEqual(alice);
+      expect(observed.input).toMatchObject({
+        attributedInputResponses: [{ auth: bob, response: answer }],
+      });
+    } else {
+      expect(observed.auth).toEqual(bob);
+      expect(observed.input).not.toHaveProperty("attributedInputResponses");
+    }
+  });
+
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
     const announcement = "Available skills\n- policy: Tenant policy";
     const session = createStubSession({

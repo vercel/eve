@@ -383,9 +383,10 @@ export default defineRemoteAgent({
     const { session, response } = await client.sessions.create({ message: MESSAGES.foreground });
     await response.result();
     const events = await recordUntilReply(session, REPLIES.foreground);
+    // The settled task_wait delivered the result.
     expect(deriveTaskStreamStates(events)).toMatchObject([
       {
-        delivered: false,
+        delivered: true,
         kind: "agent",
         mode: "detached",
         name: "researcher",
@@ -437,6 +438,7 @@ export default defineRemoteAgent({
     const events = await recordUntilReply(session, REPLIES.timeout);
     expect(deriveTaskStreamStates(events)).toMatchObject([
       {
+        delivered: true,
         errorCode: "TIMED_OUT",
         kind: "agent",
         mode: "detached",
@@ -469,7 +471,14 @@ export default defineRemoteAgent({
     await turn.finished;
     const events = await recordUntilReply(session, REPLIES.remote);
     expect(deriveTaskStreamStates(events)).toMatchObject([
-      { inputRequests: 1, kind: "agent", name: "billing", remote: true, status: "completed" },
+      {
+        delivered: true,
+        inputRequests: 1,
+        kind: "agent",
+        name: "billing",
+        remote: true,
+        status: "completed",
+      },
     ]);
     return {
       description:

@@ -25,6 +25,7 @@ import {
   renderAgentUnreachable,
   renderLastStatus,
   renderNotAnAgent,
+  renderTooManyTasks,
   renderUnknownAgent,
 } from "#tasks/render.js";
 
@@ -45,6 +46,9 @@ export const WORKFLOW_TASK_CANCEL_CONFIRM_MS = WORKFLOW_CANCELLATION_CLEANUP_MS 
 
 /** Default time limit for one agent generation, in active (non-waiting) time. */
 export const DEFAULT_AGENT_TIMEOUT_MS = 2 * 60 * 60_000;
+
+/** Working detached tasks one session may hold; a start over the cap fails `TOO_MANY_TASKS`. */
+export const MAX_WORKING_TASKS = 20;
 
 const MAX_DATE_MS = 8.64e15;
 
@@ -462,9 +466,55 @@ export function applyTaskMessage(
       // its next turn for the same call, so they become its next generation.
       const continued = continueAfterMissedSteers(record, next, missed, now);
       effects.push({ kind: "continued", record: continued });
-      return { effects, table: replaceRecord(table, continued) };
+      const working = workingDetachedTaskIds(table).filter((id) => id !== record.id);
+      if (working.length < MAX_WORKING_TASKS) {
+        return { effects, table: replaceRecord(table, continued) };
+      }
+      // Like any detached start over the cap, the generation fails at once,
+      // and the agent is asked to stop working on it.
+      const failed = failTask(replaceRecord(table, continued), continued.id, now, {
+        code: "TOO_MANY_TASKS",
+        message: renderTooManyTasks(working, MAX_WORKING_TASKS),
+      });
+      return { effects: [...effects, ...failed.effects], table: failed.table };
     }
   }
+}
+
+/**
+ * Settles a working task failed with `error` and asks its child to stop:
+ * a timeout, or a generation that starts over the working-task cap.
+ */
+export function failTask(
+  table: TaskTable,
+  taskId: string,
+  now: string,
+  error: TaskError,
+): TaskTransition {
+  const record = findTask(table, taskId);
+  if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
+  const outcome: TaskOutcome = { error, status: "failed" };
+  const failed = withoutUndefined({
+    ...settleRecord(record, outcome),
+    cancelConfirmBy: cancelConfirmBy(record, now),
+  });
+  const commanded = issueCommand(replaceRecord(table, failed), failed, { kind: "cancel" });
+  return {
+    effects: [{ kind: "settled", outcome, record: failed }, ...commanded.effects],
+    table: commanded.table,
+  };
+}
+
+/** Detached generations still working, which count toward {@link MAX_WORKING_TASKS}. */
+export function workingDetachedTaskIds(table: TaskTable): readonly string[] {
+  return table.records
+    .filter(
+      (record) =>
+        record.mode === "detached" &&
+        record.workflowCaller === undefined &&
+        (record.status === "working" || record.status === "input_required"),
+    )
+    .map((record) => record.id);
 }
 
 /**

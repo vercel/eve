@@ -26,8 +26,8 @@ import {
 } from "#tasks/render.js";
 import { holdTaskResult, takeTaskResult } from "#tasks/results.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { markTaskDelivered, setTaskWait } from "#tasks/table.js";
-import { readTaskWaitInput, type TaskWaitOutput } from "#tasks/wait-tool.js";
+import { findTask, markTaskDelivered, readTaskTable, setTaskWait } from "#tasks/table.js";
+import { isTaskWaitRequest, readTaskWaitInput, type TaskWaitOutput } from "#tasks/wait-tool.js";
 
 // Owner side of `task_wait`. A wait is the `wait` field of its task's record:
 // set while the call waits, and cleared by whichever comes first, the result,
@@ -53,8 +53,13 @@ type WaitingCall = Pick<RuntimeWorkflowTaskRequest, "callId" | "toolName">;
  * Applies one `task_wait` call. It resolves at once when the answer is known
  * now: an error, a result the model has not seen, an idle agent, or a zero
  * timeout. Otherwise it points the task at this call, and the turn holds.
+ * `waitedTaskId` names the task the call waited on; a later call in the same
+ * step that names it again fails `TASK_ALREADY_WAITED`, even when this call
+ * took a result at once and the task's record is gone.
  */
 export function applyTaskWaitCall<T extends Session>(input: {
+  /** Tasks an earlier `task_wait` in the same step already waited on. */
+  readonly alreadyWaited: ReadonlySet<string>;
   readonly caller: SessionAuthContext | null;
   readonly now: string;
   readonly request: RuntimeWorkflowTaskRequest;
@@ -63,6 +68,7 @@ export function applyTaskWaitCall<T extends Session>(input: {
   readonly session: T;
   readonly result?: RuntimeToolResultActionResult;
   readonly wait?: TaskWaitRegistration;
+  readonly waitedTaskId?: string;
 } {
   const { request, session } = input;
   const parsed = readTaskWaitInput(request.input);
@@ -70,14 +76,23 @@ export function applyTaskWaitCall<T extends Session>(input: {
     const error = { code: "INVALID_INPUT", message: TASK_WAIT_INVALID_INPUT_MESSAGE };
     return { result: taskToolErrorResult(request, error), session };
   }
+  if (input.alreadyWaited.has(parsed.taskId)) {
+    const error = { code: "TASK_ALREADY_WAITED", message: renderTaskAlreadyWaited(parsed.taskId) };
+    return { result: taskToolErrorResult(request, error), session };
+  }
   const table = getTaskTable(session);
   const found = findCallerTask({ caller: input.caller, table, taskId: parsed.taskId });
   if ("error" in found) return { result: taskToolErrorResult(request, found.error), session };
   const { record } = found;
+  const waitedTaskId = record.id;
   // A result that settled before the wait began goes to the wait, not to a later message.
-  const held = takeTaskResult(session, record.id, record.generation);
+  const held = takeTaskResult(session, record.id);
   if (held.result !== undefined) {
-    return { result: settledResult(request, record, held.result.outcome), session: held.session };
+    return {
+      result: settledResult(request, record, held.result.outcome),
+      session: held.session,
+      waitedTaskId,
+    };
   }
   if (isTerminalTaskStatus(record.status)) {
     if (record.kind !== "agent" || record.child === undefined) {
@@ -85,15 +100,15 @@ export function applyTaskWaitCall<T extends Session>(input: {
       return { result: taskToolErrorResult(request, error), session };
     }
     const idle = { status: "idle", taskId: record.id } as const;
-    return { result: waitResult(request, idle, renderWaitIdle(record)), session };
-  }
-  if (record.wait !== undefined && waitingCall(session.state, record.wait.callId) !== undefined) {
-    const error = { code: "TASK_ALREADY_WAITED", message: renderTaskAlreadyWaited(record.id) };
-    return { result: taskToolErrorResult(request, error), session };
+    return { result: waitResult(request, idle, renderWaitIdle(record)), session, waitedTaskId };
   }
   if (parsed.timeoutMs === 0) {
     const timedOut = { status: "timed_out", taskId: record.id } as const;
-    return { result: waitResult(request, timedOut, renderWaitTimedOut(record.id, 0)), session };
+    return {
+      result: waitResult(request, timedOut, renderWaitTimedOut(record, 0)),
+      session,
+      waitedTaskId,
+    };
   }
   const wait = { callId: request.callId, startedAt: input.now };
   return {
@@ -102,6 +117,7 @@ export function applyTaskWaitCall<T extends Session>(input: {
       parsed.timeoutMs === undefined
         ? { callId: request.callId }
         : { callId: request.callId, timeoutMs: parsed.timeoutMs },
+    waitedTaskId,
   };
 }
 
@@ -145,6 +161,11 @@ export function takeLiveWait<T extends Session>(
  * Ends waits that got no result: the given calls, or every wait when
  * `callIds` is absent. A timeout or a steering message gives each its tool
  * result; a cancelled turn's waits just end. The tasks keep working.
+ *
+ * Every given call that is a `task_wait` in the pending batch gets a result,
+ * even when no record points at it any more, so no wait is left waiting for
+ * a result that cannot come. The one exception is a wait an unreadable
+ * record still names: the owner reports that loss to the wait at once.
  */
 export function endTaskWaits<T extends Session>(
   session: T,
@@ -154,32 +175,58 @@ export function endTaskWaits<T extends Session>(
     readonly reason: TaskWaitEnd;
   },
 ): { readonly session: T; readonly results: readonly RuntimeToolResultActionResult[] } {
-  const initial = getTaskTable(session);
+  const { lost, table: initial } = readTaskTable(session.state);
   let table = initial;
   const results: RuntimeToolResultActionResult[] = [];
+  const ended = new Set<string>();
   for (const record of initial.records) {
     const { wait } = record;
     if (wait === undefined || (input.callIds !== undefined && !input.callIds.includes(wait.callId)))
       continue;
     table = setTaskWait(table, record.id, undefined);
+    ended.add(wait.callId);
     const call = waitingCall(session.state, wait.callId);
     if (call === undefined || input.reason === "turn-cancelled") continue;
     const waitedMs = Math.max(0, Date.parse(input.now) - Date.parse(wait.startedAt));
-    results.push(
-      input.reason === "timed_out"
-        ? waitResult(
-            call,
-            { status: "timed_out", taskId: record.id },
-            renderWaitTimedOut(record.id, waitedMs),
-          )
-        : waitResult(
-            call,
-            { status: "interrupted", taskId: record.id },
-            renderWaitInterrupted(record, waitedMs),
-          ),
-    );
+    results.push(endedWaitResult(call, record, input.reason, waitedMs));
+  }
+  if (input.reason !== "turn-cancelled") {
+    const reported = new Set(lost.flatMap((task) => (task.wait ? [task.wait.callId] : [])));
+    for (const callId of input.callIds ?? []) {
+      const call = waitingCall(session.state, callId);
+      if (call === undefined || ended.has(callId) || reported.has(callId)) continue;
+      const parsed = isTaskWaitRequest(call) ? readTaskWaitInput(call.input) : undefined;
+      if (parsed === undefined) continue;
+      const record = findTask(table, parsed.taskId) ?? {
+        id: parsed.taskId,
+        kind: "workflow",
+        name: parsed.taskId,
+        status: "working",
+      };
+      // Without the record's start time, a timeout waited for the call's own timeout.
+      results.push(endedWaitResult(call, record, input.reason, parsed.timeoutMs ?? 0));
+    }
   }
   return { results, session: table === initial ? session : setTaskTable(session, table) };
+}
+
+function endedWaitResult(
+  call: WaitingCall,
+  record: Pick<TaskRecord, "id" | "kind" | "name" | "status">,
+  reason: Exclude<TaskWaitEnd, "turn-cancelled">,
+  waitedMs: number,
+): RuntimeToolResultActionResult {
+  return reason === "timed_out"
+    ? waitResult(
+        call,
+        { status: "timed_out", taskId: record.id },
+        renderWaitTimedOut(record, waitedMs),
+      )
+    : waitResult(
+        call,
+        { status: "interrupted", taskId: record.id },
+        renderWaitInterrupted(record, waitedMs),
+      );
 }
 
 /** Owner step for {@link endTaskWaits}. */
@@ -213,7 +260,10 @@ export async function endTaskWaitsStep(input: {
  * The call a wait belongs to, while the turn's pending batch still holds it.
  * A batch that moved on means the wait is stale, so it never takes a result.
  */
-function waitingCall(state: SessionStateMap | undefined, callId: string): WaitingCall | undefined {
+function waitingCall(
+  state: SessionStateMap | undefined,
+  callId: string,
+): RuntimeWorkflowTaskRequest | undefined {
   return getPendingCoordinationBatch(state)?.tasks.find((task) => task.callId === callId);
 }
 

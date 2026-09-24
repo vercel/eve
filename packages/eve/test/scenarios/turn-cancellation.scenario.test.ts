@@ -269,15 +269,9 @@ describe("turn cancellation descendant cascade", () => {
                 event.type === "task.settled" ? [`${event.data.taskId}:${event.data.status}`] : [],
               )
               .sort();
-          expect(settled(parentEvents)).toEqual(cancelledTasks);
           const boundary = parentEvents.findIndex((event) => event.type === "turn.cancelled");
+          expect(settled(parentEvents.slice(0, boundary))).toEqual(cancelledTasks);
           expect(settled(parentEvents.slice(boundary))).toEqual([]);
-          await new Promise((resolve) => setTimeout(resolve, 1_500));
-          const all: MessageStreamEvent[] = [];
-          for await (const event of parentSession.stream({ follow: false, startIndex: 0 })) {
-            all.push(event);
-          }
-          expect(settled(all)).toEqual(cancelledTasks);
 
           const followUp = await (
             await parentSession.send("Reply with the exact string `still-alive` and nothing else.")
@@ -286,6 +280,7 @@ describe("turn cancellation descendant cascade", () => {
           expect(followUp.status).toBe("waiting");
           expect(followUp.message, JSON.stringify(followUp.events)).toBe("still-alive");
           expect(followUp.events.some((event) => event.type === "turn.cancelled")).toBe(false);
+          expect(settled(followUp.events)).toEqual([]);
         } catch (error) {
           throw new Error(
             [

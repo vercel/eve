@@ -19,7 +19,7 @@
           "generations": 1,
           "remote": false,
           "inputRequests": 0,
-          "delivered": false
+          "delivered": true
         }
       ]
     },
@@ -77,7 +77,7 @@
           "generations": 1,
           "remote": false,
           "inputRequests": 0,
-          "delivered": false
+          "delivered": true
         }
       ]
     },
@@ -96,7 +96,7 @@
           "generations": 1,
           "remote": true,
           "inputRequests": 1,
-          "delivered": false
+          "delivered": true
         }
       ]
     }

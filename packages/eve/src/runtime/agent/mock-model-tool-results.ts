@@ -71,6 +71,9 @@ export function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToo
  * One `task_wait` call per receipt in the latest tool results whose result
  * has not arrived yet, so the tasks are waited on together in one step, or
  * `undefined` when there is nothing to wait on or no `task_wait` is offered.
+ * Each wait's call ID derives from its receipt's, which is unique: a task an
+ * idle agent resumes keeps its task ID, so a wait keyed by the task would
+ * repeat an earlier call ID.
  */
 export function createTaskWaitCalls(
   prompt: BootstrapPrompt,
@@ -80,14 +83,14 @@ export function createTaskWaitCalls(
   | undefined {
   if (!tools.some((tool) => tool.name === TASK_WAIT_TOOL_NAME)) return undefined;
   const { delivered, parts } = readLatestToolResults(prompt);
-  const taskIds = parts.flatMap((part) => {
+  const waits = parts.flatMap((part) => {
     const taskId = receiptTaskId(rawOutput(part));
-    return taskId === undefined || delivered.has(taskId) ? [] : [taskId];
+    return taskId === undefined || delivered.has(taskId) ? [] : [{ part, taskId }];
   });
-  if (taskIds.length === 0) return undefined;
-  return taskIds.map((taskId) => ({
+  if (waits.length === 0) return undefined;
+  return waits.map(({ part, taskId }) => ({
     input: { taskId },
-    toolCallId: `call_task_wait_${taskId.replace(/[^a-z0-9]+/giu, "_")}`,
+    toolCallId: `call_task_wait_${part.toolCallId}`,
     toolName: TASK_WAIT_TOOL_NAME,
   }));
 }

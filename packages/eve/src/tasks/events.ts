@@ -68,16 +68,20 @@ export function settledEvents(effects: readonly TaskEffect[]): TaskSettledStream
 }
 
 /**
- * One `task.started` for each generation an agent opened to run steering
- * messages that reached it after it answered.
+ * A child report's events in order: one `task.settled` for each first
+ * terminal outcome, and one `task.started` for each generation an agent
+ * opened to run steering messages that reached it after it answered, before
+ * that generation's own `task.settled` when it fails at once.
  */
-export function continuedEvents(
+export function reportedEvents(
   effects: readonly TaskEffect[],
   ownerSessionId: string,
-): TaskStartedStreamEvent[] {
-  return effects.flatMap((effect) =>
-    effect.kind === "continued" && effect.record.child !== undefined
-      ? [taskStartedEvent({ child: effect.record.child, ownerSessionId, record: effect.record })]
-      : [],
-  );
+): (TaskSettledStreamEvent | TaskStartedStreamEvent)[] {
+  return effects.flatMap((effect): (TaskSettledStreamEvent | TaskStartedStreamEvent)[] => {
+    if (effect.kind === "settled") return settledEvents([effect]);
+    if (effect.kind !== "continued" || effect.record.child === undefined) return [];
+    return [
+      taskStartedEvent({ child: effect.record.child, ownerSessionId, record: effect.record }),
+    ];
+  });
 }

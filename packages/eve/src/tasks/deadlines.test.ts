@@ -13,6 +13,7 @@ import {
   resolveHookOwnerRunId,
   resolveSessionOwnerRunId,
 } from "#execution/workflow-runtime.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
@@ -30,6 +31,7 @@ import {
   TASK_TIMER_STATE_KEY,
 } from "#tasks/state.js";
 import { applyTaskMessage } from "#tasks/table.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { recordNestedAgentInvocationTerminal } from "#tracing/agent-invocation-terminal.js";
 import { readRemoteTaskReport } from "#tasks/transport.js";
@@ -204,6 +206,44 @@ describe("applyTaskDeadlines", () => {
     ).toEqual([
       ["call-1", "cancelled"],
       ["call-3", "cancelled"],
+    ]);
+  });
+
+  it("stops the agent calls a hard-stopped workflow run awaited, since the run never reports", async () => {
+    // Alice's deploy run timed out while its researcher still worked, then never confirmed.
+    const deploy = createTaskRecord({
+      callId: "call-2",
+      cancelConfirmBy: "2026-09-24T14:00:30.000Z",
+      child: WORKFLOW_CHILD,
+      delivered: true,
+      id: "deploy-abc234",
+      kind: "workflow",
+      name: "deploy",
+      status: "failed",
+    });
+    const runAgent = createTaskRecord({
+      callId: "call-nested",
+      child: LOCAL_CHILD,
+      id: "research-b81d0c",
+      workflowCaller: { replyTo: "reply-hook", runId: WORKFLOW_CHILD.runId },
+    });
+
+    const update = await applyTaskDeadlines(
+      input([deploy, runAgent], { now: "2026-09-24T14:00:31.000Z" }),
+    );
+
+    expect(vi.mocked(cancelRun).mock.calls.map((call) => call[1])).toEqual(["run-1"]);
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "child-session",
+    });
+    expect(update.events).toEqual([
+      {
+        data: { callId: "call-nested", status: "cancelled", taskId: "research-b81d0c" },
+        type: "task.settled",
+      },
+    ]);
+    expect(records(update.sessionState)).toEqual([
+      expect.objectContaining({ id: "research-b81d0c", status: "cancelled" }),
     ]);
   });
 
@@ -566,6 +606,55 @@ describe("applyTaskDeadlines", () => {
     ]);
     expect(stateOf(update.sessionState)?.["eve.taskTable"]).toEqual({ records: [working] });
     expect(wakeToArm(stateOf(update.sessionState))).toBe(DEADLINE);
+  });
+
+  it("gives a task_wait on an unreadable detached record its STATE_LOST failure", async () => {
+    const wait = {
+      callId: "call-wait",
+      input: { taskId: "old-abc234" },
+      kind: "workflow-task" as const,
+      toolName: "task_wait",
+      workflowId: TASK_WAIT_WORKFLOW_ID,
+    };
+    const state = setPendingCoordinationBatch({
+      event: { sequence: 1, stepIndex: 1, turnId: "turn-1" },
+      responseMessages: [],
+      session: { history: [], state: taskTableState([]) } as never,
+      tasks: [wait],
+    }).state!;
+    (state["eve.taskTable"] as { records: unknown[] }).records.push({
+      callId: "call-9",
+      id: "old-abc234",
+      kind: "workflow",
+      mode: "detached",
+      name: "old",
+      v: 0,
+      wait: { callId: "call-wait", startedAt: STARTED },
+    });
+
+    const update = await applyTaskDeadlines({
+      now: "2026-09-24T13:00:00.000Z",
+      serializedContext: {},
+      sessionState: ownerState(state),
+      signal: { kind: "task.deadline", ownerRunId: "owner", wakeAt: new Date(0).toISOString() },
+    });
+
+    const error = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
+    expect(update.results).toEqual([
+      {
+        callId: "call-wait",
+        kind: "tool-result",
+        output: {
+          name: "old",
+          outcome: { error, status: "failed" },
+          status: "settled",
+          taskId: "old-abc234",
+        },
+        toolName: "task_wait",
+      },
+    ]);
+    // The wait took the loss, so no task.result repeats it.
+    expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([]);
   });
 
   it("resolves a waited call or a ctx.agent caller whose record is unreadable", async () => {

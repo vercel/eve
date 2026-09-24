@@ -9,7 +9,7 @@ import { createTaskRecord, taskTableState } from "#internal/testing/task-records
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
 import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
-import { MAX_WORKING_TASKS } from "#tasks/results.js";
+import { MAX_WORKING_TASKS } from "#tasks/table.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runCommands } from "#tasks/transport.js";
 

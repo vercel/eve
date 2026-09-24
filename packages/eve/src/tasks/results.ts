@@ -4,7 +4,7 @@ import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json
 import type { TaskKind, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { isReportedLoss, markTaskDelivered, readTaskTable, type TaskTable } from "#tasks/table.js";
+import { isReportedLoss, markTaskDelivered, readTaskTable } from "#tasks/table.js";
 
 // Detached results no wait took are held in session state from settlement
 // until a model step delivers them as one `task.result` message. Read by the
@@ -12,9 +12,6 @@ import { isReportedLoss, markTaskDelivered, readTaskTable, type TaskTable } from
 
 /** Session state key holding detached results that have not reached history. */
 export const TASK_RESULTS_STATE_KEY = "eve.taskResults";
-
-/** Working detached tasks one session may hold; a start over the cap fails `TOO_MANY_TASKS`. */
-export const MAX_WORKING_TASKS = 20;
 
 /** Who started a task, captured at start. A result turn runs as this creator. */
 export interface TaskCreator {
@@ -150,20 +147,19 @@ export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
 }
 
 /**
- * Takes the held result of one generation and marks it delivered: a
- * `task_wait` asked for that task by name.
+ * Takes the oldest held result of one task, whatever its generation, and
+ * marks it delivered: a `task_wait` asked for the task's next result the
+ * model has not seen. An agent that runs missed steering messages as a new
+ * generation can hold an earlier generation's result while it works.
  */
 export function takeTaskResult<T extends { readonly state?: SessionStateMap }>(
   session: T,
   taskId: string,
-  generation: number,
 ): { readonly result?: PendingTaskResult; readonly session: T } {
   const pending = readPendingTaskResults(session.state);
-  const result = pending.find(
-    (entry) => entry.taskId === taskId && entry.generation === generation,
-  );
+  const result = pending.find((entry) => entry.taskId === taskId);
   if (result === undefined) return { session };
-  const table = markTaskDelivered(getTaskTable(session), taskId, generation);
+  const table = markTaskDelivered(getTaskTable(session), taskId, result.generation);
   return {
     result,
     session: writePending(
@@ -184,18 +180,6 @@ export function hasPendingDetachedWork(state: SessionStateMap | undefined): bool
   // An unreadable record is reported as a result before the session is quiescent.
   if (lost.some(isReportedLoss)) return true;
   return table.records.some((record) => record.mode === "detached" && !record.delivered);
-}
-
-/** Detached generations still working, which count toward {@link MAX_WORKING_TASKS}. */
-export function workingDetachedTaskIds(table: TaskTable): readonly string[] {
-  return table.records
-    .filter(
-      (record) =>
-        record.mode === "detached" &&
-        record.workflowCaller === undefined &&
-        (record.status === "working" || record.status === "input_required"),
-    )
-    .map((record) => record.id);
 }
 
 function writePending<T extends { readonly state?: SessionStateMap }>(

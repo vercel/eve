@@ -70,7 +70,7 @@ import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
-import { attributeAnswer, readDelegatedAnswerer } from "#execution/session/delegated-answer.js";
+import { attributeAnswer, readAnswerer } from "#execution/session/answerer.js";
 import { createSessionEventSink, type SessionEventSink } from "#execution/session/event-sink.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
@@ -175,12 +175,13 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
   const previousAuth = ctx.get(AuthKey);
 
-  const answerer = readDelegatedAnswerer(ctx, delivery);
+  const answerer = readAnswerer(ctx, delivery, durableSession.state);
 
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
   // input has no auth; it was seeded by buildRunContext). Only the turn's own
-  // principal steers it (`isSteeringDelivery`), so a steering message never
-  // changes who the turn acts for.
+  // principal steers it (`isSteeringDelivery`), and an answer to the
+  // session's own request keeps it (`readAnswerer`), so neither changes who
+  // the turn acts for.
   if (delivery?.auth !== undefined && answerer === undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);

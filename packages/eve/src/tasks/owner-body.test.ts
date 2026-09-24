@@ -5,6 +5,7 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
@@ -16,6 +17,7 @@ import {
   applyTaskReport,
   cancelTasks,
   closeTaskOwnerInbox,
+  endTaskWaits,
   settleWorkflowTask,
   startAgentTasks,
   syncTaskTimer,
@@ -26,6 +28,7 @@ import { applyTaskReportStep, startAgentTasksStep } from "#tasks/owner.js";
 import { TASK_CALLBACK_ALIAS_STATE_KEY, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
 vi.mock("#tasks/emit-event-step.js", () => ({
@@ -221,6 +224,52 @@ describe("cancelTasks", () => {
 
     await expect(cancelTasks(cursor, { kind: "all" })).resolves.toEqual([]);
     expect(cancelTasksStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("endTaskWaits", () => {
+  const WAIT = {
+    callId: "call-w1",
+    input: { taskId: "research-abc234", timeout: 5_000 },
+    kind: "workflow-task" as const,
+    toolName: "task_wait",
+    workflowId: TASK_WAIT_WORKFLOW_ID,
+  };
+
+  it("ends a named wait even when no record points at it any more", async () => {
+    const state = setPendingCoordinationBatch({
+      event: { sequence: 1, stepIndex: 1, turnId: "turn-1" },
+      responseMessages: [],
+      session: {
+        history: [],
+        state: taskTableState([createTaskRecord({ mode: "detached" })]),
+      } as never,
+      tasks: [WAIT],
+    }).state;
+    const cursor = createCursor(
+      stateWith(state ?? {}),
+      vi.fn(async () => {}),
+    );
+
+    await expect(
+      endTaskWaits(cursor, { callIds: ["call-w1"], reason: "timed_out" }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        callId: "call-w1",
+        output: { status: "timed_out", taskId: "research-abc234" },
+      }),
+    ]);
+  });
+
+  it("takes no step for a cancelled turn with no waits", async () => {
+    const sessionState = stateWith(taskTableState([createTaskRecord()]));
+    const cursor = createCursor(
+      sessionState,
+      vi.fn(async () => {}),
+    );
+
+    await expect(endTaskWaits(cursor, { reason: "turn-cancelled" })).resolves.toEqual([]);
+    expect(cursor.sessionState).toBe(sessionState);
   });
 });
 

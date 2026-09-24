@@ -5,10 +5,11 @@ import type { MockModelRequest, MockModelResponder, MockModelToolResult } from "
 // themselves in `waitForTasks`, which waits on each receipt with task_wait
 // and shows the responder the settled result under the call that started it.
 
-const RECEIPT_PATTERNS = [/^Started task ([\w-]+)\./u, /^Sent your message to agent ([\w-]+),/u];
+const START_RECEIPT_PATTERN = /^Started task ([\w-]+)\./u;
+const STEER_RECEIPT_PATTERN = /^Sent your message to agent ([\w-]+),/u;
 const RESULT_BLOCK_PATTERN =
   /<task_result id="([^"]*)" name="[^"]*" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
-const WAIT_CALL_PREFIX = "wait-";
+const WAIT_CALL_PREFIX = "task-wait-for-";
 
 interface SettledResult {
   readonly isError: boolean;
@@ -16,64 +17,93 @@ interface SettledResult {
 }
 
 /**
+ * One unit of a task's work: the call that started it and any messages sent
+ * to it while it worked. An agent resumed with its `agentId` keeps its task
+ * ID, so each start opens a new generation and results pair with them in
+ * call order.
+ */
+interface Generation {
+  readonly taskId: string;
+  /** Receipt call IDs, the start first. */
+  readonly callIds: string[];
+  result?: SettledResult;
+}
+
+/**
  * Wraps a scripted responder so detached calls read like waited ones. When a
  * step returned receipts, the wrapper calls task_wait once for each task in
- * the next step. The responder then sees each settled result as the output
- * of the call that returned the receipt, and never sees the wait. A result
- * that reached the turn in a `task.result` message first, because the task
- * settled while the turn was parked, is shown the same way, and that message
- * is hidden. A wait that ended without a result (timed out or interrupted)
- * is left in `toolResults` for the responder to handle.
+ * the next step, keyed by the receipt's call ID. The responder then sees each
+ * settled result as the output of the call that returned the receipt, and
+ * never sees the wait. A result that reached the turn in a `task.result`
+ * message first, because the task settled while the turn was parked, pairs
+ * with the task's earliest generation still without a result, and that
+ * message is hidden. A wait that ended without a result (timed out,
+ * interrupted, or idle) is left in `toolResults` for the responder to handle.
  */
 export function waitForTasks(respond: MockModelResponder): MockModelResponder {
   return (request) => {
-    const delivered = new Map<string, SettledResult>();
-    for (const message of request.messages) {
-      if (message.role === "user")
-        for (const entry of readResults(message.text)) delivered.set(...entry);
-    }
-    const waited = new Map<string, SettledResult>();
+    const generations = readGenerations(request.toolResults);
+    const byCallId = new Map(
+      generations.flatMap((generation) => generation.callIds.map((id) => [id, generation])),
+    );
+    // A wait names the receipt it waits for, so its result needs no pairing.
+    const waited = new Set<string>();
     for (const result of request.toolResults) {
       if (!result.id.startsWith(WAIT_CALL_PREFIX) || typeof result.output !== "string") continue;
-      for (const entry of readResults(result.output)) waited.set(...entry);
+      const generation = byCallId.get(result.id.slice(WAIT_CALL_PREFIX.length));
+      const [settled] = readResults(result.output);
+      if (generation === undefined || settled === undefined) continue;
+      generation.result = settled.result;
+      waited.add(result.id);
     }
-    const settled = (taskId: string) => waited.get(taskId) ?? delivered.get(taskId);
+    // A delivered result goes to the task's earliest generation still waiting for one.
+    const pairedBlocks = new Set<string>();
+    for (const [index, message] of request.messages.entries()) {
+      if (message.role !== "user") continue;
+      for (const [blockIndex, block] of readResults(message.text).entries()) {
+        const generation = generations.find(
+          (candidate) => candidate.taskId === block.taskId && candidate.result === undefined,
+        );
+        if (generation === undefined) continue;
+        generation.result = block.result;
+        pairedBlocks.add(`${index}:${blockIndex}`);
+      }
+    }
 
-    const receipts = request.toolResults.flatMap((result) => {
-      const taskId = receiptTaskId(result);
-      return taskId === undefined ? [] : [taskId];
-    });
     const called = new Set(request.toolResults.map((result) => result.id));
-    const pending = receipts.filter(
-      (taskId) => settled(taskId) === undefined && !called.has(`${WAIT_CALL_PREFIX}${taskId}`),
+    const pending = generations.filter(
+      (generation) =>
+        generation.result === undefined &&
+        !generation.callIds.some((callId) => called.has(`${WAIT_CALL_PREFIX}${callId}`)),
     );
     if (pending.length > 0 && request.tools.some((tool) => tool.name === "task_wait")) {
       return {
-        toolCalls: pending.map((taskId) => ({
-          id: `${WAIT_CALL_PREFIX}${taskId}`,
-          input: { taskId },
+        toolCalls: pending.map((generation) => ({
+          id: `${WAIT_CALL_PREFIX}${generation.callIds.at(-1)!}`,
+          input: { taskId: generation.taskId },
           name: "task_wait",
         })),
       };
     }
 
-    const shown = new Set(receipts.filter((taskId) => settled(taskId) !== undefined));
     const toolResults = request.toolResults.flatMap((result): MockModelToolResult[] => {
-      if (result.id.startsWith(WAIT_CALL_PREFIX)) {
-        return waited.has(result.id.slice(WAIT_CALL_PREFIX.length)) ? [] : [result];
-      }
-      const taskId = receiptTaskId(result);
-      const outcome = taskId === undefined ? undefined : settled(taskId);
+      if (waited.has(result.id)) return [];
+      const outcome = byCallId.get(result.id)?.result;
       return [outcome === undefined ? result : { ...result, ...outcome }];
     });
-    const hidden = (text: string) => {
-      const ids = [...readResults(text)].map(([taskId]) => taskId);
-      return ids.length > 0 && ids.every((taskId) => shown.has(taskId));
-    };
-    const messages = request.messages.filter(
-      (message) => message.role !== "user" || !hidden(message.text),
+    const hidden = new Set<number>();
+    for (const [index, message] of request.messages.entries()) {
+      if (message.role !== "user") continue;
+      const blocks = readResults(message.text);
+      if (blocks.length > 0 && blocks.every((_, block) => pairedBlocks.has(`${index}:${block}`))) {
+        hidden.add(index);
+      }
+    }
+    const messages = request.messages.filter((_, index) => !hidden.has(index));
+    const hiddenTexts = new Set(
+      request.messages.filter((_, index) => hidden.has(index)).map((message) => message.text),
     );
-    const userMessages = request.userMessages.filter((text) => !hidden(text));
+    const userMessages = request.userMessages.filter((text) => !hiddenTexts.has(text));
     return respond({
       ...request,
       lastUserMessage: userMessages.at(-1) ?? null,
@@ -85,16 +115,34 @@ export function waitForTasks(respond: MockModelResponder): MockModelResponder {
   };
 }
 
-function receiptTaskId(result: MockModelToolResult): string | undefined {
-  if (typeof result.output !== "string") return undefined;
-  const text = result.output;
-  return RECEIPT_PATTERNS.map((pattern) => pattern.exec(text)?.[1]).find(Boolean);
+/**
+ * The task generations the receipts in `toolResults` stand for, in call
+ * order. A start opens a generation; a message sent to a working agent joins
+ * that agent's latest generation.
+ */
+function readGenerations(toolResults: readonly MockModelToolResult[]): Generation[] {
+  const generations: Generation[] = [];
+  for (const result of toolResults) {
+    if (typeof result.output !== "string") continue;
+    const started = START_RECEIPT_PATTERN.exec(result.output)?.[1];
+    if (started !== undefined) {
+      generations.push({ callIds: [result.id], taskId: started });
+      continue;
+    }
+    const steered = STEER_RECEIPT_PATTERN.exec(result.output)?.[1];
+    if (steered === undefined) continue;
+    const joined = generations.filter((generation) => generation.taskId === steered).at(-1);
+    if (joined === undefined) generations.push({ callIds: [result.id], taskId: steered });
+    else joined.callIds.push(result.id);
+  }
+  return generations;
 }
 
-/** The `<task_result>` blocks in a message or a settled wait, by task id. */
-function readResults(text: string): Map<string, SettledResult> {
-  const results = new Map<string, SettledResult>();
-  for (const [, taskId, status, escaped] of text.matchAll(RESULT_BLOCK_PATTERN)) {
+/** The `<task_result>` blocks in a message or a settled wait, in order. */
+function readResults(
+  text: string,
+): readonly { readonly result: SettledResult; readonly taskId: string }[] {
+  return [...text.matchAll(RESULT_BLOCK_PATTERN)].map(([, taskId, status, escaped]) => {
     const body = escaped!.replaceAll("&lt;/task_result", "</task_result");
     let output: unknown = body;
     try {
@@ -102,7 +150,6 @@ function readResults(text: string): Map<string, SettledResult> {
     } catch {
       // A text body stays text.
     }
-    results.set(taskId!, { isError: status !== "completed", output });
-  }
-  return results;
+    return { result: { isError: status !== "completed", output }, taskId: taskId! };
+  });
 }

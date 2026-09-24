@@ -8,7 +8,8 @@ import { startEveDev } from "./dev-server-harness.js";
 
 // Only a turn's own principal steers it: Bob's message during Alice's turn
 // waits for that turn to end, then starts a turn of Bob's own, while Bob's
-// answer to a request Alice's turn waits on reaches it at once.
+// answer to a request Alice's turn waits on reaches it at once and never
+// changes who the turn acts for.
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -34,6 +35,11 @@ export default defineAgent({
     if (lastUserMessage === "Bob here, can you help?") {
       if (actors(toolResults).length < 2) return { toolCalls: [{ name: "whoami", input: {} }] };
       return "Own turn as " + actors(toolResults)[1];
+    }
+    if (lastUserMessage === "Refund order 7 once someone approves.") {
+      const refunded = toolResults.find((r) => r.name === "refund_now");
+      if (refunded === undefined) return { toolCalls: [{ name: "refund_now", input: {} }] };
+      return "Refunded as " + JSON.stringify(refunded.output);
     }
     if (lastUserMessage === "Refund order 42, then wait for it.") {
       const waited = toolResults.find((r) => r.name === "task_wait");
@@ -70,6 +76,20 @@ export default defineTool({
   description: "Report who the current turn acts for.",
   inputSchema: z.object({}),
   approval: never(),
+  execute(_input, ctx) {
+    return ctx.session.auth.current?.principalId ?? "anonymous";
+  },
+});
+`;
+
+const REFUND_NOW_TOOL = `import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Refund an order once someone approves, as the turn's principal.",
+  inputSchema: z.object({}),
+  approval: always(),
   execute(_input, ctx) {
     return ctx.session.auth.current?.principalId ?? "anonymous";
   },
@@ -165,6 +185,7 @@ describe("the principal check", () => {
           "agent/channels/eve.ts": CHANNEL,
           "agent/instructions.md": "Help whoever writes.\n",
           "agent/tools/refund.ts": REFUND_TOOL,
+          "agent/tools/refund_now.ts": REFUND_NOW_TOOL,
           "agent/tools/sleep.ts": `import { sleep } from "eve/tools/sleep";\n\nexport default sleep();\n`,
           "agent/tools/whoami.ts": WHOAMI_TOOL,
         },
@@ -230,6 +251,30 @@ describe("the principal check", () => {
         expect(lastReply(answered)).toMatch(/^Refund: <task_result [^>]*status="completed">/u);
         expect(lastReply(answered)).toMatch(/"decision":\s*"approve"/u);
         expect(JSON.stringify(answered)).not.toContain("Unexpected:");
+
+        // Bob approves the session's own request; Alice's turn resumes and still acts as Alice.
+        const approval = await alice.sessions.create({
+          message: "Refund order 7 once someone approves.",
+        });
+        const pending = await collectUntil(approval.session.stream({ startIndex: 0 }), (events) =>
+          events.some((event) => event.type === "input.requested"),
+        );
+        const approvalRequest = pending.find((event) => event.type === "input.requested");
+        const approvalId =
+          approvalRequest?.type === "input.requested"
+            ? approvalRequest.data.requests[0]?.requestId
+            : undefined;
+        expect(approvalId).toBeTruthy();
+        await bob.sessions
+          .attach(approval.response.sessionId)
+          .respond([{ optionId: "approve", requestId: approvalId! }]);
+        const approved = await collectUntil(
+          approval.session.stream({ startIndex: 0 }),
+          (events) =>
+            lastReply(events).startsWith("Refunded as") &&
+            events.at(-1)?.type === "session.waiting",
+        );
+        expect(lastReply(approved)).toBe('Refunded as "alice"');
       } catch (error) {
         throw new Error(
           [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),

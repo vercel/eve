@@ -7,7 +7,7 @@ import type {
 } from "#channel/types.js";
 import { AuthKey } from "#context/keys.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { readDelegatedAnswerer } from "#execution/session/delegated-answer.js";
+import { readAnswerer } from "#execution/session/answerer.js";
 import {
   isSteeringDelivery,
   type SessionInputQueue,
@@ -96,7 +96,7 @@ export class SessionExecution {
   ): Promise<TurnOutcome> {
     const turn = new ActiveTurn(this.input, {
       callerCallId,
-      principal: turnPrincipal(delivery, this.input.cursor.serializedContext),
+      principal: turnPrincipal(delivery, this.input.cursor),
     });
     try {
       return await this.runTurnSteps(turn, delivery);
@@ -180,6 +180,11 @@ export class SessionExecution {
       }
 
       if (result.action === "park") {
+        // A failed turn stops the work it started before it reports, so a
+        // task-mode run never waits on tasks it just cancelled.
+        if (result.settled?.isError === true) {
+          await cancelTasks(cursor, { kind: "turn", turnId: turn.turnId });
+        }
         const canPark =
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
@@ -188,10 +193,6 @@ export class SessionExecution {
           (result.settled !== undefined &&
             hasPendingDetachedWork(cursor.sessionState.snapshot.session.state));
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
-        // A failed turn stops the work it started before it reports.
-        if (result.settled?.isError === true) {
-          await cancelTasks(cursor, { kind: "turn", turnId: turn.turnId });
-        }
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
           kind: "park",
@@ -609,19 +610,21 @@ type StopReason = "cancelled" | "expired";
 /**
  * The principal a turn acts for, as `turnStep` decides it: a result turn's
  * creator, else the auth of the delivery that starts it, else the session's
- * current principal. A person's answer never changes a delegated session's
- * principal (see `readDelegatedAnswerer`).
+ * current principal. A person's answer to a request the session waits on
+ * never changes its principal (see `readAnswerer`).
  */
 function turnPrincipal(
   payload: TurnStepPayload | undefined,
-  serializedContext: Record<string, unknown>,
+  cursor: SessionStateCursor,
 ): SessionAuthContext | null {
   if (payload?.taskResults !== undefined) return readTaskCreator(payload.taskResults.creator).auth;
   const delivery = payload?.delivery;
+  const { serializedContext } = cursor;
   const context = {
     has: (key: { readonly name: string }) => serializedContext[key.name] !== undefined,
   };
-  if (delivery?.auth !== undefined && readDelegatedAnswerer(context, delivery) === undefined) {
+  const state = cursor.sessionState.snapshot.session.state;
+  if (delivery?.auth !== undefined && readAnswerer(context, delivery, state) === undefined) {
     return delivery.auth;
   }
   return sessionPrincipal(serializedContext);

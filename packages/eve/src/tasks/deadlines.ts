@@ -7,6 +7,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import { cancelRunAgents } from "#tasks/cancel.js";
 import { settledEvents } from "#tasks/events.js";
 import {
   commandEffects,
@@ -77,10 +78,13 @@ export async function applyTaskDeadlines(input: {
   const replies: WorkflowCallerReply[] = [...reconciled.replies];
   // Detached results go to a live wait or a later model step, not to a caller.
   const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
+  // A hard-stopped workflow run never reports, so the agents it awaits stop with it.
+  const stoppedRuns = new Set<string>();
   for (const effect of evaluated.effects) {
     if (effect.kind === "unconfirmed") {
       const { child, record } = effect;
       if (child !== undefined) await hardStopTaskChild(child, record.id);
+      if (child?.kind === "workflow") stoppedRuns.add(child.runId);
       // A child that never confirmed its stop ends its generation's span here.
       serializedContext = recordTaskTraceTerminal({
         nowMs,
@@ -108,7 +112,9 @@ export async function applyTaskDeadlines(input: {
     table = markTaskDelivered(table, record.id, record.generation);
     resolveCaller(record, outcome.error, { replies, results });
   }
-  const commands = commandEffects(evaluated.effects);
+  const runAgents = cancelRunAgents(table, stoppedRuns, now);
+  table = runAgents.table;
+  const commands = [...commandEffects(evaluated.effects), ...runAgents.commands];
   if (commands.length > 0) await runCommands(commands, await readContext(serializedContext));
 
   const lost = reportLostTasks(session, { replies, results });
@@ -127,7 +133,12 @@ export async function applyTaskDeadlines(input: {
     if (routed.result !== undefined) results.push(routed.result);
   }
   return {
-    events: [...reconciled.events, ...settledEvents(evaluated.effects), ...lost.events],
+    events: [
+      ...reconciled.events,
+      ...settledEvents(evaluated.effects),
+      ...runAgents.events,
+      ...lost.events,
+    ],
     replies,
     results,
     serializedContext: await flushAgentInvocationTraces(serializedContext),
@@ -186,6 +197,7 @@ function reportLostTasks(
         id,
         kind: task.kind ?? "workflow",
         name,
+        wait: task.wait,
       },
     });
   }

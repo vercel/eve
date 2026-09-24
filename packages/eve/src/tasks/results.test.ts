@@ -16,10 +16,9 @@ import {
   readTaskCreator,
   sameTaskPrincipal,
   takeTaskResults,
-  workingDetachedTaskIds,
 } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
-import { applyTaskMessage } from "#tasks/table.js";
+import { applyTaskMessage, workingDetachedTaskIds } from "#tasks/table.js";
 
 const NOW = "2026-09-24T14:05:00.000Z";
 const ALICE: SessionAuthContext = {

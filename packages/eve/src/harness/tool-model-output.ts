@@ -6,6 +6,9 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import type { ToolModelOutputPart } from "#tools/definition.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { withToolOutputSerializationError } from "#harness/tool-output-serialization.js";
+import type { HarnessToolMap } from "#harness/types.js";
+import type { TaskOutcome } from "#tasks/protocol.js";
+import { renderModelOutputBody } from "#tasks/render.js";
 
 /**
  * A validated {@link ToolModelOutput} in the AI SDK's expected shape:
@@ -112,6 +115,35 @@ export function normalizeToolModelOutput(input: {
       return output;
     },
   );
+}
+
+/**
+ * The `<task_result>` body a completed task's tool shapes with its
+ * `toModelOutput`, as it shapes that tool's own result. A `task_wait` and a
+ * `task.result` message project the same way: a projection that throws is
+ * logged, and the raw output is delivered instead.
+ */
+export async function projectTaskResultBody(
+  task: { readonly name: string; readonly outcome: TaskOutcome; readonly taskId: string },
+  tools: HarnessToolMap | undefined,
+): Promise<string | undefined> {
+  const toModelOutput = tools?.get(task.name)?.toModelOutput;
+  if (task.outcome.status !== "completed" || toModelOutput === undefined) return undefined;
+  try {
+    return renderModelOutputBody(
+      normalizeToolModelOutput({
+        output: await toModelOutput(task.outcome.output),
+        toolName: task.name,
+      }),
+    );
+  } catch (error) {
+    log.warn("toModelOutput failed for a task result; delivering the raw output", {
+      error,
+      taskId: task.taskId,
+      toolName: task.name,
+    });
+    return undefined;
+  }
 }
 
 /**

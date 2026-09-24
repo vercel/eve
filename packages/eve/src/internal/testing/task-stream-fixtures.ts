@@ -4,6 +4,7 @@ import type {
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
 } from "#protocol/message.js";
+import { readSettledTaskWaitOutput } from "#tasks/wait-tool.js";
 
 // Recorded session streams that each release publishes under
 // `conformance/task-streams/v<N>/` so stream consumers can replay real
@@ -49,7 +50,7 @@ export interface TaskStreamState {
   readonly remote: boolean;
   /** Input requests surfaced on the stream with the task's ID. */
   readonly inputRequests: number;
-  /** Whether a `task.result` input delivered the task's result. */
+  /** Whether a `task.result` input or a settled `task_wait` delivered the task's result. */
   readonly delivered: boolean;
 }
 
@@ -124,6 +125,13 @@ export function deriveTaskStreamStates(
           for (const taskId of event.data.taskIds ?? []) ensure(taskId).delivered = true;
         }
         break;
+      case "action.result": {
+        const { result } = event.data;
+        const waited =
+          result.kind === "tool-result" ? readSettledTaskWaitOutput(result.output) : undefined;
+        if (waited !== undefined) ensure(waited.taskId).delivered = true;
+        break;
+      }
     }
   }
 

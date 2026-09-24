@@ -92,8 +92,10 @@ export function rejectOtherPrincipal(input: {
 /**
  * The task a `task_wait` or `task_cancel` call names, or the call's error. A
  * task the session does not have, an attached call its turn still holds, and
- * a `ctx.agent` call a workflow body awaits are unknown to the model; a task a
- * different principal started is refused, as for agent calls.
+ * a `ctx.agent` call a workflow body still awaits are unknown to the model;
+ * once finished, such an agent is idle like any other and the `[Tasks]` note
+ * lists it. A task a different principal started is refused, as for agent
+ * calls.
  */
 export function findCallerTask(input: {
   readonly caller: SessionAuthContext | null;
@@ -103,8 +105,8 @@ export function findCallerTask(input: {
   const record = findTask(input.table, input.taskId);
   if (
     record === undefined ||
-    record.workflowCaller !== undefined ||
-    (record.mode === "attached" && !isTerminalTaskStatus(record.status))
+    ((record.workflowCaller !== undefined || record.mode === "attached") &&
+      !isTerminalTaskStatus(record.status))
   ) {
     return { error: { code: "UNKNOWN_TASK", message: renderUnknownTask(input.taskId) } };
   }

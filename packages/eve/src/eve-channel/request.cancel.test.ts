@@ -24,6 +24,22 @@ describe("parseCancelTurnBody", () => {
       ok: false,
     });
   });
+
+  it.each([{ taskId: "research-7k2m9q" }, { tasks: true }, { tasks: false, turnId: "turn_1" }])(
+    "refuses the removed task options %o instead of cancelling everything",
+    async (body) => {
+      const result = await parseCancelTurnBody(cancelRequest(body));
+
+      expect(result).toBeInstanceOf(Response);
+      if (!(result instanceof Response)) return;
+      expect(result.status).toBe(400);
+      await expect(result.json()).resolves.toEqual({
+        error:
+          "'taskId' and 'tasks' are no longer supported: session.cancel() stops the turn and every working task. To stop one task, the agent calls task_cancel.",
+        ok: false,
+      });
+    },
+  );
 });
 
 function cancelRequest(body: Record<string, unknown>): Request {

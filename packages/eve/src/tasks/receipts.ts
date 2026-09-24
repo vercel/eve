@@ -10,8 +10,7 @@ import {
   renderTooManyTasks,
   type TaskReceipt,
 } from "#tasks/render.js";
-import { MAX_WORKING_TASKS, workingDetachedTaskIds } from "#tasks/results.js";
-import type { TaskTable } from "#tasks/table.js";
+import { MAX_WORKING_TASKS, workingDetachedTaskIds, type TaskTable } from "#tasks/table.js";
 
 // Immediate tool results of calls the turn does not wait for. Clients read
 // the structured receipt; the model reads its text.

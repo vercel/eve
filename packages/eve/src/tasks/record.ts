@@ -85,6 +85,8 @@ export interface RecoveredTaskFields {
   /** Reply hook of the `ctx.agent` call waiting on the task. */
   readonly replyTo?: string;
   readonly delivered?: boolean;
+  /** The `task_wait` call waiting on the task, which takes the loss as its result. */
+  readonly wait?: TaskRecord["wait"];
 }
 
 export type TaskRecordDecodeResult =
@@ -267,5 +269,12 @@ function recoverTaskFields(value: Record<string, unknown>): RecoveredTaskFields 
     fields.replyTo = value.workflowCaller.replyTo;
   }
   if (typeof value.delivered === "boolean") fields.delivered = value.delivered;
+  if (
+    isRecordObject(value.wait) &&
+    isString(value.wait.callId) &&
+    isIsoTime(value.wait.startedAt)
+  ) {
+    fields.wait = { callId: value.wait.callId, startedAt: value.wait.startedAt };
+  }
   return fields;
 }
