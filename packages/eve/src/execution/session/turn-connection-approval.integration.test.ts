@@ -441,6 +441,9 @@ describe("turn connection approval restoration", () => {
         expect.objectContaining({ requestId: newer.requestId, outcome: "allowed" }),
       ]);
       expect(getPendingInputBatches(state).flatMap((batch) => batch.requests)).toEqual([older]);
+      expect(getPendingInputBatches(state)[0]!.toolReplayIdentities).toEqual(
+        batches[0]!.toolReplayIdentities,
+      );
       expect(fixture.fetch).toHaveBeenCalledOnce();
     },
   );
@@ -490,8 +493,8 @@ describe("turn connection approval restoration", () => {
     expect(getPendingInputBatches(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
     expect(getApprovalAuditState(state).candidateHistory).toEqual([
       expect.objectContaining({
-        status: "rejected",
-        reason: expect.stringContaining("cannot replay its approvalResponse callback"),
+        status: "failed",
+        reason: "Approval authorization is temporarily unavailable. Please try again.",
       }),
     ]);
   });
@@ -571,11 +574,11 @@ describe("turn connection approval restoration", () => {
       const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
       expect(request.action.toolName).toBe("notes__saveNote");
-      expect(parked.serializedContext["eve.pendingConnectionCalls"]).toEqual({
-        [request.action.callId]: {
-          connectionName: "notes",
-          instanceId: expect.stringMatching(/^connection:/),
-        },
+      expect(
+        getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
+          .toolReplayIdentities,
+      ).toEqual({
+        [request.requestId]: expect.stringMatching(/^connection:/),
       });
       expect(fixture.fetch).not.toHaveBeenCalled();
       if (cold) clearDurableDynamicCallbacks(sessionId);
@@ -596,7 +599,8 @@ describe("turn connection approval restoration", () => {
         getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
       ).toEqual([expect.objectContaining({ outcome: "allowed", requestId: request.requestId })]);
       expect(fixture.fetch).toHaveBeenCalledOnce();
-      expect(resumed.serializedContext["eve.pendingConnectionCalls"]).toEqual({});
+      expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
+      expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
       expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(2);
       expect(fixture.events).toContainEqual(
         expect.objectContaining({

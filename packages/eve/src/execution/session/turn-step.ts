@@ -3,7 +3,6 @@ import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
-import { forgetCompletedConnectionCall } from "#execution/tools/connection-search.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
@@ -646,7 +645,6 @@ function createTurnEventHandler(input: {
   const { abortSignal, bundle, ctx, effectiveAgent, effectiveNode } = input;
   return async (event, messages) => {
     const emitted = await input.sink.emit(event);
-    forgetCompletedConnectionCall(event);
     const lifecycleMessages = await dispatchMemoryLifecycleEvent({
       abortSignal,
       appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",

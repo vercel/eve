@@ -1,11 +1,9 @@
 import { loadContext } from "#context/container.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { ContextKey } from "#context/key.js";
 import {
   type AuthorizationChallenge,
   type AuthorizationSignal,
   getAuthorizationResults,
-  isAuthorizationPendingModelOutput,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -85,43 +83,6 @@ const CONNECTION_SEARCH_OUTPUT_SCHEMA = defineJsonSchema<ConnectionSearchResultI
 const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
   "eve.connectionSearchResults",
 );
-
-const PendingConnectionCallsKey = new ContextKey<
-  Readonly<Record<string, { readonly connectionName: string; readonly instanceId: string }>>
->("eve.pendingConnectionCalls");
-
-/** Refuse replay against a replacement connection rather than silently changing destinations. */
-export function assertPendingConnectionCalls(callIds: readonly string[]): void {
-  const ctx = loadContext();
-  const pending = ctx.get(PendingConnectionCallsKey) ?? {};
-  const connections = ctx.get(ConnectionRegistryKey)?.getConnections() ?? [];
-  for (const callId of callIds) {
-    const expected = pending[callId];
-    if (expected === undefined) continue;
-    const current = connections.find((entry) => entry.connectionName === expected.connectionName);
-    if (current?.instanceId !== expected.instanceId) {
-      throw new Error(
-        "The connection for this tool call changed or is unavailable. Request a new tool call and approval.",
-      );
-    }
-  }
-}
-
-export function forgetCompletedConnectionCall(event: UnstampedMessageStreamEvent): void {
-  if (
-    event.type !== "action.result" ||
-    event.data.result.kind !== "tool-result" ||
-    isAuthorizationPendingModelOutput(event.data.result.output)
-  )
-    return;
-  const callId = event.data.result.callId;
-  const ctx = loadContext();
-  const pending = ctx.get(PendingConnectionCallsKey);
-  if (pending?.[callId] === undefined) return;
-  const next = { ...pending };
-  delete next[callId];
-  ctx.set(PendingConnectionCallsKey, next);
-}
 
 /**
  * Builds the qualified tool name for a connection tool.
@@ -357,6 +318,32 @@ async function executeConnectionSearch(
   return summaries;
 }
 
+export function connectionToolReplayIdentity(toolName: string): string | undefined {
+  const ctx = loadContext();
+  const discovered = ctx
+    .get(ConnectionSearchResultsKey)
+    ?.find((entry) => entry.qualifiedName === toolName);
+  if (discovered === undefined) return;
+  return ctx
+    .get(ConnectionRegistryKey)
+    ?.getConnections()
+    .find((connection) => connection.connectionName === discovered.connection)?.instanceId;
+}
+
+function assertConnectionToolInstance(closure: JsonObject): void {
+  if (typeof closure.instanceId !== "string") return;
+  const { connectionName } = readDiscoveredToolClosure(closure);
+  const connection = loadContext()
+    .get(ConnectionRegistryKey)
+    ?.getConnections()
+    .find((entry) => entry.connectionName === connectionName);
+  if (connection?.instanceId !== closure.instanceId) {
+    throw new Error(
+      "The connection for this tool call changed or is unavailable. Request a new tool call and approval.",
+    );
+  }
+}
+
 function readDiscoveredToolClosure(closure: JsonObject): {
   readonly connectionName: string;
   readonly toolName: string;
@@ -379,7 +366,7 @@ async function executeDiscoveredConnectionTool(
   if (registry === undefined) {
     throw new Error("Connection registry is unavailable while replaying a discovered tool.");
   }
-  assertPendingConnectionCalls([executeCtx.callId]);
+  assertConnectionToolInstance(closure);
   assertPendingConnectionAuthorizationInstances(registry);
   const scoped = await resolveInteractiveAuth(registry, connectionName);
   const auth = createAuthorizationExecution();
@@ -413,27 +400,9 @@ async function requestDiscoveredConnectionToolApproval(
   context: ApprovalContext,
 ) {
   const { connectionName } = readDiscoveredToolClosure(closure);
-  const ctx = loadContext();
-  assertPendingConnectionCalls([context.callId]);
-  const registry = ctx.get(ConnectionRegistryKey);
-  const connection = registry
-    ?.getConnections()
-    .find((entry) => entry.connectionName === connectionName);
-  const approval = connection?.approval;
-  const outcome =
-    approval === undefined ? "not-applicable" : await resolveApprovalPolicy(approval)(context);
-  if (
-    connection?.instanceId !== undefined &&
-    (outcome === true ||
-      outcome === "user-approval" ||
-      (typeof outcome === "object" && outcome?.type === "user-approval"))
-  ) {
-    ctx.set(PendingConnectionCallsKey, {
-      ...ctx.get(PendingConnectionCallsKey),
-      [context.callId]: { connectionName, instanceId: connection.instanceId },
-    });
-  }
-  return outcome;
+  assertConnectionToolInstance(closure);
+  const approval = loadContext().get(ConnectionRegistryKey)?.getConnectionApproval(connectionName);
+  return approval === undefined ? "not-applicable" : await resolveApprovalPolicy(approval)(context);
 }
 
 async function authorizeDiscoveredConnectionToolApproval(
@@ -441,7 +410,7 @@ async function authorizeDiscoveredConnectionToolApproval(
   context: ApprovalResponseContext,
 ) {
   const { connectionName } = readDiscoveredToolClosure(closure);
-  assertPendingConnectionCalls([context.request.callId]);
+  assertConnectionToolInstance(closure);
   const approval = loadContext().get(ConnectionRegistryKey)?.getConnectionApproval(connectionName);
   const response =
     approval === undefined || typeof approval === "function" ? undefined : approval.response;
@@ -490,7 +459,14 @@ export async function resolveConnectionSearchDynamicTools() {
     const toolName = result.tool!;
     const approval = registry.getConnectionApproval(connectionName);
 
-    const closure = { connectionName, toolName };
+    const instanceId = connections.find(
+      (connection) => connection.connectionName === connectionName,
+    )?.instanceId;
+    const closure: { connectionName: string; toolName: string; instanceId?: string } = {
+      connectionName,
+      toolName,
+    };
+    if (instanceId !== undefined) closure.instanceId = instanceId;
     const discoveredTool = defineTool({
       description: result.description,
       inputSchema: (result.inputSchema ?? {
