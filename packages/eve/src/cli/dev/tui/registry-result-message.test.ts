@@ -8,7 +8,7 @@ describe("registryCommandOutcome", () => {
       registryCommandOutcome({
         outcomes: [{ kind: "installed", title: "connection/notion", facts: [], output: [] }],
       }),
-    ).toEqual({ status: "success", summary: "Added connection/notion", message: "" });
+    ).toEqual({ failed: false, summary: "Added connection/notion", message: "" });
   });
 
   it("hangs one installation's facts under its summary", () => {
@@ -27,7 +27,7 @@ describe("registryCommandOutcome", () => {
         ],
       }),
     ).toEqual({
-      status: "success",
+      failed: false,
       summary: "Added channel/photon",
       message:
         "Agent phone number  +15551234567\nMode                dev\nConfigured MCP connection.",
@@ -49,7 +49,7 @@ describe("registryCommandOutcome", () => {
         ["Wait for the Slack request to expire before retrying."],
       ),
     ).toEqual({
-      status: "neutral",
+      failed: false,
       summary: "Added channel/slack · setup not finished",
       message:
         "Finish with `eve add channel/slack --skip-install`\n" +
@@ -60,7 +60,7 @@ describe("registryCommandOutcome", () => {
   it("reports a cancellation before installation without detail", () => {
     expect(
       registryCommandOutcome({ outcomes: [{ kind: "cancelled", title: "connection/sentry" }] }),
-    ).toEqual({ status: "neutral", summary: "connection/sentry not added", message: "" });
+    ).toEqual({ failed: false, summary: "connection/sentry not added", message: "" });
   });
 
   it("splits a failure's retry hint onto its own line", () => {
@@ -76,7 +76,7 @@ describe("registryCommandOutcome", () => {
         ],
       }),
     ).toEqual({
-      status: "error",
+      failed: true,
       summary: "Couldn't add channel/slack",
       message:
         "Vercel CLI is not authenticated.\nTry again with `eve add channel/slack --skip-install`.",
@@ -93,7 +93,7 @@ describe("registryCommandOutcome", () => {
         ],
       }),
     ).toEqual({
-      status: "error",
+      failed: true,
       summary: "Added 1 of 3 items",
       message: "* Added Web Chat\n* Slack not added\n* Couldn't add GitHub\n  Installation failed.",
     });
