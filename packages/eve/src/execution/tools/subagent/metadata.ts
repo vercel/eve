@@ -24,8 +24,15 @@ export function resolveWorkflowAgentMetadata(
   }
 
   for (const [name, registered] of bundle.subagentRegistry.subagentsByName ?? []) {
-    const description = registered.definition.description;
-    if (description !== undefined) agents.set(name, { description });
+    const { definition } = registered;
+    if (definition.description === undefined) continue;
+    const models = definition.kind === "subagent" ? definition.modelChoices : undefined;
+    agents.set(
+      name,
+      models === undefined
+        ? { description: definition.description }
+        : { description: definition.description, models },
+    );
   }
 
   const selections = effectiveDynamicSelections(ctx);

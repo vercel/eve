@@ -31,6 +31,7 @@ The declared subagent tool, and `ctx.agent()`, accept an optional `model`:
 
 The tool schema lists the choices as an `enum` with the first entry as its
 `default`. Subagents without an array keep the existing schema.
+Authored workflow tools read the same list from `ctx.agents[name].models`.
 
 ## Semantics
 

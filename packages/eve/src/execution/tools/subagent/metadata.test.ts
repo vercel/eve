@@ -42,6 +42,23 @@ describe("resolveWorkflowAgentMetadata", () => {
     });
   });
 
+  it("lists a subagent's model choices", () => {
+    const models = ["openai/gpt-5.4-mini", "openai/gpt-5.4"];
+    const ctx = context({
+      nodeId: "subagents/coordinator",
+      subagentsByName: new Map([
+        [
+          "writer",
+          { definition: { description: "Write reports.", kind: "subagent", modelChoices: models } },
+        ],
+      ]),
+    });
+
+    expect(resolveWorkflowAgentMetadata(ctx)).toEqual({
+      writer: { description: "Write reports.", models },
+    });
+  });
+
   it("omits self-delegation from a delegated root copy", () => {
     const ctx = context({
       description: "Coordinate specialist work.",

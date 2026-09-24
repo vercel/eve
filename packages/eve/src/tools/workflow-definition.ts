@@ -72,6 +72,8 @@ type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue 
 
 export interface WorkflowAgentMetadata {
   readonly description: string;
+  /** Gateway model ids accepted by `ctx.agent()`'s `model`; the first is the default. */
+  readonly models?: readonly string[];
 }
 
 /** Context capabilities available inside an authored `"use step"` helper. */

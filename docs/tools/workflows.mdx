@@ -15,7 +15,7 @@ suspend in either execution mode; running in the background does not require a s
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for durable agent delegation. Use `yield` to report
+the session's channel, `ctx.agents` for effective callable-agent descriptions (plus `models` for a subagent that lists [model choices](../subagents#let-the-parent-choose-the-model)), and `ctx.agent` for durable agent delegation. Use `yield` to report
 progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
 stay in local variables in the workflow body.
 
