@@ -35,7 +35,6 @@ import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 import {
   callSlackApiTrackingResponse,
-  resolveSlackTransportOptions,
   slackApiOptions,
   type SlackTransportOptions,
 } from "#public/channels/slack/transport.js";
@@ -104,9 +103,7 @@ export async function callSlackApi(input: {
   return callSlackApiTrackingResponse(
     input.operation,
     normalizeSlackApiBody(input.body),
-    slackApiOptions(resolveSlackTransportOptions(input.api), () =>
-      resolveSlackBotToken(input.botToken, input.context),
-    ),
+    slackApiOptions(input.api, () => resolveSlackBotToken(input.botToken, input.context)),
   );
 }
 

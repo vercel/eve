@@ -11,6 +11,7 @@ import {
 import type { SlackAttachment, SlackMessage } from "#public/channels/slack/inbound.js";
 import {
   isConfiguredSlackFileUrl,
+  resolveSlackTransportOptions,
   type SlackTransportOptions,
 } from "#public/channels/slack/transport.js";
 import {
@@ -175,15 +176,16 @@ export function createSlackFetchFile(input: {
   readonly api?: SlackTransportOptions;
   readonly botToken?: SlackBotToken;
 }): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
+  const api = resolveSlackTransportOptions(input.api);
   return async (url, context) => {
-    if (!isConfiguredSlackFileUrl(input.api, url) && !isSlackFileUrl(url)) {
+    if (!isConfiguredSlackFileUrl(api, url) && !isSlackFileUrl(url)) {
       return null;
     }
     const installationTeamId = context?.state.installationTeamId;
     const token = await resolveSlackBotToken(input.botToken, {
       teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
     });
-    const response = await (input.api?.fetch ?? fetch)(url, {
+    const response = await (api?.fetch ?? fetch)(url, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {

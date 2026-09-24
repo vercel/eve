@@ -13,9 +13,6 @@ import {
 /** Fetch implementation used for Slack traffic. */
 export type SlackFetch = typeof globalThis.fetch;
 
-/** Where the vendored transport sends a call with no `apiBaseUrl` configured. */
-const SLACK_API_BASE_URL = "https://slack.com/api/";
-
 /**
  * Slack API transport overrides. The base URLs say where a call may go:
  * `apiBaseUrl` defaults to `https://slack.com/api/`, and `fileBaseUrl` falls back to
@@ -84,12 +81,9 @@ function confineFetch(
   fileBaseUrl: string | undefined,
 ): SlackFetch | undefined {
   if (custom === undefined) return undefined;
-  if (apiBaseUrl === undefined && fileBaseUrl === undefined) return custom;
-  const origins = new Set(
-    [apiBaseUrl ?? SLACK_API_BASE_URL, fileBaseUrl ?? SLACK_API_BASE_URL].map(
-      (base) => new URL(base).origin,
-    ),
-  );
+  const bases = [apiBaseUrl, fileBaseUrl].filter((base) => base !== undefined);
+  if (bases.length === 0) return custom;
+  const origins = new Set(bases.map((base) => new URL(base).origin));
   return (target, init) => {
     const origin = URL.parse(target instanceof Request ? target.url : String(target))?.origin;
     return origin !== undefined && origins.has(origin)
@@ -98,12 +92,17 @@ function confineFetch(
   };
 }
 
-/** The options an outbound Slack Web API call is made with. */
+/**
+ * The options an outbound Slack Web API call is made with. Resolves `api`, so a
+ * caller cannot reach the transport with a base that was never checked or a fetch
+ * that was never confined.
+ */
 export function slackApiOptions(
   api: SlackTransportOptions | undefined,
   token: SlackApiOptions["token"],
 ): SlackApiOptions {
-  return { apiUrl: api?.apiBaseUrl, fetch: api?.fetch, token };
+  const resolved = resolveSlackTransportOptions(api);
+  return { apiUrl: resolved?.apiBaseUrl, fetch: resolved?.fetch, token };
 }
 
 /**

@@ -93,6 +93,18 @@ describe("the fetch resolveSlackTransportOptions returns", () => {
     expect(seen).toEqual(["supplied https://files.sim.example/F123/report.csv"]);
   });
 
+  it("leaves Slack's own host alone when only a file base is configured", async () => {
+    const { seen, fetch: confined } = transports({ fileBaseUrl: "https://sim.example/files" });
+    await confined?.("https://sim.example/files/F01/cat.png");
+    // apiBaseUrl was never configured, so slack.com is not a host the wrapper
+    // was given a credential for.
+    await confined?.("https://slack.com/api/chat.postMessage");
+    expect(seen).toEqual([
+      "supplied https://sim.example/files/F01/cat.png",
+      "global https://slack.com/api/chat.postMessage",
+    ]);
+  });
+
   it("carries every Slack host when no base is configured", async () => {
     const { seen, fetch: confined } = transports({});
     await confined?.("https://slack.com/api/chat.postMessage");
