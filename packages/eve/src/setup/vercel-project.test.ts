@@ -749,6 +749,7 @@ describe("linkProject", () => {
       ["link", "--project", "my-agent", "--scope", "team-a", "--yes"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", nonInteractive: true }),
     );
+    expect(mockedRunVercel).toHaveBeenCalledTimes(1);
     expect(mockedVercelApiJson).toHaveBeenCalledWith(
       "https://api.vercel.com/v1/drains/tracing/config?projectId=prj_new&teamId=team_123",
       {

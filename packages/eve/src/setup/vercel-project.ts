@@ -1,6 +1,4 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
-import { readVercelCliConnection } from "#internal/model-auth/vercel-cli.js";
-import { vercelApiJson } from "#internal/model-auth/vercel.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
 import pc from "#compiled/picocolors/index.js";
@@ -34,13 +32,12 @@ import {
   ensureCreatedProjectFramework,
   type CreatedProjectFrameworkOptions,
 } from "./vercel-project-framework.js";
+import { configureTraceSampling } from "./vercel-trace-sampling.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
 });
-
-const AGENT_PROJECT_TRACING_SAMPLING = [{ type: "head_sampling", rate: 1 }] as const;
 
 export interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
@@ -666,39 +663,8 @@ export async function linkProject(
     if (!linked) return undefined;
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
-    if (options.traceSampling !== false) {
-      try {
-        const connection = await readVercelCliConnection();
-        if (connection === undefined) throw new Error("Vercel CLI credentials are unavailable.");
-        const tracingQuery = new URLSearchParams({
-          projectId: link.projectId,
-          teamId: link.orgId,
-        });
-        const response = await vercelApiJson(
-          `https://api.vercel.com/v1/drains/tracing/config?${tracingQuery.toString()}`,
-          {
-            body: JSON.stringify({
-              enabled: true,
-              sampling: AGENT_PROJECT_TRACING_SAMPLING,
-            }),
-            headers: {
-              authorization: `Bearer ${connection.token}`,
-              "content-type": "application/json",
-            },
-            method: "PUT",
-            signal: options.signal,
-          },
-        );
-        if (response.error !== undefined) {
-          throw new Error("Vercel rejected the trace sampling configuration.");
-        }
-      } catch {
-        options.signal?.throwIfAborted();
-        prompter.log.warning(
-          "The Vercel project was created, but trace sampling could not be configured. Set it to 100% for all environments in the Vercel project settings.",
-        );
-      }
-    }
+    if (options.traceSampling !== false)
+      await configureTraceSampling(link, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,
       projectRoot,
