@@ -697,6 +697,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (batch?.event !== undefined) await config.prepareApprovalTurn?.(batch.event);
       if (approvalContext !== undefined) {
         await config.resolveStepDynamicTools?.({
+          requiredToolNames: batch?.requests.map((request) => request.action.toolName),
           ctx: approvalContext,
           event: createStepStartedEvent({
             modelId: session.agent.modelReference?.id ?? "dynamic",
@@ -1257,6 +1258,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
       } catch (error) {
         return failBoundaryEvent(error, emissionState);
+      }
+    }
+    const replayRequests = (pending.resolvedInputs ?? []).flatMap((batch) =>
+      batch.inputs.filter((input) => input.outcome === "approved").map((input) => input.request),
+    );
+    config.assertApprovalReplay?.(replayRequests.map((request) => request.action.callId));
+    if (replayRequests.length > 0) {
+      const replayTools = buildResponseAuthorizationTools({
+        authoredTools: config.tools,
+        context: ctx,
+      });
+      for (const request of replayRequests) {
+        if (!replayTools.has(request.action.toolName)) {
+          throw new Error(
+            "The approved tool is no longer available. Request a new tool call and approval.",
+          );
+        }
       }
     }
     const approvedTools = getApprovedTools(

@@ -25,6 +25,7 @@ import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { assertPendingConnectionCalls } from "#execution/tools/connection-search.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -110,6 +111,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation: sessionInstrumentation,
     mode: input.mode,
     prepareApprovalTurn: input.prepareApprovalTurn,
+    assertApprovalReplay: assertPendingConnectionCalls,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,

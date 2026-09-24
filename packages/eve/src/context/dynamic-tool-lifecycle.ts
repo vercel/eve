@@ -447,6 +447,7 @@ export async function resolveStepDynamicTools(input: {
 
 /** Converts persisted step metadata before any approval replay can read it. */
 export async function preparePersistedStepDynamicToolMetadata(input: {
+  readonly requiredToolNames?: readonly string[];
   readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: StepStartedStreamEvent;
@@ -454,7 +455,11 @@ export async function preparePersistedStepDynamicToolMetadata(input: {
 }): Promise<void> {
   const persisted = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
   const current = persisted.filter(isCurrentDynamicToolMetadata);
+  const missing =
+    input.requiredToolNames?.filter((name) => !persisted.some((entry) => entry.name === name)) ??
+    [];
   if (
+    missing.length === 0 &&
     current.length === persisted.length &&
     !hasUnregisteredDurableDynamicCallbacks(current, {
       sessionId: input.ctx.require(SessionIdKey),
@@ -467,15 +472,18 @@ export async function preparePersistedStepDynamicToolMetadata(input: {
     return;
   }
 
+  if (missing.length > 0) resolvedStepTools.delete(input.ctx);
   await resolveStepDynamicTools(input);
-  const resolved = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
+  const resolved = (input.ctx.get(StepDynamicToolMetadataKey) ?? []).filter(
+    isCurrentDynamicToolMetadata,
+  );
   storeResolvedStepTools({
     ctx: input.ctx,
     event: input.event,
-    metadata: toCurrentDynamicToolMetadataList(
-      persisted,
-      resolved.filter(isCurrentDynamicToolMetadata),
-    ),
+    metadata: [
+      ...toCurrentDynamicToolMetadataList(persisted, resolved),
+      ...resolved.filter((entry) => missing.includes(entry.name)),
+    ],
   });
 }
 

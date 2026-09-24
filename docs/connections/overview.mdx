@@ -69,6 +69,16 @@ eve restores each candidate's originating connection scope before its policy
 check, then prepares the complete batch selected for tool replay. Keep connection
 resolvers idempotent because restoration can run them again.
 
+Restoration uses current resolver results, not a historical connection snapshot.
+If the tool or its required response policy is unavailable, eve refuses the
+response and leaves the request pending. Before replay, eve checks that the
+approved tool is still available and that its connection identity has not
+changed since the call requested approval. A missing or changed connection
+fails the replay rather than sending the call to a replacement destination.
+Request a new tool call and approval after correcting the connection. Identity
+includes the endpoint and `instanceKey`; use a distinct `instanceKey` for each
+account or tenant even when they share an endpoint.
+
 ## Static-token auth
 
 `getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange:

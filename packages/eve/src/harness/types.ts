@@ -312,8 +312,11 @@ export interface ToolLoopHarnessConfig {
     readonly sequence: number;
     readonly turnId: string;
   }) => Promise<void>;
+  /** Rejects approved calls whose runtime resources changed before execution. */
+  readonly assertApprovalReplay?: (callIds: readonly string[]) => void;
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
+    readonly requiredToolNames?: readonly string[];
     readonly ctx: AlsContext;
     readonly event: StepStartedStreamEvent;
     readonly messages: readonly ModelMessage[];
