@@ -253,6 +253,7 @@ describe("runDeployCommand", () => {
     { existing: false, traceSampling: undefined, shouldConfigure: true },
     { existing: false, traceSampling: false, shouldConfigure: false },
     { existing: true, traceSampling: undefined, shouldConfigure: false },
+    { existing: "unknown", traceSampling: undefined, shouldConfigure: false },
   ])(
     "non-interactive deploy: existing=$existing traceSampling=$traceSampling",
     async ({ existing, traceSampling, shouldConfigure }) => {
@@ -260,11 +261,15 @@ describe("runDeployCommand", () => {
       const logger = new TestLogger();
       const fake = createFakePrompter({});
       const linkDeps = createNonInteractiveLinkDeps();
-      if (existing) {
+      if (existing === true) {
         vi.mocked(linkDeps.resolveProjectByNameOrId).mockResolvedValue({
           projectId: "prj_existing",
           projectName: "my-agent",
         });
+      } else if (existing === "unknown") {
+        vi.mocked(linkDeps.resolveProjectByNameOrId).mockRejectedValue(
+          new Error("Vercel API unavailable"),
+        );
       }
       const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
       vi.stubGlobal("fetch", fetchMock);
@@ -299,6 +304,13 @@ describe("runDeployCommand", () => {
       }
       if (traceSampling === false) {
         expect(linkDeps.resolveProjectByNameOrId).not.toHaveBeenCalled();
+      }
+      if (existing === "unknown") {
+        expect(fake.prompter.log.warning).toHaveBeenCalledWith(
+          expect.stringContaining("so it was not configured"),
+        );
+      } else {
+        expect(fake.prompter.log.warning).not.toHaveBeenCalled();
       }
     },
   );

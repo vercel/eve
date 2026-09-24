@@ -118,10 +118,11 @@ describe("runNonInteractiveLink", () => {
     expect(deps.readProjectLink).not.toHaveBeenCalled();
   });
 
-  test("does not link if the scoped existence check fails", async () => {
+  test("links without configuring sampling if the scoped existence check fails", async () => {
     const deps = dependencies();
     vi.mocked(deps.resolveProjectByNameOrId).mockRejectedValue(new Error("Access denied"));
     const onCreatedProject = vi.fn(async () => {});
+    const onProjectCreationUnknown = vi.fn();
 
     await expect(
       runNonInteractiveLink({
@@ -130,10 +131,34 @@ describe("runNonInteractiveLink", () => {
         options: { nonInteractive: true, project: "wayfinder" },
         dependencies: deps,
         onCreatedProject,
+        onProjectCreationUnknown,
       }),
-    ).rejects.toThrow("Access denied");
+    ).resolves.toBe(true);
 
-    expect(deps.runVercel).not.toHaveBeenCalled();
+    expect(deps.runVercel).toHaveBeenCalled();
     expect(onCreatedProject).not.toHaveBeenCalled();
+    expect(onProjectCreationUnknown).toHaveBeenCalledOnce();
+  });
+
+  test("continues linking when project metadata is unavailable for sampling", async () => {
+    const deps = dependencies();
+    vi.mocked(deps.readProjectLink).mockResolvedValue(undefined);
+    const onCreatedProject = vi.fn(async () => {});
+    const onProjectCreationUnknown = vi.fn();
+
+    await expect(
+      runNonInteractiveLink({
+        logger: new TestLogger(),
+        appRoot: "/agent",
+        options: { nonInteractive: true, project: "wayfinder" },
+        dependencies: deps,
+        onCreatedProject,
+        onProjectCreationUnknown,
+      }),
+    ).resolves.toBe(true);
+
+    expect(deps.runVercelEnvPull).toHaveBeenCalled();
+    expect(onCreatedProject).not.toHaveBeenCalled();
+    expect(onProjectCreationUnknown).toHaveBeenCalledOnce();
   });
 });

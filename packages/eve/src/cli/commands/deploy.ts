@@ -75,6 +75,13 @@ export async function runDeployCommand(
             options.traceSampling === false
               ? undefined
               : (link) => configureTraceSampling(link, prompter),
+          onProjectCreationUnknown:
+            options.traceSampling === false
+              ? undefined
+              : () =>
+                  prompter.log.warning(
+                    "Could not verify the Vercel project for trace sampling, so it was not configured. Check the project settings if you need traces in Agent Runs.",
+                  ),
         }))
       )
         return;

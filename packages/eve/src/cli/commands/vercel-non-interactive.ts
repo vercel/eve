@@ -46,6 +46,7 @@ export async function runNonInteractiveLink(input: {
   options: VercelProjectCliOptions;
   dependencies?: NonInteractiveLinkDependencies;
   onCreatedProject?: (link: VercelProjectReference) => Promise<void>;
+  onProjectCreationUnknown?: () => void;
 }): Promise<boolean> {
   const { appRoot, logger, options } = input;
   const dependencies = input.dependencies ?? defaultDependencies;
@@ -60,14 +61,19 @@ export async function runNonInteractiveLink(input: {
     return false;
   }
 
-  const existing =
-    input.onCreatedProject === undefined
-      ? undefined
-      : await dependencies.resolveProjectByNameOrId(
+  let existing: boolean | undefined;
+  if (input.onCreatedProject !== undefined) {
+    try {
+      existing =
+        (await dependencies.resolveProjectByNameOrId(
           appRoot,
           await dependencies.resolveTeam(appRoot, options.team),
           options.project,
-        );
+        )) !== null;
+    } catch {
+      // An uncertain project identity must not turn on billable sampling.
+    }
+  }
   const args = [
     "link",
     "--project",
@@ -79,12 +85,13 @@ export async function runNonInteractiveLink(input: {
     process.exitCode = 1;
     return false;
   }
-  if (existing === null && input.onCreatedProject !== undefined) {
-    const link = await dependencies.readProjectLink(appRoot);
-    if (link === undefined) {
-      throw new Error("Vercel project linked, but its project identity could not be read.");
-    }
-    await input.onCreatedProject(link);
+  if (existing === false && input.onCreatedProject !== undefined) {
+    const link = await dependencies.readProjectLink(appRoot).catch(() => undefined);
+    if (link !== undefined) await input.onCreatedProject(link);
+    else input.onProjectCreationUnknown?.();
+  }
+  if (existing === undefined && input.onCreatedProject !== undefined) {
+    input.onProjectCreationUnknown?.();
   }
   if (!(await dependencies.runVercelEnvPull(appRoot, undefined, undefined, true))) {
     logger.error("Vercel project linked, but pulling environment variables did not complete.");
