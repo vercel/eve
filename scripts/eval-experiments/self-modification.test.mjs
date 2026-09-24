@@ -15,6 +15,7 @@ function childSession(sessionId, parentSessionId, parentTurnId, callId, events =
         {
           invocation: {
             kind: "subagent",
+            name: "self-modification__agent",
             parentCallId: callId,
             parentSessionId,
             parentTurnId,
@@ -92,6 +93,18 @@ test("derives independently evidenced durations and a zero-valid tool count", ()
     { sessionId: "child", eventId: "child-completed" },
   ]);
   assert.deepEqual(result.toolCalls.evidence, result.totalChildDuration.evidence);
+});
+
+test("measures archived child sessions without invocation metadata", () => {
+  const sessions = captures();
+  sessions[1].events[0].data = { runtime: { agentId: "self-modification__agent" } };
+  const result = derive(sessions);
+  assert.equal(result.parentTurnToFinalChildCompletion.value, 5000);
+  assert.equal(result.totalChildDuration.value, 3000);
+  assert.equal(result.toolCalls.value, 0);
+
+  sessions[1].events[0].data.runtime.agentId = "another-agent";
+  assert.equal(derive(sessions).totalChildDuration.reason, "child-invocation-mismatch");
 });
 
 test("measures total child turns for every self-modification eval", () => {

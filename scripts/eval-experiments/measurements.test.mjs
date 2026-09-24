@@ -148,6 +148,7 @@ test("delegation helpers work with any subagent and allow repeated calls to the 
         event("session.started", "child-session", 1, {
           invocation: {
             kind: "subagent",
+            name: "editor",
             parentCallId: "first",
             parentSessionId: "parent",
             parentTurnId: "parent-turn",
@@ -164,5 +165,28 @@ test("delegation helpers work with any subagent and allow repeated calls to the 
   assert.equal(
     delegatedSessions(captureSessions(sessions), calls).reason,
     "child-invocation-mismatch",
+  );
+  sessions[1].events[0].data = { runtime: { agentId: "editor" } };
+  assert.deepEqual(delegatedSessions(captureSessions(sessions), calls), {
+    status: "ready",
+    sessionIds: ["child"],
+  });
+  sessions[1].events[0].data.runtime.agentId = "wrong-agent";
+  assert.equal(
+    delegatedSessions(captureSessions(sessions), calls).reason,
+    "child-invocation-mismatch",
+  );
+  sessions[1].events[0].data.runtime.agentId = "editor";
+  sessions[0].events.push(
+    event("subagent.called", "unrelated", 1, {
+      name: "other-agent",
+      childSessionId: "child",
+      turnId: "parent-turn",
+      callId: "other-call",
+    }),
+  );
+  assert.equal(
+    delegatedSessions(captureSessions(sessions), sessions[0].events.slice(1)).reason,
+    "ambiguous-child-parent",
   );
 });

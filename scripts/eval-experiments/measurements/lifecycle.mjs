@@ -12,8 +12,13 @@ export function delegatedSessions(capture, calls) {
     if (childSessionId === parentSessionId) return unavailable("child-session-reused");
     if (!capture.bySession.has(childSessionId)) return unavailable("missing-child-capture");
 
-    const child = children.get(childSessionId) ?? { parentSessionId, calls: [] };
-    if (child.parentSessionId !== parentSessionId) return unavailable("ambiguous-child-parent");
+    const child = children.get(childSessionId) ?? {
+      parentSessionId,
+      name: called.data.name,
+      calls: [],
+    };
+    if (child.parentSessionId !== parentSessionId || child.name !== called.data.name)
+      return unavailable("ambiguous-child-parent");
     child.calls.push({ callId, parentTurnId });
     children.set(childSessionId, child);
   }
@@ -22,14 +27,21 @@ export function delegatedSessions(capture, calls) {
     const invocations = selectEvents(capture.bySession.get(sessionId), "session.started");
     const invocation = invocations[0]?.data?.invocation;
     const initialCall = child.calls[0];
-    if (
-      invocations.length !== 1 ||
-      invocation?.kind !== "subagent" ||
+    if (invocations.length !== 1) return unavailable("child-invocation-mismatch");
+    if (invocation === undefined) {
+      // Some captures omit invocation metadata; the parent's childSessionId is
+      // the link, and the child's runtime identity must agree with the selected agent.
+      if (invocations[0].data?.runtime?.agentId !== child.name)
+        return unavailable("child-invocation-mismatch");
+    } else if (
+      invocation.kind !== "subagent" ||
       invocation.parentCallId !== initialCall.callId ||
       invocation.parentSessionId !== child.parentSessionId ||
-      invocation.parentTurnId !== initialCall.parentTurnId
-    )
+      invocation.parentTurnId !== initialCall.parentTurnId ||
+      invocation.name !== child.name
+    ) {
       return unavailable("child-invocation-mismatch");
+    }
   }
   return { status: /** @type {const} */ ("ready"), sessionIds: [...children.keys()] };
 }
