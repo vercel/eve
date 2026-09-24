@@ -66,6 +66,40 @@ describe("Vercel workspace subagent compilation", () => {
     ]);
   });
 
+  it("uses the workspace member root for background workflow tool ids", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agents/assistant/agent/agent.ts": rootConfig,
+        "agents/assistant/agent/instructions.md": "Call the probe tool.\n",
+        "agents/assistant/agent/tools/probe.ts": [
+          'import { defineWorkflowTool } from "eve/tools";',
+          "",
+          "export default defineWorkflowTool({",
+          '  description: "Probe the workflow registry.",',
+          '  execution: "background",',
+          "  inputSchema: {},",
+          "  async execute() {",
+          '    "use workflow";',
+          '    return { status: "ok" };',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+      installDependencies: true,
+      name: "workspace-member-background-workflow-id",
+    });
+
+    const result = await compileAgent({ startPath: join(app.appRoot, "agents", "assistant") });
+
+    expect(result.manifest.tools.find((tool) => tool.name === "probe")?.behavior).toMatchObject({
+      handling: {
+        kind: "workflow-tool",
+        workflowId: "workflow//./agent/tools/probe//execute",
+      },
+    });
+  });
+
   it("rejects an unknown peer even with a description override", async () => {
     const app = await scenarioApp({
       installDependencies: true,
