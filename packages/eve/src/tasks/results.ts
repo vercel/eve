@@ -169,6 +169,30 @@ export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
 }
 
 /**
+ * Takes the held result of one generation, whatever its detach group, and
+ * marks it delivered: a `task_wait` asked for that task by name.
+ */
+export function takeTaskResult<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  taskId: string,
+  generation: number,
+): { readonly result?: PendingTaskResult; readonly session: T } {
+  const pending = readPendingTaskResults(session.state);
+  const result = pending.find(
+    (entry) => entry.taskId === taskId && entry.generation === generation,
+  );
+  if (result === undefined) return { session };
+  const table = markTaskDelivered(getTaskTable(session), taskId, generation);
+  return {
+    result,
+    session: writePending(
+      setTaskTable(session, table),
+      pending.filter((entry) => entry !== result),
+    ),
+  };
+}
+
+/**
  * Whether background work remains whose result has not reached history. A
  * session with such work is not quiescent: a delegated caller or a task-mode
  * run waits for it.

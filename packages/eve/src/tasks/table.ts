@@ -25,7 +25,6 @@ import {
   renderAgentUnreachable,
   renderLastStatus,
   renderNotAnAgent,
-  renderTimedOut,
   renderUnknownAgent,
 } from "#tasks/render.js";
 
@@ -315,9 +314,10 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
       steers: undefined,
       timeoutMs,
       turnId: input.turnId,
+      wait: undefined,
       workflowCaller: input.workflowCaller,
     });
-    return { kind: "started", record: next, table: replace(table, next) };
+    return { kind: "started", record: next, table: replaceRecord(table, next) };
   }
 
   const id = deriveTaskId({
@@ -361,14 +361,14 @@ export function steerTask(
   const record = findTask(table, taskId);
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
   const counted = { ...record, steers: (record.steers ?? 0) + 1 };
-  return issueCommand(replace(table, counted), counted, command);
+  return issueCommand(replaceRecord(table, counted), counted, command);
 }
 
 /** Stops counting a steering message that could not be delivered, so the owner does not wait for it. */
 export function withdrawSteer(table: TaskTable, taskId: string, generation: number): TaskTable {
   const record = findTask(table, taskId);
   if (record?.generation !== generation || record.steers === undefined) return table;
-  return replace(
+  return replaceRecord(
     table,
     withoutUndefined({ ...record, steers: record.steers > 1 ? record.steers - 1 : undefined }),
   );
@@ -398,7 +398,7 @@ export function applyTaskMessage(
       });
       return {
         effects: pending.length === 0 ? [] : [{ commands: pending, kind: "send", record: next }],
-        table: replace(table, next),
+        table: replaceRecord(table, next),
       };
     }
     case "task.input": {
@@ -412,7 +412,7 @@ export function applyTaskMessage(
         input: waiting ? message.input : undefined,
         status: waiting ? "input_required" : "working",
       });
-      return { effects: [], table: replace(table, next) };
+      return { effects: [], table: replaceRecord(table, next) };
     }
     case "task.settled": {
       // A repeat of an answer already applied, even one to an earlier
@@ -441,7 +441,7 @@ export function applyTaskMessage(
               usage: message.usage,
             }),
           ],
-          table: replace(table, confirmed),
+          table: replaceRecord(table, confirmed),
         };
       }
       if (isTerminalTaskStatus(record.status)) return { effects: [], table };
@@ -458,13 +458,13 @@ export function applyTaskMessage(
       ];
       const missed = (record.steers ?? 0) - (message.steers ?? 0);
       if (missed <= 0 || message.childEnded === true) {
-        return { effects, table: replace(table, next) };
+        return { effects, table: replaceRecord(table, next) };
       }
       // The agent answered before these messages reached it. It runs them as
       // its next turn for the same call, so they become its next generation.
       const continued = continueAfterMissedSteers(record, next, missed, now);
       effects.push({ kind: "continued", record: continued });
-      return { effects, table: replace(table, continued) };
+      return { effects, table: replaceRecord(table, continued) };
     }
   }
 }
@@ -487,92 +487,28 @@ export function cancelTask(table: TaskTable, taskId: string, now: string): TaskT
     lastStatus: renderLastStatus({ status: "cancelled" }),
     status: "cancelled" as const,
   });
-  return issueCommand(replace(table, cancelled), cancelled, { kind: "cancel" });
-}
-
-/** Settles a task that did not finish in time and asks its child to stop. */
-export function timeOutTask(table: TaskTable, taskId: string, now: string): TaskTransition {
-  const record = findTask(table, taskId);
-  if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
-  const outcome: TaskOutcome = {
-    error: { code: "TIMED_OUT", message: renderTimedOut(record.kind, record.timeoutMs) },
-    status: "failed",
-  };
-  const timedOut = withoutUndefined({
-    ...settleRecord(record, outcome),
-    cancelConfirmBy: cancelConfirmBy(record, now),
-  });
-  const commanded = issueCommand(replace(table, timedOut), timedOut, { kind: "cancel" });
-  return {
-    effects: [{ kind: "settled", outcome, record: timedOut }, ...commanded.effects],
-    table: commanded.table,
-  };
-}
-
-/**
- * Evaluates deadlines. A due working task times out and its child is asked
- * to stop; a stopped task past its confirmation window is reported
- * unconfirmed, with the run to hard-stop when the owner can stop it.
- */
-export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransition {
-  const nowMs = Date.parse(now);
-  const effects: TaskEffect[] = [];
-  let next = table;
-  for (const record of table.records) {
-    if (
-      !isTerminalTaskStatus(record.status) &&
-      record.clockStoppedAt === undefined &&
-      record.deadlineAt !== undefined &&
-      Date.parse(record.deadlineAt) <= nowMs
-    ) {
-      const timedOut = timeOutTask(next, record.id, now);
-      next = timedOut.table;
-      effects.push(...timedOut.effects);
-      continue;
-    }
-    if (record.cancelConfirmBy !== undefined && Date.parse(record.cancelConfirmBy) <= nowMs) {
-      // A remote child already has the cancel request; there is nothing more to stop.
-      const child = record.child?.kind === "remote" ? undefined : record.child;
-      const confirmed = withoutUndefined({
-        ...record,
-        cancelConfirmBy: undefined,
-        child: child === undefined ? record.child : undefined,
-      });
-      next = replace(next, confirmed);
-      effects.push(
-        child === undefined
-          ? { kind: "unconfirmed", record: confirmed }
-          : { child, kind: "unconfirmed", record: confirmed },
-      );
-    }
-  }
-  return { effects, table: next };
-}
-
-/** The earliest time the owner must re-evaluate deadlines, if any. */
-export function nextTaskWakeAt(table: TaskTable): string | undefined {
-  let earliest: number | undefined;
-  for (const record of table.records) {
-    const candidates = [
-      !isTerminalTaskStatus(record.status) && record.clockStoppedAt === undefined
-        ? record.deadlineAt
-        : undefined,
-      record.cancelConfirmBy,
-    ];
-    for (const candidate of candidates) {
-      if (candidate === undefined) continue;
-      const ms = Date.parse(candidate);
-      if (earliest === undefined || ms < earliest) earliest = ms;
-    }
-  }
-  return earliest === undefined ? undefined : new Date(earliest).toISOString();
+  return issueCommand(replaceRecord(table, cancelled), cancelled, { kind: "cancel" });
 }
 
 /** Marks the current generation's result as present in history. */
 export function markTaskDelivered(table: TaskTable, taskId: string, generation: number): TaskTable {
   const record = findTask(table, taskId);
   if (record === undefined || record.generation !== generation || record.delivered) return table;
-  return replace(table, { ...record, delivered: true });
+  return replaceRecord(table, { ...record, delivered: true });
+}
+
+/**
+ * Points the task at the `task_wait` call that takes its current
+ * generation's result, or clears the pointer.
+ */
+export function setTaskWait(
+  table: TaskTable,
+  taskId: string,
+  wait: TaskRecord["wait"] | undefined,
+): TaskTable {
+  const record = findTask(table, taskId);
+  if (record === undefined || record.wait === wait) return table;
+  return replaceRecord(table, withoutUndefined({ ...record, wait }));
 }
 
 /**
@@ -588,7 +524,10 @@ export function detachTasks(
   for (const taskId of taskIds) {
     const record = findTask(next, taskId);
     if (record === undefined || record.mode === "background") continue;
-    next = replace(next, withoutUndefined({ ...record, detachGroup, mode: "background" as const }));
+    next = replaceRecord(
+      next,
+      withoutUndefined({ ...record, detachGroup, mode: "background" as const }),
+    );
   }
   return next;
 }
@@ -614,12 +553,17 @@ export function pruneTaskTable(table: TaskTable): TaskTable {
   return records.length === table.records.length ? table : toTable(records);
 }
 
-function issueCommand(table: TaskTable, record: TaskRecord, command: TaskCommand): TaskTransition {
+/** Sends a command to a started child, or holds it until the child starts. For `tasks/table*.ts` only. */
+export function issueCommand(
+  table: TaskTable,
+  record: TaskRecord,
+  command: TaskCommand,
+): TaskTransition {
   if (record.child !== undefined) {
     return { effects: [{ commands: [command], kind: "send", record }], table };
   }
   const next = { ...record, pendingCommands: [...(record.pendingCommands ?? []), command] };
-  return { effects: [], table: replace(table, next) };
+  return { effects: [], table: replaceRecord(table, next) };
 }
 
 /**
@@ -648,11 +592,13 @@ function continueAfterMissedSteers(
     startedAt: now,
     status: "working" as const,
     steers: missed,
+    wait: undefined,
     workflowCaller: undefined,
   });
 }
 
-function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
+/** For `tasks/table*.ts` only. */
+export function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
   return withoutUndefined({
     ...record,
     clockStoppedAt: undefined,
@@ -663,7 +609,8 @@ function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
   });
 }
 
-function cancelConfirmBy(record: TaskRecord, now: string): string {
+/** For `tasks/table*.ts` only. */
+export function cancelConfirmBy(record: TaskRecord, now: string): string {
   const window =
     record.kind === "workflow" ? WORKFLOW_TASK_CANCEL_CONFIRM_MS : TASK_CANCEL_CONFIRM_MS;
   return new Date(Date.parse(now) + window).toISOString();
@@ -678,7 +625,8 @@ function resumeDeadline(record: TaskRecord, now: string): string | undefined {
   return new Date(Date.parse(record.deadlineAt) + waited).toISOString();
 }
 
-function replace(table: TaskTable, record: TaskRecord): TaskTable {
+/** Writes one record into the table. For `tasks/table*.ts` only. */
+export function replaceRecord(table: TaskTable, record: TaskRecord): TaskTable {
   const index = table.records.findIndex((candidate) => candidate.id === record.id);
   if (index < 0) return toTable([...table.records, record]);
   const records = [...table.records];
@@ -686,6 +634,7 @@ function replace(table: TaskTable, record: TaskRecord): TaskTable {
   return toTable(records);
 }
 
-function withoutUndefined<T extends object>(value: T): T {
+/** For `tasks/table*.ts` only. */
+export function withoutUndefined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }

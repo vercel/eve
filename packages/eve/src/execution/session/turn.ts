@@ -35,19 +35,21 @@ import {
   applyTaskOwnerUpdate,
   applyTaskReport,
   cancelTurnDescendants,
+  endTaskWaits,
   interruptWaitedTasks,
   startPendingAgentTasks,
 } from "#tasks/owner-body.js";
 import { hasPendingTaskInput } from "#tasks/input.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
-  DetachTimers,
   DISMISSED_CALL_GRACE_MS,
   resolveWaitInterruption,
   steeringInterruptsWait,
   type TaskWaitPlan,
   type WaitInterruption,
 } from "#tasks/detach.js";
+import type { TaskWaitRegistration } from "#tasks/wait.js";
+import { WaitTimers } from "#tasks/wait-timers.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -161,6 +163,7 @@ export class SessionExecution {
           initialAcceptedAtMs,
           initialResults,
           pendingCallIds,
+          taskWaits: dispatched.taskWaits ?? [],
           turn,
           wait: dispatched.wait,
         });
@@ -203,21 +206,23 @@ export class SessionExecution {
 
   private async finishCancelledTurn(): Promise<TurnOutcome> {
     const { cursor } = this.input;
+    await endTaskWaits(cursor, { reason: "turn-cancelled" });
     await cancelTurnDescendants(cursor);
     return { cancelled: true, kind: "park" };
   }
 
   /**
-   * Waits for every call in the batch. In an interactive root turn, a
-   * steering message detaches the calls still waiting and a
-   * `detach: { timeout }` timer detaches its own call; in any session, a
-   * steering message ends a waited `sleep`. Each such call resolves at once
-   * with its receipt or early-end result.
+   * Waits for every call in the batch. A `task_wait` ends at its timeout,
+   * and a steering message ends every `task_wait` still waiting. In an
+   * interactive root turn, a steering message also detaches the other calls
+   * still waiting, except attached ones; in any session, it ends a waited
+   * `sleep`. Each such call resolves at once with its own tool result.
    */
   private async waitForRuntimeActionResults(input: {
     readonly initialAcceptedAtMs: number | undefined;
     readonly initialResults: readonly RuntimeActionResult[];
     readonly pendingCallIds: readonly string[];
+    readonly taskWaits: readonly TaskWaitRegistration[];
     readonly turn: ActiveTurn;
     readonly wait: TaskWaitPlan | undefined;
   }): Promise<RuntimeActionResultStepInput | "cancelled"> {
@@ -230,16 +235,18 @@ export class SessionExecution {
     const unresolved = () =>
       input.pendingCallIds.filter((callId) => !results.some((result) => result.callId === callId));
     const { wait } = input;
-    const steer = wait !== undefined && steeringInterruptsWait(wait);
-    const timers =
-      wait === undefined || !wait.detachable
-        ? undefined
-        : new DetachTimers(wait.timeouts.filter(({ callId }) => unresolved().includes(callId)));
+    const waitCallIds = new Set(input.taskWaits.map(({ callId }) => callId));
+    const steer = waitCallIds.size > 0 || (wait !== undefined && steeringInterruptsWait(wait));
+    const timers = new WaitTimers(
+      input.taskWaits.flatMap(({ callId, timeoutMs }) =>
+        timeoutMs === undefined || !unresolved().includes(callId) ? [] : [{ callId, timeoutMs }],
+      ),
+    );
     const accept = (accepted: readonly RuntimeActionResult[]) => {
       const acceptedAtMs = Date.now();
       results.push(...accepted);
       for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
-      timers?.disarm(accepted.map((result) => result.callId));
+      timers.disarm(accepted.map((result) => result.callId));
     };
     // Calls a steering message left waiting because it dismissed their
     // question, mapped to the call that names the message's detach group.
@@ -259,13 +266,26 @@ export class SessionExecution {
         };
       }
 
-      const next = await input.turn.nextRuntimeEvent({ steer, timer: timers?.next() });
+      const next = await input.turn.nextRuntimeEvent({ steer, timer: timers.next() });
       if (next === "cancelled") return next;
       if (next.kind === "runtime-action-result") {
         accept(next.results);
         continue;
       }
-      if (next.kind === "timeout") timers?.disarm([next.callId]);
+      if (next.kind === "timeout") timers.disarm([next.callId]);
+      // A timeout ends its own `task_wait`; a steering message ends every one
+      // still waiting. The tasks keep working.
+      const endedWaits = unresolved().filter(
+        (callId) => waitCallIds.has(callId) && (next.kind === "steer" || callId === next.callId),
+      );
+      if (endedWaits.length > 0) {
+        accept(
+          await endTaskWaits(this.input.cursor, {
+            callIds: endedWaits,
+            reason: next.kind === "steer" ? "interrupted" : "timed_out",
+          }),
+        );
+      }
       const changes =
         wait === undefined
           ? undefined
@@ -273,7 +293,7 @@ export class SessionExecution {
               dismissed,
               interruption: next,
               plan: wait,
-              unresolvedCallIds: unresolved(),
+              unresolvedCallIds: unresolved().filter((callId) => !waitCallIds.has(callId)),
             });
       if (changes === undefined) continue;
       accept(await interruptWaitedTasks(this.input.cursor, changes));
@@ -284,7 +304,7 @@ export class SessionExecution {
       for (const callId of changes.detachCallIds) {
         if (dismissed.has(callId) || !unresolved().includes(callId)) continue;
         dismissed.set(callId, groupCallId);
-        timers?.arm(callId, DISMISSED_CALL_GRACE_MS);
+        timers.arm(callId, DISMISSED_CALL_GRACE_MS);
       }
     }
   }
@@ -500,6 +520,9 @@ class ActiveTurn {
         return;
       case "task-deadline":
         this.acceptOwnResults(await applyTaskDeadline(this.input.cursor, admitted.signal));
+        return;
+      case "wait-results":
+        this.acceptOwnResults(admitted.results);
         return;
       case "cancel":
         if (!this.cancelsThisTurn(value)) return;

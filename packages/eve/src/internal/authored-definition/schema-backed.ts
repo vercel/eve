@@ -1,7 +1,6 @@
 import {
   isWorkflowToolDefinition,
-  normalizeWorkflowToolDetach,
-  type WorkflowToolDetach,
+  normalizeWorkflowToolAttached,
 } from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { normalizeTaskTimeout, type TaskTimeout } from "#shared/task-timeout.js";
@@ -41,8 +40,8 @@ import {
  */
 type NormalizedAuthoredTool = Readonly<
   Omit<InternalToolDefinition, "name"> & {
+    readonly attached?: boolean;
     readonly behavior?: CompiledToolBehavior;
-    readonly detach?: WorkflowToolDetach;
     readonly execute?: ToolExecuteFn;
     readonly timeout?: TaskTimeout;
     readonly hasApproval: boolean;
@@ -117,11 +116,11 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   expectOnlyKnownKeys(
     record,
     [
+      "attached",
       "availableInSubagents",
       "label",
       "auth",
       "description",
-      "detach",
       "execute",
       "inputSchema",
       "approval",
@@ -132,14 +131,14 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     ],
     message,
   );
-  for (const key of ["detach", "timeout"] as const) {
+  for (const key of ["attached", "timeout"] as const) {
     if (record[key] !== undefined && !isWorkflowToolDefinition(value)) {
       throw new Error(
         `${message} "${key}" is only supported on defineWorkflowTool(); other tools run inside the model step that calls them.`,
       );
     }
   }
-  const detach = normalizeWorkflowToolDetach(record.detach, message);
+  const attached = normalizeWorkflowToolAttached(record.attached, message);
   const timeout = normalizeTaskTimeout(record.timeout, message);
   const inputSchema =
     record.inputSchema === undefined
@@ -166,8 +165,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (behavior !== undefined) {
     definition.behavior = behavior;
   }
-  if (detach !== undefined) {
-    definition.detach = detach;
+  if (attached !== undefined) {
+    definition.attached = attached;
   }
   if (timeout !== undefined) {
     definition.timeout = timeout;

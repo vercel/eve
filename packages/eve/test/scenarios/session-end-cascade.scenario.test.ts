@@ -111,7 +111,6 @@ import { writeMarker } from "../lib/marker.ts";
 export default defineWorkflowTool({
   description: "Write a note after a delay.",
   inputSchema: z.object({}),
-  detach: true,
   async execute(_input, ctx) {
     "use workflow";
     await sleep(${String(GRANDCHILD_SLEEP_MS)});
@@ -147,7 +146,7 @@ export default defineWorkflowTool({
         );
         const writer = startedTask(root, "writer")!;
 
-        // The writer's detach: true tool holds its call open until the note settles.
+        // The writer's turn waits on its slow note.
         const writerStream = session.streamSubagent(writer);
         const beforeEnd = await collectUntil(
           writerStream,

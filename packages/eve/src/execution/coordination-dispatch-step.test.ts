@@ -6,7 +6,9 @@ import { readDurableSession } from "#execution/durable-session-store.js";
 import { startWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runCommands } from "#tasks/transport.js";
 
@@ -43,7 +45,7 @@ it("applies a task_cancel call as the owner and returns its result at once", asy
   };
   const request = {
     callId: "call-stop",
-    input: { taskIds: ["remind-q4x1ze", "nobody-000000"] },
+    input: { taskId: "remind-q4x1ze" },
     kind: "workflow-task" as const,
     toolName: "task_cancel",
     workflowId: TASK_CANCEL_WORKFLOW_ID,
@@ -68,7 +70,7 @@ it("applies a task_cancel call as the owner and returns its result at once", asy
     {
       callId: "call-stop",
       kind: "tool-result",
-      output: { alreadyFinished: [], cancelled: ["remind-q4x1ze"], unknown: ["nobody-000000"] },
+      output: { status: "cancelled" },
       toolName: "task_cancel",
     },
   ]);
@@ -87,7 +89,7 @@ it("applies a task_cancel call as the owner and returns its result at once", asy
   ]);
 });
 
-it("returns how the turn waits: sleeps end on steer, and timers run only when detachable", async () => {
+it("returns how the turn waits: sleeps end on steer, and attached calls never detach", async () => {
   const base = createTestSessionState({ sessionId: "parent" });
   const session = {
     ...base.snapshot.session,
@@ -95,26 +97,27 @@ it("returns how the turn waits: sleeps end on steer, and timers run only when de
     compaction: { recentWindowSize: 5, threshold: 10_000 },
   };
   const sleep = {
+    attached: true,
     callId: "call-sleep",
     input: { seconds: 60 },
     kind: "workflow-task" as const,
     toolName: "sleep",
     workflowId: "workflow//eve@0.66.1//executeSleepTool",
   };
-  const tests = {
-    callId: "call-tests",
-    detach: { timeout: 120_000 },
+  const lookup = {
+    attached: true,
+    callId: "call-lookup",
     input: {},
     kind: "workflow-task" as const,
-    toolName: "run_tests",
-    workflowId: "workflow//./agent/tools/run_tests//execute",
+    toolName: "lookup",
+    workflowId: "workflow//./agent/tools/lookup//execute",
   };
   vi.mocked(startWorkflowToolRun).mockResolvedValue({ hookToken: "control", runId: "run-1" });
   const dispatch = async (interactiveRootTurn: boolean) => {
     vi.mocked(prepareCoordinationDispatch).mockResolvedValue({
-      batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [sleep, tests] },
+      batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [sleep, lookup] },
       interactiveRootTurn,
-      plan: [sleep, tests],
+      plan: [sleep, lookup],
       session,
       sessionState: base,
     } as never);
@@ -128,13 +131,77 @@ it("returns how the turn waits: sleeps end on steer, and timers run only when de
   };
 
   await expect(dispatch(true)).resolves.toMatchObject({
-    wait: {
-      detachable: true,
-      sleepCallIds: ["call-sleep"],
-      timeouts: [{ callId: "call-tests", timeoutMs: 120_000 }],
-    },
+    taskWaits: [],
+    wait: { attachedCallIds: ["call-lookup"], detachable: true, sleepCallIds: ["call-sleep"] },
   });
   await expect(dispatch(false)).resolves.toMatchObject({
-    wait: { detachable: false, sleepCallIds: ["call-sleep"], timeouts: [] },
+    wait: { attachedCallIds: ["call-lookup"], detachable: false, sleepCallIds: ["call-sleep"] },
   });
+});
+
+it("registers task_wait calls before task_cancel calls, so a wait gets its task's cancellation", async () => {
+  const base = createTestSessionState({ sessionId: "parent" });
+  const cancel = {
+    callId: "call-stop",
+    input: { taskId: "remind-q4x1ze" },
+    kind: "workflow-task" as const,
+    toolName: "task_cancel",
+    workflowId: TASK_CANCEL_WORKFLOW_ID,
+  };
+  const wait = {
+    callId: "call-wait",
+    input: { taskId: "remind-q4x1ze", timeout: 60_000 },
+    kind: "workflow-task" as const,
+    toolName: "task_wait",
+    workflowId: TASK_WAIT_WORKFLOW_ID,
+  };
+  const durable = setPendingCoordinationBatch({
+    event: { sequence: 1, stepIndex: 1, turnId: "turn-1" },
+    responseMessages: [],
+    session: { ...base.snapshot.session, state: taskTableState([REMINDER]) } as never,
+    tasks: [cancel, wait],
+  });
+  const session = {
+    ...durable,
+    agent: { dynamicModel: true as const, system: "", tools: [] },
+    compaction: { recentWindowSize: 5, threshold: 10_000 },
+  };
+  const sessionState = { ...base, snapshot: { session: durable } };
+  vi.mocked(prepareCoordinationDispatch).mockResolvedValue({
+    batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [cancel, wait] },
+    interactiveRootTurn: true,
+    plan: [cancel, wait],
+    session,
+    sessionState,
+  } as never);
+
+  const update = await dispatchCoordinationStep({
+    action: "park",
+    serializedContext: {},
+    sessionState,
+    sessionWritable: new WritableStream(),
+    workflowToolRunOwner: { inbox: "owner-inbox" },
+  });
+
+  expect(update.taskWaits).toEqual([{ callId: "call-wait", timeoutMs: 60_000 }]);
+  expect(update.results).toEqual([
+    {
+      callId: "call-stop",
+      kind: "tool-result",
+      output: { status: "cancelled" },
+      toolName: "task_cancel",
+    },
+    {
+      callId: "call-wait",
+      kind: "tool-result",
+      output: {
+        name: "remind",
+        outcome: { status: "cancelled" },
+        status: "settled",
+        taskId: "remind-q4x1ze",
+      },
+      toolName: "task_wait",
+    },
+  ]);
+  expect(getTaskTable(readDurableSession(update.sessionState)).records[0]?.wait).toBeUndefined();
 });

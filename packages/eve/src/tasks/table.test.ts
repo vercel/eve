@@ -6,19 +6,19 @@ import { decodeTaskRecord } from "#tasks/record.js";
 import {
   applyTaskMessage,
   cancelTask,
-  evaluateTaskDeadlines,
+  findTask,
   isReportedLoss,
-  nextTaskWakeAt,
   pruneTaskTable,
   readTaskTable,
+  setTaskWait,
   startTask,
   steerTask,
   TASK_TABLE_STATE_KEY,
-  timeOutTask,
   withdrawSteer,
   writeTaskTable,
   type TaskTable,
 } from "#tasks/table.js";
+import { evaluateTaskDeadlines, nextTaskWakeAt, timeOutTask } from "#tasks/table-deadlines.js";
 
 const NOW = "2026-09-24T14:02:00.000Z";
 const child = { commandToken: "hook_1", kind: "workflow", runId: "run_1" } as const;
@@ -124,6 +124,50 @@ describe("startTask", () => {
       kind: "local",
       sessionId: "s",
     });
+  });
+
+  it("points a task at its task_wait and clears it, and a new generation drops a stale one", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher", nodeId: "n1" });
+    const wait = { callId: "call-w1", startedAt: NOW };
+    const waited = setTaskWait(agent.table, agent.record.id, wait);
+    expect(findTask(waited, agent.record.id)?.wait).toEqual(wait);
+    expect(setTaskWait(waited, agent.record.id, wait)).toBe(waited);
+    expect(findTask(setTaskWait(waited, agent.record.id, undefined), agent.record.id)).toEqual(
+      agent.record,
+    );
+
+    const settled = applyTaskMessage(
+      applyTaskMessage(
+        waited,
+        {
+          child: { continuationToken: "c", kind: "local", sessionId: "s" },
+          generation: 1,
+          kind: "task.started",
+          taskId: agent.record.id,
+        },
+        NOW,
+      ).table,
+      {
+        generation: 1,
+        kind: "task.settled",
+        outcome: { output: "done", status: "completed" },
+        taskId: agent.record.id,
+      },
+      NOW,
+    );
+    const continued = startTask(settled.table, {
+      agentId: agent.record.id,
+      callId: "call_2",
+      kind: "agent",
+      mode: "background",
+      name: "researcher",
+      nodeId: "n1",
+      now: NOW,
+      ownerId: "session_1",
+      turnId: "turn_1",
+    });
+    expect(continued).toMatchObject({ kind: "started", record: { generation: 2 } });
+    if (continued.kind === "started") expect(continued.record.wait).toBeUndefined();
   });
 
   it("rejects unknown agents, tasks passed as agents, and mismatched agents with guidance", () => {
@@ -698,6 +742,17 @@ describe("persistence", () => {
     expect(lost).toMatchObject({ duplicate: true, reason: "duplicate id" });
     expect(isReportedLoss(lost!)).toBe(false);
     expect(storedRecords(writeTaskTable(state, task.table))).toEqual([record]);
+  });
+
+  it("decodes a record's task_wait and rejects a malformed one", () => {
+    const record = { ...started().record, wait: { callId: "call-w1", startedAt: NOW } };
+    expect(decodeTaskRecord(record)).toEqual({ ok: true, record });
+    for (const wait of ["call-w1", { callId: "", startedAt: NOW }, { callId: "call-w1" }]) {
+      expect(decodeTaskRecord({ ...record, wait })).toMatchObject({
+        ok: false,
+        reason: "invalid wait",
+      });
+    }
   });
 
   it("decodes one record without validating others", () => {

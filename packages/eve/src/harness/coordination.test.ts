@@ -11,10 +11,12 @@ import {
 
 import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { truncateTaskResult } from "#tasks/render.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 
 describe("createRuntimeActionRequestFromToolCall", () => {
   const loadSkillCall = {
@@ -232,24 +234,24 @@ describe("createCoordinationRequestFromToolCall", () => {
     });
   });
 
-  it("carries a workflow tool's detach option onto its task", () => {
+  it("carries a workflow tool's attached option onto its task", () => {
     expect(
       createCoordinationRequestFromToolCall({
-        toolCall: { ...toolCall, toolName: "remind" },
+        toolCall: { ...toolCall, toolName: "lookup" },
         tools: new Map([
           [
-            "remind",
+            "lookup",
             {
-              description: "Remind Alice later.",
-              detach: true,
+              attached: true,
+              description: "Look up an order.",
               inputSchema: jsonSchema({ type: "object" }),
-              name: "remind",
-              workflowId: "workflow//./agent/tools/remind//execute",
+              name: "lookup",
+              workflowId: "workflow//./agent/tools/lookup//execute",
             },
           ],
         ]),
       }),
-    ).toMatchObject({ detach: true, toolName: "remind" });
+    ).toMatchObject({ attached: true, toolName: "lookup" });
   });
 
   it("rejects a deferred tool without a workflow", () => {
@@ -471,7 +473,6 @@ describe("resolvePendingCoordination", () => {
       tasks: [
         {
           callId: "call-1",
-          detach: true,
           input: {},
           kind: "workflow-task",
           toolName: "remind",
@@ -531,6 +532,72 @@ describe("resolvePendingCoordination", () => {
         }),
         type: "action.result",
       }),
+    ]);
+  });
+
+  it("shows a settled task_wait as the task's <task_result> block, shaped by its tool", async () => {
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-wait",
+          input: { taskId: "remind-q4x1ze" },
+          kind: "workflow-task",
+          toolName: "task_wait",
+          workflowId: TASK_WAIT_WORKFLOW_ID,
+        },
+      ],
+    });
+    const output = {
+      name: "remind",
+      outcome: { output: { note: "stand-up at 10" }, status: "completed" },
+      status: "settled",
+      taskId: "remind-q4x1ze",
+    };
+
+    const resolved = await resolvePendingCoordination({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          { callId: "call-wait", kind: "tool-result", output, toolName: "task_wait" },
+        ],
+      },
+      tools: new Map<string, HarnessToolDefinition>([
+        [
+          "remind",
+          {
+            description: "Remind.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "remind",
+            toModelOutput: (value) =>
+              toolOutput.text(`Reminder: ${(value as { note: string }).note}`),
+          },
+        ],
+        [
+          "task_wait",
+          {
+            description: "Wait.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "task_wait",
+            workflowId: TASK_WAIT_WORKFLOW_ID,
+          },
+        ],
+      ]),
+    });
+
+    expect(resolved.messages.at(-1)?.content).toEqual([
+      {
+        output: {
+          type: "text",
+          value:
+            '<task_result id="remind-q4x1ze" name="remind" status="completed">\nReminder: stand-up at 10\n</task_result>',
+        },
+        toolCallId: "call-wait",
+        toolName: "task_wait",
+        type: "tool-result",
+      },
     ]);
   });
 

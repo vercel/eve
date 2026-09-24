@@ -5,13 +5,8 @@ import {
 import type { SessionStateMap } from "#harness/types.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
-import {
-  nextTaskWakeAt,
-  pruneTaskTable,
-  readTaskTable,
-  writeTaskTable,
-  type TaskTable,
-} from "#tasks/table.js";
+import { pruneTaskTable, readTaskTable, writeTaskTable, type TaskTable } from "#tasks/table.js";
+import { nextTaskWakeAt } from "#tasks/table-deadlines.js";
 
 // Read by the session workflow body, so it must not import Node.js built-ins.
 

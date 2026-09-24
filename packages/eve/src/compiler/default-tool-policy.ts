@@ -11,9 +11,20 @@ import {
 } from "#compiler/source-graph.js";
 
 // `defaultTools: false` keeps these: `connection_search` reaches connection
-// tools, and `task_cancel` is advertised only with the background-tasks
-// instructions that name it.
-const KEPT_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search", "tools/task_cancel"]);
+// tools, and `task_wait` and `task_cancel` are advertised only with the
+// background-tasks instructions that name them.
+const KEPT_FRAMEWORK_TOOL_SLOTS = new Set([
+  "tools/connection_search",
+  "tools/task_cancel",
+  "tools/task_wait",
+]);
+
+// The framework task tools, by slot, with the dispatch action only their
+// framework definitions carry.
+const FRAMEWORK_TASK_TOOL_ACTIONS = new Map([
+  ["tools/task_cancel", "task-cancel"],
+  ["tools/task_wait", "task-wait"],
+]);
 
 export function assertFrameworkToolPolicy(
   candidate: AgentSourceCandidate,
@@ -25,17 +36,19 @@ export function assertFrameworkToolPolicy(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
     );
   }
+  const action = FRAMEWORK_TASK_TOOL_ACTIONS.get(slot);
   if (
-    slot === "tools/task_cancel" &&
+    action !== undefined &&
     result.kind !== "disabled" &&
     !(
       result.kind === "tool" &&
       result.definition.behavior?.handling?.kind === "dispatch" &&
-      result.definition.behavior.handling.action === "task-cancel"
+      result.definition.behavior.handling.action === action
     )
   ) {
+    const name = slot.slice("tools/".length);
     throw new Error(
-      'The framework "task_cancel" tool cannot be overridden. Re-export it from "eve/tools/task_cancel" or disable it with disableTool().',
+      `The framework "${name}" tool cannot be overridden. Re-export it from "eve/tools/${name}" or disable it with disableTool().`,
     );
   }
 }

@@ -6,6 +6,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import { isTaskCancelTool } from "#tasks/cancel-tool.js";
 import { renderBackgroundTasksInstruction } from "#tasks/render.js";
+import { isTaskWaitTool } from "#tasks/wait-tool.js";
 import { BACKGROUND_SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 
 // Which sessions and turns can move work to the background. The one place
@@ -38,10 +39,11 @@ export function isInteractiveRootTurn(ctx: ContextReader, turnSequence: number):
 
 /** What a session offers the model for background work. */
 export interface BackgroundTaskSurface {
-  /** Agent tools take the model-facing `background` parameter. */
-  readonly backgroundParameter: boolean;
-  /** The model gets `task_cancel`. */
-  readonly taskCancel: boolean;
+  /**
+   * Agent tools take the model-facing `background` parameter, and the model
+   * gets `task_wait` and `task_cancel`.
+   */
+  readonly enabled: boolean;
   /** The static background-tasks system block. */
   readonly instruction?: string;
 }
@@ -50,49 +52,42 @@ export interface BackgroundTaskSurface {
  * Decides the background surface, which is static per session so the tools
  * and system prefix stay stable for the prompt cache. It applies to an
  * interactive root session with any agent tool (including dynamic subagents
- * it may resolve later) or workflow tool, and to any session with a
- * `detach: true` tool. A turn a schedule started still offers `background`;
- * the owner waits on such calls instead.
+ * it may resolve later) or workflow tool that is not attached. A turn a
+ * schedule started still offers `background`; the owner waits on such calls
+ * instead.
  */
 export function resolveBackgroundTaskSurface(input: {
   readonly ctx: ContextReader | undefined;
   readonly mode: RunMode;
   readonly tools: HarnessToolMap;
 }): BackgroundTaskSurface {
-  const interactiveRoot = isInteractiveRootSession(input.ctx, input.mode);
+  if (!isInteractiveRootSession(input.ctx, input.mode)) return { enabled: false };
   const dynamicResolvers = input.ctx?.get(BundleKey)?.subagentRegistry?.dynamicResolvers ?? [];
   let agents = dynamicResolvers.some((resolver) => resolver.tool !== false);
   let workflows = false;
-  let detach = false;
   for (const tool of input.tools.values()) {
-    if (isTaskCancelTool(tool)) continue;
-    if (tool.detach === true) detach = true;
+    if (isTaskCancelTool(tool) || isTaskWaitTool(tool)) continue;
     if (tool.workflowId === AGENT_TASK_WORKFLOW_ID) agents = true;
-    else if (tool.workflowId !== undefined) workflows = true;
+    else if (tool.workflowId !== undefined && tool.attached !== true) workflows = true;
   }
-  const enabled = detach || (interactiveRoot && (agents || workflows));
-  if (!enabled) return { backgroundParameter: false, taskCancel: false };
-  return {
-    backgroundParameter: interactiveRoot,
-    instruction: renderBackgroundTasksInstruction({ agents }),
-    taskCancel: true,
-  };
+  if (!agents && !workflows) return { enabled: false };
+  return { enabled: true, instruction: renderBackgroundTasksInstruction({ agents }) };
 }
 
 /**
  * Applies the surface to one model step's tools: agent tools (declared,
  * remote, dynamic, and the built-in `agent`) gain `background`, and
- * `task_cancel` is dropped where background work cannot exist.
+ * `task_wait` and `task_cancel` are dropped where background work cannot
+ * exist.
  */
 export function applyBackgroundTaskSurface(
   tools: HarnessToolMap,
   surface: BackgroundTaskSurface,
 ): HarnessToolMap {
-  if (surface.taskCancel && !surface.backgroundParameter) return tools;
   const next = new Map(tools);
   for (const [name, tool] of tools) {
-    if (!surface.taskCancel && isTaskCancelTool(tool)) next.delete(name);
-    else if (surface.backgroundParameter && tool.workflowId === AGENT_TASK_WORKFLOW_ID) {
+    if (!surface.enabled && (isTaskCancelTool(tool) || isTaskWaitTool(tool))) next.delete(name);
+    else if (surface.enabled && tool.workflowId === AGENT_TASK_WORKFLOW_ID) {
       next.set(name, { ...tool, inputSchema: BACKGROUND_SUBAGENT_TOOL_INPUT_SCHEMA });
     }
   }

@@ -18,13 +18,8 @@ import {
 } from "#tasks/input.js";
 import type { TaskInputBatch, TaskInputEvent, TaskInputRequest } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
-import {
-  applyTaskMessage,
-  cancelTask,
-  findTask,
-  timeOutTask,
-  type TaskTable,
-} from "#tasks/table.js";
+import { applyTaskMessage, cancelTask, findTask, type TaskTable } from "#tasks/table.js";
+import { timeOutTask } from "#tasks/table-deadlines.js";
 
 const NOW = "2026-09-24T14:00:00.000Z";
 

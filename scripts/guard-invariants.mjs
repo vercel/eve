@@ -123,13 +123,14 @@
  *             (a durable wait belongs in a workflow body, a deadline in the
  *             owner's task timer). A short allowlist names the functions that
  *             legitimately back off, each with its reason.
- *   rule 47 — Only `src/tasks/table.ts` constructs task records, and only
- *             `src/tasks/table.ts` and `src/tasks/state.ts` write the owner's
- *             `eve.taskTable` state key. `TaskTable` is branded, so only the
- *             table's transitions produce one; no other module may cast to
- *             it. The table is the single writer of the owner's task records;
- *             a second writer reintroduces the split stores the task kernel
- *             removed.
+ *   rule 47 — Only the table modules (`src/tasks/table*.ts`) construct task
+ *             records, and only they and `src/tasks/state.ts` write the
+ *             owner's `eve.taskTable` state key. `TaskTable` is branded, so
+ *             only the table's transitions produce one; no other module may
+ *             cast to it or import the record helpers `table.ts` shares with
+ *             its sibling table modules. The table is the single writer of
+ *             the owner's task records; a second writer reintroduces the
+ *             split stores the task kernel removed.
  *   rule 48 — One `TaskMessage` union. Object types with
  *             `kind: "task.started" | "task.settled" | "task.input" |
  *             "task.deadline"` are declared only in `src/tasks/protocol.ts`,
@@ -458,8 +459,19 @@ function checkRule46(posix, source, violations) {
   visit(sourceFile, { loop: false, name: undefined, workflow: false });
 }
 
-const RULE47_RECORD_WRITERS = new Set([`${EVE_SRC}tasks/table.ts`, `${EVE_SRC}tasks/record.ts`]);
-const RULE47_TABLE_WRITERS = new Set([`${EVE_SRC}tasks/table.ts`, `${EVE_SRC}tasks/state.ts`]);
+const RULE47_TABLE_MODULE_RE = new RegExp(`^${EVE_SRC}tasks/table[^/]*\\.ts$`);
+const RULE47_RECORD_WRITERS = new Set([`${EVE_SRC}tasks/record.ts`]);
+const RULE47_TABLE_WRITERS = new Set([`${EVE_SRC}tasks/state.ts`]);
+// Record helpers `tasks/table.ts` exports only for its sibling table modules.
+const RULE47_TABLE_INTERNALS = [
+  "cancelConfirmBy",
+  "issueCommand",
+  "replaceRecord",
+  "settleRecord",
+  "withoutUndefined",
+];
+const RULE47_TABLE_IMPORT_RE =
+  /import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']#tasks\/table\.js["']/g;
 
 /**
  * @param {string} posix
@@ -468,26 +480,40 @@ const RULE47_TABLE_WRITERS = new Set([`${EVE_SRC}tasks/table.ts`, `${EVE_SRC}tas
  */
 function checkRule47(posix, lines, violations) {
   if (!isProductionEveSource(posix)) return;
-  lines.forEach((line, idx) => {
-    if (!RULE47_RECORD_WRITERS.has(posix) && /\bTASK_RECORD_VERSION\b/.test(line)) {
+  const tableModule = RULE47_TABLE_MODULE_RE.test(posix);
+  if (!tableModule) {
+    for (const match of lines.join("\n").matchAll(RULE47_TABLE_IMPORT_RE)) {
+      const names = match[1].split(",").map((name) => name.trim().split(/\s+as\s+/)[0]);
+      const internal = names.filter((name) => RULE47_TABLE_INTERNALS.includes(name));
+      if (internal.length === 0) continue;
       violations.push({
         rule: 47,
         file: posix,
-        line: idx + 1,
-        message:
-          "constructs a task record outside src/tasks/table.ts. Records change only through the table's transitions (startTask, applyTaskMessage, cancelTask, ...); add a transition there instead.",
+        message: `imports ${internal.join(", ")} from src/tasks/table.ts. Those helpers write records and are shared only with the table modules (src/tasks/table*.ts); add a transition there instead.`,
       });
     }
-    if (posix !== `${EVE_SRC}tasks/table.ts` && /\bas\s+TaskTable\b/.test(line)) {
+  }
+  lines.forEach((line, idx) => {
+    if (!tableModule && !RULE47_RECORD_WRITERS.has(posix) && /\bTASK_RECORD_VERSION\b/.test(line)) {
       violations.push({
         rule: 47,
         file: posix,
         line: idx + 1,
         message:
-          "casts to TaskTable outside src/tasks/table.ts. A table comes only from the table's transitions (startTask, applyTaskMessage, cancelTask, ...), so no other code writes records into one.",
+          "constructs a task record outside the table modules (src/tasks/table*.ts). Records change only through the table's transitions (startTask, applyTaskMessage, cancelTask, ...); add a transition there instead.",
+      });
+    }
+    if (!tableModule && /\bas\s+TaskTable\b/.test(line)) {
+      violations.push({
+        rule: 47,
+        file: posix,
+        line: idx + 1,
+        message:
+          "casts to TaskTable outside the table modules (src/tasks/table*.ts). A table comes only from the table's transitions (startTask, applyTaskMessage, cancelTask, ...), so no other code writes records into one.",
       });
     }
     if (
+      !tableModule &&
       !RULE47_TABLE_WRITERS.has(posix) &&
       (/\b(?:TASK_TABLE_STATE_KEY|writeTaskTable)\b/.test(line) || line.includes('"eve.taskTable"'))
     ) {

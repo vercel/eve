@@ -31,6 +31,7 @@ describe("askQuestion", () => {
     const ask = vi.fn().mockResolvedValue({ optionId: "Blue", status: "answered" });
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
+    expect(definition.attached).toBe(true);
     expect(definition.description).toBe(ASK_QUESTION_TOOL_DESCRIPTION);
     await expect(definition.execute(colorQuestion, { ask } as never)).resolves.toEqual({
       answer: "Blue",

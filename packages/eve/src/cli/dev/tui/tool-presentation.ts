@@ -126,8 +126,14 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
   task_cancel: {
     verb: "Cancel",
     pastVerb: "Cancelled",
-    argKey: "taskIds",
-    extractItem: taskIdsArg,
+    argKey: "taskId",
+    singularNoun: "task",
+    pluralNoun: "tasks",
+  },
+  task_wait: {
+    verb: "Wait for",
+    pastVerb: "Waited for",
+    argKey: "taskId",
     singularNoun: "task",
     pluralNoun: "tasks",
   },
@@ -338,15 +344,6 @@ function webSearchActionArg(input: unknown): string | undefined {
     }
   }
   return undefined;
-}
-
-/** Joins a `taskIds: string[]` argument into one salient line. */
-function taskIdsArg(input: unknown): string | undefined {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
-  const value = (input as Record<string, unknown>).taskIds;
-  if (!Array.isArray(value)) return undefined;
-  const ids = value.filter((id): id is string => typeof id === "string");
-  return ids.length === 0 ? undefined : salientLine(ids.join(", "));
 }
 
 /**

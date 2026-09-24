@@ -18,7 +18,7 @@ import { cancelTask, detachTasks, type TaskTable } from "#tasks/table.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 
 // Owner-side changes to the calls a turn waits on, after a steering message
-// or a `detach: { timeout }` timer. Detaching needs nothing from the child:
+// or a dismissed call's grace timer. Detaching needs nothing from the child:
 // it reports to the owner's inbox, not to the turn.
 
 /**
@@ -115,24 +115,20 @@ export function applyWaitedTaskChanges(input: {
     .filter((record) => !changes.keepTaskIds.includes(record.id));
   const [first] = detached;
   if (first !== undefined) {
-    // Tasks one steering message detaches deliver their results together; a
-    // timer detaches its call on its own.
-    const group =
-      changes.reason === "steer"
-        ? `${first.turnId}/${changes.groupCallId ?? first.callId}`
-        : undefined;
+    // Tasks one steering message detaches deliver their results together.
+    const group = `${first.turnId}/${changes.groupCallId ?? first.callId}`;
     table = detachTasks(
       table,
       detached.map((record) => record.id),
       group,
     );
     for (const record of detached) {
-      events.push(taskDetachedEvent({ reason: changes.reason, record }));
+      events.push(taskDetachedEvent({ reason: "steer", record }));
       const receipt: TaskReceipt = { status: "working", taskId: record.id };
       results.push({
         callId: record.callId,
         kind: "tool-result",
-        modelOutput: renderDetachedReceipt(record, changes.reason),
+        modelOutput: renderDetachedReceipt(record),
         output: { ...receipt },
         toolName: toolName(record),
       });

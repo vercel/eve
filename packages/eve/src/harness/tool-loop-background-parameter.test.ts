@@ -33,8 +33,8 @@ const REMIND: HarnessToolDefinition = {
 };
 
 const TASK_CANCEL: HarnessToolDefinition = {
-  description: "Stop background agents or tasks by id.",
-  inputSchema: jsonSchema({ type: "object", properties: { taskIds: { type: "array" } } }),
+  description: "Stop a background task by id.",
+  inputSchema: jsonSchema({ type: "object", properties: { taskId: { type: "string" } } }),
   name: "task_cancel",
   workflowId: TASK_CANCEL_WORKFLOW_ID,
 };
@@ -87,7 +87,7 @@ describe("the agent tool background parameter", () => {
       description: BACKGROUND_PARAMETER_DESCRIPTION,
       type: "boolean",
     });
-    // Workflow tools keep their authored schema; `detach` is the author's choice.
+    // Workflow tools keep their authored schema.
     expect(properties(request, "remind").background).toBeUndefined();
   });
 

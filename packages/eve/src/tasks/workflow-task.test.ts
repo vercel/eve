@@ -5,15 +5,16 @@ import type {
   WorkflowToolRunOutcome,
   WorkflowToolRunOutcomeMessage,
 } from "#execution/tools/workflow/messages.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { taskTable, createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { hasPendingTaskInput } from "#tasks/input.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { renderBackgroundReceipt, renderTooManyBackgroundTasks } from "#tasks/render.js";
-import { readPendingTaskResults, readTaskCreator } from "#tasks/results.js";
+import { readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { cancelTask } from "#tasks/table.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { settleWorkflowTask, startWorkflowTask } from "#tasks/workflow-task.js";
 
 vi.mock("#internal/logging.js", () => ({
@@ -219,147 +220,47 @@ describe("startWorkflowTask", () => {
   });
 });
 
-describe("startWorkflowTask with detach: true", () => {
-  const ALICE = {
-    attributes: {},
-    authenticator: "slack",
-    principalId: "alice",
-    principalType: "user",
-  };
-
-  it("starts the run in the background and resolves the call at once with a receipt", async () => {
-    const started = await startWorkflowTask({
-      creator: { activityRootTurnId: "turn-1", auth: ALICE },
-      now: NOW,
-      request: { ...REQUEST, detach: true },
-      session: PARENT,
-      startRun: async () => ({ hookToken: "control-hook", runId: "run-1" }),
-      turnId: "turn-1",
-    });
-
-    const [record] = getTaskTable(started.session).records;
-    expect(record).toMatchObject({ child: RUN, delivered: false, mode: "background" });
-    expect(readTaskCreator(record!.creator)).toEqual({ activityRootTurnId: "turn-1", auth: ALICE });
-    // Clients read the structured receipt; the model reads the receipt text.
-    expect(started.result).toEqual({
-      callId: "call-1",
-      kind: "tool-result",
-      modelOutput: renderBackgroundReceipt(record!),
-      output: { status: "working", taskId: record!.id },
-      toolName: "deploy",
-    });
-    expect(started.events).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({ mode: "background", taskId: record!.id }),
-        type: "task.started",
-      }),
-    ]);
-  });
-
-  it("starts a detach: { timeout } call waited, so only its timer can detach it", async () => {
-    const started = await startWorkflowTask({
-      now: NOW,
-      request: { ...REQUEST, detach: { timeout: 120_000 } },
-      session: PARENT,
-      startRun: async () => ({ hookToken: "control-hook", runId: "run-1" }),
-      turnId: "turn-1",
-    });
-
-    expect(started.result).toBeUndefined();
-    expect(getTaskTable(started.session).records).toEqual([
-      expect.objectContaining({ mode: "foreground" }),
-    ]);
-  });
-
-  it("returns the receipt again for a replayed call without starting a second run", async () => {
-    const first = await startWorkflowTask({
-      now: NOW,
-      request: { ...REQUEST, detach: true },
-      session: PARENT,
-      startRun: async () => ({ hookToken: "control-hook", runId: "run-1" }),
-      turnId: "turn-1",
-    });
-    const startRun = vi.fn();
-
-    const replayed = await startWorkflowTask({
-      now: NOW,
-      request: { ...REQUEST, detach: true },
-      session: first.session,
-      startRun,
-      turnId: "turn-1",
-    });
-
-    expect(startRun).not.toHaveBeenCalled();
-    expect(replayed.result).toEqual(first.result);
-  });
-
-  it("does not start an eleventh working background task", async () => {
-    const working = Array.from({ length: 10 }, (_, index) =>
-      createTaskRecord({
-        callId: `earlier-${index}`,
-        id: `remind-${index}`,
-        kind: "workflow",
-        mode: "background",
-        name: "remind",
-        status: index % 2 === 0 ? "working" : "input_required",
-      }),
-    );
-    const startRun = vi.fn();
-
-    const started = await startWorkflowTask({
-      now: NOW,
-      request: { ...REQUEST, detach: true },
-      session: { sessionId: "parent", state: taskTableState(working) },
-      startRun,
-      turnId: "turn-1",
-    });
-
-    expect(startRun).not.toHaveBeenCalled();
-    expect(started.result).toEqual({
-      callId: "call-1",
-      isError: true,
-      kind: "tool-result",
-      output: {
-        code: "TOO_MANY_BACKGROUND_TASKS",
-        message: renderTooManyBackgroundTasks(
-          working.map((record) => record.id),
-          10,
-          "workflow",
-        ),
-      },
-      toolName: "deploy",
-    });
-    expect(getTaskTable(started.session).records).toHaveLength(10);
-  });
-
-  it("does not count settled background tasks or waited calls toward the cap", async () => {
-    const others = [
-      ...Array.from({ length: 9 }, (_, index) =>
-        createTaskRecord({ callId: `bg-${index}`, id: `remind-${index}`, mode: "background" }),
-      ),
-      createTaskRecord({
-        callId: "settled",
-        id: "remind-done",
-        mode: "background",
-        status: "completed",
-      }),
-      createTaskRecord({ callId: "waited", id: "deploy-waited", mode: "foreground" }),
-    ];
-
-    const started = await startWorkflowTask({
-      now: NOW,
-      request: { ...REQUEST, detach: true },
-      session: { sessionId: "parent", state: taskTableState(others) },
-      startRun: async () => ({ hookToken: "control-hook", runId: "run-1" }),
-      turnId: "turn-1",
-    });
-
-    expect(started.result).toMatchObject({ output: { status: "working" } });
-  });
-});
-
 describe("settleWorkflowTask for a background task", () => {
   const BACKGROUND = { ...WORKING, creator: { auth: null }, mode: "background" as const };
+
+  it("gives the result to a live task_wait on the task instead of holding it", () => {
+    const waited = { ...BACKGROUND, wait: { callId: "call-wait", startedAt: NOW } };
+    const state = setPendingCoordinationBatch({
+      event: { sequence: 1, stepIndex: 1, turnId: "turn-2" },
+      responseMessages: [],
+      session: { history: [], state: taskTableState([waited]) } as never,
+      tasks: [
+        {
+          callId: "call-wait",
+          input: { taskId: BACKGROUND.id },
+          kind: "workflow-task",
+          toolName: "task_wait",
+          workflowId: TASK_WAIT_WORKFLOW_ID,
+        },
+      ],
+    }).state;
+
+    const update = settleWorkflowTask(
+      settle(ownerState(state), { output: { reminder: "Stand-up" }, status: "completed" }),
+    );
+
+    expect(update.results).toEqual([
+      {
+        callId: "call-wait",
+        kind: "tool-result",
+        output: {
+          name: "deploy",
+          outcome: { output: { reminder: "Stand-up" }, status: "completed" },
+          status: "settled",
+          taskId: BACKGROUND.id,
+        },
+        toolName: "task_wait",
+      },
+    ]);
+    expect(readPendingTaskResults(update.sessionState.snapshot.session.state)).toEqual([]);
+    // Delivered and finished, so the owner prunes the record.
+    expect(records(update.sessionState)).toEqual([]);
+  });
 
   it("holds the result for delivery instead of resolving a tool call", () => {
     const update = settleWorkflowTask(

@@ -17,6 +17,7 @@ describe("sleep", () => {
     const definition = sleep();
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
+    expect(definition.attached).toBe(true);
     expect(definition.description).toContain("before continuing");
     expect(definition.execute).toBeTypeOf("function");
   });

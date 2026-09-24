@@ -50,7 +50,6 @@ const FIXTURE_NAMES = [
   "foreground-agent-call",
   "background-agent-call",
   "detach-on-steer",
-  "detach-true-workflow-tool",
   "task-cancel",
   "agent-timed-out",
   "remote-agent-input-request",
@@ -62,7 +61,6 @@ const MESSAGES = {
   cancelFollowUp: "Actually, cancel that reminder.",
   detach: "Check the d0 and sre dashboards.",
   detachSteer: "Also check the Plain queue, please.",
-  detachTrue: "Remind me to stretch in five seconds.",
   foreground: "Ask the researcher about the Orbit launch.",
   remote: "Refund order 42 through billing.",
   timeout: "Ask the auditor to review the Q3 ledger.",
@@ -72,7 +70,6 @@ const REPLIES = {
   background: "The launch post draft is ready.",
   cancel: "Cancelled the reminder.",
   detach: "d0 and sre are both healthy.",
-  detachTrue: "Reminder: time to stretch.",
   foreground: "The researcher found three sources.",
   remote: "Billing refunded order 42.",
   timeout: "The auditor did not finish in time.",
@@ -111,16 +108,11 @@ export default defineAgent({
           ["d0-call", "lookup", { seconds: 6, source: "d0" }],
           ["sre-call", "lookup", { seconds: 12, source: "sre" }],
         );
-      case M.detachTrue:
-        if (delivered) return reply(R.detachTrue);
-        return result("stretch-call")
-          ? reply("I will remind you in five seconds.")
-          : call(["stretch-call", "remind", { note: "Time to stretch.", seconds: 5 }]);
       case M.cancel:
         if (latest === M.cancelFollowUp) {
           if (result("cancel-call")) return reply(R.cancel);
           const taskId = /remind-[0-9a-z]{6}/u.exec(JSON.stringify(result("review-call")?.output))?.[0];
-          return call(["cancel-call", "task_cancel", { taskIds: [taskId] }]);
+          return call(["cancel-call", "task_cancel", { taskId }]);
         }
         return result("review-call")
           ? reply("I will remind you in ten minutes.")
@@ -164,7 +156,6 @@ function sleepingToolSource(input: {
   readonly inputSchema: string;
   readonly seconds: string;
   readonly result: string;
-  readonly options?: string;
 }): string {
   return `import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "workflow";
@@ -172,7 +163,7 @@ import { z } from "zod";
 
 export default defineWorkflowTool({
   description: ${JSON.stringify(input.description)},
-  inputSchema: ${input.inputSchema},${input.options ?? ""}
+  inputSchema: ${input.inputSchema},
   async execute(input) {
     "use workflow";
     await sleep(${input.seconds} * 1000);
@@ -306,8 +297,6 @@ export default defineRemoteAgent({
         "agent/tools/remind.ts": sleepingToolSource({
           description: "Remind the user after a delay.",
           inputSchema: "z.object({ note: z.string(), seconds: z.number() })",
-          options:
-            '\n  detach: true,\n  toModelOutput: (output) => ({ type: "text", value: `Reminder: ${output.reminder}` }),',
           result: "{ reminder: input.note }",
           seconds: "input.seconds",
         }),
@@ -454,38 +443,25 @@ export default defineRemoteAgent({
     };
   });
 
-  fixture("detach-true-workflow-tool", async (client) => {
-    const { session, response } = await client.sessions.create({ message: MESSAGES.detachTrue });
-    await response.result();
-    const events = await recordUntilReply(session, REPLIES.detachTrue);
+  fixture("task-cancel", async (client) => {
+    const { session, response } = await client.sessions.create({ message: MESSAGES.cancel });
+    const turn = followTurn(response, (events) => count(events, "task.started") === 1);
+    await turn.reached;
+    await (await session.send(MESSAGES.cancelFollowUp)).result();
+    await turn.finished;
+    const events = await recordUntilReply(session, REPLIES.cancel);
     expect(deriveTaskStreamStates(events)).toMatchObject([
       {
-        delivered: true,
+        delivered: false,
+        detached: "steer",
         kind: "workflow",
-        mode: "background",
-        name: "remind",
-        status: "completed",
+        mode: "foreground",
+        status: "cancelled",
       },
     ]);
     return {
       description:
-        "A workflow tool defined with detach: true: task.started with mode background and a receipt at once, then task.settled and a result turn.",
-      events,
-      sessionId: session.state.sessionId,
-    };
-  });
-
-  fixture("task-cancel", async (client) => {
-    const { session, response } = await client.sessions.create({ message: MESSAGES.cancel });
-    await response.result();
-    await (await session.send(MESSAGES.cancelFollowUp)).result();
-    const events = await recordUntilReply(session, REPLIES.cancel);
-    expect(deriveTaskStreamStates(events)).toMatchObject([
-      { delivered: false, kind: "workflow", mode: "background", status: "cancelled" },
-    ]);
-    return {
-      description:
-        "A background task stopped by the model with task_cancel: the tool result lists it as cancelled, task.settled reports cancelled, and no result is ever delivered.",
+        'A waited workflow tool call that a steering message moved to the background, then stopped by the model with task_cancel: the tool result is { status: "cancelled" }, task.settled reports cancelled, and no result is ever delivered.',
       events,
       sessionId: session.state.sessionId,
     };

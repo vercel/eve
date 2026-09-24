@@ -4,21 +4,29 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
+import { setPendingCoordinationBatch } from "#harness/coordination.js";
+import type { SessionStateMap } from "#harness/types.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 import { applyTaskCancelCall, cancelTasksStep } from "#tasks/cancel.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { renderTasksNote } from "#tasks/render.js";
+import {
+  renderTaskOtherPrincipal,
+  renderTasksNote,
+  renderUnknownTask,
+  TASK_CANCEL_INVALID_INPUT_MESSAGE,
+} from "#tasks/render.js";
 import {
   encodeTaskCreator,
   holdTaskResult,
   readPendingTaskResults,
   takeTaskResults,
 } from "#tasks/results.js";
-import { getTaskTable, setTaskTable } from "#tasks/state.js";
+import { getTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, startTask, type TaskTable } from "#tasks/table.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { settleWorkflowTask } from "#tasks/workflow-task.js";
 
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
@@ -32,6 +40,12 @@ vi.mock("#internal/logging.js", () => ({
 }));
 
 const NOW = "2026-09-24T14:00:00.000Z";
+const ALICE = {
+  attributes: {},
+  authenticator: "slack",
+  principalId: "U-alice",
+  principalType: "user",
+};
 const RUN = { commandToken: "control-hook", kind: "workflow" as const, runId: "run-remind" };
 const LOCAL_CHILD = {
   continuationToken: "child-token",
@@ -56,18 +70,16 @@ beforeEach(() => {
 
 describe("applyTaskCancelCall", () => {
   it("cancels a working background task at once and reports it settled", () => {
-    const { commands, events, result, table } = applyTaskCancelCall(
-      taskTable([REMINDER]),
-      call(["remind-q4x1ze"]),
-      NOW,
-    );
+    const { commands, events, results, session } = cancel([REMINDER], "remind-q4x1ze");
 
-    expect(result).toEqual({
-      callId: "call-stop",
-      kind: "tool-result",
-      output: { alreadyFinished: [], cancelled: ["remind-q4x1ze"], unknown: [] },
-      toolName: "task_cancel",
-    });
+    expect(results).toEqual([
+      {
+        callId: "call-stop",
+        kind: "tool-result",
+        output: { status: "cancelled" },
+        toolName: "task_cancel",
+      },
+    ]);
     expect(events).toEqual([
       {
         data: { callId: "call-remind", status: "cancelled", taskId: "remind-q4x1ze" },
@@ -77,6 +89,7 @@ describe("applyTaskCancelCall", () => {
     expect(commands).toEqual([
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
     ]);
+    const table = getTaskTable(session);
     expect(table.records).toEqual([
       expect.objectContaining({
         cancelConfirmBy: expect.any(String),
@@ -91,12 +104,13 @@ describe("applyTaskCancelCall", () => {
 
   it("holds the cancel until the run starts, and the run's late result never reaches the model", () => {
     const unstarted = { ...REMINDER, child: undefined };
-    const cancelled = applyTaskCancelCall(taskTable([unstarted]), call(["remind-q4x1ze"]), NOW);
+    const cancelled = cancel([unstarted], "remind-q4x1ze");
 
     expect(cancelled.commands).toEqual([]);
-    expect(cancelled.table.records[0]).toMatchObject({ pendingCommands: [{ kind: "cancel" }] });
+    const table = getTaskTable(cancelled.session);
+    expect(table.records[0]).toMatchObject({ pendingCommands: [{ kind: "cancel" }] });
     const started = applyTaskMessage(
-      cancelled.table,
+      table,
       { child: RUN, generation: 1, kind: "task.started", taskId: "remind-q4x1ze" },
       NOW,
     );
@@ -133,18 +147,20 @@ describe("applyTaskCancelCall", () => {
       finished,
       { output: "Reminder: stand-up at 10", status: "completed" },
     );
-    const table = getTaskTable(session);
 
-    const cancelled = applyTaskCancelCall(table, call(["remind-q4x1ze"]), NOW);
-
-    expect(cancelled.result.output).toEqual({
-      alreadyFinished: ["remind-q4x1ze"],
-      cancelled: [],
-      unknown: [],
+    const cancelled = applyTaskCancelCall({
+      caller: null,
+      now: NOW,
+      request: call("remind-q4x1ze"),
+      session,
     });
+
+    expect(cancelled.results.map((result) => result.output)).toEqual([
+      { status: "already_finished" },
+    ]);
     expect(cancelled).toMatchObject({ commands: [], events: [] });
-    expect(cancelled.table).toBe(table);
-    const { results } = takeTaskResults(setTaskTable(session, cancelled.table), null);
+    expect(cancelled.session).toBe(session);
+    const { results } = takeTaskResults(cancelled.session, null);
     expect(results).toEqual([expect.objectContaining({ taskId: "remind-q4x1ze" })]);
   });
 
@@ -156,105 +172,135 @@ describe("applyTaskCancelCall", () => {
       status: "completed",
     });
 
-    const { result, table } = applyTaskCancelCall(
-      taskTable([idle]),
-      call(["research-7k2m9q"]),
-      NOW,
-    );
+    const { results, session } = cancel([idle], "research-7k2m9q");
 
-    expect(result.output).toEqual({
-      alreadyFinished: ["research-7k2m9q"],
-      cancelled: [],
-      unknown: [],
-    });
-    expect(table.records).toEqual([idle]);
+    expect(results.map((result) => result.output)).toEqual([{ status: "already_finished" }]);
+    expect(getTaskTable(session).records).toEqual([idle]);
   });
 
-  it("treats unknown IDs and calls a caller waits on as unknown", () => {
+  it.each([
+    ["a call its turn waits on", "research-7k2m9q"],
+    ["a call a workflow body awaits", "research-b81d0c"],
+    ["an ID the session never had", "nobody-000000"],
+  ])("fails UNKNOWN_TASK for %s", (_label, taskId) => {
     const waited = createTaskRecord({ child: LOCAL_CHILD, id: "research-7k2m9q" });
     const nested = createTaskRecord({
       callId: "call-nested",
       id: "research-b81d0c",
+      mode: "background",
       workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
     });
-    const initial = taskTable([waited, nested]);
+    const session = { state: taskTableState([waited, nested]) };
 
-    const cancelled = applyTaskCancelCall(
-      initial,
-      call(["research-7k2m9q", "research-b81d0c", "nobody-000000"]),
-      NOW,
-    );
-
-    expect(cancelled.result.output).toEqual({
-      alreadyFinished: [],
-      cancelled: [],
-      unknown: ["research-7k2m9q", "research-b81d0c", "nobody-000000"],
+    const cancelled = applyTaskCancelCall({
+      caller: null,
+      now: NOW,
+      request: call(taskId),
+      session,
     });
+
+    expect(cancelled.results).toEqual([
+      {
+        callId: "call-stop",
+        isError: true,
+        kind: "tool-result",
+        output: { code: "UNKNOWN_TASK", message: renderUnknownTask(taskId) },
+        toolName: "task_cancel",
+      },
+    ]);
     expect(cancelled).toMatchObject({ commands: [], events: [] });
-    expect(cancelled.table).toBe(initial);
-  });
-
-  it("lists a repeated ID once", () => {
-    const { events, result } = applyTaskCancelCall(
-      taskTable([REMINDER]),
-      call(["remind-q4x1ze", "remind-q4x1ze"]),
-      NOW,
-    );
-
-    expect(result.output).toEqual({
-      alreadyFinished: [],
-      cancelled: ["remind-q4x1ze"],
-      unknown: [],
-    });
-    expect(events).toHaveLength(1);
+    expect(cancelled.session).toBe(session);
   });
 
   it.each([
     [{}],
-    [{ taskIds: "remind-q4x1ze" }],
-    [{ taskIds: [] }],
-    [{ taskIds: [""] }],
-    [{ taskIds: [7] }],
-    [{ taskIds: ["x".repeat(129)] }],
-    [{ taskIds: Array.from({ length: 51 }, (_, index) => `remind-${String(index)}`) }],
+    [{ taskId: "" }],
+    [{ taskId: 7 }],
+    [{ taskId: "x".repeat(129) }],
+    [{ taskIds: ["remind-q4x1ze"] }],
   ])("rejects the input %o without touching the table", (input) => {
-    const initial = taskTable([REMINDER]);
+    const session = { state: taskTableState([REMINDER]) };
 
-    const cancelled = applyTaskCancelCall(
-      initial,
-      { ...call([]), input: input as JsonObject },
-      NOW,
-    );
-
-    expect(cancelled.result).toMatchObject({
-      isError: true,
-      output: { code: "INVALID_INPUT", message: expect.stringContaining("1 to 50") },
+    const cancelled = applyTaskCancelCall({
+      caller: null,
+      now: NOW,
+      request: { ...call("remind-q4x1ze"), input: input as JsonObject },
+      session,
     });
+
+    expect(cancelled.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: { code: "INVALID_INPUT", message: TASK_CANCEL_INVALID_INPUT_MESSAGE },
+      }),
+    ]);
     expect(cancelled).toMatchObject({ commands: [], events: [] });
-    expect(cancelled.table).toBe(initial);
+    expect(cancelled.session).toBe(session);
   });
 
-  it("stops a task another principal started: access to the session includes cancel rights", () => {
-    const alices = {
-      ...REMINDER,
-      creator: encodeTaskCreator({
-        auth: {
-          attributes: {},
-          authenticator: "slack",
-          principalId: "U-alice",
-          principalType: "user",
+  it("refuses a task another principal started, and lets its creator stop it", () => {
+    const alices = { ...REMINDER, creator: encodeTaskCreator({ auth: ALICE }) };
+    const session = { state: taskTableState([alices]) };
+
+    const byBob = applyTaskCancelCall({
+      caller: { ...ALICE, principalId: "U-bob" },
+      now: NOW,
+      request: call("remind-q4x1ze"),
+      session,
+    });
+    expect(byBob.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: {
+          code: "TASK_OTHER_PRINCIPAL",
+          message: renderTaskOtherPrincipal("remind-q4x1ze"),
         },
       }),
-    };
-
-    // The call runs in Bob's turn; nothing about it names a principal.
-    const { result } = applyTaskCancelCall(taskTable([alices]), call(["remind-q4x1ze"]), NOW);
-
-    expect(result.output).toEqual({
-      alreadyFinished: [],
-      cancelled: ["remind-q4x1ze"],
-      unknown: [],
+    ]);
+    expect(byBob.session).toBe(session);
+    const anonymous = applyTaskCancelCall({
+      caller: null,
+      now: NOW,
+      request: call("remind-q4x1ze"),
+      session,
     });
+    expect(anonymous.results[0]).toMatchObject({ output: { code: "TASK_OTHER_PRINCIPAL" } });
+
+    const byAlice = applyTaskCancelCall({
+      caller: ALICE,
+      now: NOW,
+      request: call("remind-q4x1ze"),
+      session,
+    });
+    expect(byAlice.results.map((result) => result.output)).toEqual([{ status: "cancelled" }]);
+  });
+
+  it("gives a task_wait on the cancelled task the cancellation as its result", () => {
+    const waited = { ...REMINDER, wait: { callId: "call-wait", startedAt: NOW } };
+    const session = withBatch(taskTableState([waited]), ["call-wait", "call-stop"]);
+
+    const cancelled = applyTaskCancelCall({
+      caller: null,
+      now: NOW,
+      request: call("remind-q4x1ze"),
+      session,
+    });
+
+    expect(cancelled.results).toEqual([
+      expect.objectContaining({ callId: "call-stop", output: { status: "cancelled" } }),
+      {
+        callId: "call-wait",
+        kind: "tool-result",
+        output: {
+          name: "remind",
+          outcome: { status: "cancelled" },
+          status: "settled",
+          taskId: "remind-q4x1ze",
+        },
+        toolName: "task_wait",
+      },
+    ]);
+    expect(getTaskTable(cancelled.session).records[0]?.wait).toBeUndefined();
   });
 
   it("keeps a cancelled agent available for new work", () => {
@@ -264,7 +310,7 @@ describe("applyTaskCancelCall", () => {
       mode: "background",
     });
 
-    const { table } = applyTaskCancelCall(taskTable([agent]), call(["research-7k2m9q"]), NOW);
+    const table = getTaskTable(cancel([agent], "research-7k2m9q").session);
 
     expect(renderTasksNote(table.records)).toContain(
       '<agent id="research-7k2m9q" name="research">',
@@ -312,6 +358,34 @@ describe("cancelTasksStep with the task selector", () => {
       { id: "research-7k2m9q", status: "working" },
       { id: "remind-3fq8wd", status: "working" },
     ]);
+  });
+
+  it("gives a task_wait on the cancelled task the cancellation as its result", async () => {
+    const waited = { ...REMINDER, wait: { callId: "call-wait", startedAt: NOW } };
+    const base = createTestSessionState({ sessionId: "parent" });
+    const sessionState = {
+      ...base,
+      snapshot: {
+        session: {
+          ...base.snapshot.session,
+          state: withBatch(taskTableState([waited]), ["call-wait"]).state,
+        },
+      },
+    };
+
+    const update = await cancelTasksStep({
+      selector: { kind: "task", taskId: "remind-q4x1ze" },
+      serializedContext: {},
+      sessionState,
+    });
+
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        callId: "call-wait",
+        output: expect.objectContaining({ outcome: { status: "cancelled" }, status: "settled" }),
+      }),
+    ]);
+    expect(records(update.sessionState)[0]?.wait).toBeUndefined();
   });
 
   it.each([["research-7k2m9q"], ["nobody-000000"]])(
@@ -364,14 +438,43 @@ describe("cancelTasksStep with the background selector", () => {
   });
 });
 
-function call(taskIds: readonly string[]): RuntimeWorkflowTaskRequest {
+function call(taskId: string): RuntimeWorkflowTaskRequest {
   return {
     callId: "call-stop",
-    input: { taskIds: [...taskIds] },
+    input: { taskId },
     kind: "workflow-task",
     toolName: "task_cancel",
     workflowId: TASK_CANCEL_WORKFLOW_ID,
   };
+}
+
+function cancel(existing: readonly TaskRecord[], taskId: string) {
+  return applyTaskCancelCall({
+    caller: null,
+    now: NOW,
+    request: call(taskId),
+    session: { state: taskTableState(existing) },
+  });
+}
+
+/** A session whose turn waits on these calls: `task_wait` calls, unless named `call-stop`. */
+function withBatch(state: SessionStateMap, callIds: readonly string[]) {
+  return setPendingCoordinationBatch({
+    event: { sequence: 1, stepIndex: 1, turnId: "turn-1" },
+    responseMessages: [],
+    session: { history: [], state } as never,
+    tasks: callIds.map((callId) =>
+      callId === "call-stop"
+        ? call("remind-q4x1ze")
+        : {
+            callId,
+            input: { taskId: "remind-q4x1ze" },
+            kind: "workflow-task",
+            toolName: "task_wait",
+            workflowId: TASK_WAIT_WORKFLOW_ID,
+          },
+    ),
+  });
 }
 
 function ownerState(existing: readonly TaskRecord[]): DurableSessionState {

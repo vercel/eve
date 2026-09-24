@@ -37,14 +37,11 @@ function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
 describe("receipts", () => {
   it("names agents and tasks by id", () => {
     expect(renderBackgroundReceipt(record())).toMatch(/^Agent researcher-7k2m9q is working/);
-    expect(renderBackgroundReceipt(record({ id: "remind-q4x1ze", kind: "workflow" }))).toBe(
-      "Task remind-q4x1ze is working in the background. Its result will arrive in a later message. Do not poll or repeat this work.",
-    );
-    expect(renderDetachedReceipt(record(), "steer")).toMatch(
+    expect(renderDetachedReceipt(record())).toMatch(
       /^A new message arrived, so this call moved to the background as agent researcher-7k2m9q\./,
     );
-    expect(renderDetachedReceipt(record({ kind: "workflow" }), "timeout")).toMatch(
-      /^This call is taking a while, so it moved to the background as task researcher-7k2m9q\./,
+    expect(renderDetachedReceipt(record({ kind: "workflow" }))).toMatch(
+      /^A new message arrived, so this call moved to the background as task researcher-7k2m9q\./,
     );
     expect(renderSleepEndedEarly(12_400)).toBe(
       "The sleep ended early after 12 s because a new message arrived.",
@@ -232,12 +229,9 @@ describe("system blocks", () => {
 });
 
 describe("renderTooManyBackgroundTasks", () => {
-  it("offers a waited call only where the call can wait", () => {
-    expect(renderTooManyBackgroundTasks(["a-1", "b-2"], 10, "agent")).toBe(
+  it("offers a waited agent call instead", () => {
+    expect(renderTooManyBackgroundTasks(["a-1", "b-2"], 10)).toBe(
       "10 background tasks are already running (a-1, b-2). Wait for one to report, stop one with task_cancel, or call without background.",
-    );
-    expect(renderTooManyBackgroundTasks(["a-1"], 10, "workflow")).toBe(
-      "10 background tasks are already running (a-1). Wait for one to report or stop one with task_cancel, then call this tool again.",
     );
   });
 });

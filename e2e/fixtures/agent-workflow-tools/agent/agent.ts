@@ -44,26 +44,11 @@ function respondBackground(request: MockModelRequest): MockModelResponse | strin
       if (last.includes("BG-PING")) return "BG-PING-REPLY";
       if (results("confirm_deploy").length > 0) return "BG-APPROVAL-WAITED";
       return { toolCalls: [{ input: { service: "billing" }, name: "confirm_deploy" }] };
-    case "BG-TIMEOUT-START": {
-      const checks = results("timed_check");
-      if (checks.length > 0)
-        return `BG-TIMED ${checks.map((entry) => text(entry.output)).join(" | ")}`;
-      return {
-        toolCalls: [
-          { input: { label: "lint", seconds: 0 }, name: "timed_check" },
-          { input: { label: "integration", seconds: 30 }, name: "timed_check" },
-        ],
-      };
-    }
     case "BG-SLEEP-START": {
       const slept = results("sleep")[0];
       if (slept !== undefined) return `BG-SLEPT ${text(slept.output)}`;
       return { toolCalls: [{ input: { seconds: 600 }, name: "sleep" }] };
     }
-    case "BG-DEADLINE-START":
-      if (results("stuck_job").length > 0) return "BG-STARTED";
-      return { toolCalls: [{ input: {}, name: "stuck_job" }] };
-    case "BG-REMIND-START":
     case "BG-CANCEL-START":
     case "BG-NOTE-START": {
       if (last.includes("BG-IDLE")) return "BG-IDLE-REPLY";
@@ -72,12 +57,10 @@ function respondBackground(request: MockModelRequest): MockModelResponse | strin
         const stopped = results("task_cancel")[0];
         if (stopped !== undefined) return `BG-CANCELLED ${text(stopped.output)}`;
         const taskId = /remind_later-[0-9a-z]{6}/u.exec(receipt)?.[0] ?? "unknown";
-        return { toolCalls: [{ input: { taskIds: [taskId] }, name: "task_cancel" }] };
+        return { toolCalls: [{ input: { taskId }, name: "task_cancel" }] };
       }
       if (results("remind_later").length > 0) return "BG-STARTED";
-      const seconds = { "BG-CANCEL-START": 8, "BG-NOTE-START": 120, "BG-REMIND-START": 3 }[
-        directive
-      ];
+      const seconds = { "BG-CANCEL-START": 20, "BG-NOTE-START": 120 }[directive];
       return {
         toolCalls: [{ input: { note: "water the office plants", seconds }, name: "remind_later" }],
       };

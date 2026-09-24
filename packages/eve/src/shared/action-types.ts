@@ -129,8 +129,8 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
+    attached: z.boolean().optional(),
     callId: z.string(),
-    detach: z.union([z.boolean(), z.object({ timeout: z.number() }).strict()]).optional(),
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),

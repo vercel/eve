@@ -26,6 +26,7 @@ export type { SleepToolInput, SleepToolOutput };
  */
 export function sleep(): WorkflowToolDefinition<SleepToolInput, SleepToolOutput> {
   return defineWorkflowTool({
+    attached: true,
     description: SLEEP_TOOL_DESCRIPTION,
     execute: executeSleepTool,
     inputSchema: SLEEP_INPUT_SCHEMA,

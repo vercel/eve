@@ -68,6 +68,8 @@ export interface TaskRecord {
   readonly workflowCaller?: { readonly runId: string; readonly replyTo: string };
   /** The current generation's result reached history. */
   readonly delivered: boolean;
+  /** The `task_wait` call that takes the current generation's result, while it waits. */
+  readonly wait?: { readonly callId: string; readonly startedAt: string };
 }
 
 /**
@@ -242,6 +244,13 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   )
     return fail("invalid workflowCaller");
   if (typeof value.delivered !== "boolean") return fail("invalid delivered");
+  if (
+    value.wait !== undefined &&
+    (!isRecordObject(value.wait) ||
+      !isString(value.wait.callId) ||
+      !isIsoTime(value.wait.startedAt))
+  )
+    return fail("invalid wait");
   const fields: Partial<Record<keyof TaskRecord, unknown>> = value;
   return { ok: true, record: fields as TaskRecord };
 }

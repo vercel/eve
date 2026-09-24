@@ -5,7 +5,6 @@ import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/def
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
 import type { TaskTimeout } from "#shared/task-timeout.js";
-import type { WorkflowToolDetach } from "#tools/workflow-definition.js";
 
 /**
  * Unified harness-owned tool definition.
@@ -16,8 +15,8 @@ export interface HarnessToolDefinition {
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;
-  /** Workflow tools only: `true` returns a receipt instead of waiting for the run. */
-  readonly detach?: WorkflowToolDetach;
+  /** Workflow tools only: a steering message never moves a call to the background. */
+  readonly attached?: boolean;
   /** Workflow tools only: the time limit for each call. */
   readonly timeout?: TaskTimeout;
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;

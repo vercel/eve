@@ -11,9 +11,13 @@ import type { JsonValue } from "#shared/json.js";
 import { AGENT_OTHER_PRINCIPAL } from "#subagents/agent-handle-errors.js";
 import type { AgentTaskCall, WorkflowCallerReply } from "#tasks/owner.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { renderAgentOtherPrincipal } from "#tasks/render.js";
+import {
+  renderAgentOtherPrincipal,
+  renderTaskOtherPrincipal,
+  renderUnknownTask,
+} from "#tasks/render.js";
 import { readTaskCreator, sameTaskPrincipal } from "#tasks/results.js";
-import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import { isTerminalTaskStatus, type TaskError } from "#tasks/protocol.js";
 import { findTask, removeTasks, type TaskTable } from "#tasks/table.js";
 
 // How the owner resolves one agent call and the child report that settles it.
@@ -70,8 +74,8 @@ export function retireIdleAgents(
  * user, a schedule, or an app. The agent acts with its starter's credentials
  * and keeps their conversation, so neither new work nor a steering message
  * from anyone else may reach it. Every unauthenticated caller is the same
- * anonymous principal, so this separates no two of them. Cancelling is not
- * checked: any caller with access to the session may stop any of its tasks.
+ * anonymous principal, so this separates no two of them. `task_wait` and
+ * `task_cancel` apply the same rule through {@link findCallerTask}.
  */
 export function rejectOtherPrincipal(input: {
   readonly agentId: string | undefined;
@@ -83,6 +87,33 @@ export function rejectOtherPrincipal(input: {
   if (agent?.kind !== "agent") return undefined;
   if (sameTaskPrincipal(readTaskCreator(agent.creator).auth, input.caller)) return undefined;
   return { code: AGENT_OTHER_PRINCIPAL, message: renderAgentOtherPrincipal(agent.id) };
+}
+
+/**
+ * The task a `task_wait` or `task_cancel` call names, or the call's error. A
+ * task the session does not have, a call its turn still waits on, and a
+ * `ctx.agent` call a workflow body awaits are unknown to the model; a task a
+ * different principal started is refused, as for agent calls.
+ */
+export function findCallerTask(input: {
+  readonly caller: SessionAuthContext | null;
+  readonly table: TaskTable;
+  readonly taskId: string;
+}): { readonly record: TaskRecord } | { readonly error: TaskError } {
+  const record = findTask(input.table, input.taskId);
+  if (
+    record === undefined ||
+    record.workflowCaller !== undefined ||
+    (record.mode === "foreground" && !isTerminalTaskStatus(record.status))
+  ) {
+    return { error: { code: "UNKNOWN_TASK", message: renderUnknownTask(input.taskId) } };
+  }
+  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
+    return {
+      error: { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) },
+    };
+  }
+  return { record };
 }
 
 export function readDynamicRemoteAgent(input: {

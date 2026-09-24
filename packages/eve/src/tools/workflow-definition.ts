@@ -100,14 +100,6 @@ export type WorkflowToolContext = Pick<
 
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
 
-/**
- * When a call stops holding its turn. `false` waits and detaches only when
- * steered; `true` returns a receipt at once; `{ timeout }` also detaches
- * after `timeout` milliseconds. A detached call's result arrives later in
- * its own message.
- */
-export type WorkflowToolDetach = boolean | { readonly timeout: number };
-
 /** A static tool whose executor runs as a durable workflow. Its executor must start with "use workflow". */
 export interface WorkflowToolDefinition<
   TInput = unknown,
@@ -117,15 +109,13 @@ export interface WorkflowToolDefinition<
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   /**
-   * Defaults to `false`: the call waits, and in an interactive root session
-   * (a root session in conversation mode) a steering message moves it to the
-   * background. `true` returns a receipt to the model at once. `{ timeout }`
-   * waits like `false`, and in an interactive root session also moves the
-   * call to the background after `timeout` milliseconds. A background call's
-   * result arrives later as a task result. Unlike `timeout`, this never
-   * stops the run.
+   * `true` keeps the call attached to its turn: its result is always the
+   * tool result, and a steering message never moves it to the background.
+   * Defaults to `false`: the call still waits, but in an interactive root
+   * session (a root session in conversation mode) a steering message moves
+   * it to the background, and its result arrives later as a task result.
    */
-  detach?: WorkflowToolDetach;
+  attached?: boolean;
   /**
    * Time limit for each call, in milliseconds of active time: time the run
    * spends waiting on `ctx.ask` or an approval does not count. A call still
@@ -136,42 +126,16 @@ export interface WorkflowToolDefinition<
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
-/**
- * Longest `detach.timeout`: the largest delay `setTimeout` accepts, about
- * 24.8 days. A longer timer could not be scheduled reliably.
- */
-export const MAX_DETACH_TIMEOUT_MS = 2_147_483_647;
-
-/** Validates an authored `detach` value. */
-export function normalizeWorkflowToolDetach(
+/** Validates an authored `attached` value. */
+export function normalizeWorkflowToolAttached(
   value: unknown,
   factory: string,
-): WorkflowToolDetach | undefined {
+): boolean | undefined {
   if (value === undefined || typeof value === "boolean") return value;
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    const keys = Object.keys(value);
-    const timeout = (value as { readonly timeout?: unknown }).timeout;
-    if (
-      keys.length === 1 &&
-      keys[0] === "timeout" &&
-      typeof timeout === "number" &&
-      Number.isFinite(timeout) &&
-      timeout > 0
-    ) {
-      if (timeout > MAX_DETACH_TIMEOUT_MS) {
-        throw new Error(
-          `${factory}: "detach.timeout" must be at most ${MAX_DETACH_TIMEOUT_MS} milliseconds (about 24.8 days), received ${timeout}. Use the top-level "timeout" to limit how long a call runs.`,
-        );
-      }
-      return { timeout };
-    }
-  }
-  throw new Error(
-    `${factory}: "detach" must be true, false, or { timeout } with a positive number of milliseconds, received ${describeDetach(value)}.`,
-  );
+  throw new Error(`${factory}: "attached" must be true or false, received ${describe(value)}.`);
 }
 
-function describeDetach(value: unknown): string {
+function describe(value: unknown): string {
   try {
     return JSON.stringify(value) ?? String(value);
   } catch {
@@ -225,7 +189,7 @@ export function defineWorkflowTool<TInput, TOutput>(
   definition: Unbranded<WorkflowToolDefinition<TInput, TOutput>>,
 ): WorkflowToolDefinition<TInput, TOutput> {
   rejectRemovedExecutionOption(definition, "defineWorkflowTool");
-  normalizeWorkflowToolDetach(definition.detach, "defineWorkflowTool");
+  normalizeWorkflowToolAttached(definition.attached, "defineWorkflowTool");
   normalizeTaskTimeout(definition.timeout, "defineWorkflowTool:");
   stampToolDefinition(definition, "defineWorkflowTool");
   return Object.assign(definition, { [WORKFLOW_TOOL_BRAND]: true as const });

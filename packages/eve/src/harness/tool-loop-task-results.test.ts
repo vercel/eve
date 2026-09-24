@@ -25,7 +25,9 @@ import { encodeTaskCreator, holdTaskResult, readPendingTaskResults } from "#task
 import { getTaskTable } from "#tasks/state.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { taskCancel } from "#tools/framework/task-cancel.js";
+import { taskWait } from "#tools/framework/task-wait.js";
 
 const ALICE: SessionAuthContext = {
   attributes: {},
@@ -37,7 +39,6 @@ const BOB: SessionAuthContext = { ...ALICE, principalId: "U-bob" };
 
 const REMIND: HarnessToolDefinition = {
   description: "Remind Alice later.",
-  detach: true,
   inputSchema: jsonSchema({ type: "object" }),
   name: "remind",
   toModelOutput: (output) => ({
@@ -53,6 +54,13 @@ const TASK_CANCEL: HarnessToolDefinition = {
   name: "task_cancel",
   outputSchema: taskCancel.outputSchema as FlexibleSchema,
   workflowId: TASK_CANCEL_WORKFLOW_ID,
+};
+
+const TASK_WAIT: HarnessToolDefinition = {
+  description: taskWait.description,
+  inputSchema: taskWait.inputSchema as FlexibleSchema,
+  name: "task_wait",
+  workflowId: TASK_WAIT_WORKFLOW_ID,
 };
 
 const CHECK: HarnessToolDefinition = {
@@ -273,7 +281,7 @@ describe("background result delivery in the tool loop", () => {
     expect(finished.events.map((event) => event.type)).toContain("session.completed");
   });
 
-  it("includes the background tasks block in the system prompt for detach: true tools", async () => {
+  it("includes the background tasks block in an interactive root session with a workflow tool", async () => {
     const withDetach = await runStep({
       auth: null,
       respond: () => "ok",
@@ -300,22 +308,32 @@ describe("background result delivery in the tool loop", () => {
   });
 
   it.each([
-    ["a detach: true tool", "task" as const, [REMIND, TASK_CANCEL], true],
     [
       "an interactive root session with a workflow tool",
       "conversation" as const,
-      [{ ...REMIND, detach: undefined }, TASK_CANCEL],
+      [REMIND, TASK_CANCEL, TASK_WAIT],
       true,
     ],
     [
-      "a task-mode run without detach: true",
-      "task" as const,
-      [{ ...REMIND, detach: undefined }, TASK_CANCEL],
+      "an interactive root session with only attached workflow tools",
+      "conversation" as const,
+      [{ ...REMIND, attached: true }, TASK_CANCEL, TASK_WAIT],
       false,
     ],
-    ["a session with only plain tools", "conversation" as const, [CHECK, TASK_CANCEL], false],
+    [
+      "a task-mode run with a workflow tool",
+      "task" as const,
+      [REMIND, TASK_CANCEL, TASK_WAIT],
+      false,
+    ],
+    [
+      "a session with only plain tools",
+      "conversation" as const,
+      [CHECK, TASK_CANCEL, TASK_WAIT],
+      false,
+    ],
   ])(
-    "advertises task_cancel with the background block for %s",
+    "advertises task_wait and task_cancel with the background block for %s",
     async (_label, mode, tools, advertised) => {
       const { requests } = await runStep({
         auth: null,
@@ -332,6 +350,7 @@ describe("background result delivery in the tool loop", () => {
         .map((message) => message.text)
         .join("\n");
       expect(names.includes("task_cancel")).toBe(advertised);
+      expect(names.includes("task_wait")).toBe(advertised);
       expect(system.includes(BACKGROUND_TASKS_INSTRUCTION)).toBe(advertised);
     },
   );
@@ -346,9 +365,7 @@ describe("background result delivery in the tool loop", () => {
     const { result, session } = await runStep({
       auth: null,
       respond: () => ({
-        toolCalls: [
-          { id: "call-stop", input: { taskIds: ["remind-q4x1ze"] }, name: "task_cancel" },
-        ],
+        toolCalls: [{ id: "call-stop", input: { taskId: "remind-q4x1ze" }, name: "task_cancel" }],
       }),
       session: { ...sessionWithResult({ creator: null }), state: taskTableState([working]) },
       stepInput: { message: "Never mind the reminder." },
@@ -359,7 +376,7 @@ describe("background result delivery in the tool loop", () => {
     expect(getPendingCoordinationBatch(session.state)?.tasks).toEqual([
       expect.objectContaining({
         callId: "call-stop",
-        input: { taskIds: ["remind-q4x1ze"] },
+        input: { taskId: "remind-q4x1ze" },
         toolName: "task_cancel",
         workflowId: TASK_CANCEL_WORKFLOW_ID,
       }),
@@ -368,14 +385,14 @@ describe("background result delivery in the tool loop", () => {
     expect(getTaskTable(session).records).toEqual([working]);
   });
 
-  it.each([[[]], [[""]], [Array.from({ length: 51 }, (_, index) => `task-${index}`)]])(
-    "returns an input error for task_cancel ids %o without deferring the call",
-    async (taskIds) => {
+  it.each([[{}], [{ taskId: "" }], [{ taskIds: ["remind-q4x1ze"] }]])(
+    "returns an input error for task_cancel input %o without deferring the call",
+    async (input) => {
       const { requests, session } = await runStep({
         auth: null,
         respond: (request) =>
           request.toolResults.length === 0
-            ? { toolCalls: [{ id: "call-stop", input: { taskIds }, name: "task_cancel" }] }
+            ? { toolCalls: [{ id: "call-stop", input, name: "task_cancel" }] }
             : "I could not stop it.",
         session: { ...sessionWithResult({ creator: null }), state: undefined },
         stepInput: { message: "Stop the reminder." },

@@ -4,7 +4,6 @@ import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
 import type { TaskTimeout } from "#shared/task-timeout.js";
-import type { WorkflowToolDetach } from "#tools/workflow-definition.js";
 
 /** Grouped durable workflow metadata for one prepared harness tool. */
 export interface PreparedRuntimeWorkflowTask {
@@ -17,8 +16,8 @@ export interface PreparedRuntimeWorkflowTask {
   readonly nodeId?: string;
   /** Registered workflow definition to execute. */
   readonly workflowId: string;
-  /** Authored workflow tools only: whether a call returns a receipt instead of waiting. */
-  readonly detach?: WorkflowToolDetach;
+  /** Authored workflow tools only: a steering message never moves a call to the background. */
+  readonly attached?: boolean;
   /** Authored workflow tools only: the time limit for each call. */
   readonly timeout?: TaskTimeout;
 }

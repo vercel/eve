@@ -12,6 +12,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import {
   applyBackgroundTaskSurface,
   isInteractiveRootSession,
@@ -37,8 +38,9 @@ function tool(name: string, fields: Partial<HarnessToolDefinition> = {}): Harnes
 
 const RESEARCHER = tool("researcher", { workflowId: AGENT_TASK_WORKFLOW_ID });
 const DEPLOY = tool("deploy", { workflowId: "workflow//deploy" });
-const REMIND = tool("remind", { detach: true, workflowId: "workflow//remind" });
+const ASK = tool("ask_question", { attached: true, workflowId: "workflow//ask" });
 const TASK_CANCEL = tool("task_cancel", { workflowId: TASK_CANCEL_WORKFLOW_ID });
+const TASK_WAIT = tool("task_wait", { workflowId: TASK_WAIT_WORKFLOW_ID });
 
 function tools(...entries: HarnessToolDefinition[]) {
   return new Map(entries.map((entry) => [entry.name, entry]));
@@ -94,28 +96,37 @@ describe("isInteractiveRootTurn", () => {
 });
 
 describe("resolveBackgroundTaskSurface", () => {
-  it("offers background, task_cancel, and the block in an interactive root session with an agent or workflow tool", () => {
+  it("offers background, the task tools, and the block in an interactive root session with an agent or workflow tool", () => {
     for (const available of [tools(RESEARCHER), tools(DEPLOY)]) {
       expect(
         resolveBackgroundTaskSurface({ ctx: context(), mode: "conversation", tools: available }),
-      ).toMatchObject({ backgroundParameter: true, taskCancel: true });
+      ).toMatchObject({ enabled: true });
     }
     expect(
       resolveBackgroundTaskSurface({ ctx: context(), mode: "conversation", tools: tools() }),
-    ).toEqual({ backgroundParameter: false, taskCancel: false });
+    ).toEqual({ enabled: false });
+  });
+
+  it("does not count attached workflow tools, which never move to the background", () => {
+    expect(
+      resolveBackgroundTaskSurface({
+        ctx: context(),
+        mode: "conversation",
+        tools: tools(ASK, TASK_CANCEL, TASK_WAIT),
+      }),
+    ).toEqual({ enabled: false });
   });
 
   it("counts dynamic subagents the agent declares, even before one resolves", () => {
     const surface = resolveBackgroundTaskSurface({
       ctx: context(withDynamicSubagents),
       mode: "conversation",
-      tools: tools(TASK_CANCEL),
+      tools: tools(TASK_CANCEL, TASK_WAIT),
     });
 
     expect(surface).toEqual({
-      backgroundParameter: true,
+      enabled: true,
       instruction: renderBackgroundTasksInstruction({ agents: true }),
-      taskCancel: true,
     });
   });
 
@@ -125,41 +136,36 @@ describe("resolveBackgroundTaskSurface", () => {
       mode: "conversation",
       tools: tools(RESEARCHER),
     });
-    expect(surface.backgroundParameter).toBe(true);
+    expect(surface.enabled).toBe(true);
   });
 
-  it("offers only task_cancel and the block elsewhere, and only for a detach: true tool", () => {
+  it("offers nothing outside an interactive root session", () => {
     const delegated = context((ctx) => ctx.set(DelegatedSessionKey, true));
     expect(
       resolveBackgroundTaskSurface({
         ctx: delegated,
         mode: "conversation",
-        tools: tools(RESEARCHER, REMIND),
+        tools: tools(RESEARCHER, DEPLOY),
       }),
-    ).toEqual({
-      backgroundParameter: false,
-      instruction: renderBackgroundTasksInstruction({ agents: true }),
-      taskCancel: true,
-    });
+    ).toEqual({ enabled: false });
     expect(
-      resolveBackgroundTaskSurface({ ctx: delegated, mode: "task", tools: tools(RESEARCHER) }),
-    ).toEqual({ backgroundParameter: false, taskCancel: false });
+      resolveBackgroundTaskSurface({ ctx: context(), mode: "task", tools: tools(RESEARCHER) }),
+    ).toEqual({ enabled: false });
   });
 });
 
 describe("applyBackgroundTaskSurface", () => {
-  it("adds background to agent tools and drops task_cancel where it has nothing to stop", () => {
-    const applied = applyBackgroundTaskSurface(tools(RESEARCHER, DEPLOY, TASK_CANCEL), {
-      backgroundParameter: true,
-      taskCancel: true,
+  it("adds background to agent tools and drops the task tools where they have nothing to act on", () => {
+    const applied = applyBackgroundTaskSurface(tools(RESEARCHER, DEPLOY, TASK_CANCEL, TASK_WAIT), {
+      enabled: true,
     });
     expect(applied.get("researcher")?.inputSchema).toBe(BACKGROUND_SUBAGENT_TOOL_INPUT_SCHEMA);
     expect(applied.get("deploy")).toBe(DEPLOY);
     expect(applied.has("task_cancel")).toBe(true);
+    expect(applied.has("task_wait")).toBe(true);
 
-    const none = applyBackgroundTaskSurface(tools(RESEARCHER, TASK_CANCEL), {
-      backgroundParameter: false,
-      taskCancel: false,
+    const none = applyBackgroundTaskSurface(tools(RESEARCHER, TASK_CANCEL, TASK_WAIT), {
+      enabled: false,
     });
     expect([...none.keys()]).toEqual(["researcher"]);
     expect(none.get("researcher")).toBe(RESEARCHER);

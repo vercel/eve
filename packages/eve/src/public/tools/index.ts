@@ -39,7 +39,6 @@ export {
   type WorkflowStepToolContext,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
-  type WorkflowToolDetach,
   type AgentInput,
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";

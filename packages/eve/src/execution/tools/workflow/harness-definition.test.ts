@@ -26,18 +26,18 @@ describe("createWorkflowToolHarnessDefinition", () => {
 });
 
 describe("createPreparedWorkflowToolHarnessDefinition", () => {
-  it("carries a workflow tool's detach option to the harness", () => {
+  it("carries a workflow tool's attached option to the harness", () => {
     expect(
       createPreparedWorkflowToolHarnessDefinition({
-        description: "Remind Alice later.",
+        description: "Look up an order.",
         inputSchema: { type: "object" },
         kind: "authored-tool",
-        logicalPath: "tools/remind.ts",
-        name: "remind",
+        logicalPath: "tools/lookup.ts",
+        name: "lookup",
         sourceId: "agent",
-        task: { detach: true, workflowId: "workflow//./agent/tools/remind//execute" },
+        task: { attached: true, workflowId: "workflow//./agent/tools/lookup//execute" },
       } as never),
-    ).toMatchObject({ detach: true, workflowId: "workflow//./agent/tools/remind//execute" });
+    ).toMatchObject({ attached: true, workflowId: "workflow//./agent/tools/lookup//execute" });
   });
 
   it("carries a workflow tool's timeout to the harness", () => {

@@ -5,13 +5,9 @@ import {
   type HarnessModelMessage,
   type UserModelMessage,
 } from "#harness/messages.js";
-import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
+import { projectTaskResultBody } from "#harness/coordination.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-import {
-  RESULT_TURN_REPLY_PROMPT,
-  renderModelOutputBody,
-  renderTaskResults,
-} from "#tasks/render.js";
+import { RESULT_TURN_REPLY_PROMPT, renderTaskResults } from "#tasks/render.js";
 import { takeTaskResults, type PendingTaskResult } from "#tasks/results.js";
 
 const log = createLogger("harness.task-results");
@@ -81,16 +77,9 @@ async function projectBody(
   result: PendingTaskResult,
   tools: HarnessToolMap,
 ): Promise<string | undefined> {
-  if (result.kind !== "workflow" || result.outcome.status !== "completed") return undefined;
-  const toModelOutput = tools.get(result.name)?.toModelOutput;
-  if (toModelOutput === undefined) return undefined;
+  if (result.kind !== "workflow") return undefined;
   try {
-    return renderModelOutputBody(
-      normalizeToolModelOutput({
-        output: await toModelOutput(result.outcome.output),
-        toolName: result.name,
-      }),
-    );
+    return await projectTaskResultBody(result, tools);
   } catch (error) {
     log.warn("toModelOutput failed for a task result; delivering the raw output", {
       error,

@@ -1,6 +1,6 @@
 /**
  * Starts workflow tool calls in pending coordination as tasks and applies the
- * model's calls that stop background tasks. Agent calls start separately.
+ * model's `task_wait` and `task_cancel` calls. Agent calls start separately.
  */
 
 import {
@@ -16,17 +16,22 @@ import { applyTaskCancelCall } from "#tasks/cancel.js";
 import { isTaskCancelRequest } from "#tasks/cancel-tool.js";
 import { planTaskWait, type TaskWaitPlan } from "#tasks/detach.js";
 import { readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
-import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
+import { applyTaskWaitCall, type TaskWaitRegistration } from "#tasks/wait.js";
+import { isTaskWaitRequest } from "#tasks/wait-tool.js";
 import { startWorkflowTask } from "#tasks/workflow-task.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
   readonly action: "park";
 };
 
-export async function dispatchCoordinationStep(
-  input: CoordinationDispatchStepInput,
-): Promise<TaskOwnerUpdate & { readonly wait?: TaskWaitPlan }> {
+export async function dispatchCoordinationStep(input: CoordinationDispatchStepInput): Promise<
+  TaskOwnerUpdate & {
+    readonly wait?: TaskWaitPlan;
+    /** The `task_wait` calls the turn holds for. */
+    readonly taskWaits?: readonly TaskWaitRegistration[];
+  }
+> {
   "use step";
 
   const prepared = await prepareCoordinationDispatch({
@@ -49,16 +54,10 @@ export async function dispatchCoordinationStep(
   const events: UnstampedMessageStreamEvent[] = [];
   const results: RuntimeToolResultActionResult[] = [];
   const commands: CommandEffect[] = [];
+  const taskWaits: TaskWaitRegistration[] = [];
 
   for (const request of prepared.plan) {
-    if (isAgentTaskRequest(request)) continue;
-    if (isTaskCancelRequest(request)) {
-      const table = getTaskTable(nextSession);
-      const cancelled = applyTaskCancelCall(table, request, now);
-      if (cancelled.table !== table) nextSession = setTaskTable(nextSession, cancelled.table);
-      commands.push(...cancelled.commands);
-      events.push(...cancelled.events);
-      results.push(cancelled.result);
+    if (isAgentTaskRequest(request) || isTaskWaitRequest(request) || isTaskCancelRequest(request)) {
       continue;
     }
     const started = await startWorkflowTask({
@@ -91,6 +90,26 @@ export async function dispatchCoordinationStep(
     events.push(...started.events);
     if (started.result !== undefined) results.push(started.result);
   }
+  // Waits register before cancels, so a wait on a task cancelled in the same
+  // step gets the cancellation, whatever the calls' order.
+  for (const request of prepared.plan.filter(isTaskWaitRequest)) {
+    const waited = applyTaskWaitCall({ caller: prepared.auth, now, request, session: nextSession });
+    nextSession = waited.session;
+    if (waited.result !== undefined) results.push(waited.result);
+    if (waited.wait !== undefined) taskWaits.push(waited.wait);
+  }
+  for (const request of prepared.plan.filter(isTaskCancelRequest)) {
+    const cancelled = applyTaskCancelCall({
+      caller: prepared.auth,
+      now,
+      request,
+      session: nextSession,
+    });
+    nextSession = cancelled.session;
+    commands.push(...cancelled.commands);
+    events.push(...cancelled.events);
+    results.push(...cancelled.results);
+  }
   if (commands.length > 0) {
     await runCommands(commands, await readContext(input.serializedContext));
   }
@@ -100,7 +119,11 @@ export async function dispatchCoordinationStep(
     replies: [],
     results,
     serializedContext: input.serializedContext,
-    wait: planTaskWait({ detachable: prepared.interactiveRootTurn, requests: prepared.plan }),
+    taskWaits,
+    wait: planTaskWait({
+      detachable: prepared.interactiveRootTurn,
+      requests: prepared.plan.filter((request) => !isTaskWaitRequest(request)),
+    }),
     sessionState:
       nextSession === session
         ? prepared.sessionState

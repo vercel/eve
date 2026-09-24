@@ -87,7 +87,7 @@ import {
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { encodeTaskCreator, holdTaskResult } from "#tasks/results.js";
+import { encodeTaskCreator } from "#tasks/results.js";
 import {
   applyTaskMessage,
   findTask,
@@ -98,6 +98,7 @@ import {
   type TaskTable,
 } from "#tasks/table.js";
 import { armChildHardStop, syncTaskTimerInStep } from "#tasks/timer-steps.js";
+import { routeDetachedResult } from "#tasks/wait.js";
 
 const log = createLogger("tasks.owner");
 
@@ -325,7 +326,6 @@ export async function startAgentTasks(input: {
     if (background) {
       const rejected = tooManyBackgroundTasksResult({
         callId: call.callId,
-        kind: "agent",
         table,
         toolName,
       });
@@ -599,13 +599,18 @@ export async function applyTaskReport(input: {
       const settledEffect = applied.effects.find((effect) => effect.kind === "settled");
       if (settledEffect === undefined) continue;
       events.push(...settledEvents(applied.effects));
-      // A waited call's result is delivered now; a background one is held for delivery.
+      // A waited call's result is delivered now; a background one goes to a
+      // live `task_wait`, or is held for delivery.
       const background = record.mode === "background" && record.workflowCaller === undefined;
       let next = setTaskTable(
         session,
         background ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
       );
-      if (background) next = holdTaskResult(next, settledEffect.record, outcome);
+      if (background) {
+        const routed = routeDetachedResult(next, settledEffect.record, outcome);
+        next = routed.session;
+        if (routed.result !== undefined) results.push(routed.result);
+      }
       events.push(...continuedEvents(applied.effects, session.sessionId));
       session = setTurnUsageState(
         next,

@@ -214,13 +214,13 @@ function resolveHarnessToolDefinition(input: {
       return createPreparedWorkflowToolHarnessDefinition(input.tool);
     }
     return createWorkflowToolHarnessDefinition({
+      attached: input.tool.task.attached,
       executeInput: registeredTool.definition.executeInput,
       definition: createRegisteredHarnessToolDefinition({
         behavior: input.tool.behavior,
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
-      detach: input.tool.task.detach,
       nodeId: input.tool.task.nodeId,
       timeout: input.tool.task.timeout,
       workflowId: input.tool.task.workflowId,

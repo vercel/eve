@@ -75,27 +75,8 @@
       ]
     },
     {
-      "name": "detach-true-workflow-tool",
-      "description": "A workflow tool defined with detach: true: task.started with mode background and a receipt at once, then task.settled and a result turn.",
-      "file": "detach-true-workflow-tool.ndjson",
-      "sessionId": "session-root",
-      "tasks": [
-        {
-          "name": "remind",
-          "taskId": "remind-000001",
-          "kind": "workflow",
-          "mode": "background",
-          "status": "completed",
-          "generations": 1,
-          "remote": false,
-          "inputRequests": 0,
-          "delivered": true
-        }
-      ]
-    },
-    {
       "name": "task-cancel",
-      "description": "A background task stopped by the model with task_cancel: the tool result lists it as cancelled, task.settled reports cancelled, and no result is ever delivered.",
+      "description": "A waited workflow tool call that a steering message moved to the background, then stopped by the model with task_cancel: the tool result is { status: \"cancelled\" }, task.settled reports cancelled, and no result is ever delivered.",
       "file": "task-cancel.ndjson",
       "sessionId": "session-root",
       "tasks": [
@@ -103,7 +84,8 @@
           "name": "remind",
           "taskId": "remind-000001",
           "kind": "workflow",
-          "mode": "background",
+          "mode": "foreground",
+          "detached": "steer",
           "status": "cancelled",
           "generations": 1,
           "remote": false,

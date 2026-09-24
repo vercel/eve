@@ -193,6 +193,11 @@
       "import": "./dist/src/public/tools/task-cancel.js",
       "default": "./dist/src/public/tools/task-cancel.js"
     },
+    "./tools/task_wait": {
+      "types": "./dist/src/public/tools/task-wait.d.ts",
+      "import": "./dist/src/public/tools/task-wait.js",
+      "default": "./dist/src/public/tools/task-wait.js"
+    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",

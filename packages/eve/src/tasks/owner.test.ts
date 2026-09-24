@@ -36,7 +36,8 @@ import {
   readTaskCallbackAlias,
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
-import { cancelTask, evaluateTaskDeadlines, pruneTaskTable } from "#tasks/table.js";
+import { cancelTask, pruneTaskTable } from "#tasks/table.js";
+import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
 import { MAX_RETAINED_IDLE_AGENTS } from "#tasks/owner-calls.js";
 import { armChildHardStop } from "#tasks/timer-steps.js";
 import { renderBackgroundReceipt, renderSteeringReceipt } from "#tasks/render.js";

@@ -35,6 +35,7 @@ import {
   type AgentTaskCall,
   type TaskOwnerUpdate,
 } from "#tasks/owner.js";
+import { endTaskWaitsStep, type TaskWaitEnd } from "#tasks/wait.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
 // Owner-side helpers that run in the session workflow body. They only
@@ -189,15 +190,39 @@ export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise
   await cancelTasks(cursor, { kind: "active-turn" });
 }
 
-/** Cancels the selected working tasks and publishes their `task.settled` events. */
+/**
+ * Cancels the selected working tasks and publishes their `task.settled`
+ * events. Returns the results of `task_wait` calls on the cancelled tasks.
+ */
 export async function cancelTasks(
   cursor: SessionStateCursor,
   selector: TaskCancelSelector,
-): Promise<void> {
-  await applyTaskOwnerUpdate(
+): Promise<readonly RuntimeToolResultActionResult[]> {
+  return await applyTaskOwnerUpdate(
     cursor,
     await cancelTasksStep({
       selector,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    }),
+  );
+}
+
+/**
+ * Ends `task_wait` calls that got no result: the given calls, or every wait
+ * when `callIds` is absent. Returns their tool results; a cancelled turn's
+ * waits get none.
+ */
+export async function endTaskWaits(
+  cursor: SessionStateCursor,
+  input: { readonly callIds?: readonly string[]; readonly reason: TaskWaitEnd },
+): Promise<readonly RuntimeToolResultActionResult[]> {
+  const table = getTaskTable(cursor.sessionState.snapshot.session);
+  if (!table.records.some((record) => record.wait !== undefined)) return [];
+  return await applyTaskOwnerUpdate(
+    cursor,
+    await endTaskWaitsStep({
+      ...input,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }),

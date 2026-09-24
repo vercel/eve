@@ -30,7 +30,6 @@ import {
 } from "#shared/agent-definition.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
-import { MAX_DETACH_TIMEOUT_MS } from "#tools/workflow-definition.js";
 import type {
   AgentModuleBacking,
   AgentSourceComposition,
@@ -812,7 +811,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
       .discriminatedUnion("kind", [
         z
           .object({
-            action: z.enum(["self-agent", "task-cancel"]),
+            action: z.enum(["self-agent", "task-cancel", "task-wait"]),
             kind: z.literal("dispatch"),
           })
           .strict(),
@@ -824,12 +823,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .strict(),
         z
           .object({
-            detach: z
-              .union([
-                z.boolean(),
-                z.object({ timeout: z.number().positive().max(MAX_DETACH_TIMEOUT_MS) }).strict(),
-              ])
-              .optional(),
+            attached: z.boolean().optional(),
             kind: z.literal("workflow-tool"),
             timeout: taskTimeoutSchema.optional(),
             workflowId: z.string(),

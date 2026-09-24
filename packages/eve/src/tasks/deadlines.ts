@@ -17,17 +17,13 @@ import {
 import type { TaskDeadlineSignal, TaskError, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { STATE_LOST_MESSAGE } from "#tasks/render.js";
-import { holdTaskResult } from "#tasks/results.js";
 import { getTaskTable, readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
-import {
-  evaluateTaskDeadlines,
-  isReportedLoss,
-  markTaskDelivered,
-  readTaskTable,
-} from "#tasks/table.js";
+import { isReportedLoss, markTaskDelivered, readTaskTable } from "#tasks/table.js";
+import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
 import { hardStopTaskChild } from "#tasks/timer-steps.js";
 import { runCommands } from "#tasks/transport.js";
 import { reconcileDueTasks } from "#tasks/reconcile.js";
+import { routeDetachedResult } from "#tasks/wait.js";
 import {
   flushAgentInvocationTraces,
   invocationError,
@@ -42,7 +38,7 @@ import {
 const log = createLogger("tasks.deadlines");
 
 /** What a held result needs from its task: a record, or what an unreadable one still says. */
-type HeldRecord = Parameters<typeof holdTaskResult>[1];
+type HeldRecord = Parameters<typeof routeDetachedResult>[1];
 
 /** Applies one timer signal. Every signal is re-evaluated, so a stale one does nothing. */
 export async function applyTaskDeadlinesStep(input: {
@@ -125,7 +121,11 @@ export async function applyTaskDeadlines(input: {
   session = setTaskTable({ ...session, state: writeTaskTimer(session.state, timer) }, table, {
     dropLost: true,
   });
-  for (const { outcome, record } of held) session = holdTaskResult(session, record, outcome);
+  for (const { outcome, record } of held) {
+    const routed = routeDetachedResult(session, record, outcome);
+    session = routed.session;
+    if (routed.result !== undefined) results.push(routed.result);
+  }
   return {
     events: [...reconciled.events, ...settledEvents(evaluated.effects), ...lost.events],
     replies,

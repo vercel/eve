@@ -26,6 +26,7 @@ export type { AskQuestionInput, AskQuestionOutput };
  */
 export function askQuestion(): WorkflowToolDefinition<AskQuestionInput, AskQuestionOutput> {
   return defineWorkflowTool({
+    attached: true,
     description: ASK_QUESTION_TOOL_DESCRIPTION,
     execute: executeAskQuestionTool,
     inputSchema: ASK_QUESTION_INPUT_SCHEMA,

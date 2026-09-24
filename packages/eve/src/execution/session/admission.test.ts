@@ -105,6 +105,7 @@ it("admits the owner timer's signal for the deadline step", async () => {
 
 it("cancels one task on admission and leaves the turn running", async () => {
   const cursor = createCursor([]);
+  vi.mocked(cancelTasks).mockResolvedValue([]);
 
   await expect(
     admitSessionInboxPayload(
@@ -117,6 +118,29 @@ it("cancels one task on admission and leaves the turn running", async () => {
     kind: "task",
     taskId: "remind-q4x1ze",
   });
+});
+
+it("passes the results of task_wait calls the cancel ended to the turn", async () => {
+  const cursor = createCursor([]);
+  const waited = {
+    callId: "call-wait",
+    kind: "tool-result" as const,
+    output: {
+      name: "remind",
+      outcome: { status: "cancelled" },
+      status: "settled",
+      taskId: "remind-q4x1ze",
+    },
+    toolName: "task_wait",
+  };
+  vi.mocked(cancelTasks).mockResolvedValue([waited]);
+
+  await expect(
+    admitSessionInboxPayload(
+      { kind: "cancel", taskId: "remind-q4x1ze" },
+      { cursor, queue: new SessionInputQueue() },
+    ),
+  ).resolves.toEqual({ kind: "wait-results", results: [waited] });
 });
 
 it("cancels background tasks and leaves the turn's calls to turn cancellation for tasks: true", async () => {

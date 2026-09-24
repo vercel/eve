@@ -19,7 +19,8 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { DISMISSED_CALL_GRACE_MS, type TaskWaitPlan } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
-import { answerTaskInput } from "#tasks/owner-body.js";
+import { answerTaskInput, endTaskWaits } from "#tasks/owner-body.js";
+import type { TaskWaitRegistration } from "#tasks/wait.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -31,23 +32,24 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinatio
 vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
   ...(await importOriginal()),
   answerTaskInput: vi.fn(),
+  endTaskWaits: vi.fn(),
 }));
 vi.mock("#execution/session-workflow-tool-run.js", () => ({
   handleWorkflowToolRunMessage: vi.fn(),
 }));
 vi.mock("#tasks/detach-step.js", () => ({ detachWaitedTasksStep: vi.fn() }));
 
-// The foreground wait's detach rules (plan §4.8): a steering message that
-// answers nothing detaches the waited calls of an interactive root turn and
-// ends waited sleeps everywhere; a `detach: { timeout }` timer detaches only
-// its own call; a result that lands first wins.
+// The foreground wait's rules (plan §4.8): a steering message that answers
+// nothing detaches the waited calls of an interactive root turn, except
+// attached ones, ends waited sleeps everywhere, and ends every `task_wait`;
+// a `task_wait` timer ends only its own call; a result that lands first wins.
 
 const STEERING: DeliverHookPayload = {
   kind: "deliver",
   payloads: [{ message: "Also check Plain." }],
 };
 
-const INTERACTIVE: TaskWaitPlan = { detachable: true, sleepCallIds: [], timeouts: [] };
+const INTERACTIVE: TaskWaitPlan = { detachable: true, sleepCallIds: [], attachedCallIds: [] };
 
 beforeEach(() => {
   vi.mocked(sleep).mockReset();
@@ -60,10 +62,21 @@ beforeEach(() => {
       replies: [],
       results: [...input.endCallIds, ...input.detachCallIds]
         .filter((callId) => !input.keepTaskIds.includes(taskIdOf(callId)))
-        .map((callId) => receipt(callId, input.reason)),
+        .map((callId) => receipt(callId)),
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     }));
+  vi.mocked(endTaskWaits)
+    .mockReset()
+    .mockImplementation(async (_cursor, input) =>
+      (input.callIds ?? []).map((callId) => ({
+        callId,
+        kind: "tool-result",
+        modelOutput: `${input.reason}: ${callId}`,
+        output: { status: input.reason, taskId: taskIdOf(callId) },
+        toolName: "task_wait",
+      })),
+    );
   vi.mocked(answerTaskInput)
     .mockReset()
     .mockImplementation(async (_cursor, delivery) => ({ kind: "continue", remainder: delivery }));
@@ -89,12 +102,11 @@ describe("detach on steer", () => {
         detachCallIds: ["call-d0", "call-sre"],
         endCallIds: [],
         keepTaskIds: [],
-        reason: "steer",
       }),
     );
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [receipt("call-d0", "steer"), receipt("call-sre", "steer")] },
+      runtimeResults: { results: [receipt("call-d0"), receipt("call-sre")] },
     });
   });
 
@@ -136,7 +148,7 @@ describe("detach on steer", () => {
     // The dismissed call resolves normally, alongside the other call's receipt.
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [result("call-ask"), receipt("call-d0", "steer")] },
+      runtimeResults: { results: [result("call-ask"), receipt("call-d0")] },
     });
   });
 
@@ -157,12 +169,11 @@ describe("detach on steer", () => {
         detachCallIds: ["call-ask"],
         groupCallId: "call-ask",
         keepTaskIds: [],
-        reason: "steer",
       }),
     ]);
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [receipt("call-ask", "steer"), receipt("call-d0", "steer")] },
+      runtimeResults: { results: [receipt("call-ask"), receipt("call-d0")] },
     });
   });
 
@@ -188,7 +199,7 @@ describe("detach on steer", () => {
     const { execution, steps } = setup({
       calls: ["call-d0"],
       script: [STEERING, outcome("call-d0")],
-      wait: { detachable: false, sleepCallIds: [], timeouts: [] },
+      wait: { detachable: false, sleepCallIds: [], attachedCallIds: [] },
     });
 
     await execution.runTurn(undefined);
@@ -204,17 +215,17 @@ describe("detach on steer", () => {
     const { execution, steps } = setup({
       calls: ["call-sleep", "call-d0"],
       script: [STEERING, outcome("call-d0")],
-      wait: { detachable: false, sleepCallIds: ["call-sleep"], timeouts: [] },
+      wait: { detachable: false, sleepCallIds: ["call-sleep"], attachedCallIds: [] },
     });
 
     await execution.runTurn(undefined);
 
     expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ detachCallIds: [], endCallIds: ["call-sleep"], reason: "steer" }),
+      expect.objectContaining({ detachCallIds: [], endCallIds: ["call-sleep"] }),
     );
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
-      runtimeResults: { results: [receipt("call-sleep", "steer"), result("call-d0")] },
+      runtimeResults: { results: [receipt("call-sleep"), result("call-d0")] },
     });
   });
 
@@ -240,56 +251,89 @@ describe("detach on steer", () => {
   });
 });
 
-describe("detach: { timeout }", () => {
-  const TIMED: TaskWaitPlan = {
-    detachable: true,
-    sleepCallIds: [],
-    timeouts: [{ callId: "call-slow", timeoutMs: 120_000 }],
-  };
-
-  it("detaches only the slow call when its timer fires first", async () => {
-    vi.mocked(sleep).mockResolvedValue(undefined);
+describe("attached calls and task_wait", () => {
+  it("never detaches an attached call on steer", async () => {
     const { execution, steps } = setup({
-      calls: ["call-fast", "call-slow"],
-      script: [outcome("call-fast"), "timer"],
-      wait: TIMED,
+      calls: ["call-ask", "call-d0"],
+      script: [STEERING, outcome("call-ask")],
+      wait: { ...INTERACTIVE, attachedCallIds: ["call-ask"] },
     });
 
     await execution.runTurn(undefined);
 
-    expect(sleep).toHaveBeenCalledExactlyOnceWith(120_000);
     expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ detachCallIds: ["call-slow"], keepTaskIds: [], reason: "timeout" }),
+      expect.objectContaining({ detachCallIds: ["call-d0"] }),
     );
     expect(steps()[1]).toMatchObject({
-      delivery: undefined,
-      runtimeResults: { results: [result("call-fast"), receipt("call-slow", "timeout")] },
+      delivery: STEERING,
+      runtimeResults: { results: [result("call-ask"), receipt("call-d0")] },
     });
   });
 
-  it("lets a result that landed first win over a timer that already fired", async () => {
+  it("ends only the task_wait whose timer fired", async () => {
     vi.mocked(sleep).mockResolvedValue(undefined);
     const { execution, steps } = setup({
-      calls: ["call-slow"],
-      // The inbox hands out an accepted payload before reporting the timer.
-      script: [outcome("call-slow")],
-      wait: TIMED,
+      calls: ["call-w1", "call-w2"],
+      script: ["timer", outcome("call-w2")],
+      taskWaits: [{ callId: "call-w1", timeoutMs: 5_000 }, { callId: "call-w2" }],
+      wait: INTERACTIVE,
     });
 
     await execution.runTurn(undefined);
 
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(5_000);
+    expect(endTaskWaits).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      callIds: ["call-w1"],
+      reason: "timed_out",
+    });
     expect(detachWaitedTasksStep).not.toHaveBeenCalled();
-    expect(steps()[1]).toMatchObject({ runtimeResults: { results: [result("call-slow")] } });
+    expect(steps()[1]).toMatchObject({
+      delivery: undefined,
+      runtimeResults: {
+        results: [expect.objectContaining({ callId: "call-w1" }), result("call-w2")],
+      },
+    });
   });
 
-  it("runs no timer outside an interactive root turn", async () => {
-    const { execution } = setup({
-      calls: ["call-slow"],
-      script: [outcome("call-slow")],
-      wait: { ...TIMED, detachable: false },
+  it("ends every task_wait on steer and detaches only the other calls", async () => {
+    vi.mocked(sleep).mockImplementation(() => new Promise<void>(() => {}));
+    const { execution, steps } = setup({
+      calls: ["call-w1", "call-w2", "call-d0"],
+      script: [STEERING],
+      taskWaits: [{ callId: "call-w1" }, { callId: "call-w2", timeoutMs: 60_000 }],
+      wait: INTERACTIVE,
     });
+
     await execution.runTurn(undefined);
-    expect(sleep).not.toHaveBeenCalled();
+
+    expect(endTaskWaits).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      callIds: ["call-w1", "call-w2"],
+      reason: "interrupted",
+    });
+    expect(detachWaitedTasksStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ detachCallIds: ["call-d0"] }),
+    );
+    expect(steps()[1]).toMatchObject({ delivery: STEERING });
+  });
+
+  it("lets a steering message end a task_wait outside an interactive root turn", async () => {
+    const { execution, steps } = setup({
+      calls: ["call-w1"],
+      script: [STEERING],
+      taskWaits: [{ callId: "call-w1" }],
+      wait: { attachedCallIds: [], detachable: false, sleepCallIds: [] },
+    });
+
+    await execution.runTurn(undefined);
+
+    expect(endTaskWaits).toHaveBeenCalledExactlyOnceWith(expect.anything(), {
+      callIds: ["call-w1"],
+      reason: "interrupted",
+    });
+    expect(steps()[1]).toMatchObject({
+      delivery: STEERING,
+      runtimeResults: { results: [expect.objectContaining({ callId: "call-w1" })] },
+    });
   });
 });
 
@@ -307,6 +351,7 @@ function dismissAsk(): void {
 function setup(input: {
   readonly calls: readonly string[];
   readonly script: ScriptItem[];
+  readonly taskWaits?: readonly TaskWaitRegistration[];
   readonly wait: TaskWaitPlan;
 }) {
   const sessionState = ownerState();
@@ -346,6 +391,7 @@ function setup(input: {
     results: [],
     serializedContext: {},
     sessionState,
+    taskWaits: input.taskWaits,
     wait: input.wait,
   });
   const cursor = new SessionStateCursor({
@@ -372,11 +418,11 @@ function taskIdOf(callId: string): string {
   return `${callId.replace("call-", "")}-a1b2c3`;
 }
 
-function receipt(callId: string, reason: "steer" | "timeout"): RuntimeToolResultActionResult {
+function receipt(callId: string): RuntimeToolResultActionResult {
   return {
     callId,
     kind: "tool-result",
-    modelOutput: `${reason}: ${taskIdOf(callId)}`,
+    modelOutput: `receipt: ${taskIdOf(callId)}`,
     output: { status: "working", taskId: taskIdOf(callId) },
     toolName: "lookup",
   };

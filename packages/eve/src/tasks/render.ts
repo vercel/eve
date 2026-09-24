@@ -32,23 +32,14 @@ function noun(kind: TaskKind): "agent" | "task" {
   return kind === "agent" ? "agent" : "task";
 }
 
-/** Receipt text for an explicit `background: true` agent call or a `detach: true` tool. */
-export function renderBackgroundReceipt(record: Pick<TaskRecord, "id" | "kind">): string {
-  if (record.kind === "agent") {
-    return `Agent ${record.id} is working in the background. Its result will arrive in a later message. Do not poll or repeat this work. Continue with anything that does not depend on it; if nothing remains, tell the user briefly what you started and end your turn.`;
-  }
-  return `Task ${record.id} is working in the background. Its result will arrive in a later message. Do not poll or repeat this work.`;
+/** Receipt text for an agent call with `background: true`. */
+export function renderBackgroundReceipt(record: Pick<TaskRecord, "id">): string {
+  return `Agent ${record.id} is working in the background. Its result will arrive in a later message. Do not poll or repeat this work. Continue with anything that does not depend on it; if nothing remains, tell the user briefly what you started and end your turn.`;
 }
 
 /** Receipt text for a waited call that moved to the background. */
-export function renderDetachedReceipt(
-  record: Pick<TaskRecord, "id" | "kind">,
-  reason: "steer" | "timeout",
-): string {
-  const as = `${noun(record.kind)} ${record.id}`;
-  return reason === "steer"
-    ? `A new message arrived, so this call moved to the background as ${as}. Its result will arrive in a later message. Do not poll or repeat this work.`
-    : `This call is taking a while, so it moved to the background as ${as}. Its result will arrive in a later message. Do not poll or repeat this work.`;
+export function renderDetachedReceipt(record: Pick<TaskRecord, "id" | "kind">): string {
+  return `A new message arrived, so this call moved to the background as ${noun(record.kind)} ${record.id}. Its result will arrive in a later message. Do not poll or repeat this work.`;
 }
 
 /**
@@ -209,21 +200,66 @@ export const WORKFLOW_PROGRAM_AGENT_CONTRACT =
 
 /** Output of `task_cancel`. */
 export interface TaskCancelOutput {
-  readonly cancelled: readonly string[];
-  readonly alreadyFinished: readonly string[];
-  readonly unknown: readonly string[];
+  readonly status: "cancelled" | "already_finished";
 }
 
 export const TASK_CANCEL_DESCRIPTION =
-  "Stop background agents or tasks by id. A stopped one never reports back. One that already finished is listed in alreadyFinished, and its result is still delivered. A stopped agent usually stays available: pass its agentId to give it new work.";
+  "Stop a task's current work. That work never reports back; if it already finished, its result is still delivered. Agents stay available afterwards: if the [Tasks] note lists the agent as idle, pass its id as agentId to its tool to give it new work.";
 
-/** Description of the `taskIds` input of `task_cancel`. */
-export const TASK_CANCEL_IDS_DESCRIPTION =
-  "Ids of background agents or tasks, from their receipts or the latest [Tasks] note.";
+/** Description of the `taskId` input of `task_cancel` and `task_wait`. */
+export const TASK_ID_PARAMETER_DESCRIPTION =
+  "The id of a background task or agent, from its receipt or the latest [Tasks] note.";
 
 /** Error message for a `task_cancel` call whose input could not be read. */
-export function renderInvalidTaskCancelInput(maxIds: number): string {
-  return `task_cancel needs taskIds: a list of 1 to ${String(maxIds)} task or agent ids.`;
+export const TASK_CANCEL_INVALID_INPUT_MESSAGE =
+  "task_cancel needs taskId: the id of one background task or agent.";
+
+export const TASK_WAIT_DESCRIPTION =
+  "Wait for a task's next result. Returns when the task has a result you have not seen, when timeout (in milliseconds) passes, or when a new message arrives. Ending a wait never stops the task. To wait on several tasks, call task_wait once for each in the same step. Omit timeout to wait until the result arrives; a timeout of 0 returns at once with the task's current state.";
+
+/** Description of the `timeout` input of `task_wait`. */
+export const TASK_WAIT_TIMEOUT_DESCRIPTION =
+  "How long to wait, in milliseconds. Omit it to wait until the result arrives; 0 returns at once.";
+
+/** Error message for a `task_wait` call whose input could not be read. */
+export const TASK_WAIT_INVALID_INPUT_MESSAGE =
+  "task_wait needs taskId, the id of one background task or agent, and an optional timeout in milliseconds (0 or more).";
+
+/** Result of a `task_wait` whose timeout passed first. */
+export function renderWaitTimedOut(taskId: string, waitedMs: number): string {
+  return `Stopped waiting after ${formatDuration(waitedMs)}; ${taskId} is still working. Its result arrives in a later message; wait again only if you need it now.`;
+}
+
+/** Result of a `task_wait` that a new message ended. */
+export function renderWaitInterrupted(
+  record: Pick<TaskRecord, "id" | "kind" | "name">,
+  waitedMs: number,
+): string {
+  const choices =
+    record.kind === "agent"
+      ? `keep the task, pass its id as agentId to ${record.name} to correct it, or stop it with task_cancel`
+      : "keep the task or stop it with task_cancel";
+  return `A new message arrived, so the wait ended after ${formatDuration(waitedMs)}; ${record.id} is still working. Read the message and decide whether it changes this work: ${choices}.`;
+}
+
+/** Result of a `task_wait` on an idle agent with nothing new. */
+export function renderWaitIdle(record: Pick<TaskRecord, "id" | "name">): string {
+  return `${record.id} is idle and has no new result. Pass its id as agentId to ${record.name} to give it more work.`;
+}
+
+/** `UNKNOWN_TASK` error message for `task_wait` and `task_cancel`. */
+export function renderUnknownTask(taskId: string): string {
+  return `No open task "${taskId}" in this session; it may have ended. The latest [Tasks] note lists open tasks.`;
+}
+
+/** `TASK_OTHER_PRINCIPAL` error message for a task a different caller started. */
+export function renderTaskOtherPrincipal(taskId: string): string {
+  return `Task "${taskId}" was started by a different caller, so you can't use it. Start a new one by calling its tool.`;
+}
+
+/** `TASK_ALREADY_WAITED` error message for a second `task_wait` on one task in a step. */
+export function renderTaskAlreadyWaited(taskId: string): string {
+  return `Another task_wait in this step already waits for task "${taskId}"; use that call's result.`;
 }
 
 export const BACKGROUND_PARAMETER_DESCRIPTION =
@@ -243,19 +279,9 @@ export function renderBackgroundTasksInstruction(options: { readonly agents: boo
   return `Background tasks\n${rules} ${specific}`;
 }
 
-/**
- * `TOO_MANY_BACKGROUND_TASKS` error message. An agent call can run without
- * `background`; a `detach: true` tool always runs in the background.
- */
-export function renderTooManyBackgroundTasks(
-  ids: readonly string[],
-  limit: number,
-  kind: TaskKind,
-): string {
-  const running = `${limit} background tasks are already running (${ids.join(", ")}).`;
-  return kind === "agent"
-    ? `${running} Wait for one to report, stop one with task_cancel, or call without background.`
-    : `${running} Wait for one to report or stop one with task_cancel, then call this tool again.`;
+/** `TOO_MANY_BACKGROUND_TASKS` error message for an agent call with `background: true`. */
+export function renderTooManyBackgroundTasks(ids: readonly string[], limit: number): string {
+  return `${limit} background tasks are already running (${ids.join(", ")}). Wait for one to report, stop one with task_cancel, or call without background.`;
 }
 
 /** Framework continuation for a result turn that ended without a reply. */

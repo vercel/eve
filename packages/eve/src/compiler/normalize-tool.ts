@@ -118,9 +118,9 @@ export async function compileToolEntry(
           : {
               availability: [],
               handling: {
-                ...(entry.definition.detach === undefined
+                ...(entry.definition.attached === undefined
                   ? {}
-                  : { detach: entry.definition.detach }),
+                  : { attached: entry.definition.attached }),
                 kind: "workflow-tool",
                 ...(entry.definition.timeout === undefined
                   ? {}

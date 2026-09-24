@@ -14,6 +14,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { cancelTasks, surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
@@ -28,6 +29,8 @@ export type SessionAdmission =
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "task-report"; readonly payload: TaskStartedHookPayload }
   | { readonly kind: "task-deadline"; readonly signal: TaskDeadlineSignal }
+  /** Results of `task_wait` calls that a cancelled task ended. */
+  | { readonly kind: "wait-results"; readonly results: readonly RuntimeToolResultActionResult[] }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
 /**
@@ -101,8 +104,8 @@ export async function admitSessionInboxPayload(
       // Task cancellation applies on admission, whether a turn is running,
       // parked, or the session is idle, and never waits for a child to stop.
       if (command.taskId !== undefined) {
-        await cancelTasks(input.cursor, { kind: "task", taskId: command.taskId });
-        return { kind: "consumed" };
+        const results = await cancelTasks(input.cursor, { kind: "task", taskId: command.taskId });
+        return results.length === 0 ? { kind: "consumed" } : { kind: "wait-results", results };
       }
       // The turn's own calls are cancelled with the turn, when the turn guard matches.
       if (command.tasks === true) await cancelTasks(input.cursor, { kind: "background" });

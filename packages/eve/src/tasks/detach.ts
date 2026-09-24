@@ -1,25 +1,21 @@
-import { sleep } from "#compiled/@workflow/core/index.js";
-
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 
 // How an owner's turn treats the calls it waits on: which ones a steering
-// message detaches or ends, and which `detach: { timeout }` timers race the
-// inbox. Read by the session workflow body, so this module must not import
-// Node.js built-ins.
+// message detaches or ends. Read by the session workflow body, so this module
+// must not import Node.js built-ins.
 
 /** What the owner decided about its waited calls when it started them. */
 export interface TaskWaitPlan {
   /**
    * The turn is an interactive root turn: a root session in conversation
    * mode, in a turn a schedule did not start. Only there does a steering
-   * message detach waited calls, and only there do `detach: { timeout }`
-   * timers run.
+   * message detach waited calls.
    */
   readonly detachable: boolean;
   /** Waited calls to eve's `sleep` tool, which a steering message ends early in any session. */
   readonly sleepCallIds: readonly string[];
-  /** Waited `detach: { timeout }` calls and their timeouts in milliseconds; empty unless detachable. */
-  readonly timeouts: readonly { readonly callId: string; readonly timeoutMs: number }[];
+  /** Other waited calls to `attached: true` tools, which a steering message never detaches. */
+  readonly attachedCallIds: readonly string[];
 }
 
 /**
@@ -36,12 +32,11 @@ export type WaitInterruption =
       readonly kind: "steer";
       readonly dismissedTaskIds: readonly string[];
     }
-  /** A `detach: { timeout }` timer, or the grace period of a dismissed call. */
+  /** The grace period of a dismissed call ended. */
   | { readonly kind: "timeout"; readonly callId: string };
 
 /** The table changes one interruption makes. */
 export interface WaitedTaskChanges {
-  readonly reason: "steer" | "timeout";
   /** Waited calls whose tasks move to the background. */
   readonly detachCallIds: readonly string[];
   /** Waited `sleep` calls that end early; their runs are cancelled. */
@@ -81,19 +76,16 @@ export function planTaskWait(input: {
   readonly detachable: boolean;
   readonly requests: readonly Pick<
     RuntimeWorkflowTaskRequest,
-    "callId" | "detach" | "workflowId"
+    "attached" | "callId" | "workflowId"
   >[];
 }): TaskWaitPlan {
   const sleepCallIds: string[] = [];
-  const timeouts: { callId: string; timeoutMs: number }[] = [];
+  const attachedCallIds: string[] = [];
   for (const request of input.requests) {
-    if (isSleepToolWorkflowId(request.workflowId)) {
-      sleepCallIds.push(request.callId);
-    } else if (input.detachable && typeof request.detach === "object") {
-      timeouts.push({ callId: request.callId, timeoutMs: request.detach.timeout });
-    }
+    if (isSleepToolWorkflowId(request.workflowId)) sleepCallIds.push(request.callId);
+    else if (request.attached === true) attachedCallIds.push(request.callId);
   }
-  return { detachable: input.detachable, sleepCallIds, timeouts };
+  return { attachedCallIds, detachable: input.detachable, sleepCallIds };
 }
 
 /** Whether a steering message can change anything about this wait. */
@@ -105,7 +97,8 @@ export function steeringInterruptsWait(plan: TaskWaitPlan): boolean {
  * The changes one interruption makes to the calls still waiting, or
  * `undefined` when it changes nothing. A steering message ends waited
  * sleeps in any session and, in an interactive root turn, detaches every
- * other waited call together. A timer detaches only its own call.
+ * other waited call together, except attached ones. A dismissed call's
+ * grace timer detaches only its own call.
  */
 export function resolveWaitInterruption(input: {
   /** Dismissed calls still in their grace period, mapped to their group's call ID. */
@@ -117,59 +110,30 @@ export function resolveWaitInterruption(input: {
   const { interruption, plan, unresolvedCallIds } = input;
   if (interruption.kind === "timeout") {
     const { callId } = interruption;
-    if (!plan.detachable || !unresolvedCallIds.includes(callId)) return undefined;
     const groupCallId = input.dismissed?.get(callId);
-    return groupCallId === undefined
-      ? { detachCallIds: [callId], endCallIds: [], keepTaskIds: [], reason: "timeout" }
-      : { detachCallIds: [callId], endCallIds: [], groupCallId, keepTaskIds: [], reason: "steer" };
+    if (!plan.detachable || groupCallId === undefined || !unresolvedCallIds.includes(callId)) {
+      return undefined;
+    }
+    return {
+      detachCallIds: [callId],
+      endCallIds: [],
+      groupCallId,
+      keepTaskIds: [],
+    };
   }
   const endCallIds = unresolvedCallIds.filter((callId) => plan.sleepCallIds.includes(callId));
   const detachCallIds = plan.detachable
-    ? unresolvedCallIds.filter((callId) => !endCallIds.includes(callId))
+    ? unresolvedCallIds.filter(
+        (callId) => !endCallIds.includes(callId) && !plan.attachedCallIds.includes(callId),
+      )
     : [];
   if (endCallIds.length === 0 && detachCallIds.length === 0) return undefined;
   const changes: { -readonly [K in keyof WaitedTaskChanges]: WaitedTaskChanges[K] } = {
     detachCallIds,
     endCallIds,
     keepTaskIds: interruption.dismissedTaskIds,
-    reason: "steer",
   };
   const [groupCallId] = detachCallIds;
   if (groupCallId !== undefined) changes.groupCallId = groupCallId;
   return changes;
-}
-
-/**
- * The timers of one foreground wait: one durable sleep per timed call,
- * started with the wait, plus the grace period of each dismissed call. A
- * timer still pending when the wait ends is abandoned: it no longer affects
- * the turn, though its durable sleep may still wake the run once when it
- * elapses.
- */
-export class DetachTimers {
-  readonly #armed: Map<string, Promise<string>>;
-
-  constructor(timeouts: TaskWaitPlan["timeouts"]) {
-    this.#armed = new Map(
-      timeouts.map(({ callId, timeoutMs }) => [callId, sleep(timeoutMs).then(() => callId)]),
-    );
-  }
-
-  /** Starts a timer for one call, replacing any timer it already had. */
-  arm(callId: string, ms: number): void {
-    this.#armed.set(
-      callId,
-      sleep(ms).then(() => callId),
-    );
-  }
-
-  /** Resolves with the call ID of the next timer to fire, or is `undefined` when none is armed. */
-  next(): Promise<string> | undefined {
-    return this.#armed.size === 0 ? undefined : Promise.race(this.#armed.values());
-  }
-
-  /** Stops racing the timers of calls that resolved or already detached. */
-  disarm(callIds: Iterable<string>): void {
-    for (const callId of callIds) this.#armed.delete(callId);
-  }
 }

@@ -122,6 +122,8 @@ export async function nextTurnDelivery(input: {
         break;
       case "delivery":
       case "consumed":
+      // Waits exist only inside a turn.
+      case "wait-results":
         break;
     }
   }

@@ -33,7 +33,9 @@ import { defineDynamic } from "#dynamic/definition.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
+import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { taskCancel } from "#public/tools/task-cancel.js";
+import { taskWait } from "#public/tools/task-wait.js";
 import { agent as agentTool } from "#tools/framework/agent.js";
 
 function manifest() {
@@ -216,10 +218,11 @@ describe("compileAgentManifest source graph", () => {
     });
 
     expect(compiled.config.defaultTools).toBe(false);
-    // task_cancel is advertised only with the background block, so it stays.
+    // The task tools are advertised only with the background block, so they stay.
     expect(compiled.tools.map((tool) => tool.name).sort()).toEqual([
       "bash",
       "task_cancel",
+      "task_wait",
       "weather",
     ]);
     expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_search"]);
@@ -273,11 +276,15 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("installs task_cancel and no other task tool from the framework registry", async () => {
+  it("installs task_cancel, task_wait, and no other task tool from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
     expect(compiled.tools.find((tool) => tool.name === "task_cancel")).toMatchObject({
       behavior: { availability: [], handling: { action: "task-cancel", kind: "dispatch" } },
+      hasExecute: false,
+    });
+    expect(compiled.tools.find((tool) => tool.name === "task_wait")).toMatchObject({
+      behavior: { availability: [], handling: { action: "task-wait", kind: "dispatch" } },
       hasExecute: false,
     });
     expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
@@ -286,38 +293,43 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("rejects overriding the framework task_cancel tool", async () => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: "tools/task_cancel.ts",
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement tool.",
-            execute: async () => null,
-            inputSchema: {},
+  it.each([["task_cancel"], ["task_wait"]])(
+    "rejects overriding the framework %s tool",
+    async (name) => {
+      const sourceRegistry = registry([
+        {
+          logicalPath: `tools/${name}.ts`,
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Replacement tool.",
+              execute: async () => null,
+              inputSchema: {},
+            }),
           }),
-        }),
-      },
-    ]);
+        },
+      ]);
 
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'The framework "task_cancel" tool cannot be overridden. Re-export it from "eve/tools/task_cancel" or disable it with disableTool().',
-    );
-  });
+      await expect(
+        compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+      ).rejects.toThrow(
+        `The framework "${name}" tool cannot be overridden. Re-export it from "eve/tools/${name}" or disable it with disableTool().`,
+      );
+    },
+  );
 
   it.each([
-    ["disables", disableTool(), false],
-    ["re-exports", taskCancel, true],
-  ])("lets an application slot that %s task_cancel compile", async (_label, value, kept) => {
+    ["disables", "task_cancel", disableTool(), false],
+    ["re-exports", "task_cancel", taskCancel, true],
+    ["disables", "task_wait", disableTool(), false],
+    ["re-exports", "task_wait", taskWait, true],
+  ])("lets an application slot that %s %s compile", async (_label, name, value, kept) => {
     const sourceRegistry = registry([
-      { logicalPath: "tools/task_cancel.ts", loadNamespace: async () => ({ default: value }) },
+      { logicalPath: `tools/${name}.ts`, loadNamespace: async () => ({ default: value }) },
     ]);
 
     const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
 
-    expect(compiled.tools.map((tool) => tool.name).includes("task_cancel")).toBe(kept);
+    expect(compiled.tools.map((tool) => tool.name).includes(name)).toBe(kept);
   });
 
   it("does not install ask_question from the framework registry", async () => {
@@ -424,6 +436,10 @@ describe("compileAgentManifest source graph", () => {
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "task_cancel")).toMatchObject({
       behavior: { handling: { kind: "dispatch", target: { kind: "task-cancel" } } },
       task: { workflowId: TASK_CANCEL_WORKFLOW_ID },
+    });
+    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "task_wait")).toMatchObject({
+      behavior: { handling: { kind: "dispatch", target: { kind: "task-wait" } } },
+      task: { workflowId: TASK_WAIT_WORKFLOW_ID },
     });
   });
 

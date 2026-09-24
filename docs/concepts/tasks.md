@@ -238,7 +238,6 @@ Each eve release ships recorded task streams in the package, so you can replay r
 | `foreground-agent-call.ndjson`      | A waited agent call that completes                                                        |
 | `background-agent-call.ndjson`      | An agent call with `background: true`: a receipt, then a result turn                      |
 | `detach-on-steer.ndjson`            | Two waited workflow tool calls detached by one steering message, delivered together       |
-| `detach-true-workflow-tool.ndjson`  | A `detach: true` workflow tool call: a receipt, then a result turn                        |
 | `task-cancel.ndjson`                | A background task stopped with `task_cancel`                                              |
 | `agent-timed-out.ndjson`            | A waited agent call that fails with `TIMED_OUT`                                           |
 | `remote-agent-input-request.ndjson` | A remote agent call whose approval appears as `input.requested`, then as `input.resolved` |

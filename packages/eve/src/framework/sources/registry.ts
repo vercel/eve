@@ -50,6 +50,10 @@ const localDefaults = defineProgrammaticAgentSource({
       loadNamespace: () => import("#tools/framework/task-cancel.js"),
     },
     {
+      logicalPath: "tools/task_wait.ts",
+      loadNamespace: () => import("#tools/framework/task-wait.js"),
+    },
+    {
       logicalPath: "tools/web_search.ts",
       loadNamespace: () => import("#tools/provided/web-search.js"),
     },

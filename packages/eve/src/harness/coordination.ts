@@ -10,7 +10,14 @@ import type {
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
-import { truncateTaskResult, truncateTaskResultParts } from "#tasks/render.js";
+import type { TaskOutcome } from "#tasks/protocol.js";
+import {
+  renderModelOutputBody,
+  renderTaskResults,
+  truncateTaskResult,
+  truncateTaskResultParts,
+} from "#tasks/render.js";
+import { isTaskWaitTool, readSettledTaskWaitOutput } from "#tasks/wait-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type {
   HarnessEmitFn,
@@ -240,16 +247,20 @@ export async function resolvePendingCoordination(input: {
           type: "tool-result",
         });
         continue;
-      case "tool-result":
+      case "tool-result": {
+        const definition = input.tools?.get(result.toolName);
+        const waited = await renderSettledTaskWait(result, definition, input.tools);
         toolResults.push({
-          output: truncateTaskResultOutput(
-            await projectToolResultOutput(result, input.tools?.get(result.toolName)),
-          ),
+          output:
+            waited === undefined
+              ? truncateTaskResultOutput(await projectToolResultOutput(result, definition))
+              : { type: "text", value: waited },
           toolCallId: result.callId,
           toolName: result.toolName,
           type: "tool-result",
         });
         continue;
+      }
     }
 
     throw new Error(`Unsupported runtime action result kind "${String(result)}".`);
@@ -306,8 +317,8 @@ export function createCoordinationRequestFromToolCall(input: {
   });
   if (definition?.workflowId !== undefined) {
     return {
+      attached: definition.attached,
       callId: input.toolCall.toolCallId,
-      detach: definition.detach,
       executeInput: definition.executeInput?.(inputObject),
       input: inputObject,
       kind: "workflow-task",
@@ -375,6 +386,46 @@ async function projectToolResultOutput(
     toolCallId: result.callId,
     toolName: result.toolName,
   });
+}
+
+/**
+ * A `task_wait` that received its task's result reads it as the same
+ * `<task_result>` block a `task.result` message holds, already truncated.
+ */
+async function renderSettledTaskWait(
+  result: Extract<RuntimeActionResult, { kind: "tool-result" }>,
+  definition: HarnessToolDefinition | undefined,
+  tools: HarnessToolMap | undefined,
+): Promise<string | undefined> {
+  if (result.isError === true || !isTaskWaitTool(definition)) return undefined;
+  const settled = readSettledTaskWaitOutput(result.output);
+  if (settled === undefined) return undefined;
+  return renderTaskResults([
+    {
+      body: await projectTaskResultBody(settled, tools),
+      outcome: settled.outcome,
+      record: { id: settled.taskId, name: settled.name },
+    },
+  ]);
+}
+
+/**
+ * The `<task_result>` body a completed task's tool shapes with its
+ * `toModelOutput`, as it shapes that tool's own result. Throws when the
+ * projection fails.
+ */
+export async function projectTaskResultBody(
+  task: { readonly name: string; readonly outcome: TaskOutcome },
+  tools: HarnessToolMap | undefined,
+): Promise<string | undefined> {
+  const toModelOutput = tools?.get(task.name)?.toModelOutput;
+  if (task.outcome.status !== "completed" || toModelOutput === undefined) return undefined;
+  return renderModelOutputBody(
+    normalizeToolModelOutput({
+      output: await toModelOutput(task.outcome.output),
+      toolName: task.name,
+    }),
+  );
 }
 
 /**

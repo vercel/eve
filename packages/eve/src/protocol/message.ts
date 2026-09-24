@@ -431,9 +431,9 @@ export interface TaskStartedStreamEvent {
 }
 
 /**
- * Stream event emitted when a waited task moves to the background: a
- * steering message arrived during the wait (`steer`), or the tool's
- * `detach: { timeout }` timer fired (`timeout`). The call's `action.result`
+ * Stream event emitted when a waited task moves to the background because a
+ * steering message arrived during the wait (`steer`). eve no longer emits
+ * `timeout`. The call's `action.result`
  * carries a receipt, and the task keeps working; its `task.settled` follows
  * later. Tasks detached by one steering message deliver their results
  * together.

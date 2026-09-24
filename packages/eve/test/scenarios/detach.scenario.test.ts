@@ -190,89 +190,33 @@ export default defineWorkflowTool({
   );
 
   it(
-    "detaches a slow detach: { timeout } call but not a fast one, and ends a sleep early on steer",
+    "ends an attached sleep early on steer instead of detaching it",
     async () => {
       const app = await scenarioApp({
-        dependencies: { zod: "^4.3.6" },
         files: {
           "agent/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 export default defineAgent({
-  model: mockModel(({ lastUserMessage, toolResults, userMessages }) => {
-    if (lastUserMessage?.startsWith("<task_result")) return "Late: " + lastUserMessage;
-    if (userMessages[0] === "Run both checks.") {
-      if (toolResults.length === 0) {
-        return {
-          toolCalls: [
-            { name: "check", input: { name: "fast", seconds: 1 } },
-            { name: "check", input: { name: "slow", seconds: 12 } },
-          ],
-        };
-      }
-      return "Checks: " + JSON.stringify(toolResults.map((r) => r.output));
-    }
+  model: mockModel(({ lastUserMessage, toolResults }) => {
     if (toolResults.length === 0) return { toolCalls: [{ name: "sleep", input: { seconds: 60 } }] };
     return "After sleep: " + JSON.stringify(toolResults.map((r) => r.output)) + " / " + lastUserMessage;
   }),
   modelContextWindowTokens: 32_000,
 });
 `,
-          "agent/instructions.md": "Run checks and wait when asked.\n",
-          "agent/tools/check.ts": `import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
-import { z } from "zod";
-
-export default defineWorkflowTool({
-  description: "Run one check.",
-  inputSchema: z.object({ name: z.string(), seconds: z.number() }),
-  detach: { timeout: 4_000 },
-  async execute({ name, seconds }) {
-    "use workflow";
-    await sleep(seconds * 1000);
-    return { check: name, passed: true };
-  },
-});
-`,
+          "agent/instructions.md": "Wait when asked.\n",
           "agent/tools/sleep.ts": `import { sleep } from "eve/tools/sleep";
 
 export default sleep();
 `,
         },
         installDependencies: true,
-        name: "detach-timeout-sleep",
+        name: "detach-sleep",
       });
       const server = await startEveDev(app.appRoot, { env: ENV });
       try {
         const client = new Client({ host: server.url });
-
-        const checks = await client.sessions.create({ message: "Run both checks." });
-        const first = await checks.response.result();
-        const started = first.events.flatMap((event) =>
-          event.type === "task.started" ? [event.data] : [],
-        );
-        expect(started).toHaveLength(2);
-        const detached = first.events.flatMap((event) =>
-          event.type === "task.detached" ? [event.data] : [],
-        );
-        expect(detached).toHaveLength(1);
-        expect(detached[0]?.reason).toBe("timeout");
-        const slow = started.find(({ taskId }) => taskId === detached[0]?.taskId)!;
-        const fast = started.find(({ taskId }) => taskId !== slow.taskId)!;
-        const outputs = outputsByCall(first.events);
-        expect(outputs.get(fast.callId)).toEqual({ check: "fast", passed: true });
-        expect(outputs.get(slow.callId)).toEqual({ status: "working", taskId: slow.taskId });
-        expect(lastReply(first.events)).toContain("This call is taking a while");
-
-        const late = await nextResultTurn(checks.session);
-        const received = late.find(
-          (event) => event.type === "message.received" && event.data.kind === "task.result",
-        );
-        expect(received?.type === "message.received" ? received.data.taskIds : []).toEqual([
-          slow.taskId,
-        ]);
-        expect(lastReply(late)).toContain('"check": "slow"');
-
         const nap = await client.sessions.create({ message: "Wait a minute." });
         const turn = followTurn(nap.response, (events) => count(events, "task.started") === 1);
         await turn.reached;

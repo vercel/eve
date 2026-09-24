@@ -5,24 +5,30 @@ import {
 } from "#execution/durable-session-store.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionStateMap } from "#harness/types.js";
 import type { TaskSettledStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
-import { MAX_TASK_CANCEL_IDS, readTaskCancelIds } from "#tasks/cancel-tool.js";
+import { readTaskCancelId } from "#tasks/cancel-tool.js";
 import { taskSettledEvent } from "#tasks/events.js";
 import { commandEffects, readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
+import { findCallerTask } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import { taskToolErrorResult } from "#tasks/receipts.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { renderInvalidTaskCancelInput, type TaskCancelOutput } from "#tasks/render.js";
+import { TASK_CANCEL_INVALID_INPUT_MESSAGE, type TaskCancelOutput } from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { cancelTask, findTask, type TaskTable } from "#tasks/table.js";
+import { cancelTask, type TaskTable } from "#tasks/table.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
+import { takeLiveWait } from "#tasks/wait.js";
 
 // Owner-side cancellation: record the outcome at once, ask each started child
 // to stop, and never wait for it. The timer hard-stops a child that does not
-// confirm in time.
+// confirm in time. A `task_wait` on a cancelled task gets the cancellation as
+// its result; cancelled work otherwise never reaches the model.
 
 /** Which working tasks {@link cancelTasksStep} cancels. */
 export type TaskCancelSelector =
@@ -46,6 +52,8 @@ interface CancelledTasks {
   readonly commands: readonly CommandEffect[];
   readonly events: readonly TaskSettledStreamEvent[];
 }
+
+type Session = { readonly state?: SessionStateMap };
 
 /**
  * Records cancellation for every working task the selector picks, reports
@@ -71,75 +79,108 @@ export async function cancelTasksStep(input: {
     ),
   );
   const cancelled = cancelRecords(initial, selected, new Date().toISOString());
-  const update = {
+  if (cancelled.table === initial) {
+    return {
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
+  await runCommands(cancelled.commands, await readContext(input.serializedContext));
+  const applied = applyCancelled(
+    durable,
+    cancelled.table,
+    selected.filter((record) => !isTerminalTaskStatus(record.status)),
+  );
+  return {
     events: cancelled.events,
     replies: [],
-    results: [],
+    results: applied.results,
     serializedContext: input.serializedContext,
-  };
-  if (cancelled.table === initial) return { ...update, sessionState: input.sessionState };
-  await runCommands(cancelled.commands, await readContext(input.serializedContext));
-  return {
-    ...update,
     sessionState: replaceDurableSessionSnapshot({
-      session: setTaskTable(durable, cancelled.table),
+      session: applied.session,
       state: input.sessionState,
     }),
   };
 }
 
 /**
- * Applies one model call that stops background tasks. A working background
- * task is cancelled and never reports; a finished one keeps its result; any
- * other ID, including a call the turn is waiting on, is unknown. The caller
- * sends the commands and publishes the events. Access to a session includes
- * the right to cancel its tasks, so a turn may stop tasks another principal
- * started, as `session.cancel({ taskId })` may.
+ * Applies one model call that stops a background task. A working task is
+ * cancelled and never reports, except to a `task_wait` on it; a finished one
+ * keeps its result. A call its turn still waits on is unknown, and a task
+ * another principal started is refused. The caller sends the commands and
+ * publishes the events.
  */
-export function applyTaskCancelCall(
-  table: TaskTable,
-  request: RuntimeWorkflowTaskRequest,
-  now: string,
-): CancelledTasks & { readonly result: RuntimeToolResultActionResult } {
-  const taskIds = readTaskCancelIds(request.input);
-  if (taskIds === undefined) {
-    return {
-      commands: [],
-      events: [],
-      result: {
-        callId: request.callId,
-        isError: true,
-        kind: "tool-result",
-        output: {
-          code: "INVALID_INPUT",
-          message: renderInvalidTaskCancelInput(MAX_TASK_CANCEL_IDS),
-        },
-        toolName: request.toolName,
-      },
-      table,
-    };
+export function applyTaskCancelCall<T extends Session>(input: {
+  readonly caller: SessionAuthContext | null;
+  readonly now: string;
+  readonly request: RuntimeWorkflowTaskRequest;
+  readonly session: T;
+}): Omit<CancelledTasks, "table"> & {
+  /** The call's own result, then the result of each `task_wait` the cancel ended. */
+  readonly results: readonly RuntimeToolResultActionResult[];
+  readonly session: T;
+} {
+  const { request, session } = input;
+  const unchanged = (result: RuntimeToolResultActionResult) => ({
+    commands: [],
+    events: [],
+    results: [result],
+    session,
+  });
+  const taskId = readTaskCancelId(request.input);
+  if (taskId === undefined) {
+    const error = { code: "INVALID_INPUT", message: TASK_CANCEL_INVALID_INPUT_MESSAGE };
+    return unchanged(taskToolErrorResult(request, error));
   }
-  const output: { -readonly [K in keyof TaskCancelOutput]: string[] } = {
-    alreadyFinished: [],
-    cancelled: [],
-    unknown: [],
-  };
-  const selected: TaskRecord[] = [];
-  for (const taskId of new Set(taskIds)) {
-    const record = findTask(table, taskId);
-    if (record !== undefined && isTerminalTaskStatus(record.status)) {
-      output.alreadyFinished.push(taskId);
-    } else if (record !== undefined && isBackgroundWork(record)) {
-      selected.push(record);
-      output.cancelled.push(taskId);
-    } else {
-      output.unknown.push(taskId);
-    }
+  const table = getTaskTable(session);
+  const found = findCallerTask({ caller: input.caller, table, taskId });
+  if ("error" in found) return unchanged(taskToolErrorResult(request, found.error));
+  const { record } = found;
+  if (isTerminalTaskStatus(record.status)) {
+    return unchanged(cancelResult(request, { status: "already_finished" }));
   }
+  const cancelled = cancelRecords(table, [record], input.now);
+  const applied = applyCancelled(session, cancelled.table, [record]);
   return {
-    ...cancelRecords(table, selected, now),
-    result: { callId: request.callId, kind: "tool-result", output, toolName: request.toolName },
+    commands: cancelled.commands,
+    events: cancelled.events,
+    results: [cancelResult(request, { status: "cancelled" }), ...applied.results],
+    session: applied.session,
   };
+}
+
+function cancelResult(
+  request: RuntimeWorkflowTaskRequest,
+  output: TaskCancelOutput,
+): RuntimeToolResultActionResult {
+  return {
+    callId: request.callId,
+    kind: "tool-result",
+    output: { ...output },
+    toolName: request.toolName,
+  };
+}
+
+/**
+ * Writes the cancelled table, and gives each live `task_wait` on a cancelled
+ * task the cancellation as its result.
+ */
+function applyCancelled<T extends Session>(
+  session: T,
+  table: TaskTable,
+  cancelled: readonly TaskRecord[],
+): { readonly results: readonly RuntimeToolResultActionResult[]; readonly session: T } {
+  let next = setTaskTable(session, table);
+  const results: RuntimeToolResultActionResult[] = [];
+  for (const record of cancelled) {
+    const waited = takeLiveWait(next, record, { status: "cancelled" });
+    next = waited.session;
+    if (waited.result !== undefined) results.push(waited.result);
+  }
+  return { results, session: next };
 }
 
 function selectTasks(

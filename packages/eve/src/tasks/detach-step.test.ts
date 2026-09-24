@@ -16,7 +16,7 @@ import {
 import { applyWaitedTaskChanges, detachWaitedTasksStep } from "#tasks/detach-step.js";
 import { getTaskTable } from "#tasks/state.js";
 import { applyTaskMessage } from "#tasks/table.js";
-import { startWorkflowTask } from "#tasks/workflow-task.js";
+import { tooManyBackgroundTasksResult } from "#tasks/receipts.js";
 
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#internal/logging.js", () => ({
@@ -56,7 +56,6 @@ function changes(overrides: Partial<Parameters<typeof applyWaitedTaskChanges>[0]
     detachCallIds: [],
     endCallIds: [],
     keepTaskIds: [],
-    reason: "steer" as const,
     ...overrides,
   };
 }
@@ -98,27 +97,6 @@ describe("applyWaitedTaskChanges", () => {
     ]);
     expect(applied.commands).toEqual([]);
     expect(renderTasksNote(applied.table.records)).toContain(`id="${SRE.id}"`);
-  });
-
-  it("detaches a timed call on its own, without a group", () => {
-    const applied = applyWaitedTaskChanges({
-      changes: changes({ detachCallIds: [SRE.callId], reason: "timeout" }),
-      now: NOW,
-      table: taskTable([D0, SRE]),
-      toolNames: new Map(),
-      turnId: TURN,
-    });
-
-    expect(applied.table.records.map(({ detachGroup, mode }) => ({ detachGroup, mode }))).toEqual([
-      { detachGroup: undefined, mode: "foreground" },
-      { detachGroup: undefined, mode: "background" },
-    ]);
-    expect(applied.results[0]?.modelOutput).toBe(
-      `This call is taking a while, so it moved to the background as agent ${SRE.id}. Its result will arrive in a later message. Do not poll or repeat this work.`,
-    );
-    expect(applied.events).toEqual([
-      { data: { callId: SRE.callId, reason: "timeout", taskId: SRE.id }, type: "task.detached" },
-    ]);
   });
 
   it("keeps a call whose question the message dismissed, and one whose result is in flight", () => {
@@ -172,7 +150,7 @@ describe("applyWaitedTaskChanges", () => {
     ]);
   });
 
-  it("never rejects a detach at the cap, and detached tasks count toward it", async () => {
+  it("never rejects a detach at the cap, and detached tasks count toward it", () => {
     const running = Array.from({ length: MAX_BACKGROUND_TASKS }, (_, index) =>
       waited(`remind-${String(index).padStart(6, "0")}`, {
         callId: `call-remind-${index}`,
@@ -189,21 +167,12 @@ describe("applyWaitedTaskChanges", () => {
     });
     expect(workingBackgroundTaskIds(applied.table)).toHaveLength(MAX_BACKGROUND_TASKS + 1);
 
-    const rejected = await startWorkflowTask({
-      now: NOW,
-      request: {
-        callId: "call-another",
-        detach: true,
-        input: {},
-        kind: "workflow-task",
-        toolName: "remind",
-        workflowId: "workflow//./agent/tools/remind//execute",
-      },
-      session: { sessionId: "owner", state: taskTableState(applied.table.records) },
-      startRun: vi.fn(),
-      turnId: TURN,
+    const rejected = tooManyBackgroundTasksResult({
+      callId: "call-another",
+      table: applied.table,
+      toolName: "researcher",
     });
-    expect(rejected.result).toMatchObject({
+    expect(rejected).toMatchObject({
       isError: true,
       output: { code: "TOO_MANY_BACKGROUND_TASKS" },
     });
