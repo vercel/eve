@@ -237,6 +237,7 @@ Authentication works as in `mcpChannel`, including `oauthResource(...)` metadata
 - `tools/list` returns authored and extension tools. Each tool carries `_meta["eve.dev/owner"]` (the agent name) and `_meta["eve.dev/approval"]`. Framework tools such as `load_skill` and `bash`, workflow tools, and `execution: "background"` tools are not listed.
 - `tools/call` runs the tool's `execute` on your deployment, in the same context it gets in the model loop: `ctx.getSandbox()`, `ctx.getSkill()`, `ctx.getToken()`, and `ctx.session.auth` (the authenticated caller) all work. The result's `content` is the tool's `toModelOutput`, or its output as text or JSON. Object outputs also appear in `structuredContent`. A thrown error becomes an `isError` result.
 - `resources/list` returns one `skill://<agent>/<skill>` resource per skill, with supporting file paths in `_meta["eve.dev/files"]`. `resources/read` returns the skill instructions, or a supporting file at `skill://<agent>/<skill>/<path>`.
+- `tools/list` also returns one tool per declared local subagent, named after the subagent, with `_meta["eve.dev/kind"]: "subagent"` and a single required `message` input. See [Subagents](#subagents).
 
 ### Sessions and sandboxes
 
@@ -271,6 +272,12 @@ A forwarded call's session ID includes both identities, `sha256(forwarder + "\n"
 A tool that needs approval, or a `ctx.getToken()` call that needs the user to sign in, returns an MCP input-required result instead of running. Approval is a form elicitation with a boolean `approved` field. Sign-in is a URL elicitation. Retry `tools/call` with the same arguments, the `inputResponses`, and the returned `requestState`. eve rejects a `requestState` from a different session, tool, or argument set. Clients must declare `elicitation` (`form` and `url`) in their client capabilities to receive these requests.
 
 Sign-in callbacks arrive at `<route>/authorize/:name/:attemptId`. That route is public, so the provider's browser redirect can reach it.
+
+### Subagents
+
+Calling a subagent tool runs that subagent to completion on your deployment and returns its final answer as text, or as `structuredContent` when the answer is JSON. The subagent receives `message` the same way it receives a delegation from your agent, runs as the calling principal (including a forwarded principal), and uses the capability session's sandbox when it declares `defineParentSandbox()`. Remote agents are not listed.
+
+When the subagent asks a question, the call returns an input-required result with one form elicitation per question: pick an option with `optionId`, or answer with `text` when the question allows free-form answers. When it needs a sign-in, the call returns a URL elicitation. Retry with the same arguments, the `inputResponses`, and the returned `requestState` to continue the same subagent session. Declining a question cancels the subagent. A subagent still working after 150 seconds is cancelled, and the call returns an error saying so.
 
 ## What to read next
 

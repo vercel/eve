@@ -1189,12 +1189,24 @@ export function createAuthorizationRequiredEvent(input: {
     data.candidateId = input.candidateId;
   }
   if (input.webhookUrl !== undefined) {
-    data.webhookUrl = input.webhookUrl;
+    data.webhookUrl = withoutProtectionBypass(input.webhookUrl);
   }
   return {
     data,
     type: "authorization.required",
   };
+}
+
+/**
+ * The runtime's hook URL carries the deployment's automation bypass so
+ * server-to-server callbacks pass Deployment Protection. Stream consumers only
+ * need to know a hook exists, and the event can reach end users and models.
+ */
+function withoutProtectionBypass(webhookUrl: string): string {
+  if (!URL.canParse(webhookUrl)) return webhookUrl;
+  const url = new URL(webhookUrl);
+  url.searchParams.delete("x-vercel-protection-bypass");
+  return url.toString();
 }
 
 /**

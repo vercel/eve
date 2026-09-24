@@ -455,6 +455,24 @@ describe("message stream protocol", () => {
     expect(full.data.webhookUrl).toBe(webhookUrl);
   });
 
+  it("drops the protection bypass secret from the client-facing webhookUrl", () => {
+    const hookUrl = `https://eve.example.com${createEveConnectionCallbackRoutePath(
+      "linear",
+      "attempt-1",
+      "abc",
+    )}`;
+    const event = createAuthorizationRequiredEvent({
+      name: "linear",
+      description: "Linear",
+      sequence: 3,
+      stepIndex: 1,
+      turnId: "turn_0",
+      webhookUrl: `${hookUrl}?code=1&x-vercel-protection-bypass=secret+value`,
+    });
+    expect(event.data.webhookUrl).toBe(`${hookUrl}?code=1`);
+    expect(JSON.stringify(event)).not.toContain("secret");
+  });
+
   it("builds authorization.completed with optional reason", () => {
     const authorized = createAuthorizationCompletedEvent({
       name: "linear",

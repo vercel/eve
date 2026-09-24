@@ -20,10 +20,13 @@ import {
   type CapabilityPrincipals,
   type CapabilityRuntime,
   type CapabilitySessionScope,
+  type CapabilitySubagent,
   type CapabilityToolOutcome,
 } from "#execution/capability-session.js";
 import { projectAuthorizationCallback } from "#execution/connections/callback-route.js";
-import type { AuthorizationSignal } from "#harness/authorization.js";
+import type { AuthorizationChallenge } from "#harness/authorization.js";
+import type { AgentInvocation } from "#internal/invocation/agent-invocation.js";
+import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { resolveCapabilityPrincipals } from "#internal/mcp/forwarded-principal-header.js";
@@ -40,7 +43,10 @@ import {
   skillResourceTemplates,
 } from "#internal/mcp/skill-resources.js";
 import { serveMcpHttpRequest } from "#internal/mcp/streamable-http-server.js";
-import { readRouteCapabilityRuntime } from "#internal/nitro/routes/channel-route-context.js";
+import {
+  readRouteCapabilityRuntime,
+  readRouteChannelName,
+} from "#internal/nitro/routes/channel-route-context.js";
 import {
   readOAuthResourceOptions,
   routeAuth,
@@ -50,7 +56,9 @@ import {
 import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { parseJsonObject, parseJsonValue, type JsonObject } from "#shared/json.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
+import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import { formatSubagentInput } from "#subagents/invocation.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { createUlid } from "#shared/ulid.js";
 
@@ -237,11 +245,28 @@ function createCapabilitiesServer(input: CapabilitiesRequest, scope: CapabilityS
     },
   );
 
+  const subagents = new Map(runtime.subagents.map((subagent) => [subagent.name, subagent]));
+
   server.setRequestHandler("tools/list", () => ({
-    tools: [...tools.values()].map((entry) => entry.descriptor),
+    tools: [
+      ...[...tools.values()].map((entry) => entry.descriptor),
+      ...runtime.subagents.map((subagent) => describeSubagent(runtime.agentName, subagent)),
+    ],
   }));
 
   server.setRequestHandler("tools/call", async (request, context) => {
+    const subagent = subagents.get(request.params.name);
+    if (subagent !== undefined) {
+      return await callSubagent({
+        arguments: request.params.arguments ?? {},
+        inputResponses: context.mcpReq.inputResponses ?? {},
+        rawRequestState: context.mcpReq.requestState(),
+        request: input,
+        scope,
+        signal: context.mcpReq.signal,
+        subagent,
+      });
+    }
     const entry = tools.get(request.params.name);
     if (entry === undefined) return toolError(`Unknown tool: ${request.params.name}`);
     return await callTool({
@@ -349,16 +374,8 @@ async function callTool(input: ToolCallInput) {
   const { request, scope, tool } = input;
   const args = input.arguments;
   const argsHash = hashArguments(args);
-  const state =
-    input.rawRequestState === undefined ? undefined : decodeRequestState(input.rawRequestState);
-  if (
-    state === null ||
-    (state !== undefined && (state.s !== scope.id || state.t !== tool.name || state.h !== argsHash))
-  ) {
-    return toolError(
-      "requestState does not belong to this tool call. Retry with the original arguments, or without requestState to start over.",
-    );
-  }
+  const state = readBoundRequestState(input.rawRequestState, scope, tool.name, argsHash);
+  if (state === null || state?.k === "subagent") return REQUEST_STATE_MISMATCH;
   const callId = state?.c ?? `call_${createUlid()}`;
   const baseState = { c: callId, h: argsHash, s: scope.id, t: tool.name, v: 1 as const };
 
@@ -419,7 +436,7 @@ async function callTool(input: ToolCallInput) {
         });
         if (outcome.kind === "authorization-required") {
           const attemptIds = recordCapabilityAuthorizationAttempts(scope.id, outcome.signal);
-          return inputRequired(authorizationElicitations(outcome.signal), {
+          return inputRequired(authorizationElicitations(outcome.signal.challenges), {
             ...baseState,
             a: attemptIds,
             k: "authorization",
@@ -439,6 +456,250 @@ async function callTool(input: ToolCallInput) {
     const message = error instanceof Error && error.message ? error.message : "Tool call failed.";
     return toolError(`${message} (errorId: ${errorId})`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Subagents
+// ---------------------------------------------------------------------------
+
+/**
+ * Longest a `tools/call` waits for a subagent. It stays inside serverless
+ * request limits and common MCP client timeouts, so the caller gets a precise
+ * error rather than a dropped request.
+ */
+const SUBAGENT_WAIT_MS = 150_000;
+const SUBAGENT_POLL_MS = 1_000;
+
+const SUBAGENT_INPUT_SCHEMA: JsonObject = {
+  additionalProperties: false,
+  properties: {
+    message: {
+      description:
+        "Everything the subagent needs to do the task. It does not see your conversation.",
+      type: "string",
+    },
+  },
+  required: ["message"],
+  type: "object",
+};
+
+function describeSubagent(agentName: string, subagent: CapabilitySubagent): McpToolDescriptor {
+  return {
+    _meta: { "eve.dev/approval": false, "eve.dev/kind": "subagent", "eve.dev/owner": agentName },
+    description: `${subagent.description}\n\nRuns the ${subagent.name} subagent to completion and returns its answer.`,
+    inputSchema: SUBAGENT_INPUT_SCHEMA,
+    name: subagent.name,
+  };
+}
+
+interface SubagentCallInput extends Omit<ToolCallInput, "tool"> {
+  readonly subagent: CapabilitySubagent;
+}
+
+/**
+ * Runs a declared subagent to completion inside one `tools/call`, as the same
+ * durable task invocation `mcpChannel` exposes. Its questions and sign-ins
+ * come back as `input_required`, and the retry answers them. A subagent still
+ * working after {@link SUBAGENT_WAIT_MS} is cancelled and reported.
+ */
+async function callSubagent(input: SubagentCallInput) {
+  const { request, scope, subagent } = input;
+  const argsHash = hashArguments(input.arguments);
+  const state = readBoundRequestState(input.rawRequestState, scope, subagent.name, argsHash);
+  if (state === null || (state !== undefined && (state.k !== "subagent" || !state.r))) {
+    return REQUEST_STATE_MISMATCH;
+  }
+  const auth = request.principals.current;
+  const channelName = readRouteChannelName(request.args);
+  const execution = new WorkflowAgentInvocationExecution({
+    createSession: async (runInput) =>
+      await subagent.createSession(
+        {
+          ...runInput,
+          // `from(token)` resolves this channel's namespaced tokens when answers arrive.
+          continuationToken:
+            channelName === undefined || runInput.continuationToken === undefined
+              ? runInput.continuationToken
+              : `${channelName}:${runInput.continuationToken}`,
+          initiatorAuth: request.principals.initiator,
+        },
+        scope.ephemeral ? undefined : scope.id,
+      ),
+    from: request.args.from,
+  });
+
+  try {
+    let invocationId = state?.r;
+    const answered = new Set<string>();
+    if (invocationId === undefined) {
+      const message = input.arguments.message;
+      if (typeof message !== "string" || message.trim().length === 0) {
+        return toolError(`Invalid arguments for ${subagent.name}: message is required.`);
+      }
+      const started = await execution.create({
+        auth,
+        message: formatSubagentInput({
+          description: subagent.description,
+          message,
+          name: subagent.name,
+          type: "local",
+        }).message,
+      });
+      invocationId = started.invocationId;
+    } else {
+      const answers = readSubagentAnswers(input.inputResponses);
+      if (answers === "declined") {
+        await execution.cancel({ auth, invocationId });
+        return toolError(`The user declined to answer ${subagent.name}, so it was cancelled.`);
+      }
+      if (answers.length > 0) {
+        const updated = await execution.update({ auth, invocationId, responses: answers });
+        if (updated.type === "not_found") return subagentNotFound(subagent);
+        if (updated.type === "conflict") return toolError(updated.message);
+        for (const answer of answers) answered.add(answer.requestId);
+      }
+    }
+
+    const invocation = await waitForSubagent(execution, auth, invocationId, answered, input.signal);
+    const resume = {
+      c: `call_${createUlid()}`,
+      h: argsHash,
+      k: "subagent" as const,
+      r: invocationId,
+      s: scope.id,
+      t: subagent.name,
+      v: 1 as const,
+    };
+    switch (invocation?.status) {
+      case undefined:
+        return subagentNotFound(subagent);
+      case "completed":
+        return subagentOutput(invocation.result);
+      case "failed":
+        return toolError(`${subagent.name} failed: ${invocation.error.message}`);
+      case "cancelled":
+        return toolError(`${subagent.name} was cancelled.`);
+      case "input_required":
+        return inputRequired(questionElicitations(invocation.inputRequests), resume);
+      case "authorization_required":
+        return inputRequired(
+          authorizationElicitations(
+            invocation.authorizations.map((entry) => ({
+              challenge: entry.authorization ?? { instructions: entry.description },
+              name: entry.name,
+            })),
+          ),
+          resume,
+        );
+      case "working":
+        await execution.cancel({ auth, invocationId });
+        return toolError(
+          `${subagent.name} did not finish within ${String(SUBAGENT_WAIT_MS / 1000)} seconds and was cancelled. Retry with a narrower task.`,
+        );
+    }
+  } catch (error) {
+    const errorId = logError(log, "capability subagent call failed", error, {
+      subagentName: subagent.name,
+    });
+    const message =
+      error instanceof Error && error.message ? error.message : "Subagent call failed.";
+    return toolError(`${message} (errorId: ${errorId})`);
+  }
+}
+
+/**
+ * Polls until the subagent settles or needs new input. Accepted answers stay
+ * visible as pending until the subagent resumes, so they count as working.
+ */
+async function waitForSubagent(
+  execution: WorkflowAgentInvocationExecution,
+  auth: CapabilityPrincipals["current"],
+  invocationId: string,
+  answered: ReadonlySet<string>,
+  signal: AbortSignal,
+): Promise<AgentInvocation | undefined> {
+  const deadline = Date.now() + SUBAGENT_WAIT_MS;
+  for (;;) {
+    const invocation = await execution.read({ auth, invocationId });
+    const working =
+      invocation?.status === "working" ||
+      (invocation?.status === "input_required" &&
+        Object.keys(invocation.inputRequests).every((requestId) => answered.has(requestId)));
+    const remaining = deadline - Date.now();
+    if (!working || remaining <= 0 || signal.aborted) return invocation;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(SUBAGENT_POLL_MS, remaining)));
+  }
+}
+
+function subagentNotFound(subagent: CapabilitySubagent) {
+  return toolError(
+    `The ${subagent.name} session is no longer available. Call it again without requestState.`,
+  );
+}
+
+function subagentOutput(result: JsonValue | undefined) {
+  const text = typeof result === "string" ? result : JSON.stringify(result ?? null);
+  const output: {
+    readonly content: readonly { readonly text: string; readonly type: "text" }[];
+    structuredContent?: JsonObject;
+  } = { content: [{ text, type: "text" }] };
+  const structuredContent = toStructuredContent(result);
+  if (structuredContent !== undefined) output.structuredContent = structuredContent;
+  return output;
+}
+
+/** One form per subagent question: pick an option id, or answer in text when allowed. */
+function questionElicitations(requests: Readonly<Record<string, InputRequest>>) {
+  return Object.fromEntries(
+    Object.entries(requests).map(([requestId, request]) => {
+      const options = request.options ?? [];
+      const properties: Record<string, JsonObject> = {};
+      if (options.length > 0) {
+        properties.optionId = {
+          description: options
+            .map((option) =>
+              [`${option.id}: ${option.label}`, option.description].filter(Boolean).join(" - "),
+            )
+            .join("; "),
+          enum: options.map((option) => option.id),
+          title: "Choice",
+          type: "string",
+        };
+      }
+      if (options.length === 0 || request.allowFreeform === true) {
+        properties.text = { title: "Answer", type: "string" };
+      }
+      return [
+        requestId,
+        {
+          method: "elicitation/create",
+          params: {
+            message: request.prompt,
+            mode: "form",
+            requestedSchema: { properties, type: "object" },
+          },
+        },
+      ];
+    }),
+  );
+}
+
+/** Maps accepted answers to eve input responses; sign-in entries carry nothing to deliver. */
+function readSubagentAnswers(
+  inputResponses: Readonly<Record<string, unknown>>,
+): InputResponse[] | "declined" {
+  const answers: InputResponse[] = [];
+  for (const [requestId, response] of Object.entries(inputResponses)) {
+    if (requestId.startsWith("authorization:")) continue;
+    const record = readRecord(response);
+    if (record?.action !== "accept") return "declined";
+    const content = readRecord(record.content);
+    const answer: InputResponse = { requestId };
+    if (typeof content?.optionId === "string") answer.optionId = content.optionId;
+    if (typeof content?.text === "string") answer.text = content.text;
+    answers.push(answer);
+  }
+  return answers;
 }
 
 function toolResult(outcome: Extract<CapabilityToolOutcome, { kind: "output" }>) {
@@ -505,8 +766,10 @@ const requestStateSchema = z.strictObject({
   a: z.array(z.string().max(64)).max(16).optional(),
   c: z.string().max(64),
   h: z.string().length(64),
-  k: z.enum(["approval", "authorization"]),
+  k: z.enum(["approval", "authorization", "subagent"]),
   p: z.boolean().optional(),
+  /** Subagent session a `subagent` state resumes. */
+  r: z.string().max(128).optional(),
   s: z.string().length(64),
   t: z.string().max(256),
   v: z.literal(1),
@@ -516,6 +779,24 @@ type RequestState = z.infer<typeof requestStateSchema>;
 
 function encodeRequestState(state: RequestState): string {
   return Buffer.from(JSON.stringify(state)).toString("base64url");
+}
+
+const REQUEST_STATE_MISMATCH = toolError(
+  "requestState does not belong to this tool call. Retry with the original arguments, or without requestState to start over.",
+);
+
+/** Returns `null` for state that is invalid or bound to another session, tool, or arguments. */
+function readBoundRequestState(
+  raw: unknown,
+  scope: CapabilitySessionScope,
+  name: string,
+  argsHash: string,
+): RequestState | undefined | null {
+  if (raw === undefined) return undefined;
+  const state = decodeRequestState(raw);
+  return state !== null && state.s === scope.id && state.t === name && state.h === argsHash
+    ? state
+    : null;
 }
 
 /** Returns `null` for present-but-invalid state. */
@@ -568,9 +849,11 @@ function isApprovalAccepted(response: unknown): boolean {
   return record?.action === "accept" && readRecord(record.content)?.approved === true;
 }
 
-function authorizationElicitations(signal: AuthorizationSignal): Record<string, unknown> {
+function authorizationElicitations(
+  challenges: readonly Pick<AuthorizationChallenge, "challenge" | "name">[],
+): Record<string, unknown> {
   const requests: Record<string, unknown> = {};
-  for (const [index, entry] of signal.challenges.entries()) {
+  for (const [index, entry] of challenges.entries()) {
     const { challenge } = entry;
     const displayName = challenge.displayName ?? entry.name;
     const message = [

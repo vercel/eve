@@ -21,7 +21,8 @@ import {
   type Approval,
   type ApprovalConfiguration,
 } from "#approval/definition.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import { HTTP_ADAPTER } from "#channel/http.js";
+import type { RunHandle, SessionAuthContext } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
@@ -33,6 +34,7 @@ import {
   type Session,
 } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { buildApprovalResponseAuth, createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import {
   AuthorizationCallbackUrlKey,
@@ -48,6 +50,7 @@ import {
   type ToolModelOutputValue,
 } from "#harness/tool-model-output.js";
 import { createLogger, logError } from "#internal/logging.js";
+import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRuntimeCompiledArtifactsAppRoot } from "#runtime/compiled-artifacts-source.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
@@ -74,9 +77,27 @@ export interface CapabilityRuntime {
    * to the sandbox copy.
    */
   readSkillFile?(skillName: string, path: string): Promise<Uint8Array | undefined>;
+  /** Declared local subagents, each callable as one capability. */
+  readonly subagents: readonly CapabilitySubagent[];
   /** Seeds `BundleKey` for tools that read the compiled graph. Absent in tests. */
   readonly bundle?: CompiledRuntimeAgentBundle;
   openSandbox(sessionId: string): Promise<SandboxAccess>;
+}
+
+/** A declared local subagent that a remote caller runs to completion in one call. */
+export interface CapabilitySubagent {
+  readonly name: string;
+  readonly description: string;
+  /**
+   * Starts the subagent as its own session on its node, the way a delegation
+   * starts a local child, but without a parent inbox: the caller waits on the
+   * session instead. A parent-sandbox subagent reuses `sandboxSessionId`'s
+   * sandbox, as it would reuse its delegating parent's.
+   */
+  createSession(
+    input: Parameters<RouteSessionCreator>[0],
+    sandboxSessionId: string | undefined,
+  ): Promise<RunHandle>;
 }
 
 /** Builds the capability view of the root agent in a compiled bundle. */
@@ -114,8 +135,38 @@ export function createCapabilityRuntime(bundle: CompiledRuntimeAgentBundle): Cap
       return await readFile(file).catch(() => undefined);
     },
     skills: bundle.resolvedAgent.skills,
+    subagents: listExposedSubagents(bundle),
     tools: listExposedTools(bundle),
   };
+}
+
+/** Model-visible declared local subagents; remote agents belong to their own deployments. */
+function listExposedSubagents(bundle: CompiledRuntimeAgentBundle): CapabilitySubagent[] {
+  return bundle.subagentRegistry.preparedTools.flatMap((prepared) => {
+    const definition = bundle.subagentRegistry.subagentsByNodeId.get(prepared.nodeId)?.definition;
+    if (definition?.kind !== "subagent" || definition.description === undefined) return [];
+    const inheritsSandbox =
+      bundle.graph.nodesByNodeId.get(definition.nodeId)?.sandboxRegistry.sandbox?.definition
+        .kind === "parent";
+    const runtime = createWorkflowRuntime({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      nodeId: definition.nodeId,
+    });
+    return [
+      {
+        createSession: async (input, sandboxSessionId) =>
+          await runtime.createSession({
+            ...input,
+            adapter: {
+              ...HTTP_ADAPTER,
+              state: inheritsSandbox && sandboxSessionId !== undefined ? { sandboxSessionId } : {},
+            },
+          }),
+        description: definition.description,
+        name: definition.name,
+      },
+    ];
+  });
 }
 
 /**

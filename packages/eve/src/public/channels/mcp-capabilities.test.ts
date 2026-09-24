@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import { z } from "#compiled/zod/index.js";
+import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
-import type { CapabilityRuntime } from "#execution/capability-session.js";
+import type { CapabilityRuntime, CapabilitySubagent } from "#execution/capability-session.js";
+import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { MCP_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { attachRouteCapabilityRuntime } from "#internal/nitro/routes/channel-route-context.js";
 import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/types.js";
@@ -20,6 +22,34 @@ import {
   type TrustedForwarders,
 } from "#public/channels/mcp.js";
 import type { AuthFn } from "#public/channels/auth.js";
+
+// Subagent calls run as durable task sessions; this in-memory world stands in
+// for the workflow runs they create.
+interface FakeRun {
+  readonly attributes: Record<string, string>;
+  readonly createdAt: Date;
+  events: unknown[];
+  output?: unknown;
+  readonly runId: string;
+  status: string;
+}
+const world = vi.hoisted(() => ({ runs: new Map<string, FakeRun>() }));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getRun: (runId: string) => {
+    const run = world.runs.get(runId)!;
+    return {
+      async cancel() {
+        run.status = "cancelled";
+      },
+      get returnValue() {
+        return Promise.resolve({ output: run.output });
+      },
+      getReadable: () => eventStream(run.events),
+    };
+  },
+  getWorld: async () => ({ runs: { get: async (runId: string) => world.runs.get(runId) } }),
+}));
 
 const principal: SessionAuthContext = {
   attributes: {},
@@ -75,6 +105,7 @@ describe("mcpCapabilitiesChannel", () => {
       "summarize",
       "needs_sign_in",
       "whoami",
+      "review_ai",
     ]);
     expect(tools[2]).toMatchObject({
       _meta: { "eve.dev/approval": true, "eve.dev/owner": "d0" },
@@ -400,11 +431,180 @@ describe("mcpCapabilitiesChannel forwarded principal", () => {
   });
 });
 
+describe("mcpCapabilitiesChannel subagents", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "slack-webhook",
+    principalId: "U_ALICE",
+    principalType: "user",
+  };
+  const complete = (output: string) => (run: FakeRun) => {
+    run.status = "completed";
+    run.output = output;
+  };
+
+  it("lists each declared subagent as a message-taking tool", async () => {
+    const listed = await createHarness().call("tools/list", {});
+    const tools = (listed.result as { tools: Array<Record<string, unknown>> }).tools;
+    expect(tools.at(-1)).toEqual({
+      _meta: { "eve.dev/approval": false, "eve.dev/kind": "subagent", "eve.dev/owner": "d0" },
+      description: expect.stringContaining("Reviews prose for AI patterns."),
+      inputSchema: {
+        additionalProperties: false,
+        properties: { message: { description: expect.any(String), type: "string" } },
+        required: ["message"],
+        type: "object",
+      },
+      name: "review_ai",
+    });
+  });
+
+  it("runs a subagent to completion as the forwarded user in the session's sandbox", async () => {
+    const harness = createHarness({
+      onSubagentStart: complete("## AI pattern review\n\n**Verdict**: Blocked"),
+      trustedForwarders: () => true,
+    });
+    const forwarded = {
+      headers: {
+        [FORWARDED_PRINCIPAL_HEADER]: encodeForwardedPrincipalHeader({ current: alice }),
+      },
+    };
+    const called = await harness.callTool(
+      "review_ai",
+      { message: "/review ai In today's fast-paced world..." },
+      "v2:parent-1",
+      forwarded,
+    );
+
+    expect(called.result).toMatchObject({
+      content: [{ text: "## AI pattern review\n\n**Verdict**: Blocked", type: "text" }],
+    });
+    const [start] = harness.subagentStarts;
+    expect(start?.input).toMatchObject({
+      auth: { attributes: { "eve:forwarded-by": "user-1" }, principalId: "U_ALICE" },
+      capabilities: { requestInput: true },
+      initiatorAuth: { principalId: "U_ALICE" },
+      input: {
+        message: expect.stringMatching(
+          /^You are the subagent "review_ai"\.[\s\S]*\/review ai In today's fast-paced world\.\.\.$/,
+        ),
+      },
+      mode: "task",
+    });
+    // The same capability session id that keys the caller's tool sandbox.
+    const sandbox = await harness.callTool("sandbox_note", { text: "x" }, "v2:parent-1", forwarded);
+    expect(start?.sandboxSessionId).toBe(
+      (sandbox.result as { structuredContent: { sessionId: string } }).structuredContent.sessionId,
+    );
+
+    await harness.callTool("review_ai", { message: "again" });
+    expect(harness.subagentStarts[1]?.sandboxSessionId).toBeUndefined();
+  });
+
+  it("relays a subagent question as input_required and resumes with the answer", async () => {
+    const harness = createHarness({
+      onSubagentAnswered: complete("Reviewed the changelog."),
+      onSubagentStart: (run) => {
+        run.events = [
+          {
+            data: {
+              requests: [
+                {
+                  action: { callId: "q1", input: {}, kind: "tool-call", toolName: "ask_question" },
+                  kind: "question",
+                  options: [
+                    { id: "changelog", label: "Changelog" },
+                    { id: "blog", label: "Blog post" },
+                  ],
+                  prompt: "Which content type is this?",
+                  requestId: "q1",
+                },
+              ],
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "turn_0",
+            },
+            meta: { at: "2026-09-24T00:00:00.000Z", id: "evt_q" },
+            type: "input.requested",
+          },
+        ];
+      },
+    });
+    const args = { message: "Review this draft." };
+    const first = await harness.callTool("review_ai", args, "v2:parent-1");
+    const pending = first.result as {
+      inputRequests: Record<string, { params: Record<string, unknown> }>;
+      requestState: string;
+      resultType: string;
+    };
+    expect(pending.resultType).toBe("input_required");
+    const [[requestId, request]] = Object.entries(pending.inputRequests) as [
+      [string, { params: Record<string, unknown> }],
+    ];
+    expect(request.params).toMatchObject({
+      message: "Which content type is this?",
+      mode: "form",
+      requestedSchema: {
+        properties: { optionId: { enum: ["changelog", "blog"], type: "string" } },
+      },
+    });
+
+    const mismatched = await harness.callTool("review_ai", { message: "other" }, "v2:parent-1", {
+      inputResponses: {},
+      requestState: pending.requestState,
+    });
+    expect(mismatched.result).toMatchObject({ isError: true });
+
+    const resumed = await harness.callTool("review_ai", args, "v2:parent-1", {
+      inputResponses: { [requestId]: { action: "accept", content: { optionId: "changelog" } } },
+      requestState: pending.requestState,
+    });
+    expect(resumed.result).toMatchObject({
+      content: [{ text: "Reviewed the changelog.", type: "text" }],
+    });
+    expect(harness.deliveries).toEqual([
+      {
+        payload: { inputResponses: [{ optionId: "changelog", requestId: "q1" }] },
+        token: harness.subagentStarts[0]?.input.continuationToken,
+      },
+    ]);
+    expect(harness.subagentStarts).toHaveLength(1);
+  });
+
+  it("cancels a subagent that outlives the wait and says so", async () => {
+    vi.useFakeTimers();
+    try {
+      let started: FakeRun | undefined;
+      const harness = createHarness({ onSubagentStart: (run) => (started = run) });
+      const pending = harness.callTool("review_ai", { message: "Review a book." }, "v2:parent-1");
+      await vi.advanceTimersByTimeAsync(151_000);
+      const called = await pending;
+      expect(called.result).toMatchObject({
+        content: [
+          {
+            text: "review_ai did not finish within 150 seconds and was cancelled. Retry with a narrower task.",
+          },
+        ],
+        isError: true,
+      });
+      expect(started?.status).toBe("cancelled");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
-function createHarness(options: { readonly trustedForwarders?: TrustedForwarders } = {}) {
+function createHarness(
+  options: {
+    readonly onSubagentAnswered?: (run: FakeRun) => void;
+    readonly onSubagentStart?: (run: FakeRun) => void;
+    readonly trustedForwarders?: TrustedForwarders;
+  } = {},
+) {
   const files = new Map<string, Map<string, string>>();
   let opens = 0;
   let deletes = 0;
@@ -530,6 +730,38 @@ function createHarness(options: { readonly trustedForwarders?: TrustedForwarders
     },
   ];
 
+  const subagentStarts: {
+    readonly input: Parameters<CapabilitySubagent["createSession"]>[0];
+    readonly sandboxSessionId: string | undefined;
+  }[] = [];
+  const reviewer: CapabilitySubagent = {
+    async createSession(input, sandboxSessionId) {
+      subagentStarts.push({ input, sandboxSessionId });
+      const run: FakeRun = {
+        attributes: { ...buildInvocationAttributes(input.externalInvocation!) },
+        createdAt: new Date("2026-09-24T00:00:00.000Z"),
+        events: [],
+        runId: `wrun_${crypto.randomUUID()}`,
+        status: "running",
+      };
+      world.runs.set(run.runId, run);
+      options.onSubagentStart?.(run);
+      return { events: new ReadableStream(), sessionId: run.runId };
+    },
+    description: "Reviews prose for AI patterns.",
+    name: "review_ai",
+  };
+  const deliveries: { readonly payload: unknown; readonly token: string }[] = [];
+  const from = (token: string) => ({
+    async [INTERNAL_CHANNEL_DELIVER](payload: unknown) {
+      deliveries.push({ payload, token });
+      const run = [...world.runs.values()].find(
+        (candidate) => candidate.attributes["$eve.invocation_token"] === token,
+      );
+      if (run !== undefined) options.onSubagentAnswered?.(run);
+    },
+  });
+
   const runtime: CapabilityRuntime = {
     agentName: "d0",
     description: "Answers data questions.",
@@ -541,6 +773,7 @@ function createHarness(options: { readonly trustedForwarders?: TrustedForwarders
         : undefined;
     },
     skills,
+    subagents: [reviewer],
     tools,
   };
 
@@ -560,7 +793,7 @@ function createHarness(options: { readonly trustedForwarders?: TrustedForwarders
     return attachRouteCapabilityRuntime(
       {
         attachSession: unavailable,
-        from: unavailable,
+        from: from as never,
         params: {},
         requestIp: "127.0.0.1",
         resolveSession: vi.fn(),
@@ -645,6 +878,7 @@ function createHarness(options: { readonly trustedForwarders?: TrustedForwarders
       );
     },
     channel,
+    deliveries,
     deployed,
     lastCallbackUrl: () => callbackUrl,
     async readResource(uri: string) {
@@ -654,6 +888,7 @@ function createHarness(options: { readonly trustedForwarders?: TrustedForwarders
     sandboxDeletes: () => deletes,
     sandboxOpens: () => opens,
     sessionKey,
+    subagentStarts,
     waitUntil,
   };
 }
@@ -679,4 +914,15 @@ function tool(input: {
     sourceKind: "module",
     toModelOutput: input.toModelOutput as ResolvedToolDefinition["toModelOutput"],
   };
+}
+
+function eventStream(events: readonly unknown[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const event of events) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      controller.close();
+    },
+  });
+  return Object.assign(stream, { getTailIndex: async () => events.length - 1 });
 }
