@@ -12,6 +12,11 @@ The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists 
 
 Continue carrying out the user's request, including starting any remaining background work. When no further tool calls are needed in this turn, send one brief user-facing acknowledgement that the background work has started. Do not wait for results or report results that are not available yet. End the turn after the acknowledgement.`;
 
+export const TASK_DELIVERY_SILENT_LAUNCH_INSTRUCTION = `Background task reporting: silent launch
+The latest ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists background tasks accepted so far from the current turn. They continue independently after this turn.
+
+Continue carrying out the user's request, including starting any remaining background work. Do not send a prose acknowledgement merely to announce that work has started or is in progress. When no further tool calls are needed and there is no substantive answer or clarification to deliver, end the turn with exactly ${EMPTY_DELIVERY_SENTINEL}. Do not wait for results or report results that are not available yet.`;
+
 export const TASK_DELIVERY_SETTLED_INSTRUCTION = `Background task reporting\nFor this background-task update, the accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the settled tasks in this cohort and their available terminal outputs. Report their useful results together in one user-facing response without repeating results already reported. Do not reply with ${EMPTY_DELIVERY_SENTINEL}.`;
 
 export const TASK_DELIVERY_AUTO_INSTRUCTION = `Background task reporting\nFor this background-task update, the accompanying ${TASK_DELIVERY_CONTEXT_LABEL} message is runtime-authored and lists the whole cohort, including pending tasks and every available terminal output. A received result has not necessarily been reported to the user. Report new results only when they are useful independently of unfinished work. When that work settles, combine its results with any previously withheld results. If there is nothing new and useful to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}. Do not repeat results already reported or send an acknowledgement just to say you are waiting.`;
@@ -56,7 +61,7 @@ export function resolveTaskDeliveryContext(input: {
   return {
     ...projectTaskCohort(
       tasks.query({ cohortId: delivered.cohortId }),
-      input.taskDeliveryPolicy === "auto",
+      input.taskDeliveryPolicy === "auto" || input.taskDeliveryPolicy === "auto-silent",
     ),
     rootTurnId: delivered.turnId,
   };

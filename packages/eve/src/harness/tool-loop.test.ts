@@ -111,6 +111,7 @@ import {
 } from "#shared/empty-delivery.js";
 import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
+  TASK_DELIVERY_SILENT_LAUNCH_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 
@@ -12640,6 +12641,40 @@ describe("createToolLoopHarness", () => {
           kind: "context.instruction",
         },
       ]);
+    });
+
+    it("allows a silent task launch without an empty-response retry", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ role: "assistant", content: EMPTY_DELIVERY_SENTINEL }] },
+        text: EMPTY_DELIVERY_SENTINEL,
+        toolCalls: [],
+        toolResults: [],
+      });
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+      ctx.set(TaskDeliveryPolicyKey, "cohort-silent");
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+      await contextStorage.run(ctx, () =>
+        runStep(recordBackgroundTask(createTestSession()), {
+          message: "Start the background work.",
+        }),
+      );
+
+      expect(getLastAgentSettings().messages).toContainEqual({
+        role: "user",
+        content: TASK_DELIVERY_SILENT_LAUNCH_INSTRUCTION,
+        kind: "context.instruction",
+      });
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "message.completed",
+          data: expect.objectContaining({ message: null }),
+        }),
+      );
+      expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     });
 
     it("routes later-turn initiating task context through user messages", async () => {

@@ -4,6 +4,7 @@ import {
   TASK_DELIVERY_AUTO_INSTRUCTION,
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
+  TASK_DELIVERY_SILENT_LAUNCH_INSTRUCTION,
 } from "#tasks/delivery-context.js";
 
 export interface DeliveryPolicy {
@@ -20,6 +21,10 @@ const POLICIES = {
   initiating: {
     allowsEmptyDelivery: false,
     instruction: TASK_DELIVERY_INITIATING_INSTRUCTION,
+  },
+  silentLaunch: {
+    allowsEmptyDelivery: true,
+    instruction: TASK_DELIVERY_SILENT_LAUNCH_INSTRUCTION,
   },
   normal: { allowsEmptyDelivery: false },
   pending: {
@@ -43,7 +48,7 @@ export function resolveDeliveryPolicy(input: {
   // These runs have an explicit output consumer, so silence would violate the call contract.
   if (input.hasOutputSchema || input.isChild) return POLICIES.normal;
   if (
-    input.taskDeliveryPolicy === "auto" &&
+    (input.taskDeliveryPolicy === "auto" || input.taskDeliveryPolicy === "auto-silent") &&
     (input.taskDeliveryPhase === "pending" || input.taskDeliveryPhase === "settled")
   )
     return POLICIES.auto;
@@ -52,8 +57,11 @@ export function resolveDeliveryPolicy(input: {
   if (input.taskDeliveryPhase === "settled") return POLICIES.settled;
   // Nobody prompted a schedule-created first turn, so starting work needs no acknowledgement.
   if (input.isFirstTurn && input.hasScheduleProvenance) return POLICIES.conditional;
-  // User-prompted background work acknowledges acceptance without waiting for results.
-  if (input.taskDeliveryPhase === "initiating") return POLICIES.initiating;
+  if (input.taskDeliveryPhase === "initiating") {
+    return input.taskDeliveryPolicy?.endsWith("-silent")
+      ? POLICIES.silentLaunch
+      : POLICIES.initiating;
+  }
   // Ordinary turns retain the agent's normal response contract.
   return POLICIES.normal;
 }

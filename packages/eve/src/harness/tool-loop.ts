@@ -2535,7 +2535,7 @@ function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
   if (!emptyDeliveryEnabled) {
     return EMPTY_RESPONSE_NUDGE;
   }
-  return `${EMPTY_RESPONSE_NUDGE} If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
+  return `${EMPTY_RESPONSE_NUDGE} If the delivery instructions permit silence and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
 }
 
 /**

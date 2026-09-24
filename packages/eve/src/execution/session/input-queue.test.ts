@@ -51,7 +51,7 @@ const second: DeliverHookPayload = {
 };
 const user: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "New request" }] };
 
-describe.each(["auto", "cohort"] as const)(
+describe.each(["auto", "cohort", "auto-silent", "cohort-silent"] as const)(
   "task notifications with %s delivery",
   (taskDeliveryPolicy) => {
     it("discards an already queued completion during cancellation without changing its outcome", () => {

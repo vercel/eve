@@ -144,6 +144,13 @@ describe("resolveTaskDeliveryContext", () => {
       taskDeliveryPolicy: "auto",
     });
     expect(batch).toEqual(result);
+    expect(
+      resolveTaskDeliveryContext({
+        state,
+        taskDeliveryIds: ["task_2:ready:completed"],
+        taskDeliveryPolicy: "auto-silent",
+      }),
+    ).toEqual(result);
   });
 
   it("auto keeps an advisory wake pending until the delivered task is terminal", () => {

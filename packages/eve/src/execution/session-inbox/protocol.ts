@@ -26,9 +26,13 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
   if (
     payload.taskDeliveryPolicy !== undefined &&
     payload.taskDeliveryPolicy !== "auto" &&
-    payload.taskDeliveryPolicy !== "cohort"
+    payload.taskDeliveryPolicy !== "cohort" &&
+    payload.taskDeliveryPolicy !== "auto-silent" &&
+    payload.taskDeliveryPolicy !== "cohort-silent"
   ) {
-    throw new SessionInboxPayloadError('Task delivery policy must be "auto" or "cohort".');
+    throw new SessionInboxPayloadError(
+      'Task delivery policy must be "auto", "cohort", "auto-silent", or "cohort-silent".',
+    );
   }
   switch (payload.kind) {
     case "send": {
