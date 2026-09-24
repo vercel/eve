@@ -6,8 +6,7 @@ import type {
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
-import { cancelTasks, settleWorkflowTask } from "#tasks/owner-body.js";
+import { cancelTasks, settleWorkflowTask, startAgentTasks } from "#tasks/owner-body.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { findWorkflowTask, getTaskTable } from "#tasks/state.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
@@ -86,10 +85,15 @@ async function handleWorkflowToolRunRequest(
       });
       return;
     }
-    await applyAgentRequest(
-      { ownerId: message.from.runId, replyTo: message.replyTo, request: message.request },
-      cursor,
-    );
+    // The session owns the task because it holds the auth, capabilities, and
+    // sandbox the child needs; the result goes to the body's reply hook.
+    await startAgentTasks(cursor, [
+      {
+        callId: message.request.invocationId,
+        input: message.request.input,
+        workflowCaller: { replyTo: message.replyTo, runId: message.from.runId },
+      },
+    ]);
     return;
   }
   if (message.request.kind === "authorization-request") {

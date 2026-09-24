@@ -1,8 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
-import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { dismissStaleWorkflowRequestStep } from "#execution/tools/workflow/stale-request-step.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -10,13 +9,15 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
+import { startAgentTasks } from "#tasks/owner-body.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
 
-vi.mock("#execution/tools/subagent/agent-requests.js", () => ({
-  applyAgentRequest: vi.fn(),
+vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  startAgentTasks: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
+vi.mock("#tasks/emit-event-step.js", () => ({
   emitSubagentEventStep: vi.fn(async () => ({})),
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
@@ -69,10 +70,13 @@ it("starts the agent a working workflow task's run asks for", async () => {
     message: { from, kind: "request", replyTo: "reply", request: agentInvoke },
   });
 
-  expect(applyAgentRequest).toHaveBeenCalledWith(
-    { ownerId: "run", replyTo: "reply", request: agentInvoke },
-    cursor,
-  );
+  expect(startAgentTasks).toHaveBeenCalledExactlyOnceWith(cursor, [
+    {
+      callId: "call:reply",
+      input: agentInvoke.input,
+      workflowCaller: { replyTo: "reply", runId: "run" },
+    },
+  ]);
   expect(resumeHookStep).not.toHaveBeenCalled();
 });
 
@@ -96,7 +100,7 @@ it.each([
     message: { from, kind: "request", replyTo: "reply", request: agentInvoke },
   });
 
-  expect(applyAgentRequest).not.toHaveBeenCalled();
+  expect(startAgentTasks).not.toHaveBeenCalled();
   expect(resumeHookStep).toHaveBeenCalledWith("reply", {
     kind: "runtime-action-result",
     results: [

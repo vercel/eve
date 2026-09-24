@@ -10,14 +10,10 @@ import type { RunMode } from "#shared/run-mode.js";
 import { AGENT_SESSION_ENDED_MESSAGE } from "#tasks/render.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
-import { notifyDelegatedParentStep, notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import { fireSessionCallbackStep } from "#subagents/remote/callback-step.js";
+import { notifyTurnCallerStep } from "#tasks/child.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { answerOrder } from "#tasks/protocol.js";
-import {
-  createDelegatedSubagentErrorResult,
-  createDelegatedSubagentSuccessResult,
-} from "#subagents/parent-result.js";
 
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
@@ -38,7 +34,7 @@ export interface SessionFinalizationContext {
 /**
  * Terminates descendants, emits the terminal protocol event when the turn has
  * not already done so, then settles whoever is waiting on this session: the
- * task callback and delegated parent in task mode, or the parked caller.
+ * task callback in task mode, or the parked caller.
  */
 export async function finalizeSession(
   outcome: SessionTerminalOutcome,
@@ -69,13 +65,6 @@ export async function finalizeSession(
       output: settled.isError ? undefined : settled.output,
       serializedContext,
       status: settled.isError ? "failed" : "completed",
-      usage: settled.sessionUsage,
-    });
-    await notifyDelegatedParentStep({
-      result: settled.isError
-        ? createDelegatedSubagentErrorResult(serializedContext, settled.output)
-        : createDelegatedSubagentSuccessResult(serializedContext, settled.output),
-      serializedContext,
       usage: settled.sessionUsage,
     });
   } else if (context.caller !== undefined) {

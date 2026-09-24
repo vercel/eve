@@ -6,7 +6,7 @@ import {
   notifyCancelledTaskCallerStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
-} from "#subagents/parent-notification.js";
+} from "#tasks/child.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { answerOrder, reportOrdering } from "#tasks/protocol.js";
@@ -17,7 +17,7 @@ import {
 } from "#execution/session/next-input.js";
 import { cancelTasks, cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
-import { flushUnsentCallerEvents } from "#subagents/unsent-caller-events.js";
+import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
   readAdmittedOperations,
   SessionInputQueue,

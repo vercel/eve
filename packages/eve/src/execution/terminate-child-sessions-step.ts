@@ -3,7 +3,7 @@ import { readDurableSession, type DurableSessionState } from "#execution/durable
 import {
   resetRemoteAgentSession,
   resolveRemoteAgentStreamHeaders,
-} from "#subagents/remote-dispatch.js";
+} from "#subagents/remote/dispatch.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";

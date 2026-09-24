@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionStateMap } from "#harness/types.js";
@@ -22,7 +22,7 @@ import { TASK_CALLBACK_ALIAS_STATE_KEY, TASK_TIMER_STATE_KEY } from "#tasks/stat
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
-vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
+vi.mock("#tasks/emit-event-step.js", () => ({
   emitSubagentEventStep: vi.fn(),
 }));
 vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));

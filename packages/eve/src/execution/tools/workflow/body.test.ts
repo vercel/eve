@@ -6,7 +6,7 @@ import { readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), agent: vi.fn(), ask: vi.fn() }));
 vi.mock("#execution/workflow-registry.js", () => ({ readRegisteredWorkflow: () => mocks.execute }));
-vi.mock("#execution/tools/subagent/invoke-agent.js", () => ({ agent: mocks.agent }));
+vi.mock("#execution/tools/workflow/agent.js", () => ({ agent: mocks.agent }));
 vi.mock("#execution/tools/workflow/ask.js", async (importOriginal) => ({
   ...(await importOriginal()),
   ask: mocks.ask,

@@ -5,10 +5,7 @@ import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import {
-  reportTaskStartedStep,
-  resolveInitialTurnCallerStep,
-} from "#subagents/parent-notification.js";
+import { reportTaskStartedStep, resolveInitialTurnCallerStep } from "#tasks/child.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";

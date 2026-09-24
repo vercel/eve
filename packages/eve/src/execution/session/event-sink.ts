@@ -5,7 +5,7 @@ import { TurnDeliveryIdsKey } from "#context/keys.js";
 import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { forwardEventToRemoteCaller } from "#subagents/remote-caller-events.js";
+import { forwardEventToRemoteCaller } from "#subagents/remote/caller-events.js";
 import {
   encodeMessageStreamEvent,
   type MessageStreamEvent,

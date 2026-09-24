@@ -4,9 +4,9 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { none } from "#public/channels/auth.js";
 import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 import { eveChannel } from "#eve-channel/index.js";
-import { readLatestTaskReport } from "#subagents/task-reports.js";
+import { readLatestTaskReport } from "#subagents/remote/task-reports.js";
 
-vi.mock("#subagents/task-reports.js", () => ({ readLatestTaskReport: vi.fn() }));
+vi.mock("#subagents/remote/task-reports.js", () => ({ readLatestTaskReport: vi.fn() }));
 
 beforeEach(() => {
   vi.resetAllMocks();

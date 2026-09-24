@@ -2,7 +2,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
 import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";

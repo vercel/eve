@@ -2,7 +2,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { EVE_CALLBACK_TOKEN_HEADER } from "#protocol/message.js";
 import type { RouteHandlerArgs } from "#public/definitions/channel.js";
 import { routeAuth } from "#public/channels/auth.js";
-import { readLatestTaskReport } from "#subagents/task-reports.js";
+import { readLatestTaskReport } from "#subagents/remote/task-reports.js";
 import { TASK_PROTOCOL_RESPONSE_FIELD } from "#eve-channel/task-protocol-request.js";
 import type { EveChannelInput } from "#eve-channel/types.js";
 

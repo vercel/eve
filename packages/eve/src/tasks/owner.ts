@@ -12,13 +12,14 @@ import {
 } from "#execution/durable-session-store.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { startSubagent } from "#execution/tools/subagent/start.js";
-import type { InternalAgentInput } from "#execution/tools/subagent/invoke-agent.js";
+import type { InternalAgentInput } from "#execution/tools/workflow/agent.js";
 import {
   classifyFreshStart,
+  createAgentContinuationBundle,
   ownerPlanReusesSandbox,
   resolveAgentInvocationAction,
-} from "#execution/tools/subagent/invoke-preparation.js";
+  startSubagent,
+} from "#tasks/start.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
@@ -41,7 +42,6 @@ import { renderAgentUnreachable } from "#tasks/render.js";
 import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
 import { flushHeldCommands, steerWorkingAgent } from "#tasks/steer.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
-import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
   flushAgentInvocationTraces,

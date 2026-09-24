@@ -73,8 +73,8 @@ describe("eve dist single-chunk module evaluation", () => {
     // workflow's `steps.mjs`.
     const stepSources = [
       "src/internal/workflow/builtins.ts",
-      "src/subagents/callback-step.ts",
-      "src/subagents/adapter.ts",
+      "src/subagents/remote/callback-step.ts",
+      "src/tasks/child-input.ts",
       "src/execution/session/turn.ts",
       "src/execution/session/entry.ts",
       "src/execution/session/turn-step.ts",

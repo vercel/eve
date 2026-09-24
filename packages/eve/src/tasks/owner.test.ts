@@ -11,7 +11,7 @@ import {
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { startSubagent } from "#execution/tools/subagent/start.js";
+import { startSubagent } from "#tasks/start.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import {
   createWorkflowRuntime,
@@ -49,7 +49,10 @@ import { deliverableTaskResults, encodeTaskCreator } from "#tasks/results.js";
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
 vi.mock("#tasks/interactive.js", () => ({ isInteractiveRootTurn: vi.fn() }));
-vi.mock("#execution/tools/subagent/start.js", () => ({ startSubagent: vi.fn() }));
+vi.mock("#tasks/start.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  startSubagent: vi.fn(),
+}));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),

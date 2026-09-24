@@ -9,12 +9,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
-import {
-  notifyTurnCallerStep,
-  resolveInitialTurnCallerStep,
-} from "#subagents/parent-notification.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
-import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
+import { notifyTurnCallerStep, resolveInitialTurnCallerStep } from "#tasks/child.js";
+import { fireSessionCallbackStep } from "#subagents/remote/callback-step.js";
+import { startRemoteAgentSession } from "#subagents/remote/dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
 import {
@@ -48,7 +45,7 @@ import type { HarnessSession } from "#harness/types.js";
  */
 
 // This suite covers callback routing; recording a report needs a workflow world it does not start.
-vi.mock("#subagents/task-reports.js", () => ({
+vi.mock("#subagents/remote/task-reports.js", () => ({
   readLatestTaskReport: vi.fn(async () => undefined),
   recordTaskReport: vi.fn(async () => {}),
 }));

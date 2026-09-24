@@ -24,7 +24,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import { emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
-import { forwardEventToRemoteCaller } from "#subagents/remote-caller-events.js";
+import { forwardEventToRemoteCaller } from "#subagents/remote/caller-events.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";

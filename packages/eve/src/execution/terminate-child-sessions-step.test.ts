@@ -32,7 +32,7 @@ const {
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: deserializeContextMock,
 }));
-vi.mock("#subagents/remote-dispatch.js", () => ({
+vi.mock("#subagents/remote/dispatch.js", () => ({
   resetRemoteAgentSession: resetRemoteAgentSessionMock,
   resolveRemoteAgentStreamHeaders: resolveRemoteAgentStreamHeadersMock,
 }));

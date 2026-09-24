@@ -22,19 +22,19 @@ import {
   isRetryableRemoteAgentCancelError,
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
-} from "#subagents/remote-dispatch.js";
+} from "#subagents/remote/dispatch.js";
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
   isRetryableRemoteAgentContinueError,
   readRemoteAgentReport,
   type RemoteCallback,
-} from "#subagents/remote-continue.js";
-import { projectSessionCallbackResult } from "#subagents/callback-route.js";
+} from "#subagents/remote/continue.js";
+import { projectSessionCallbackResult } from "#subagents/remote/callback-route.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { InputResponse } from "#shared/input.js";
-import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
+import { RemoteTaskProtocolError } from "#subagents/remote/protocol.js";
 import type { ChildAddress, TaskCommand, TaskError } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { readTaskCreator } from "#tasks/results.js";

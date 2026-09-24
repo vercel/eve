@@ -1,7 +1,7 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
-import { agent } from "#execution/tools/subagent/invoke-agent.js";
+import { agent } from "#execution/tools/workflow/agent.js";
 import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {

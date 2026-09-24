@@ -3,7 +3,7 @@ import { finalizeSession } from "#execution/session/finalization.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import { notifyTurnCallerStep } from "#tasks/child.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: vi.fn(),
@@ -14,10 +14,9 @@ vi.mock("#execution/terminal-session-completion-step.js", () => ({
 vi.mock("#execution/terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn(),
 }));
-vi.mock("#subagents/callback-step.js", () => ({ fireSessionCallbackStep: vi.fn() }));
-vi.mock("#subagents/parent-notification.js", async (importOriginal) => ({
+vi.mock("#subagents/remote/callback-step.js", () => ({ fireSessionCallbackStep: vi.fn() }));
+vi.mock("#tasks/child.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  notifyDelegatedParentStep: vi.fn(),
   notifyTurnCallerStep: vi.fn(),
 }));
 

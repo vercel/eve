@@ -13,14 +13,14 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
-} from "#subagents/remote-dispatch.js";
+} from "#subagents/remote/dispatch.js";
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
   isRetryableRemoteAgentContinueError,
   readRemoteAgentReport,
-} from "#subagents/remote-continue.js";
-import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
+} from "#subagents/remote/continue.js";
+import { RemoteTaskProtocolError } from "#subagents/remote/protocol.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 import { ownerInboxHookToken } from "#tasks/state.js";
 import {
@@ -42,12 +42,12 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
   getWorld: vi.fn(async () => ({})),
   resumeHook: vi.fn(),
 }));
-vi.mock("#subagents/remote-dispatch.js", () => ({
+vi.mock("#subagents/remote/dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
   isRetryableRemoteAgentCancelError: vi.fn(),
   resolveRemoteAgentForAction: vi.fn(),
 }));
-vi.mock("#subagents/remote-continue.js", () => ({
+vi.mock("#subagents/remote/continue.js", () => ({
   answerRemoteAgentSession: vi.fn(),
   continueRemoteAgentSession: vi.fn(),
   isRetryableRemoteAgentContinueError: vi.fn(),

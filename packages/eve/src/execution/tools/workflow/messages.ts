@@ -1,5 +1,5 @@
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
+import type { AgentInvocationRequest } from "#execution/tools/workflow/agent.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolInputRequest } from "#tools/definition.js";

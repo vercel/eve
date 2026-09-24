@@ -24,7 +24,7 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
-import type { RuntimeSession } from "#subagents/start-outcome.js";
+import type { RuntimeSession } from "#tasks/start.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueCoordinationCallIds,
@@ -45,7 +45,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
+import { resolveWorkflowAgentMetadata } from "#execution/tools/workflow/agent-metadata.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 import type { TaskCreator } from "#tasks/results.js";
 

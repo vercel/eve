@@ -145,8 +145,8 @@
  *   rule 49 — Model-facing task text lives only in `src/tasks/render.ts`. No
  *             other eve source string literal contains "in the background",
  *             "<task_result", or "[Tasks]", and no string literal under
- *             `src/tasks/`, `src/subagents/`, or
- *             `src/execution/tools/subagent/` starts with `Agent "` or
+ *             `src/tasks/`, `src/subagents/`, or the workflow tool body's
+ *             `src/execution/tools/workflow/agent*.ts` starts with `Agent "` or
  *             mentions `agentId`, `task_cancel`, or a time limit. One module
  *             owns every string the model reads about tasks, so the contract
  *             can be tuned in one place.
@@ -300,9 +300,6 @@ async function scanRepo(state) {
 const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
 const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
   /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
-// The shared body owns its invocation id, so it consumes the framework-internal
-// entry rather than the public `agent()`; that import is the one exception.
-const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
 
 /**
  * @param {string} posix
@@ -313,7 +310,6 @@ function checkRule42(posix, lines, violations) {
   if (posix !== SUBAGENT_WORKFLOW_PATH) return;
 
   lines.forEach((line, idx) => {
-    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
     if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
     violations.push({
       rule: 42,
@@ -684,7 +680,8 @@ function checkRule48(posix, sourceFile, violations) {
 const RULE49_TASK_TEXT_RE = /in the background|<task_result|\[Tasks\]/i;
 // Delegation modules also must not phrase agent errors themselves.
 const RULE49_AGENT_TEXT_RE = /^Agent "|\bagentId\b|\btask_cancel\b|\btime limit\b/;
-const RULE49_AGENT_TEXT_DIRS = ["tasks/", "subagents/", "execution/tools/subagent/"].map(
+// Path prefixes: the last covers the workflow tool body's `agent()` modules.
+const RULE49_AGENT_TEXT_DIRS = ["tasks/", "subagents/", "execution/tools/workflow/agent"].map(
   (dir) => `${EVE_SRC}${dir}`,
 );
 const RULE49_RENDER = `${EVE_SRC}tasks/render.ts`;

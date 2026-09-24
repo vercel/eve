@@ -18,7 +18,7 @@ import { cancelTasks } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import { flushUnsentCallerEvents } from "#subagents/unsent-caller-events.js";
+import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
 

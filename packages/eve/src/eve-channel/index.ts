@@ -5,7 +5,7 @@ import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
-import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
+import { handleSessionCallbackRequest } from "#subagents/remote/callback-route.js";
 import {
   handleWorkflowWebhookRequest,
   WORKFLOW_WEBHOOK_ROUTE_PATTERN,
