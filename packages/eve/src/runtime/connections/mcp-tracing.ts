@@ -97,8 +97,8 @@ export function injectMcpTraceContext(
   if (message.params !== undefined && !isObject(message.params)) return undefined;
   const propagated: Record<string, string> = {};
   injectContext(activeContext, propagated);
-  stripEveTraceBaggage(propagated);
   if (!withinTraceContextLimit(propagated)) return undefined;
+  stripEveTraceBaggage(propagated);
 
   const params = isObject(message.params) ? message.params : {};
   const existingMeta = isObject(params["_meta"]) ? params["_meta"] : {};

@@ -142,6 +142,36 @@ describe("MCP trace propagation", () => {
     expect(requestInit?.body).toBe(body);
   });
 
+  it("leaves requests untouched when custom propagation baggage is oversized", async () => {
+    const fetcher = vi.fn(
+      async (_request: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) =>
+        new Response(null),
+    );
+    const fetch = createMcpTraceFetch({
+      connectionName: "linear",
+      fetcher,
+      getActiveContext: () => ROOT_CONTEXT,
+      getProtocolVersion: () => undefined,
+      injectContext(_context, carrier) {
+        carrier.baggage = `vendor=${"x".repeat(8192)}`;
+      },
+    });
+    const requestInit = {
+      body: JSON.stringify({
+        id: 1,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "get_issue" },
+      }),
+      method: "POST",
+    } satisfies RequestInit;
+
+    await fetch("https://mcp.example.com", requestInit);
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[1]).toBe(requestInit);
+  });
+
   it("propagates the fallback CLIENT span context for tools/call", async () => {
     const parent = runtimeTrace.getTracer("test.mcp").startSpan("parent");
     const parentContext = withAgentToolContentPolicy(runtimeTrace.setSpan(ROOT_CONTEXT, parent), {
