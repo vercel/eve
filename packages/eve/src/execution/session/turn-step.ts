@@ -67,7 +67,6 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
-import { hasPendingApprovalBatch } from "#harness/input-requests.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
@@ -477,6 +476,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         compactOnly: input.input?.control === "compact",
         createRuntime: createWorkflowRuntime,
         handleEvent,
+        prepareApprovalTurn: (event) => dynamicConnections.dispatch(createTurnStartedEvent(event)),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
@@ -514,31 +514,18 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   session: enrichedSession,
                 })
               : enrichedSession;
+            const connectionState = getHarnessEmissionState(schemaSession.state);
             await dynamicConnections.rehydrate(
-              getHarnessEmissionState(schemaSession.state),
+              connectionState,
               runtimeIdentity,
-              isHarnessBetweenTurns(schemaSession),
-              input.input?.control === undefined
-                ? {
-                    session: schemaSession,
-                    stepInput: consumeDeferredStepInput({
-                      input: stepInput,
-                      preferCurrentInput:
-                        mode !== "conversation" &&
-                        stepInput !== undefined &&
-                        hasPendingApprovalBatch(schemaSession),
-                      session: schemaSession,
-                    }).input,
-                  }
-                : undefined,
+              isHarnessBetweenTurns(schemaSession)
+                ? undefined
+                : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
             );
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
               const startsTurn = completedAuths.some(
-                ({ result }) =>
-                  pendingAuth?.challenges.find(
-                    (challenge) => challenge.attemptId === result.attemptId,
-                  )?.candidateId === undefined,
+                ({ candidateId }) => candidateId === undefined,
               );
               if (startsTurn && isHarnessBetweenTurns(schemaSession)) {
                 const turnInput = createTurnInputMessages(
@@ -582,10 +569,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);
               }
-              for (const { authorization, result } of completedAuths) {
-                const candidateId = pendingAuth?.challenges.find(
-                  (challenge) => challenge.attemptId === result.attemptId,
-                )?.candidateId;
+              for (const { authorization, result, candidateId } of completedAuths) {
                 await handleEvent(
                   createAuthorizationCompletedEvent({
                     attemptId: result.attemptId,

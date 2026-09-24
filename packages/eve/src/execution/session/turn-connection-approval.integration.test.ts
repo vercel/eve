@@ -7,7 +7,11 @@ import { serializeContext } from "#context/serialize.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import type { DurableStepResult, TurnStepPayload } from "#execution/session/turn-step-types.js";
-import { getApprovalAuditState } from "#harness/approval-candidates.js";
+import {
+  getApprovalAuditState,
+  markApprovalCandidateAuthorizationRequired,
+} from "#harness/approval-candidates.js";
+import { setPendingAuthorization } from "#harness/authorization.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
@@ -48,7 +52,7 @@ const usage = {
 };
 const sessionId = "turn-connection-approval";
 
-function modelResponse(toolName?: string) {
+function modelResponse(toolName?: string, callId?: string) {
   return {
     stream: simulateReadableStream({
       chunks: [
@@ -57,7 +61,7 @@ function modelResponse(toolName?: string) {
           ? [
               {
                 type: "tool-call" as const,
-                toolCallId: toolName === "connection_search" ? "search" : "save",
+                toolCallId: callId ?? (toolName === "connection_search" ? "search" : "save"),
                 toolName,
                 input: JSON.stringify(
                   toolName === "connection_search"
@@ -92,7 +96,8 @@ function setup(scope: "turn.started" | "session.started" = "turn.started", rejec
       ? { status: "rejected" as const, reason: "Only the notes owner can approve." }
       : { status: "allowed" as const };
   });
-  const resolver = vi.fn(() => ({
+  const policyTurns: string[] = [];
+  const resolver = vi.fn((event: unknown) => ({
     notes: defineOpenAPIConnection({
       baseUrl: "https://notes.example.com",
       description: "Save notes",
@@ -121,7 +126,13 @@ function setup(scope: "turn.started" | "session.started" = "turn.started", rejec
           },
         },
       },
-      approval: { request: () => "user-approval", response },
+      approval: {
+        request: () => "user-approval",
+        response: (context) => {
+          policyTurns.push((event as { data: { turnId?: string } }).data.turnId ?? "session");
+          return response(context);
+        },
+      },
     }),
   }));
   const dynamicConnectionResolvers: ResolvedDynamicConnectionResolver[] = [
@@ -151,28 +162,51 @@ function setup(scope: "turn.started" | "session.started" = "turn.started", rejec
     model: { id: "test" },
     skills: [],
     tools: [],
-    workspaceSpec: {},
+    workspaceSpec: { rootEntries: [] },
   };
-  const resolvedAgent = {
-    config: {},
+  const resolvedAgent: Partial<CompiledBundle["resolvedAgent"]> = {
     connections: [],
     dynamicConnectionResolvers,
     dynamicToolResolvers,
   };
+  const sandboxRegistry: {
+    sandbox: CompiledBundle["graph"]["root"]["sandboxRegistry"]["sandbox"] | null;
+  } = { sandbox: null };
   const bundle = {
     adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
-    compiledArtifactsSource: {},
+    compiledArtifactsSource: { kind: "bundled" },
     graph: {
       nodesByNodeId: new Map(),
-      root: { agent: resolvedAgent, sandboxRegistry: { sandbox: null }, turnAgent },
+      root: {
+        agent: resolvedAgent as CompiledBundle["resolvedAgent"],
+        sandboxRegistry: sandboxRegistry as CompiledBundle["graph"]["root"]["sandboxRegistry"],
+        turnAgent,
+        channels: [],
+        hookRegistry: createEmptyHookRegistry(),
+        nodeId: "__root__",
+        subagentRegistry: {
+          dynamicNodeIds: new Set(),
+          dynamicResolvers: [],
+          preparedTools: [],
+          subagentsByName: new Map(),
+          subagentsByNodeId: new Map(),
+        },
+        toolRegistry: { preparedTools: [], toolsByName: new Map() },
+      },
     },
     hookRegistry: createEmptyHookRegistry(),
     moduleMap: { nodes: {} },
-    resolvedAgent,
-    subagentRegistry: {},
-    toolRegistry: {},
+    resolvedAgent: resolvedAgent as CompiledBundle["resolvedAgent"],
+    subagentRegistry: {
+      dynamicNodeIds: new Set(),
+      dynamicResolvers: [],
+      preparedTools: [],
+      subagentsByName: new Map(),
+      subagentsByNodeId: new Map(),
+    },
+    toolRegistry: { preparedTools: [], toolsByName: new Map() },
     turnAgent,
-  } as unknown as CompiledBundle;
+  } as CompiledBundle;
   vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
   const doStream = vi
     .fn()
@@ -222,7 +256,28 @@ function setup(scope: "turn.started" | "session.started" = "turn.started", rejec
     snapshot = result;
     return result;
   }
-  return { doStream, events, fetch, resolver, response, step };
+  return {
+    doStream,
+    events,
+    fetch,
+    resolver,
+    response,
+    step,
+    policyTurns,
+    updateSession(update: (session: HarnessSession) => HarnessSession) {
+      snapshot = {
+        ...snapshot,
+        sessionState: createDurableSessionState({
+          session: update({
+            ...session,
+            ...readDurableSession(snapshot.sessionState),
+            agent: session.agent,
+            compaction: session.compaction,
+          }),
+        }),
+      };
+    },
+  };
 }
 
 afterEach(() => {
@@ -232,6 +287,117 @@ afterEach(() => {
 });
 
 describe("turn connection approval restoration", () => {
+  it("authorizes requests from two originating turns independently in one cold delivery", async () => {
+    const fixture = setup();
+    await fixture.step({
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
+    });
+    const first = await fixture.step();
+    const firstBatch = getPendingInputBatches(readDurableSession(first.sessionState).state)[0]!;
+    fixture.doStream
+      .mockImplementationOnce(() => modelResponse("connection_search", "search-2"))
+      .mockImplementationOnce(() => modelResponse("notes__saveNote", "save-2"));
+    await fixture.step({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ message: "Prepare Alice's second independent note." }],
+      },
+    });
+    const second = await fixture.step();
+    const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
+    expect(batches).toHaveLength(2);
+    expect(batches[1]!.event!.turnId).not.toBe(firstBatch.event!.turnId);
+    clearDurableDynamicCallbacks(sessionId);
+    await fixture.step({
+      delivery: {
+        kind: "deliver",
+        auth: bob,
+        payloads: [
+          {
+            inputResponses: batches.flatMap((batch) =>
+              batch.requests.map((request) => ({
+                requestId: request.requestId,
+                optionId: "approve",
+              })),
+            ),
+          },
+        ],
+      },
+    });
+    clearDurableDynamicCallbacks(sessionId);
+    const resumed = await fixture.step();
+    expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
+    expect(fixture.response).toHaveBeenCalledTimes(2);
+    expect(
+      getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
+    ).toHaveLength(2);
+    expect(fixture.fetch).toHaveBeenCalled();
+    expect(fixture.events.filter((event) => event.type === "session.failed")).toEqual([]);
+  });
+  it("restores the originating connection for a sign-in callback without a premature turn", async () => {
+    const fixture = setup();
+    await fixture.step({
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note for Bob." }] },
+    });
+    const parked = await fixture.step();
+    const batch = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!;
+    const request = batch.requests[0]!;
+    const ingested = await fixture.step({
+      delivery: {
+        kind: "deliver",
+        auth: bob,
+        payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
+      },
+    });
+    const candidate = getApprovalAuditState(readDurableSession(ingested.sessionState).state)
+      .activeCandidates[0]!;
+    const challenges = [
+      {
+        attemptId: "sign-in-1",
+        candidateId: candidate.candidateId,
+        name: "notes",
+        principal: { type: "user" as const, id: "bob" },
+        hookUrl: "https://example.com/callback",
+        challenge: { url: "https://example.com/sign-in" },
+      },
+    ];
+    fixture.updateSession((session) => ({
+      ...session,
+      state: setPendingAuthorization(
+        markApprovalCandidateAuthorizationRequired({
+          state: session.state,
+          candidateId: candidate.candidateId,
+          authorizationChallenges: challenges,
+        }),
+        { challenges },
+      ),
+    }));
+    clearDurableDynamicCallbacks(sessionId);
+    const start = fixture.events.length;
+    await fixture.step({
+      delivery: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              connectionName: "notes",
+              attemptId: "sign-in-1",
+              callback: { params: { code: "approved" } },
+            },
+          },
+        ],
+      },
+    });
+    expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
+    expect(fixture.response).toHaveBeenCalledOnce();
+    expect(fixture.fetch).toHaveBeenCalledOnce();
+    const events = fixture.events.slice(start);
+    expect(events.findIndex((event) => event.type === "authorization.completed")).toBeLessThan(
+      events.findIndex((event) => event.type === "turn.started"),
+    );
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+  });
+
   it.each([false, true])(
     "approves and executes a discovered tool with a cold callback cache: %s",
     async (cold) => {

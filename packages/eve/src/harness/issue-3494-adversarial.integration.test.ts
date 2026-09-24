@@ -20,6 +20,10 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
+import { createTurnStartedEvent } from "#protocol/message.js";
 
 // Diagnostic probes assert desired outcomes. Pending state is created by the
 // real harness and SDK; only provider output and runtime result delivery are scripted.
@@ -155,7 +159,31 @@ function fixture(
       throw new Error("Must dispatch through executor");
     },
   });
+  const restoredTurns: string[] = [];
   const harness = createToolLoopHarness({
+    prepareApprovalTurn: async (event) => {
+      const ctx = new ContextContainer();
+      ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
+      await bindDynamicConnections(ctx, {
+        dynamicConnectionResolvers: [
+          {
+            slug: "notes",
+            sourceId: "notes",
+            sourceKind: "module",
+            logicalPath: "connections/notes.ts",
+            eventNames: ["turn.started"],
+            events: {
+              "turn.started": (event) => {
+                restoredTurns.push(
+                  (event as ReturnType<typeof createTurnStartedEvent>).data.turnId,
+                );
+                return null;
+              },
+            },
+          },
+        ],
+      }).dispatch(createTurnStartedEvent(event));
+    },
     mode: "conversation",
     capabilities: { requestInput: true },
     tools,
@@ -216,6 +244,7 @@ function fixture(
   reports.push(report);
   return {
     script,
+    restoredTurns,
     executions,
     events,
     step,
@@ -758,6 +787,7 @@ it("resumes a complete batch while another batch has only a partial approval [co
   f.script.push(calls("gateB"));
   await f.drive({ message: "Prepare another independent B." });
   const independentB = f.pending().at(-1)!;
+  const independentTurn = getPendingInputBatches(f.session.state)[1]!.event!.turnId;
 
   // When one delivery answers A and the independent B.
   f.script.push("Independent B approved.");
@@ -770,6 +800,7 @@ it("resumes a complete batch while another batch has only a partial approval [co
 
   // Then only the complete batch executes and replies, without another model call.
   expect(result.settledTurn?.output).toBe("Independent B approved.");
+  expect(f.restoredTurns).toEqual([independentTurn]);
   expect(f.executions).toEqual(["gateB"]);
   expect(f.pending()).toHaveLength(2);
   f.script.push("Both approved.");

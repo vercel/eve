@@ -64,8 +64,10 @@ the connection callbacks before checking the response policy, even in a fresh
 process. This restoration uses the pending request's turn coordinates and the
 current authenticated session context; it does not emit another public
 `turn.started` event. The response policy still receives the authenticated
-responder separately. Keep connection resolvers idempotent because restoration
-can run them again.
+responder separately. When one delivery answers requests from different turns,
+eve restores each candidate's originating connection scope before its policy
+check, then prepares the complete batch selected for tool replay. Keep connection
+resolvers idempotent because restoration can run them again.
 
 ## Static-token auth
 

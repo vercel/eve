@@ -69,6 +69,10 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly prepareApprovalTurn?: (event: {
+    readonly sequence: number;
+    readonly turnId: string;
+  }) => Promise<void>;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -105,6 +109,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
+    prepareApprovalTurn: input.prepareApprovalTurn,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,
