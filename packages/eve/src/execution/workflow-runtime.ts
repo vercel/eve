@@ -55,9 +55,10 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import type {
-  HandoffWorkflowEntryInput,
-  InitialWorkflowEntryInput,
+import {
+  SESSION_HANDOFF_VERSION,
+  type HandoffWorkflowEntryInput,
+  type InitialWorkflowEntryInput,
 } from "#execution/session/entry-input.js";
 import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
@@ -349,6 +350,7 @@ export async function startSessionOwnerStep(input: SessionOwnerStartInput): Prom
     activationToken: input.activationToken,
     checkpoint: input.checkpoint,
     delivery: input.delivery,
+    handoffVersion: SESSION_HANDOFF_VERSION,
     kind: "handoff",
     ownerDeploymentId: input.targetDeploymentId,
     sessionWritable: getRun(input.anchorRunId).getWritable<Uint8Array>(),
