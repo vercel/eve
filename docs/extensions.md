@@ -83,6 +83,8 @@ export default defineTool({
 });
 ```
 
+Read `extension.config` inside handlers such as `execute`, not at module top level. When the same extension is mounted in several agents with different configs, each session reads the config of its own agent's mount, and a top-level read cannot tell which agent is asking.
+
 If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
 
 `defineState` uses a durable key scoped to the logical mount path and the authored state name. Two mounts of the same package can use the same state name without sharing a slot in one context. Contributed subagents use their parent extension's mount identity, but retain their own runtime contexts.
