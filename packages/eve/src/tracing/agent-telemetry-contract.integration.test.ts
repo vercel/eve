@@ -2,7 +2,6 @@ import {
   BasicTracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
-  type ReadableSpan,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
 import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
@@ -783,17 +782,16 @@ describe("exported agent telemetry contract", () => {
       expect(caller.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
       expect(caller.attributes["gen_ai.usage.output_tokens"]).toBeUndefined();
       expect(
-        exported
+        parsed
           .filter((span) => span.links.length > 0)
           .map((span) => ({
             source: `${span.name} ${String(span.attributes["agent.run.id"])}:${String(span.attributes["agent.turn.id"])}`,
             links: span.links.map((link) => ({
-              type: link.attributes?.["eve.link.type"],
+              type: link.attributes["eve.link.type"],
               target:
                 parsed.find(
                   (candidate) =>
-                    candidate.traceId === link.context.traceId &&
-                    candidate.spanId === link.context.spanId,
+                    candidate.traceId === link.traceId && candidate.spanId === link.spanId,
                 )?.name ?? "external",
             })),
           }))
@@ -808,7 +806,7 @@ describe("exported agent telemetry contract", () => {
           links: [{ type: "channel.request", target: "external" }],
         },
       ]);
-      expect(normalizeTraceForest(parsed, exported)).toEqual([
+      expect(normalizeTraceForest(parsed)).toEqual([
         "conversation original-conversation",
         "trace parent:turn_0 outcome=completed channel=http:web delivery=delivery",
         "  invoked from external via channel.request",
@@ -835,7 +833,6 @@ describe("exported agent telemetry contract", () => {
               ? { ...span, parentSpanId: "0".repeat(16) }
               : span,
           ),
-          exported,
         ),
       ).toThrow(/Unreachable spans: execute_tool coordinate/u);
       expect(summarizeLocalTrace(parsed[0]!.traceId, parsed)).toMatchObject({
@@ -1057,10 +1054,7 @@ describe("exported agent telemetry contract", () => {
   );
 });
 
-function normalizeTraceForest(
-  spans: readonly LocalTraceSpan[],
-  exported: readonly ReadableSpan[],
-): string[] {
+function normalizeTraceForest(spans: readonly LocalTraceSpan[]): string[] {
   const roots = spans.filter(
     (span) => span.parentSpanId === undefined && span.name.startsWith("invoke_agent "),
   );
@@ -1073,14 +1067,13 @@ function normalizeTraceForest(
     ]),
   );
   const causalParents = new Map(
-    exported.flatMap((span) =>
+    spans.flatMap((span) =>
       span.links
         .filter(
           (link) =>
-            link.attributes?.["eve.link.type"] === "agent.dispatch" &&
-            aliases.has(link.context.traceId),
+            link.attributes["eve.link.type"] === "agent.dispatch" && aliases.has(link.traceId),
         )
-        .map((link) => [span.spanContext().traceId, link.context.traceId] as const),
+        .map((link) => [span.traceId, link.traceId] as const),
     ),
   );
   const byIdentity = new Map(spans.map((span) => [`${span.traceId}:${span.spanId}`, span]));
@@ -1114,12 +1107,12 @@ function normalizeTraceForest(
           : ` channel=${String(channelKind)}:${String(channelName)} delivery=${String(deliveryId)}`
       }`,
     );
-    const links = exported
-      .filter((span) => span.spanContext().traceId === root.traceId)
+    const links = spans
+      .filter((span) => span.traceId === root.traceId)
       .flatMap((span) =>
         span.links.map((link) => {
-          const target = byIdentity.get(`${link.context.traceId}:${link.context.spanId}`);
-          const type = String(link.attributes?.["eve.link.type"] ?? "unknown");
+          const target = byIdentity.get(`${link.traceId}:${link.spanId}`);
+          const type = String(link.attributes["eve.link.type"] ?? "unknown");
           return `  invoked from ${
             target === undefined
               ? "external"

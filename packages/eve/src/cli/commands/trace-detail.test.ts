@@ -14,6 +14,7 @@ function span(overrides: Partial<LocalTraceSpan> = {}): LocalTraceSpan {
     attributes: {},
     endTimeNs: 20_000_000n,
     events: [],
+    links: [],
     name: "agent.step",
     spanId: "a".repeat(16),
     startTimeNs: 10_000_000n,

@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 
@@ -401,63 +400,20 @@ async function expectLocalTraceLineage(
     "agent.parent_run.id": input.parentSessionId,
     "agent.run.type": "subagent",
   });
-  expect(await readSpanLinks(appRoot, root(children[0]!))).toEqual([
+  expect(root(children[0]!).links).toEqual([
     {
-      attributes: [{ key: "eve.link.type", value: { stringValue: "agent.dispatch" } }],
+      attributes: { "eve.link.type": "agent.dispatch" },
       spanId: caller!.spanId,
       traceId: caller!.traceId,
     },
   ]);
-  expect(await readSpanLinks(appRoot, root(children[1]!))).toEqual([]);
+  expect(root(children[1]!).links).toEqual([]);
 }
 
 function root(trace: LocalTrace): LocalTraceSpan {
   const [activation] = trace.spans.filter(isAgentTurnSpan);
   if (activation === undefined) throw new Error(`No activation in trace ${trace.traceId}`);
   return activation;
-}
-
-async function readSpanLinks(
-  appRoot: string,
-  span: LocalTraceSpan,
-): Promise<
-  readonly {
-    readonly attributes: readonly { readonly key: string; readonly value: unknown }[];
-    readonly spanId: string;
-    readonly traceId: string;
-  }[]
-> {
-  const path = join(
-    appRoot,
-    ".eve",
-    "traces",
-    "v1",
-    span.traceId,
-    "segments",
-    `${span.spanId}.otlp.json`,
-  );
-  const payload = JSON.parse(await readFile(path, "utf8")) as {
-    readonly resourceSpans: readonly {
-      readonly scopeSpans: readonly {
-        readonly spans: readonly {
-          readonly links?: readonly {
-            readonly attributes: readonly { readonly key: string; readonly value: unknown }[];
-            readonly spanId: string;
-            readonly traceId: string;
-          }[];
-        }[];
-      }[];
-    }[];
-  };
-  const spans = payload.resourceSpans.flatMap((resource) =>
-    resource.scopeSpans.flatMap((scope) => scope.spans),
-  );
-  expect(spans).toHaveLength(1);
-  return (spans[0]?.links ?? []).map(({ attributes, spanId, traceId }) => ({
-    attributes,
-    spanId,
-    traceId,
-  }));
 }
 
 async function expectRetainedChildConversation(input: {
