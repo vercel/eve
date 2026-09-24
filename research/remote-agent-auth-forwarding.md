@@ -95,8 +95,9 @@ export default eveChannel({
   asserts. The route's `auth` walk has already authenticated the request; the forwarding decision
   is authorization over its result, so there is no second token verification and no new auth
   machinery.
-- `assertion.principal` is `{ current, initiator }`: the stamped contexts the request would
-  install, with `initiator` defaulting to `current`. It is absent when the predicate decides parent
+- `assertion.principal` is `{ current, initiator }`: the stamped contexts the forwarder asserts,
+  with `initiator` defaulting to `current`. `initiator` takes effect only on session creation; on
+  continuation it is the asserted value, not the session's pinned initiator. `assertion.principal` is absent when the predicate decides parent
   lineage for a request that forwards no principal. Without this argument, a trusted forwarder
   could assert any authenticator, issuer, and attributes, so a receiver whose tools gate on Slack,
   GitHub, or app principals could not trust a forwarder that should speak only for its own users.

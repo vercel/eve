@@ -122,9 +122,11 @@ export interface EveChannelInput {
    * public trace audience, or remote lineage.
    *
    * The second argument carries what the forwarder asserts. `assertion.principal`
-   * holds the stamped `current` and `initiator` contexts the request would install,
+   * holds the stamped `current` and `initiator` contexts the forwarder asserts,
    * so a receiver can limit a forwarder to the identities it may speak for, such as
-   * one authenticator and issuer. It is absent when the predicate decides remote
+   * one authenticator and issuer. `initiator` takes effect only on session
+   * creation; on continuation it is the asserted value, not the session's pinned
+   * initiator. `assertion.principal` is absent when the predicate decides remote
    * parent lineage for a request that forwards no principal.
    *
    * When a trusted forwarder's assertion is accepted on session creation, the

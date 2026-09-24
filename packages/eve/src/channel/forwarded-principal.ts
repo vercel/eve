@@ -30,11 +30,13 @@ export interface ForwardedPrincipal {
  */
 export interface ForwardedAssertion {
   /**
-   * The session principals the request would install, present when it forwards
-   * a principal and absent when only remote parent lineage is being trusted.
+   * The session principals the forwarder asserts, present when it forwards a
+   * principal and absent when only remote parent lineage is being trusted.
    * Both contexts are already stamped with {@link FORWARDED_BY_ATTRIBUTE}, and
-   * `initiator` is `current` when the sender omitted it. Continuation requests
-   * keep the session's pinned initiator, so only `current` takes effect there.
+   * `initiator` is `current` when the sender omitted it. `initiator` takes
+   * effect only on session creation: continuation requests install only
+   * `current`, so there `initiator` is the asserted value, not the session's
+   * pinned initiator.
    */
   readonly principal?: {
     readonly current: SessionAuthContext;
