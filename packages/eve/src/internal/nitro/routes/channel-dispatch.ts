@@ -17,6 +17,7 @@ import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-
 import {
   attachAgentInfoRouteResponse,
   attachHomeRouteMetadata,
+  attachRouteCapabilityRuntime,
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
@@ -301,6 +302,13 @@ async function buildRouteArgs(
   );
   if (bundle.resolveRemoteAgentStreamHeaders !== undefined) {
     attachRemoteAgentStreamHeadersResolver(args, bundle.resolveRemoteAgentStreamHeaders);
+  }
+  const compiledBundle = bundle.compiledBundle;
+  if (compiledBundle !== undefined) {
+    attachRouteCapabilityRuntime(args, async () => {
+      const { createCapabilityRuntime } = await import("#execution/capability-session.js");
+      return createCapabilityRuntime(compiledBundle);
+    });
   }
 
   return {

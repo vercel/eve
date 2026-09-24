@@ -105,15 +105,22 @@ async function materializeNode<TManifest extends CompiledAgentResources>(input: 
     });
   }
 
+  const skills: CompiledSkillDefinition[] = [];
   for (const skill of input.manifest.skills) {
     await materializeSkill({ nodeRoot, skill });
+    skills.push({
+      ...stripSkillPackageFiles(skill),
+      fileIndex: await listSkillSupportingFiles(
+        join(nodeRoot, RESOURCE_SKILLS_DIRECTORY, skill.name),
+      ),
+    });
   }
 
   const contentHash = await hashWorkspaceResourceRoot(nodeRoot);
 
   return {
     ...input.manifest,
-    skills: input.manifest.skills.map(stripSkillPackageFiles),
+    skills,
     workspaceResourceRoot: createResourceRoot(input.manifest, input.nodeId, contentHash),
   };
 }
@@ -133,6 +140,22 @@ async function materializeSkill(input: {
     rootPath: input.nodeRoot,
     skill: normalizeSkillPackage(input.skill),
   });
+}
+
+/**
+ * Relative paths of a skill's supporting files. Deployed runtimes carry no
+ * skill bytes outside the sandbox, so this index is what lets a capability
+ * catalog list them without booting one.
+ */
+async function listSkillSupportingFiles(skillRoot: string): Promise<string[]> {
+  const files = await listWorkspaceResourceFiles({
+    logicalDirectoryPath: ".",
+    sourceDirectoryPath: skillRoot,
+  }).catch(() => []);
+  return files
+    .map((file) => pathPosix.normalize(file.logicalPath))
+    .filter((path) => path !== "SKILL.md")
+    .sort();
 }
 
 function stripSkillPackageFiles(skill: CompiledSkillDefinition): CompiledSkillDefinition {

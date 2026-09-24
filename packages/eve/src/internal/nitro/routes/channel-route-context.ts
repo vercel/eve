@@ -1,5 +1,6 @@
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
+import type { CapabilityRuntime } from "#execution/capability-session.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
 export interface HomeRouteMetadata {
@@ -25,6 +26,7 @@ const homeRouteMetadataKey = "__eveHomeRouteMetadata";
 const routeChannelNameKey = "__eveRouteChannelName";
 const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
+const routeCapabilityRuntimeKey = "__eveRouteCapabilityRuntime";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
@@ -32,6 +34,7 @@ type InternalRouteArgs = RouteHandlerArgs & {
   [routeChannelNameKey]?: string;
   [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
+  [routeCapabilityRuntimeKey]?: () => Promise<CapabilityRuntime>;
 };
 
 export function attachRouteChannelName<TArgs extends RouteHandlerArgs>(
@@ -106,4 +109,20 @@ export function readRemoteAgentStreamHeadersResolver(
 ): RemoteAgentStreamHeadersResolver | undefined {
   const routeArgs: InternalRouteArgs = args;
   return routeArgs[remoteAgentStreamHeadersResolverKey];
+}
+
+export function attachRouteCapabilityRuntime<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  resolve: () => Promise<CapabilityRuntime>,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[routeCapabilityRuntimeKey] = resolve;
+  return args;
+}
+
+export function readRouteCapabilityRuntime(
+  args: RouteHandlerArgs,
+): (() => Promise<CapabilityRuntime>) | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[routeCapabilityRuntimeKey];
 }

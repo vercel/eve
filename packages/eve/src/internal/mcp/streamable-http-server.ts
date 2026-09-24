@@ -2,6 +2,7 @@ import {
   createMcpHandler,
   McpServer,
   type McpToolAnnotations,
+  type Server,
   type StandardSchemaWithJSON,
 } from "#compiled/@modelcontextprotocol/server/index.js";
 
@@ -146,24 +147,40 @@ export function createMcpStreamableHttpServer(
     const auth = await options.authenticate(request);
     if (auth instanceof Response) return auth;
 
-    const handler = createMcpHandler(() => createServer(options, tools, auth), {
-      legacy: "stateless",
-    });
-    if (request.method.toUpperCase() !== "POST") return await handler.fetch(request);
-
-    // Every POST body is read here, bounded, before the SDK sees it. The
-    // parsed value is handed to the SDK so the body is never read twice.
-    const inspected = await inspectRequestBody(request);
-    if (inspected.tooLarge) return requestBodyTooLargeResponse();
-    if (inspected.invalidJson) return invalidJsonResponse();
-    const parsedBody = inspected.value;
-    if (parsedBody === undefined) return await handler.fetch(request);
-
-    const preflightFailure = await preflightModernRequest(request, parsedBody);
-    if (preflightFailure !== undefined) return preflightFailure;
-
-    return await handler.fetch(request, { parsedBody });
+    return await serveMcpHttpRequest(request, () => createServer(options, tools, auth));
   };
+}
+
+/**
+ * Serves one stateless MCP HTTP request with a per-request server instance.
+ *
+ * `createServer` receives the bounded, parsed JSON body (or `undefined` for
+ * bodiless requests) so callers can read request-scoped envelope values
+ * before the SDK dispatches.
+ */
+export async function serveMcpHttpRequest(
+  request: Request,
+  createServer: (parsedBody: unknown) => McpServer | Server | Promise<McpServer | Server>,
+): Promise<Response> {
+  if (request.method.toUpperCase() !== "POST") {
+    return await createMcpHandler(() => createServer(undefined), { legacy: "stateless" }).fetch(
+      request,
+    );
+  }
+
+  // Every POST body is read here, bounded, before the SDK sees it. The
+  // parsed value is handed to the SDK so the body is never read twice.
+  const inspected = await inspectRequestBody(request);
+  if (inspected.tooLarge) return requestBodyTooLargeResponse();
+  if (inspected.invalidJson) return invalidJsonResponse();
+  const parsedBody = inspected.value;
+  const handler = createMcpHandler(() => createServer(parsedBody), { legacy: "stateless" });
+  if (parsedBody === undefined) return await handler.fetch(request);
+
+  const preflightFailure = await preflightModernRequest(request, parsedBody);
+  if (preflightFailure !== undefined) return preflightFailure;
+
+  return await handler.fetch(request, { parsedBody });
 }
 
 /**

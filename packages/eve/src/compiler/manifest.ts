@@ -183,8 +183,10 @@ export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
 /**
  * Normalized authored skill preserved in the compiled manifest.
  */
-export type CompiledSkillDefinition = NamedSkillDefinition &
-  (
+export type CompiledSkillDefinition = NamedSkillDefinition & {
+  /** Relative paths of the skill's supporting files, excluding `SKILL.md`. */
+  readonly fileIndex?: readonly string[];
+} & (
     | (Omit<MarkdownSourceRef<undefined>, "definition"> & {
         readonly owner: AgentSourceOwner;
       })
@@ -661,6 +663,7 @@ const compiledSkillBaseFields = {
   license: z.string().optional(),
   markdown: z.string(),
   metadata: z.record(z.string(), z.string()).optional(),
+  fileIndex: z.array(z.string()).optional(),
   sourceId: z.string(),
   logicalPath: z.string(),
 };

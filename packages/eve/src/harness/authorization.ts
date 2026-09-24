@@ -200,6 +200,8 @@ export function consumeAuthorizationResult(
  */
 export function getHookUrl(name: string, attemptId: string): string | undefined {
   const ctx = loadContext();
+  const mintCallbackUrl = ctx.get(AuthorizationCallbackUrlKey);
+  if (mintCallbackUrl !== undefined) return mintCallbackUrl(name, attemptId);
   const sessionId = ctx.get(SessionIdKey);
   const baseUrl = ctx.get(CallbackBaseUrlKey);
   const token = ctx.get(AuthorizationHookKey) ?? (sessionId ? authHookToken(sessionId) : undefined);
@@ -302,6 +304,14 @@ export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
 
 /** Hook token of a runtime that owns its callback instead of using the session hook. */
 export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHook");
+
+/**
+ * Callback URL minter for runtimes that receive authorization callbacks on
+ * their own route instead of a workflow hook (the MCP capabilities channel).
+ */
+export const AuthorizationCallbackUrlKey = new ContextKey<
+  (name: string, attemptId: string) => string
+>("eve.authorizationCallbackUrl");
 
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)

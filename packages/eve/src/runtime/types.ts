@@ -70,6 +70,8 @@ export type ResolvedSkillDefinition = Readonly<
   NamedSkillDefinition &
     (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef | SkillPackageSourceRef) & {
       metadata?: Readonly<Record<string, string>>;
+      /** Relative paths of the skill's supporting files, excluding `SKILL.md`. */
+      fileIndex?: readonly string[];
     }
 >;
 

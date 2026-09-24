@@ -73,7 +73,9 @@ export async function handleConnectionCallbackRequest(
  * deliberately dropped so they never cross a step boundary; no shipped
  * strategy reads them.
  */
-async function projectAuthorizationCallback(request: Request): Promise<AuthorizationCallback> {
+export async function projectAuthorizationCallback(
+  request: Request,
+): Promise<AuthorizationCallback> {
   const params: Record<string, string> = {};
   for (const [key, value] of new URL(request.url).searchParams) {
     params[key] = value;

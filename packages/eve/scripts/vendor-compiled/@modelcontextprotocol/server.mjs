@@ -14,9 +14,19 @@ export interface CallToolRequest {
   };
 }
 
+export interface ReadResourceRequest {
+  readonly params: {
+    readonly uri: string;
+  };
+}
+
 export interface McpRequestHandlerExtra {
   readonly mcpReq: {
     readonly signal: AbortSignal;
+    /** MRTR input responses lifted from a retried request (untrusted). */
+    readonly inputResponses?: Readonly<Record<string, unknown>>;
+    /** MRTR request state echoed by the client (untrusted, unverified). */
+    requestState<T = unknown>(): T | undefined;
   };
 }
 
@@ -36,7 +46,22 @@ export interface StandardSchemaWithJSON<TInput = unknown, TOutput = TInput> {
 export declare class Server {
   constructor(info: { readonly name: string; readonly version: string }, options?: {
     readonly capabilities?: Readonly<Record<string, unknown>>;
+    readonly instructions?: string;
   });
+  setRequestHandler<Result>(
+    method: "resources/list" | "resources/templates/list",
+    handler: (
+      request: { readonly params?: Readonly<Record<string, unknown>> },
+      context: McpRequestHandlerExtra,
+    ) => Result | Promise<Result>,
+  ): void;
+  setRequestHandler<Result>(
+    method: "resources/read",
+    handler: (
+      request: ReadResourceRequest,
+      context: McpRequestHandlerExtra,
+    ) => Result | Promise<Result>,
+  ): void;
   setRequestHandler<Result>(
     method: "tools/list",
     handler: (
@@ -81,6 +106,11 @@ export interface McpRequestContext {
 export interface McpHandler {
   close(): Promise<void>;
   fetch(request: Request, options?: { readonly parsedBody?: unknown }): Promise<Response>;
+}
+
+/** JSON-RPC invalid-params error carrying the unknown resource URI. */
+export declare class ResourceNotFoundError extends Error {
+  constructor(uri: string, message?: string);
 }
 
 export declare function fromJsonSchema<T = unknown>(
