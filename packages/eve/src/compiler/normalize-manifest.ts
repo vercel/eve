@@ -434,7 +434,7 @@ class AgentGraphCompiler {
     externalDependencies: readonly string[],
   ): Promise<PhaseOneNodeSourceState> {
     const graph = this.composeNodeSources(input, externalDependencies);
-    const evaluation = new NodeModuleEvaluationContext(this.registries);
+    const evaluation = new NodeModuleEvaluationContext(this.registries, input.manifest.appRoot);
     evaluation.setBindings(
       Object.fromEntries(
         [...graph.composed.selected.values()]

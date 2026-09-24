@@ -14,6 +14,7 @@ export type CompiledBindingNamespaceLoader = (
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
+  readonly appRoot?: string;
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
   readonly onLoad?: (sourceId: string) => void;
   readonly registries: readonly AgentSourceRegistry[];
@@ -40,6 +41,7 @@ export function createCompiledBindingNamespaceLoader(input: {
     input.onLoad?.(sourceId);
     const nextLineage = new Set(lineage).add(sourceId);
     const loading = loadCompiledBindingNamespace({
+      appRoot: input.appRoot,
       binding,
       loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
       registries: input.registries,
@@ -52,6 +54,7 @@ export function createCompiledBindingNamespaceLoader(input: {
 }
 
 async function loadCompiledBindingNamespace(input: {
+  readonly appRoot?: string;
   readonly binding: AgentModuleBinding;
   readonly loadDependency: CompiledBindingNamespaceLoader;
   readonly registries: readonly AgentSourceRegistry[];
@@ -60,6 +63,9 @@ async function loadCompiledBindingNamespace(input: {
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
       externalDependencies: input.binding.backing.externalDependencies,
       extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(input.binding),
+      ...(input.binding.owner.kind === "application" && input.appRoot !== undefined
+        ? { workflowAppRoot: input.appRoot }
+        : {}),
     });
   }
   const dependencyNamespaces = Object.fromEntries(

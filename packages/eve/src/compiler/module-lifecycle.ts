@@ -15,8 +15,9 @@ export class NodeModuleEvaluationContext {
   readonly #lifecycle = new NodeModuleLifecycle();
   readonly loadNamespace: CompiledBindingNamespaceLoader;
 
-  constructor(registries: readonly AgentSourceRegistry[]) {
+  constructor(registries: readonly AgentSourceRegistry[], appRoot?: string) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
+      appRoot,
       onLoad: (sourceId) => this.#lifecycle.recordCompileLoad(sourceId),
       registries,
       resolveBinding: (sourceId) => this.#bindings[sourceId],
