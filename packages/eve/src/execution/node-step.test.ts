@@ -160,6 +160,7 @@ function createTestNode(
   return {
     agent,
     channels: [],
+    extensionConfigs: new Map(),
     hookRegistry: createRuntimeHookRegistry([]),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),

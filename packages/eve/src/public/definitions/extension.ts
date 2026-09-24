@@ -8,11 +8,11 @@ const MOUNTED_CONFIG = Symbol.for("eve.mounted-extension-config");
 
 const CONFIG_REGISTRY = Symbol.for("eve.extension-config-registry");
 
-/** Per-agent-node configs: extension namespace, then node id. */
-const NODE_CONFIG_REGISTRY = Symbol.for("eve.extension-node-config-registry");
-
-/** Returns the agent node id of the active session, installed by the runtime. */
-const CURRENT_NODE_RESOLVER = Symbol.for("eve.extension-config-current-node");
+/**
+ * Returns the config the active runtime scope (session, channel request, or
+ * schedule run) binds for an extension namespace. Installed by the runtime.
+ */
+const SCOPED_CONFIG_RESOLVER = Symbol.for("eve.extension-scoped-config-resolver");
 
 /**
  * Ambient namespace set by the dev/eval loader around a mount module's
@@ -38,21 +38,11 @@ function configRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
-type NodeConfigs = ReadonlyMap<string, Record<string, unknown>>;
+type ScopedConfigResolver = (namespace: string) => Record<string, unknown> | undefined;
 
-function nodeConfigRegistry(): Map<string, NodeConfigs> {
-  const container = globalThis as Record<symbol, unknown>;
-  let registry = container[NODE_CONFIG_REGISTRY] as Map<string, NodeConfigs> | undefined;
-  if (registry === undefined) {
-    registry = new Map();
-    container[NODE_CONFIG_REGISTRY] = registry;
-  }
-  return registry;
-}
-
-function currentNodeId(): string | undefined {
-  const resolve = (globalThis as Record<symbol, unknown>)[CURRENT_NODE_RESOLVER];
-  return typeof resolve === "function" ? (resolve as () => string | undefined)() : undefined;
+function scopedConfig(namespace: string): Record<string, unknown> | undefined {
+  const resolve = (globalThis as Record<symbol, unknown>)[SCOPED_CONFIG_RESOLVER];
+  return typeof resolve === "function" ? (resolve as ScopedConfigResolver)(namespace) : undefined;
 }
 
 /**
@@ -67,19 +57,12 @@ export function readMountedExtensionConfig(value: unknown): Record<string, unkno
 }
 
 /**
- * Binds each agent node's mount config for one extension namespace, so the
- * handle's `config` resolves per session node instead of to the last mount
- * evaluated. `resolveCurrentNodeId` returns the active session's node id.
+ * Installs the runtime lookup the handle's `config` consults first, so each
+ * read resolves against the agent node and graph of the active scope instead
+ * of the last mount evaluated. The resolver holds no graph state itself.
  */
-export function bindExtensionNodeConfigs(
-  configsByNamespace: ReadonlyMap<string, NodeConfigs>,
-  resolveCurrentNodeId: () => string | undefined,
-): void {
-  (globalThis as Record<symbol, unknown>)[CURRENT_NODE_RESOLVER] = resolveCurrentNodeId;
-  const registry = nodeConfigRegistry();
-  for (const [namespace, configs] of configsByNamespace) {
-    registry.set(namespace, configs);
-  }
+export function installScopedExtensionConfigResolver(resolve: ScopedConfigResolver): void {
+  (globalThis as Record<symbol, unknown>)[SCOPED_CONFIG_RESOLVER] = resolve;
 }
 
 /**
@@ -208,14 +191,10 @@ export function defineExtension(
       if (resolvedNamespace === undefined) {
         return validateConfig(schema, {});
       }
-      // Inside a session, read the config of the mount serving that agent node.
-      // Outside one (e.g. module top level) fall back to the last mount bound.
-      const nodeId = currentNodeId();
-      const bound =
-        (nodeId === undefined
-          ? undefined
-          : nodeConfigRegistry().get(resolvedNamespace)?.get(nodeId)) ??
-        configRegistry().get(resolvedNamespace);
+      // Inside a runtime scope, read the config of the mount serving that
+      // agent node. Outside one (e.g. module top level) fall back to the last
+      // mount bound.
+      const bound = scopedConfig(resolvedNamespace) ?? configRegistry().get(resolvedNamespace);
       return bound ?? validateConfig(schema, {});
     },
   });
