@@ -14,6 +14,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import { cancelTasks } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -102,6 +103,14 @@ export async function admitSessionInboxPayload(
       input.queue.enqueueControl("reset");
       return { command: { kind: "cancel" }, kind: "cancel" };
     case "cancel":
+      // Task cancellation applies on admission, whether a turn is running,
+      // parked, or the session is idle, and never waits for a child to stop.
+      if (command.taskId !== undefined) {
+        await cancelTasks(input.cursor, { kind: "task", taskId: command.taskId });
+        return { kind: "consumed" };
+      }
+      // The turn's own calls are cancelled with the turn, when the turn guard matches.
+      if (command.tasks === true) await cancelTasks(input.cursor, { kind: "background" });
       return { command, kind: "cancel" };
   }
 }

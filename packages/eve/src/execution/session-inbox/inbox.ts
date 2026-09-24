@@ -66,7 +66,9 @@ export interface SessionInboxHandle extends SessionInbox {
 }
 
 export function isInterrupt(value: SessionInboxPayload): boolean {
-  return value.kind === "cancel" || value.kind === "reset" || value.kind === "session-timeout";
+  // Cancelling one task leaves the turn running.
+  if (value.kind === "cancel") return value.taskId === undefined;
+  return value.kind === "reset" || value.kind === "session-timeout";
 }
 
 /**

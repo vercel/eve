@@ -20,6 +20,7 @@ import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
 import type { InputResponse } from "#shared/input.js";
 import type {
+  CancelSessionOptions,
   CancelSessionResult,
   ClearResult,
   ClientSessionState,
@@ -166,11 +167,13 @@ export class ClientSession {
     );
   }
 
-  /** Requests cooperative cancellation of this session's active turn. */
-  async cancel(options?: {
-    readonly signal?: AbortSignal;
-    readonly turnId?: string;
-  }): Promise<CancelSessionResult> {
+  /**
+   * Requests cooperative cancellation without waiting for it. With no options,
+   * cancels the active turn and the tasks it waits on; `taskId` cancels one
+   * background task and leaves the turn running; `tasks: true` cancels the
+   * active turn and every working task.
+   */
+  async cancel(options?: CancelSessionOptions): Promise<CancelSessionResult> {
     return await cancelClientSession({
       context: this.#context,
       options,

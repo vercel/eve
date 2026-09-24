@@ -72,6 +72,7 @@ import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { BACKGROUND_TASKS_INSTRUCTION, resolveTasksAnnouncement } from "#tasks/render.js";
 import { hasPendingBackgroundWork, supportsBackgroundTasks } from "#tasks/results.js";
+import { isTaskCancelTool } from "#tasks/cancel-tool.js";
 import { getTaskTable } from "#tasks/state.js";
 import {
   createResultTurnReplyPrompt,
@@ -1320,13 +1321,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     ): ModelMessage[] =>
       note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
 
-    // Static per session, so the system prefix stays stable for the prompt cache.
-    const backgroundTasksInstruction = supportsBackgroundTasks({
+    // Static per session, so the system prefix and tools stay stable for the prompt cache.
+    const backgroundTasks = supportsBackgroundTasks({
       interactiveRoot: config.mode === "conversation" && !hasDelegatedCaller,
       tools: config.tools.values(),
-    })
-      ? BACKGROUND_TASKS_INSTRUCTION
-      : undefined;
+    });
+    const backgroundTasksInstruction = backgroundTasks ? BACKGROUND_TASKS_INSTRUCTION : undefined;
     const prepareModelInstructions = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
         ? [{ role: "system" as const, content: extraSystemNote }]
@@ -1395,7 +1395,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
 
     const prepareModelTools = async (opts: ModelCallOptions) => {
-      const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      const allTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
+      // task_cancel shares the background-tasks block's static predicate.
+      const harnessTools = backgroundTasks
+        ? allTools
+        : new Map([...allTools].filter(([, tool]) => !isTaskCancelTool(tool)));
       const advertisedHarnessTools = getAdvertisedTools({
         session,
         tools: harnessTools,

@@ -3,6 +3,7 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
+import { describeInvalidCancelOptions } from "#shared/session-cancel.js";
 
 export type DecodedSessionInbox =
   | DeliverHookPayload
@@ -47,7 +48,11 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
       }
       return value as DeliverHookPayload;
     }
-    case "cancel":
+    case "cancel": {
+      const invalid = describeInvalidCancelOptions(payload);
+      if (invalid !== undefined) throw new SessionInboxPayloadError(`Session cancel: ${invalid}`);
+      return value as DecodedSessionInbox;
+    }
     case "clear":
     case "compact":
     case "reset":

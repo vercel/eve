@@ -34,4 +34,23 @@ describe("session inbox payloads", () => {
       SessionInboxPayloadError,
     );
   });
+
+  it("accepts task cancellation and rejects malformed cancel options", () => {
+    expect(decodeSessionInboxPayload({ kind: "cancel", taskId: "remind-q4x1ze" })).toEqual({
+      kind: "cancel",
+      taskId: "remind-q4x1ze",
+    });
+    expect(decodeSessionInboxPayload({ kind: "cancel", tasks: true })).toEqual({
+      kind: "cancel",
+      tasks: true,
+    });
+    for (const invalid of [
+      { kind: "cancel", taskId: "" },
+      { kind: "cancel", taskId: "x".repeat(129) },
+      { kind: "cancel", tasks: "yes" },
+      { kind: "cancel", taskId: "remind-q4x1ze", tasks: true },
+    ]) {
+      expect(() => decodeSessionInboxPayload(invalid)).toThrowError(SessionInboxPayloadError);
+    }
+  });
 });

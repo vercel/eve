@@ -7,7 +7,7 @@ export type ToolAvailabilityCondition = "root-session";
 
 /** Native behavior declared by a selected compiled tool. */
 export type CompiledToolHandling =
-  | { readonly kind: "dispatch"; readonly action: "self-agent" }
+  | { readonly kind: "dispatch"; readonly action: "self-agent" | "task-cancel" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
   | {
       readonly kind: "workflow-tool";
@@ -46,6 +46,7 @@ export type PreparedDispatchTarget =
       readonly nodeId: string;
       readonly subagentName: string;
     }
+  | { readonly kind: "task-cancel" }
   | { readonly kind: "workflow-tool-call"; readonly workflowId: string };
 
 /** Runtime-prepared handling consumed by the harness and execution boundary. */

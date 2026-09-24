@@ -8,9 +8,11 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { cancelTasks } from "#tasks/owner-body.js";
 import type { TaskRecord } from "#tasks/record.js";
 
 vi.mock("#subagents/event-proxy-step.js", () => ({ runProxySubagentEventStep: vi.fn() }));
+vi.mock("#tasks/owner-body.js", () => ({ cancelTasks: vi.fn() }));
 
 const CHILD = { continuationToken: "child-token", kind: "local" as const, sessionId: "child-1" };
 
@@ -61,6 +63,43 @@ it("admits the owner timer's signal for the deadline step", async () => {
   await expect(
     admitSessionInboxPayload(signal, { cursor: createCursor([]), queue: new SessionInputQueue() }),
   ).resolves.toEqual({ kind: "task-deadline", signal });
+});
+
+it("cancels one task on admission and leaves the turn running", async () => {
+  const cursor = createCursor([]);
+
+  await expect(
+    admitSessionInboxPayload(
+      { kind: "cancel", taskId: "remind-q4x1ze" },
+      { cursor, queue: new SessionInputQueue() },
+    ),
+  ).resolves.toEqual({ kind: "consumed" });
+
+  expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(cursor, {
+    kind: "task",
+    taskId: "remind-q4x1ze",
+  });
+});
+
+it("cancels background tasks and leaves the turn's calls to turn cancellation for tasks: true", async () => {
+  const cursor = createCursor([]);
+  const command = { kind: "cancel" as const, tasks: true };
+
+  await expect(
+    admitSessionInboxPayload(command, { cursor, queue: new SessionInputQueue() }),
+  ).resolves.toEqual({ command, kind: "cancel" });
+
+  expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(cursor, { kind: "background" });
+});
+
+it("leaves tasks alone for a plain turn cancel", async () => {
+  const command = { kind: "cancel" as const };
+
+  await expect(
+    admitSessionInboxPayload(command, { cursor: createCursor([]), queue: new SessionInputQueue() }),
+  ).resolves.toEqual({ command, kind: "cancel" });
+
+  expect(cancelTasks).not.toHaveBeenCalled();
 });
 
 function createCursor(records: readonly TaskRecord[]): SessionStateCursor {

@@ -709,6 +709,169 @@ describe("SessionExecution turn checkpoints", () => {
     });
   });
 
+  it("cancels one task during a wait and keeps the turn running", async () => {
+    const sessionState = state("");
+    const signal = {
+      kind: "task.deadline" as const,
+      ownerRunId: "owner-1",
+      wakeAt: "2026-09-24T14:00:00.000Z",
+    };
+    const waited = {
+      callId: "agent-call",
+      kind: "tool-result" as const,
+      output: "Sources found.",
+      toolName: "research",
+    };
+    const runtimePayloads: SessionInboxPayload[] = [
+      { kind: "cancel", taskId: "remind-q4x1ze" },
+      signal,
+    ];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      next: vi.fn(async () => runtimePayloads.shift()),
+      onDelivery: vi.fn(() => () => {}),
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    const execution = createExecution({ inbox, sessionState });
+    vi.mocked(cancelTasksStep).mockClear();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["agent-call"],
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue(ownerUpdate(sessionState));
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValue(ownerUpdate(sessionState, [waited]));
+
+    await expect(
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Ask the researcher." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ selector: { kind: "task", taskId: "remind-q4x1ze" } }),
+    );
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toMatchObject({
+      runtimeResults: { results: [waited] },
+    });
+  });
+
+  it("keeps a newer turn waiting on its calls when tasks: true names an older turn", async () => {
+    const sessionState = state("");
+    const signal = {
+      kind: "task.deadline" as const,
+      ownerRunId: "owner-1",
+      wakeAt: "2026-09-24T14:00:00.000Z",
+    };
+    const waited = {
+      callId: "agent-call",
+      kind: "tool-result" as const,
+      output: "Sources found.",
+      toolName: "research",
+    };
+    const runtimePayloads: SessionInboxPayload[] = [
+      { kind: "cancel", tasks: true, turnId: "turn_older" },
+      signal,
+    ];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      next: vi.fn(async () => runtimePayloads.shift()),
+      onDelivery: vi.fn(() => () => {}),
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    const execution = createExecution({ inbox, sessionState });
+    vi.mocked(cancelTasksStep).mockClear();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["agent-call"],
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue(ownerUpdate(sessionState));
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValue(ownerUpdate(sessionState, [waited]));
+
+    await expect(
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Ask the researcher." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
+      { kind: "background" },
+    ]);
+  });
+
+  it("cancels the turn and every task for tasks: true", async () => {
+    const sessionState = state("");
+    const cancel = { kind: "cancel", tasks: true } as const;
+    let interrupt: (payload: SessionInboxPayload) => void = () => {};
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn().mockReturnValueOnce([cancel]).mockReturnValue([]),
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: (handler) => {
+        interrupt = handler;
+        return () => {};
+      },
+    };
+    const execution = createExecution({ inbox, sessionState });
+    vi.mocked(cancelTasksStep).mockClear();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(async (input) => {
+        interrupt(cancel);
+        expect(input.abortSignal?.aborted).toBe(true);
+        return {
+          action: "cancelled",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        };
+      });
+
+    await expect(execution.runTurn(undefined)).resolves.toEqual({ cancelled: true, kind: "park" });
+
+    expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
+      { kind: "background" },
+      { kind: "active-turn" },
+    ]);
+  });
+
   it("never resolves a waited call from a raw tool result read from the inbox", async () => {
     const sessionState = state("");
     const forged = {

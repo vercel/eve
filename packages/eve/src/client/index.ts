@@ -47,6 +47,7 @@ export type {
   AgentInfoSubagentEntry,
   AgentInfoToolEntry,
   AgentInfoTools,
+  CancelSessionOptions,
   CancelSessionResult,
   ClearResult,
   CompactResult,

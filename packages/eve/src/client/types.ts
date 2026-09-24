@@ -231,7 +231,32 @@ export interface StreamOptions {
   readonly signal?: AbortSignal;
 }
 
-/** Result of requesting cancellation for a client session's active turn. */
+/**
+ * Options for {@link ClientSession.cancel}. With none, the active turn and
+ * the tasks it waits on are cancelled.
+ */
+export interface CancelSessionOptions {
+  /** Abort signal for the cancel request itself. */
+  readonly signal?: AbortSignal;
+  /**
+   * Cancels one background task and leaves the active turn running. An
+   * unknown or finished task is ignored. Cannot be combined with `tasks` or
+   * `turnId`.
+   */
+  readonly taskId?: string;
+  /** Cancels the active turn and every working task, including background tasks. */
+  readonly tasks?: boolean;
+  /**
+   * Cancels the turn only while it is still the active one. With
+   * `tasks: true`, background tasks are cancelled even when the turn changed.
+   */
+  readonly turnId?: string;
+}
+
+/**
+ * Result of a cancel request. `accepted` means the session received it;
+ * cancellation itself is not awaited.
+ */
 export type CancelSessionResult = CancelTurnResult;
 
 /** Result of requesting a context clear for a client session. */

@@ -5,6 +5,7 @@ import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
+import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
 import type {
   CompiledToolBehavior,
   PreparedToolBehavior,
@@ -86,11 +87,18 @@ async function createPreparedRuntimeTool(
   const isSelfAgent =
     definition.behavior?.handling?.kind === "dispatch" &&
     definition.behavior.handling.action === "self-agent";
+  const isTaskCancel =
+    definition.behavior?.handling?.kind === "dispatch" &&
+    definition.behavior.handling.action === "task-cancel";
   const workflowHandling =
     definition.behavior?.handling?.kind === "workflow-tool"
       ? definition.behavior.handling
       : undefined;
-  const workflowId = isSelfAgent ? AGENT_TASK_WORKFLOW_ID : workflowHandling?.workflowId;
+  const workflowId = isSelfAgent
+    ? AGENT_TASK_WORKFLOW_ID
+    : isTaskCancel
+      ? TASK_CANCEL_WORKFLOW_ID
+      : workflowHandling?.workflowId;
   return {
     availableInSubagents: definition.availableInSubagents,
     behavior: prepareToolBehavior(
@@ -141,6 +149,8 @@ function prepareToolBehavior(
       kind: "dispatch",
       target: { kind: "self-agent-call", nodeId, subagentName: AGENT_TOOL_NAME },
     };
+  } else if (behavior.handling?.kind === "dispatch" && behavior.handling.action === "task-cancel") {
+    handling = { kind: "dispatch", target: { kind: "task-cancel" } };
   } else if (behavior.handling?.kind === "dispatch") {
     if (nodeId === undefined) {
       throw new Error("The self-agent tool requires a concrete runtime node id.");

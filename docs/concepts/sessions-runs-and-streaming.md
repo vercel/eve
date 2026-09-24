@@ -237,13 +237,30 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 
 Cancelling the turn also cancels the tool calls it waits on, including subagent calls and workflow tools.
 
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; cancellation is a no-op there. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+The body also controls background tasks, such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach):
+
+| Body                  | Cancels                                                                        |
+| --------------------- | ------------------------------------------------------------------------------ |
+| None, or `{ turnId }` | The active turn and the tool calls it waits on. Background tasks keep working. |
+| `{ taskId }`          | One background task. The active turn keeps running.                            |
+| `{ tasks: true }`     | The active turn and every working task, including background tasks.            |
+
+```bash
+curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel \
+  -H 'content-type: application/json' \
+  -d '{"taskId":"remind-q4x1ze"}'
+```
+
+`taskId` is the ID from the call's receipt or its `task.started` event, and cannot be combined with `tasks` or `turnId`; the route answers `400` for that combination or a malformed option. An unknown or finished task, or a call the turn is waiting on, is ignored. A cancelled task emits `task.settled` with `status: "cancelled"`, delivers no result, and never starts a result turn. With `tasks: true` and a `turnId` that no longer names the active turn, the newer turn keeps running with its calls, and only background tasks are cancelled. The session keeps accepting messages either way.
+
+`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; turn cancellation is a no-op there, while `taskId` and `tasks: true` still cancel tasks. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 The HTTP route returns `202` for `"accepted"` and `200` for
 `"no_active_turn"`. Only the accepted result includes `sessionId`.
 
 Custom channel routes request the same cancellation through
-`from(address).cancel()` or `attachSession(sessionId).cancel()`. See
+`from(address).cancel()` or `attachSession(sessionId).cancel()`, and `attachSession(sessionId).cancel()`
+accepts the same `taskId` and `tasks` options. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
 ## Compact, clear, and reset

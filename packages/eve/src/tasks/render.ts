@@ -174,6 +174,15 @@ export interface TaskCancelOutput {
 export const TASK_CANCEL_DESCRIPTION =
   "Stop background agents or tasks by id. A stopped one never reports back. One that already finished is listed in alreadyFinished, and its result is still delivered. A stopped agent stays available: pass its agentId to give it new work.";
 
+/** Description of the `taskIds` input of `task_cancel`. */
+export const TASK_CANCEL_IDS_DESCRIPTION =
+  "Ids of background agents or tasks, from their receipts or the latest [Tasks] note.";
+
+/** Error message for a `task_cancel` call whose input could not be read. */
+export function renderInvalidTaskCancelInput(maxIds: number): string {
+  return `task_cancel needs taskIds: a list of 1 to ${String(maxIds)} task or agent ids.`;
+}
+
 export const BACKGROUND_PARAMETER_DESCRIPTION =
   "Run in the background and return immediately. The result arrives later in its own message. Use only when the user does not need the answer to continue. Do not poll, sleep, or call again to check on it. To get several answers together, make the calls in the same step without background.";
 

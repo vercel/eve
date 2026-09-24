@@ -1,5 +1,6 @@
 import { ClientError } from "#client/client-error.js";
 import type {
+  CancelSessionOptions,
   CancelSessionResult,
   ClearResult,
   ClientRedirectPolicy,
@@ -26,10 +27,7 @@ interface SessionControlContext {
 
 export async function cancelClientSession(input: {
   readonly context: SessionControlContext;
-  readonly options?: {
-    readonly signal?: AbortSignal;
-    readonly turnId?: string;
-  };
+  readonly options?: CancelSessionOptions;
   readonly sessionId: string;
 }): Promise<CancelSessionResult> {
   const { signal, ...body } = input.options ?? {};

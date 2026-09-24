@@ -362,6 +362,19 @@
       ]
     },
     {
+      "name": "tool/task_cancel",
+      "type": "registry:item",
+      "title": "Task Cancel",
+      "description": "Let the model stop background agents and tasks.",
+      "files": [
+        {
+          "path": "registry/tools/task_cancel.ts",
+          "type": "registry:file",
+          "target": "agent/tools/task_cancel.ts"
+        }
+      ]
+    },
+    {
       "name": "tool/web_fetch",
       "type": "registry:item",
       "title": "Web Fetch",

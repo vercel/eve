@@ -529,6 +529,15 @@ start and fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background run s
 cancel background tasks it started, and when the session ends, eve cancels every working task and
 delivers nothing afterward.
 
+To stop a background task, the model calls [`task_cancel`](/docs/concepts/built-in-tools#task_cancel)
+with its ID. Application code calls `session.cancel({ taskId })` to stop one task and leave the turn
+running, or `session.cancel({ tasks: true })` to cancel the active turn and every working task (see
+[Cancel the in-flight turn](/docs/concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn)).
+eve records the task as cancelled at once, emits `task.settled` with `status: "cancelled"`, and
+signals the run, which unwinds as described in
+[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). A cancelled task delivers no result and
+never starts a result turn. A task that finished before the request still delivers its result.
+
 A subagent session and a task-mode run wait for their own background tasks before they finish. A
 subagent answers its caller with the reply it gives after it has seen the results, and a task-mode
 run returns the output of the result turn that delivers the last result.
@@ -563,7 +572,7 @@ unset.
 ## Cancel and clean up: `ctx.abortSignal`
 
 `ctx.abortSignal` aborts when the run is cancelled, for example when the turn that made the call is
-cancelled. It is durable — it survives replay, and a step that
+cancelled or a background task is stopped. It is durable — it survives replay, and a step that
 receives it observes the abort. Pass it into the steps that should stop, and clean up in
 `try/finally`:
 
@@ -584,10 +593,11 @@ as cancelled whether or not it did. A body parked on a hook or a `sleep` does no
 it is abandoned when the grace period ends. Steps that received the signal are how you clean up
 first.
 
-The caller does not wait for that cleanup. Cancelling the turn records the call as cancelled at
-once and signals the run, which unwinds on its own. A run that cannot receive the signal yet, for
-example because it has only just started, is stopped immediately. A run that has not ended 35
-seconds after the signal, 5 seconds past its own grace period, is stopped outright.
+The caller does not wait for that cleanup. Cancelling the turn, or stopping a background task,
+records the call as cancelled at once and signals the run, which unwinds on its own. A run that
+cannot receive the signal yet, for example because it has only just started, is stopped
+immediately. A run that has not ended 35 seconds after the signal, 5 seconds past its own grace
+period, is stopped outright.
 
 ## Workflow tool examples
 

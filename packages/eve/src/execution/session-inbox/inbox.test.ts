@@ -96,6 +96,27 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("does not interrupt the turn to cancel one task", async () => {
+    installHooks(
+      createMockHook({
+        token: "stable",
+        reads: [
+          Promise.resolve(resolved({ kind: "cancel", taskId: "remind-q4x1ze" })),
+          Promise.resolve(resolved({ kind: "cancel", tasks: true })),
+        ],
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    const interrupt = nextInterrupt(inbox);
+    await inbox.claimSessionHook("stable");
+    await expect(interrupt).resolves.toEqual({ kind: "cancel", tasks: true });
+    expect(inbox.drain()).toEqual([
+      { kind: "cancel", taskId: "remind-q4x1ze" },
+      { kind: "cancel", tasks: true },
+    ]);
+    await inbox.dispose();
+  });
+
   it("retains tool traffic and gated callbacks in the same stable queue", async () => {
     const report: SessionInboxPayload = {
       kind: "report",

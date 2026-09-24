@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`connection_search` stays available when the agent has connections because it provides access to their tools.
+`connection_search` stays available when the agent has connections because it provides access to their tools. [`task_cancel`](#task_cancel) also stays, because eve advertises it only when the session can have background tasks.
 
 ### `bash`
 
@@ -228,6 +228,44 @@ export { default } from "eve/tools/agent";
 An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot:
 
 ```ts title="agent/tools/agent.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
+### `task_cancel`
+
+`task_cancel` lets the model stop background tasks, such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach). eve advertises it only when the session can have background tasks: a root session in conversation mode whose agent has an agent or workflow tool, or any session whose agent has a `detach: true` tool. The decision is fixed for the session, and it is the same one that adds eve's background-task instructions, which mention `task_cancel`, to the system prompt.
+
+The model passes 1 to 50 IDs from receipts or the `[Tasks]` note:
+
+```json
+{ "taskIds": ["remind-q4x1ze", "digest-9pw2kx"] }
+```
+
+The result lists each ID once:
+
+```json
+{ "cancelled": ["remind-q4x1ze"], "alreadyFinished": ["digest-9pw2kx"], "unknown": [] }
+```
+
+- `cancelled` lists tasks that were working in the background. eve records each one as cancelled at once, emits `task.settled` with `status: "cancelled"`, and asks its run or agent to stop without waiting. A cancelled task never reports back, so it never starts a result turn.
+- `alreadyFinished` lists tasks that settled before the call. Their results are still delivered.
+- `unknown` lists IDs that name no background task, including a call the current turn is still waiting on. Cancel the turn to stop such a call.
+
+A cancelled agent stays available: pass its ID as `agentId` to give it new work.
+
+```sh
+eve add tool/task_cancel
+```
+
+```ts title="agent/tools/task_cancel.ts"
+export { default } from "eve/tools/task_cancel";
+```
+
+The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it. A disabled `task_cancel` leaves the model unable to stop background tasks; application code can still stop one with [`session.cancel({ taskId })`](./sessions-runs-and-streaming#cancel-the-in-flight-turn).
+
+```ts title="agent/tools/task_cancel.ts"
 import { disableTool } from "eve/tools";
 
 export default disableTool();

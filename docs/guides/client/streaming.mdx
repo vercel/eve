@@ -277,7 +277,7 @@ The child has its own cursor, starting at `0`, and reading it never advances the
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn and the tool calls it waits on. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`.
+Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn and the tool calls it waits on, `session.cancel({ taskId })` to stop one background task, or `session.cancel({ tasks: true })` to stop both the turn and every working task. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`, and for `task.settled` with `status: "cancelled"` for each stopped task.
 
 Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 

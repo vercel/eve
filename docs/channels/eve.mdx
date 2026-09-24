@@ -26,7 +26,7 @@ The default eve channel inspects the agent, creates sessions, accepts callbacks,
 - `GET /eve/v1/info` (inspect the agent)
 - `POST /eve/v1/session` (create a session, optionally sending its first message)
 - `POST /eve/v1/session/:sessionId` (send a follow-up)
-- `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn)
+- `POST /eve/v1/session/:sessionId/cancel` (cancel the in-flight turn or a background task)
 - `POST /eve/v1/session/:sessionId/clear` (clear the session's model history)
 - `POST /eve/v1/session/:sessionId/compact` (compact the session's context)
 - `POST /eve/v1/session/:sessionId/reset` (retire the session)
@@ -103,7 +103,7 @@ Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Pass `{ "taskId": "..." }` instead to stop one background task and leave the turn running, or `{ "tasks": true }` to cancel the active turn and every working task. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`, and a stopped task as `task.settled` with `status: "cancelled"`.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 

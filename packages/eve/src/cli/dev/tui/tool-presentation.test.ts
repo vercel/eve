@@ -161,6 +161,7 @@ describe("presentTool", () => {
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
+      task_cancel: { taskIds: ["remind-q4x1ze"] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
       write_file: { filePath: "/workspace/a.ts", content: "x" },

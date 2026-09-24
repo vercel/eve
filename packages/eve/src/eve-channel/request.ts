@@ -34,6 +34,7 @@ import {
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
+import { describeInvalidCancelOptions } from "#shared/session-cancel.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
@@ -188,6 +189,8 @@ export function parseSessionMessageBody(
 }
 
 interface ParsedCancelTurnBody {
+  taskId?: string;
+  tasks?: boolean;
   turnId?: string;
 }
 
@@ -197,14 +200,12 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
-  const turnId = payload.turnId;
-  if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
-    return Response.json(
-      { error: "Expected 'turnId' to be a non-empty string.", ok: false },
-      { status: 400 },
-    );
-  }
+  const invalid = describeInvalidCancelOptions(payload);
+  if (invalid !== undefined) return Response.json({ error: invalid, ok: false }, { status: 400 });
+  const { taskId, tasks, turnId } = payload;
   const result: ParsedCancelTurnBody = {};
+  if (typeof taskId === "string") result.taskId = taskId;
+  if (typeof tasks === "boolean") result.tasks = tasks;
   if (typeof turnId === "string") result.turnId = turnId;
   return result;
 }

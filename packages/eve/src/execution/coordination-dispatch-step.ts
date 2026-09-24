@@ -1,4 +1,7 @@
-/** Starts workflow tool calls in pending coordination as tasks. Agent calls start separately. */
+/**
+ * Starts workflow tool calls in pending coordination as tasks and applies the
+ * model's calls that stop background tasks. Agent calls start separately.
+ */
 
 import {
   prepareCoordinationDispatch,
@@ -9,7 +12,12 @@ import { startWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { isAgentTaskRequest } from "#tasks/agent-tool.js";
-import type { TaskOwnerUpdate } from "#tasks/owner.js";
+import { applyTaskCancelCall } from "#tasks/cancel.js";
+import { isTaskCancelRequest } from "#tasks/cancel-tool.js";
+import { readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
+import { readTasks } from "#tasks/read.js";
+import { setTaskTable } from "#tasks/state.js";
+import { runCommands, type CommandEffect } from "#tasks/transport.js";
 import { startWorkflowTask } from "#tasks/workflow-task.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
@@ -40,9 +48,19 @@ export async function dispatchCoordinationStep(
   let nextSession = session;
   const events: UnstampedMessageStreamEvent[] = [];
   const results: RuntimeToolResultActionResult[] = [];
+  const commands: CommandEffect[] = [];
 
   for (const request of prepared.plan) {
     if (isAgentTaskRequest(request)) continue;
+    if (isTaskCancelRequest(request)) {
+      const table = readTasks(nextSession);
+      const cancelled = applyTaskCancelCall(table, request, now);
+      if (cancelled.table !== table) nextSession = setTaskTable(nextSession, cancelled.table);
+      commands.push(...cancelled.commands);
+      events.push(...cancelled.events);
+      results.push(cancelled.result);
+      continue;
+    }
     const started = await startWorkflowTask({
       creator: prepared.creator,
       now,
@@ -72,6 +90,9 @@ export async function dispatchCoordinationStep(
     nextSession = started.session;
     events.push(...started.events);
     if (started.result !== undefined) results.push(started.result);
+  }
+  if (commands.length > 0) {
+    await runCommands(commands, await readContext(input.serializedContext));
   }
 
   return {

@@ -10,7 +10,10 @@ import {
   type AgentSourceCandidate,
 } from "#compiler/source-graph.js";
 
-const REQUIRED_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search"]);
+// `defaultTools: false` keeps these: `connection_search` reaches connection
+// tools, and `task_cancel` is advertised only with the background-tasks
+// instructions that name it.
+const KEPT_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search", "tools/task_cancel"]);
 
 export function assertFrameworkToolPolicy(
   candidate: AgentSourceCandidate,
@@ -20,6 +23,19 @@ export function assertFrameworkToolPolicy(
   if (slot === "tools/connection_search" && result.kind === "disabled") {
     throw new Error(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
+    );
+  }
+  if (
+    slot === "tools/task_cancel" &&
+    result.kind !== "disabled" &&
+    !(
+      result.kind === "tool" &&
+      result.definition.behavior?.handling?.kind === "dispatch" &&
+      result.definition.behavior.handling.action === "task-cancel"
+    )
+  ) {
+    throw new Error(
+      'The framework "task_cancel" tool cannot be overridden. Re-export it from "eve/tools/task_cancel" or disable it with disableTool().',
     );
   }
 }
@@ -70,7 +86,7 @@ export function applyDefaultToolPolicy(
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
-        REQUIRED_FRAMEWORK_TOOL_SLOTS.has(slot) ||
+        KEPT_FRAMEWORK_TOOL_SLOTS.has(slot) ||
         overriddenSlots.has(slot)
       );
     }),

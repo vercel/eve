@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { isTaskCancelTool } from "#tasks/cancel-tool.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
 import { isTerminalTaskStatus, type TaskKind, type TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
@@ -170,15 +171,17 @@ export function hasPendingBackgroundWork(state: SessionStateMap | undefined): bo
 
 /**
  * Whether a session can have background tasks, which decides the static
- * background-tasks system block. It is static per session: an interactive
- * root session (a root session in conversation mode) with any agent or
- * workflow tool, or any session with a `detach: true` tool.
+ * background-tasks system block and whether the model gets `task_cancel`.
+ * It is static per session: an interactive root session (a root session in
+ * conversation mode) with any agent or workflow tool, or any session with a
+ * `detach: true` tool. `task_cancel` itself does not count.
  */
 export function supportsBackgroundTasks(input: {
   readonly interactiveRoot: boolean;
   readonly tools: Iterable<{ readonly detach?: unknown; readonly workflowId?: string }>;
 }): boolean {
   for (const tool of input.tools) {
+    if (isTaskCancelTool(tool)) continue;
     if (tool.detach === true) return true;
     if (input.interactiveRoot && tool.workflowId !== undefined) return true;
   }
