@@ -199,6 +199,8 @@ Channels turn requests into native UI: the Slack adapter renders approvals as bu
 
 From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
 
+The default message reducer waits for server confirmation before marking any input request answered. Use the store's `submitted` or `streaming` status to show that a response is being processed; submitting a response alone does not resolve an approval, question, or session-limit prompt. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
+
 ## What to read next
 
 - [Tools](/docs/tools): define the typed actions an approval gates

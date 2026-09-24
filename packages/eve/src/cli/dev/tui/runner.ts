@@ -1148,7 +1148,6 @@ export class EveTUIRunner {
                   requestId: request.approvalId,
                   optionId: response.approved ? "approve" : "cancel",
                 });
-                this.#pendingInputRequests.delete(request.approvalId);
               }
             }
 
@@ -1169,7 +1168,6 @@ export class EveTUIRunner {
                 if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
                 if (response.text !== undefined) inputResponse.text = response.text;
                 responses.push(inputResponse);
-                this.#pendingInputRequests.delete(inputRequest.requestId);
               }
             }
 
@@ -2409,6 +2407,30 @@ async function* eveEventsToTUIStream(
             toolCallId,
           };
         }
+        break;
+      }
+
+      case "approval.candidate": {
+        if (event.data.outcome === "pending") break;
+        const request = pendingInputRequests.get(event.data.requestId);
+        if (request !== undefined) upsertPendingApproval(turnState, request);
+        break;
+      }
+
+      case "approval.settled":
+      case "input.resolved": {
+        const requestIds = new Set(
+          event.type === "input.resolved"
+            ? event.data.resolutions.map((resolution) => resolution.requestId)
+            : [event.data.requestId],
+        );
+        for (const requestId of requestIds) pendingInputRequests.delete(requestId);
+        turnState.pendingApprovals = turnState.pendingApprovals.filter(
+          (request) => !requestIds.has(request.approvalId),
+        );
+        turnState.pendingQuestions = turnState.pendingQuestions.filter(
+          (request) => !requestIds.has(request.requestId),
+        );
         break;
       }
 

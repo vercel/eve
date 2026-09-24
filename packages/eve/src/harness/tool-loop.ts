@@ -163,6 +163,7 @@ import {
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
+  getPendingAuthorization,
   getSupersededAuthorizationChallenges,
   setPendingAuthorization,
 } from "#harness/authorization.js";
@@ -717,6 +718,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           context: approvalContext,
         })
       : config.tools;
+    const pendingApprovalChallenges = getPendingAuthorization(session.state)?.challenges ?? [];
     const coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,
@@ -735,6 +737,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
       }
       const audit = getApprovalAuditState(session.state);
+      for (const challenge of pendingApprovalChallenges) {
+        if (
+          !audit.candidateHistory.some(
+            (candidate) =>
+              candidate.candidateId === challenge.candidateId &&
+              candidate.status === "timed-out" &&
+              candidate.eventEmitted !== true,
+          )
+        )
+          continue;
+        await emit(
+          createAuthorizationCompletedEvent({
+            attemptId: challenge.attemptId,
+            authorization: challenge.challenge,
+            candidateId: challenge.candidateId,
+            name: challenge.name,
+            outcome: "failed",
+            reason: "The approval response expired. Please submit a new response.",
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
       for (const candidate of audit.activeCandidates.filter(
         (entry) => entry.pendingEventEmitted !== true,
       )) {
@@ -940,8 +966,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         return { next: null, session: parkedSession };
       }
 
-      if (config.mode === "conversation" && isHarnessBetweenTurns(pending.session)) {
-        // An approval response can finish without starting a turn or resolving the request.
+      if (
+        coordinated.kind === "responses-completed" &&
+        config.mode === "conversation" &&
+        isHarnessBetweenTurns(pending.session) &&
+        getPendingAuthorization(pending.session.state) === undefined &&
+        getBackgroundTasks(pending.session.state).query({ state: "working" }).length === 0 &&
+        store?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() !== true
+      ) {
+        // A completed response need not resolve the approval or start a turn.
         await emit?.(createSessionWaitingEvent());
       }
       return { next: null, session: pending.session };

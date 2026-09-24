@@ -806,6 +806,55 @@ describe("defaultMessageReducer", () => {
     expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
   });
 
+  it.each(["tool-approval", "question", "session-limit"] as const)(
+    "waits for authoritative resolution of a submitted %s response",
+    (kind) => {
+      const reducer = defaultMessageReducer();
+      const requested = reduceServerEvents(reducer, reducer.initial(), [
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+              kind,
+              prompt: "Continue Alice's task?",
+              requestId: "request_1",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ]);
+      const response = { requestId: "request_1", optionId: "continue" };
+      const submitted = reducer.reduce(requested, {
+        type: "client.input.responded",
+        data: { createdAt: 1, responses: [response] },
+      });
+      expect(submitted).toBe(requested);
+      expect(findToolPart(submitted, "call_1")).toMatchObject({ state: "approval-requested" });
+      expect(findToolPart(submitted, "call_1")?.toolMetadata?.eve?.inputResponse).toBeUndefined();
+      const resolved = reduceServerEvents(reducer, submitted, [
+        createInputResolvedEvent({
+          resolutions: [
+            {
+              kind,
+              outcome: kind === "tool-approval" ? "approved" : "answered",
+              requestId: "request_1",
+              response,
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ]);
+      expect(findToolPart(resolved, "call_1")).toMatchObject({
+        state: "approval-responded",
+        toolMetadata: { eve: { inputResponse: response } },
+      });
+    },
+  );
+
   it("projects authoritative input resolutions from replayed server events", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [
@@ -1387,5 +1436,6 @@ function findToolPart(
 ) {
   return data.messages
     .flatMap((message) => message.parts)
-    .find((part) => part.type === "dynamic-tool" && part.toolCallId === toolCallId);
+    .filter((part) => part.type === "dynamic-tool")
+    .find((part) => part.toolCallId === toolCallId);
 }

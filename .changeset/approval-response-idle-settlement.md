@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Return idle approval-response deliveries to `session.waiting` so refused responses finish instead of leaving clients streaming. Keep tool approval prompts answerable until the server confirms their resolution.
+Finish refused approval-response deliveries without leaving clients streaming. Keep approval, question, and session-limit prompts answerable until the server confirms their resolution, rather than marking them answered when a response is submitted.

@@ -1,6 +1,12 @@
 import { jsonSchema, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, expect, it, vi } from "vitest";
+import type { ApprovalResponsePolicy } from "#approval/definition.js";
+import {
+  getApprovalAuditState,
+  markApprovalCandidateAuthorizationRequired,
+} from "#harness/approval-candidates.js";
+import { setPendingAuthorization } from "#harness/authorization.js";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
@@ -26,7 +32,7 @@ afterAll(() => {
 
 function fixture(
   name: string,
-  responseAuthorized = false,
+  responseAuthorized: boolean | ApprovalResponsePolicy = false,
   outputLimit?: number,
   outputSchema?: HarnessSession["outputSchema"],
 ) {
@@ -108,7 +114,13 @@ function fixture(
       ...(toolName.startsWith("gate")
         ? {
             approval: responseAuthorized
-              ? { request: always(), response: async () => ({ status: "allowed" as const }) }
+              ? {
+                  request: always(),
+                  response:
+                    typeof responseAuthorized === "function"
+                      ? responseAuthorized
+                      : async () => ({ status: "allowed" as const }),
+                }
               : always(),
           }
         : {}),
@@ -207,6 +219,9 @@ function fixture(
     drive,
     get session() {
       return session;
+    },
+    updateSession(update: (session: HarnessSession) => HarnessSession) {
+      session = update(session);
     },
     pending: () => getPendingInputBatches(session.state).flatMap((b) => b.requests),
     async gate(...names: string[]) {
@@ -532,6 +547,145 @@ it("continues after responder-authorized approval of the older batch", async () 
   expect(f.executions).toEqual(["gateA", "read"]);
   expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateB"]);
   expect(result.settledTurn?.output).toBe("FINAL");
+});
+
+it.each(["rejected", "failed", "timed-out"] as const)(
+  "finishes a %s response attempt without starting a turn and permits retry",
+  async (outcome) => {
+    let allowed = false;
+    const policy = vi.fn(() => {
+      if (allowed) return { status: "allowed" as const };
+      if (outcome === "failed") throw new Error("Policy unavailable");
+      return { status: "rejected" as const, reason: "Alice needs Bob's approval." };
+    });
+    const f = fixture(`response-${outcome}`, policy);
+    await f.gate("gateA");
+    const input = {
+      attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+        response,
+        auth: {
+          attributes: {},
+          authenticator: "test",
+          issuer: "test",
+          principalId: "alice",
+          principalType: "user" as const,
+        },
+      })),
+    };
+    const start = f.events.length;
+    const ingested = await f.step(input);
+    expect(typeof ingested.next).toBe("function");
+    expect(f.events.slice(start).map((event) => event.type)).toEqual(["approval.candidate"]);
+    expect(policy).not.toHaveBeenCalled();
+    const clock =
+      outcome === "timed-out"
+        ? vi.spyOn(Date, "now").mockReturnValue(Date.now() + 600_001)
+        : undefined;
+    try {
+      await f.drive();
+    } finally {
+      clock?.mockRestore();
+    }
+    const events = f.events.slice(start);
+    expect(events.at(-1)?.type).toBe("session.waiting");
+    expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
+    expect(events.some((event) => event.type === "turn.started")).toBe(false);
+    expect(getApprovalAuditState(f.session.state).candidateHistory.at(-1)?.status).toBe(outcome);
+    expect(f.pending()).toHaveLength(1);
+    expect(f.executions).toEqual([]);
+
+    allowed = true;
+    f.script.push("Bob approved the task.");
+    const retryStart = f.events.length;
+    await f.drive(input);
+    expect(f.pending()).toEqual([]);
+    expect(f.executions).toEqual(["gateA"]);
+    expect(
+      f.events.slice(retryStart).filter((event) => event.type === "session.waiting"),
+    ).toHaveLength(1);
+  },
+);
+
+it("does not announce waiting while a candidate needs sign-in, then completes on expiry", async () => {
+  const policy = vi.fn(() => ({ status: "allowed" as const }));
+  const f = fixture("candidate-sign-in", policy);
+  await f.gate("gateA");
+  await f.step({
+    attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+      response,
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+    })),
+  });
+  const candidate = getApprovalAuditState(f.session.state).activeCandidates[0]!;
+  const challenges = [
+    {
+      candidateId: candidate.candidateId,
+      name: "notes",
+      hookUrl: "https://example.com/callback",
+      challenge: { url: "https://example.com/sign-in" },
+    },
+  ];
+  f.updateSession((session) => ({
+    ...session,
+    state: setPendingAuthorization(
+      markApprovalCandidateAuthorizationRequired({
+        state: session.state,
+        candidateId: candidate.candidateId,
+        authorizationChallenges: challenges,
+      }),
+      { challenges },
+    ),
+  }));
+  const start = f.events.length;
+  await f.drive();
+  expect(f.events.slice(start)).toEqual([]);
+  expect(policy).not.toHaveBeenCalled();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(candidate.expiresAt + 1);
+  try {
+    await f.drive();
+  } finally {
+    clock.mockRestore();
+  }
+  expect(f.events.slice(start).map((event) => event.type)).toEqual([
+    "authorization.completed",
+    "approval.candidate",
+    "session.waiting",
+  ]);
+  expect(f.pending()).toHaveLength(1);
+});
+
+it("uses the normal turn boundary for a mixed accepted and refused delivery", async () => {
+  const f = fixture("mixed-response", ({ request }) =>
+    request.toolName === "gateA"
+      ? { status: "allowed" }
+      : { status: "rejected", reason: "Bob must approve this task." },
+  );
+  await f.gate("gateA");
+  f.script.push(calls("gateB"));
+  await f.drive({ message: "Prepare Bob's independent task." });
+  const start = f.events.length;
+  f.script.push("Alice's task is complete.");
+  await f.drive({
+    attributedInputResponses: f.pending().map((request) => ({
+      response: { requestId: request.requestId, optionId: "approve" },
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+    })),
+  });
+  expect(f.executions).toEqual(["gateA"]);
+  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateB"]);
+  expect(f.events.slice(start).filter((event) => event.type === "session.waiting")).toHaveLength(1);
 });
 
 it("resumes a complete batch while another batch has only a partial approval [control]", async () => {

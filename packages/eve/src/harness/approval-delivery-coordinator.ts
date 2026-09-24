@@ -38,7 +38,12 @@ const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 export interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
-  readonly kind: "continue" | "continue-coordination" | "authorization-required" | "park";
+  readonly kind:
+    | "continue"
+    | "continue-coordination"
+    | "authorization-required"
+    | "responses-completed"
+    | "park";
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }
@@ -146,15 +151,19 @@ export async function coordinateApprovalDelivery(input: {
   readonly tools: HarnessToolMap;
 }): Promise<ApprovalDeliveryResult> {
   const now = input.now ?? Date.now();
-  const expiredChallengeNames = getApprovalAuditState(input.session.state)
-    .activeCandidates.filter((candidate) => candidate.expiresAt <= now)
-    .flatMap(
-      (candidate) => candidate.authorizationChallenges?.map((challenge) => challenge.name) ?? [],
-    );
+  const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
+    (candidate) => candidate.expiresAt <= now,
+  );
+  const expiredChallengeIds = expiredCandidates.flatMap(
+    (candidate) =>
+      candidate.authorizationChallenges?.map(
+        (challenge) => challenge.attemptId ?? challenge.candidateId ?? challenge.name,
+      ) ?? [],
+  );
   const expiredState = expireApprovalCandidates({ now, state: input.session.state });
   let session: HarnessSession = {
     ...input.session,
-    state: clearPendingAuthorization(expiredState, expiredChallengeNames),
+    state: clearPendingAuthorization(expiredState, expiredChallengeIds),
   };
   const audit = getApprovalAuditState(session.state);
   const batches = getPendingInputBatches(session.state);
@@ -331,6 +340,14 @@ export async function coordinateApprovalDelivery(input: {
   }
 
   const resumedStepInput = appendSettledResponses(remainingStepInput, pendingSettlements);
+  // Only a terminal candidate pass completes response processing. Ingestion must
+  // still commit before policy work, and live candidates still own their park.
+  if (
+    (didCommit || expiredCandidates.length > 0) &&
+    getApprovalAuditState(session.state).activeCandidates.length === 0
+  ) {
+    return deliveryResult(session, resumedStepInput, "responses-completed");
+  }
   if (pendingSettlements.length > 0) {
     return deliveryResult(session, resumedStepInput, "continue");
   }
