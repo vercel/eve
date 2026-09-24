@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createSessionInbox,
+  InboxWaitEnded,
   type SessionInboxHandle,
   type SessionInboxPayload,
 } from "#execution/session-inbox/inbox.js";
@@ -413,6 +414,33 @@ describe("createSessionInbox", () => {
     expect(alias.dispose).toHaveBeenCalledOnce();
     expect(stable.return).not.toHaveBeenCalled();
     expect(alias.return).not.toHaveBeenCalled();
+  });
+
+  it("stops waiting when `until` settles without consuming a later payload", async () => {
+    const later = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(createMockHook({ reads: [later.promise], token: "stable" }));
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+
+    const ended = await inbox.next(Promise.resolve("call-slow"));
+    expect(ended).toBeInstanceOf(InboxWaitEnded);
+    expect((ended as InboxWaitEnded<string>).value).toBe("call-slow");
+
+    later.resolve(resolved(send("after the timer")));
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("after the timer")));
+    await inbox.dispose();
+  });
+
+  it("hands out a payload accepted before `until` settled", async () => {
+    installHooks(
+      createMockHook({ reads: [Promise.resolve(resolved(send("result first")))], token: "stable" }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    await vi.waitFor(() => expect(inbox.hasPending()).toBe(true));
+
+    await expect(inbox.next(Promise.resolve("call-slow"))).resolves.toEqual(send("result first"));
+    await inbox.dispose();
   });
 
   it("disposes every alias with the inbox", async () => {

@@ -3719,6 +3719,90 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-child" });
   });
 
+  it.each([
+    ["started in the background", "background", false],
+    ["detached while the turn waited", "foreground", true],
+  ] as const)("keeps a call %s open as a background section", async (_label, mode, detached) => {
+    const client = stubClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async (_input, init) =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                init?.signal?.addEventListener(
+                  "abort",
+                  () => controller.error(new DOMException("Aborted", "AbortError")),
+                  { once: true },
+                );
+              },
+            }),
+            { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+          ),
+      ),
+    );
+    const view = {
+      begin: vi.fn(),
+      background: vi.fn(),
+      upsertStep: vi.fn(),
+      upsertTool: vi.fn(),
+      removeTool: vi.fn(),
+      complete: vi.fn(),
+      markChildToolCallId: vi.fn(),
+    };
+    const prompts: Array<string | undefined> = ["delegate", undefined];
+
+    await new EveTUIRunner({
+      client,
+      name: "Weather Agent",
+      renderer: fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events as AsyncIterable<unknown>) void event;
+        }),
+        subagents: view,
+      }),
+      session: sessionYielding([
+        {
+          type: "task.started",
+          data: {
+            callId: "call-child",
+            child: {
+              sessionId: "child-session",
+              streamPath: "/eve/v1/session/child-session/stream",
+            },
+            kind: "agent",
+            mode,
+            name: "weather-child",
+            taskId: "weather-child-task",
+            turnId: "turn-parent",
+          },
+        },
+        ...(detached
+          ? [
+              {
+                type: "task.detached" as const,
+                data: {
+                  callId: "call-child",
+                  reason: "steer" as const,
+                  taskId: "weather-child-task",
+                },
+              },
+            ]
+          : []),
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]),
+    }).run();
+
+    expect(view.background).toHaveBeenCalledExactlyOnceWith({ callId: "call-child" });
+    expect(view.complete).not.toHaveBeenCalled();
+  });
+
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
     const client = stubClient();
     let childSignal: AbortSignal | undefined;

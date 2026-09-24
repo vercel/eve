@@ -198,13 +198,16 @@ export class SubagentPump {
    * child boundary supplies authoritative completion.
    */
   settle(callId: string): void {
+    // A settled call no longer needs a background mark held for its child.
+    this.#pendingBackgroundCalls.delete(callId);
     this.#finalizeRun(callId, false);
   }
 
   /**
-   * The originating call returned a task receipt, not the child's result.
-   * Keep the section open until the child stream reaches its own boundary.
-   * A child that already settled before the receipt raced in stays settled.
+   * The originating call returned a task receipt, not the child's result:
+   * it started in the background or detached while the turn waited. Keep the
+   * section open until the child stream reaches its own boundary. A child
+   * that already settled before the receipt raced in stays settled.
    */
   background(callId: string): void {
     const run = this.#runs.get(callId);

@@ -29,6 +29,15 @@ interface Source {
   closed: boolean;
 }
 
+/** Returned by {@link SessionInboxReader.next} when its `until` promise settled first. */
+export class InboxWaitEnded<T> {
+  readonly value: T;
+
+  constructor(value: T) {
+    this.value = value;
+  }
+}
+
 export interface SessionInboxReader {
   /**
    * Waits for and removes the next accepted payload in arrival order, or
@@ -36,6 +45,12 @@ export interface SessionInboxReader {
    * time; the owner program is strictly sequential.
    */
   next(): Promise<SessionInboxPayload | undefined>;
+  /**
+   * Like `next()`, but stops waiting once `until` settles and returns its
+   * value without consuming anything. A payload accepted first wins, so a
+   * durable timer never overtakes an earlier inbox arrival.
+   */
+  next<T>(until: Promise<T>): Promise<SessionInboxPayload | undefined | InboxWaitEnded<T>>;
   /** Removes every payload accepted so far, in arrival order. */
   drain(): SessionInboxPayload[];
   hasPending(): boolean;
@@ -153,6 +168,33 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     }
   };
 
+  function next(): Promise<SessionInboxPayload | undefined>;
+  function next<T>(until: Promise<T>): Promise<SessionInboxPayload | undefined | InboxWaitEnded<T>>;
+  async function next<T>(
+    until?: Promise<T>,
+  ): Promise<SessionInboxPayload | undefined | InboxWaitEnded<T>> {
+    let ended: InboxWaitEnded<T> | undefined;
+    let endFailure: { readonly error: unknown } | undefined;
+    void until?.then(
+      (value) => {
+        ended = new InboxWaitEnded(value);
+        notify();
+      },
+      (error: unknown) => {
+        endFailure = { error };
+        notify();
+      },
+    );
+    while (true) {
+      if (failure !== undefined) throw failure.error;
+      if (queue.length > 0) return queue.shift();
+      if (closed()) return undefined;
+      if (endFailure !== undefined) throw endFailure.error;
+      if (ended !== undefined) return ended;
+      await wait();
+    }
+  }
+
   return {
     get claimedTokens() {
       return sources.map(({ token }) => token);
@@ -162,14 +204,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
-    async next() {
-      while (true) {
-        if (failure !== undefined) throw failure.error;
-        if (queue.length > 0) return queue.shift();
-        if (closed()) return undefined;
-        await wait();
-      }
-    },
+    next,
     drain() {
       if (failure !== undefined) throw failure.error;
       return queue.splice(0);

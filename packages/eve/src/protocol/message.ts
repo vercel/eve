@@ -418,8 +418,12 @@ export interface TaskStartedStreamEvent {
 }
 
 /**
- * Stream event for a waited task that moves to the background. Reserved:
- * every task is waited on today, so eve does not emit it yet.
+ * Stream event emitted when a waited task moves to the background: a
+ * steering message arrived during the wait (`steer`), or the tool's
+ * `detach: { timeout }` timer fired (`timeout`). The call's `action.result`
+ * carries a receipt, and the task keeps working; its `task.settled` follows
+ * later. Tasks detached by one steering message deliver their results
+ * together.
  */
 export interface TaskDetachedStreamEvent {
   data: {
@@ -1436,6 +1440,16 @@ export function createTaskStartedEvent(input: {
           };
   }
   return { data, type: "task.started" };
+}
+
+/** Creates the `task.detached` event for one waited task that moved to the background. */
+export function createTaskDetachedEvent(
+  data: TaskDetachedStreamEvent["data"],
+): TaskDetachedStreamEvent {
+  return {
+    data: { callId: data.callId, reason: data.reason, taskId: data.taskId },
+    type: "task.detached",
+  };
 }
 
 /** Creates the `task.settled` event for one task generation's first terminal outcome. */

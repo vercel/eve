@@ -69,7 +69,7 @@ export async function startWorkflowTask<
   readonly session: T;
 }> {
   const { now, request, session } = input;
-  // `{ timeout }` waits like `false` until timed detach lands.
+  // `false` and `{ timeout }` start waited; the turn may detach them later.
   const background = request.detach === true;
   const table = readTasks(session);
   const existing = table.records.find(

@@ -387,7 +387,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `grep
 
 ### `sleep`
 
-`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. Add it:
+`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message ends a waited `sleep` early in any session: eve cancels the wait, and the call reports the time it waited, such as `The sleep ended early after 12 s because a new message arrived.` Add it:
 
 ```sh
 eve add tool/sleep

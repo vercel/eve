@@ -101,8 +101,10 @@ export type WorkflowToolContext = Pick<
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
 
 /**
- * Whether a call waits for the tool's result. `true` returns a receipt at
- * once and delivers the result later in its own message.
+ * When a call stops holding its turn. `false` waits and detaches only when
+ * steered; `true` returns a receipt at once; `{ timeout }` also detaches
+ * after `timeout` milliseconds. A detached call's result arrives later in
+ * its own message.
  */
 export type WorkflowToolDetach = boolean | { readonly timeout: number };
 
@@ -115,8 +117,13 @@ export interface WorkflowToolDefinition<
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   /**
-   * `true` returns a receipt to the model at once; the run's result arrives
-   * later as a task result. Defaults to `false`: the call waits.
+   * Defaults to `false`: the call waits, and in an interactive root session
+   * (a root session in conversation mode) a steering message moves it to the
+   * background. `true` returns a receipt to the model at once. `{ timeout }`
+   * waits like `false`, and in an interactive root session also moves the
+   * call to the background after `timeout` milliseconds. A background call's
+   * result arrives later as a task result. Unlike `timeout`, this never
+   * stops the run.
    */
   detach?: WorkflowToolDetach;
   /**
@@ -129,10 +136,7 @@ export interface WorkflowToolDefinition<
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
-/**
- * Validates an authored `detach` value. `{ timeout }` is accepted and stored,
- * but until timed detach lands it behaves like `false`.
- */
+/** Validates an authored `detach` value. */
 export function normalizeWorkflowToolDetach(
   value: unknown,
   factory: string,

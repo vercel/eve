@@ -14,6 +14,7 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { isAgentTaskRequest } from "#tasks/agent-tool.js";
 import { applyTaskCancelCall } from "#tasks/cancel.js";
 import { isTaskCancelRequest } from "#tasks/cancel-tool.js";
+import { planTaskWait, type TaskWaitPlan } from "#tasks/detach.js";
 import { readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
 import { readTasks } from "#tasks/read.js";
 import { setTaskTable } from "#tasks/state.js";
@@ -26,7 +27,7 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
 
 export async function dispatchCoordinationStep(
   input: CoordinationDispatchStepInput,
-): Promise<TaskOwnerUpdate> {
+): Promise<TaskOwnerUpdate & { readonly wait?: TaskWaitPlan }> {
   "use step";
 
   const prepared = await prepareCoordinationDispatch({
@@ -100,6 +101,7 @@ export async function dispatchCoordinationStep(
     replies: [],
     results,
     serializedContext: input.serializedContext,
+    wait: planTaskWait({ detachable: prepared.interactiveRootTurn, requests: prepared.plan }),
     sessionState:
       nextSession === session
         ? prepared.sessionState

@@ -12,8 +12,11 @@ import {
   InitiatorAuthKey,
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
+  ModeKey,
   ParentSessionKey,
   SandboxKey,
+  ScheduleIdKey,
+  SessionCallbackKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
@@ -101,7 +104,13 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
 export async function prepareCoordinationDispatch(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<PreparedCoordinationDispatch | undefined> {
+}): Promise<
+  | (PreparedCoordinationDispatch & {
+      /** Whether a steering message may detach these calls; see {@link isInteractiveRootTurn}. */
+      readonly interactiveRootTurn: boolean;
+    })
+  | undefined
+> {
   const durableSession = readDurableSession(input.sessionState);
   const pending = getPendingCoordinationBatch(durableSession.state);
 
@@ -122,8 +131,9 @@ export async function prepareCoordinationDispatch(input: {
     plan: () => planDispatch({ requests }),
     serializedContext: input.serializedContext,
   });
+  const interactiveRootTurn = isInteractiveRootTurn(ctx, event.sequence);
   if (event === pending.event) {
-    return { ...prepared, sessionState: input.sessionState };
+    return { ...prepared, interactiveRootTurn, sessionState: input.sessionState };
   }
 
   const session = setPendingCoordinationBatch({
@@ -133,9 +143,23 @@ export async function prepareCoordinationDispatch(input: {
   });
   return {
     ...prepared,
+    interactiveRootTurn,
     session,
     sessionState: createDurableSessionState({ session }),
   };
+}
+
+/**
+ * A root session in conversation mode, in a turn a schedule did not start:
+ * the same session test that adds eve's background-task instructions, plus
+ * the rule that a scheduled turn never detaches, so it posts one final reply.
+ */
+export function isInteractiveRootTurn(ctx: ContextContainer, turnSequence: number): boolean {
+  if (ctx.get(ModeKey) !== "conversation") return false;
+  if (ctx.get(ParentSessionKey) !== undefined || ctx.get(SessionCallbackKey) !== undefined) {
+    return false;
+  }
+  return !(turnSequence === 0 && ctx.get(ScheduleIdKey) !== undefined);
 }
 
 interface DispatchBatch {

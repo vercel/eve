@@ -604,6 +604,21 @@ describe("SubagentPump child stream transport", () => {
     expect(requests).toEqual([]);
   });
 
+  it("marks a detached call's section once its child is known, unless it settled first", () => {
+    serveChildStreams(() => responseOf([]));
+    const { pump, view } = createPump();
+
+    pump.background("detached");
+    pump.begin(taskStarted("detached"), "parent");
+    expect(view.background).toHaveBeenCalledExactlyOnceWith({ callId: "detached" });
+
+    pump.background("settled");
+    pump.settle("settled");
+    pump.begin(taskStarted("settled"), "parent");
+    expect(view.background).toHaveBeenCalledTimes(1);
+    pump.abortAll();
+  });
+
   it("does not reopen after abortAll", async () => {
     vi.useFakeTimers();
     const requests = serveChildStreams(() => responseOf([]));

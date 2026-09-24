@@ -1,0 +1,148 @@
+import { sleep } from "#compiled/@workflow/core/index.js";
+
+import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
+
+// How an owner's turn treats the calls it waits on: which ones a steering
+// message detaches or ends, and which `detach: { timeout }` timers race the
+// inbox. Read by the session workflow body, so this module must not import
+// Node.js built-ins.
+
+/** What the owner decided about its waited calls when it started them. */
+export interface TaskWaitPlan {
+  /**
+   * The turn is an interactive root turn: a root session in conversation
+   * mode, in a turn a schedule did not start. Only there does a steering
+   * message detach waited calls, and only there do `detach: { timeout }`
+   * timers run.
+   */
+  readonly detachable: boolean;
+  /** Waited calls to eve's `sleep` tool, which a steering message ends early in any session. */
+  readonly sleepCallIds: readonly string[];
+  /** Waited `detach: { timeout }` calls and their timeouts in milliseconds; empty unless detachable. */
+  readonly timeouts: readonly { readonly callId: string; readonly timeoutMs: number }[];
+}
+
+/** What interrupted a foreground wait. */
+export type WaitInterruption =
+  | {
+      /** A steering message; tasks whose dismissible question it dismissed keep waiting. */
+      readonly kind: "steer";
+      readonly dismissedTaskIds: readonly string[];
+    }
+  | { readonly kind: "timeout"; readonly callId: string };
+
+/** The table changes one interruption makes. */
+export interface WaitedTaskChanges {
+  readonly reason: "steer" | "timeout";
+  /** Waited calls whose tasks move to the background. */
+  readonly detachCallIds: readonly string[];
+  /** Waited `sleep` calls that end early; their runs are cancelled. */
+  readonly endCallIds: readonly string[];
+  /** Tasks that keep their call waiting, because the message dismissed their question. */
+  readonly keepTaskIds: readonly string[];
+}
+
+const SLEEP_WORKFLOW_FUNCTION = "executeSleepTool";
+
+/**
+ * Whether a workflow ID names eve's own `sleep` tool. The build names a
+ * workflow after the module that defines it: the eve package
+ * (`eve@<version>`), or eve's source tree when eve itself is under test.
+ * Ending early on steer is internal to that tool, not an authored option.
+ */
+export function isSleepToolWorkflowId(workflowId: string): boolean {
+  const prefix = "workflow//";
+  const suffix = `//${SLEEP_WORKFLOW_FUNCTION}`;
+  if (!workflowId.startsWith(prefix) || !workflowId.endsWith(suffix)) return false;
+  const source = workflowId.slice(prefix.length, -suffix.length);
+  return (
+    source === "eve" ||
+    source.startsWith("eve@") ||
+    source.startsWith("eve/") ||
+    source.endsWith("src/execution/tools/sleep-workflow")
+  );
+}
+
+/** Decides how the turn treats the calls of one coordination batch. */
+export function planTaskWait(input: {
+  readonly detachable: boolean;
+  readonly requests: readonly Pick<
+    RuntimeWorkflowTaskRequest,
+    "callId" | "detach" | "workflowId"
+  >[];
+}): TaskWaitPlan {
+  const sleepCallIds: string[] = [];
+  const timeouts: { callId: string; timeoutMs: number }[] = [];
+  for (const request of input.requests) {
+    if (isSleepToolWorkflowId(request.workflowId)) {
+      sleepCallIds.push(request.callId);
+    } else if (input.detachable && typeof request.detach === "object") {
+      timeouts.push({ callId: request.callId, timeoutMs: request.detach.timeout });
+    }
+  }
+  return { detachable: input.detachable, sleepCallIds, timeouts };
+}
+
+/** Whether a steering message can change anything about this wait. */
+export function steeringInterruptsWait(plan: TaskWaitPlan): boolean {
+  return plan.detachable || plan.sleepCallIds.length > 0;
+}
+
+/**
+ * The changes one interruption makes to the calls still waiting, or
+ * `undefined` when it changes nothing. A steering message ends waited
+ * sleeps in any session and, in an interactive root turn, detaches every
+ * other waited call together. A timer detaches only its own call.
+ */
+export function resolveWaitInterruption(input: {
+  readonly interruption: WaitInterruption;
+  readonly plan: TaskWaitPlan;
+  readonly unresolvedCallIds: readonly string[];
+}): WaitedTaskChanges | undefined {
+  const { interruption, plan, unresolvedCallIds } = input;
+  if (interruption.kind === "timeout") {
+    if (!plan.detachable || !unresolvedCallIds.includes(interruption.callId)) return undefined;
+    return {
+      detachCallIds: [interruption.callId],
+      endCallIds: [],
+      keepTaskIds: [],
+      reason: "timeout",
+    };
+  }
+  const endCallIds = unresolvedCallIds.filter((callId) => plan.sleepCallIds.includes(callId));
+  const detachCallIds = plan.detachable
+    ? unresolvedCallIds.filter((callId) => !endCallIds.includes(callId))
+    : [];
+  if (endCallIds.length === 0 && detachCallIds.length === 0) return undefined;
+  return {
+    detachCallIds,
+    endCallIds,
+    keepTaskIds: interruption.dismissedTaskIds,
+    reason: "steer",
+  };
+}
+
+/**
+ * The `detach: { timeout }` timers of one foreground wait: one durable sleep
+ * per timed call, started with the wait. A timer still pending when the wait
+ * ends is abandoned, so it lives and dies with the turn.
+ */
+export class DetachTimers {
+  readonly #armed: Map<string, Promise<string>>;
+
+  constructor(timeouts: TaskWaitPlan["timeouts"]) {
+    this.#armed = new Map(
+      timeouts.map(({ callId, timeoutMs }) => [callId, sleep(timeoutMs).then(() => callId)]),
+    );
+  }
+
+  /** Resolves with the call ID of the next timer to fire, or is `undefined` when none is armed. */
+  next(): Promise<string> | undefined {
+    return this.#armed.size === 0 ? undefined : Promise.race(this.#armed.values());
+  }
+
+  /** Stops racing the timers of calls that resolved or already detached. */
+  disarm(callIds: Iterable<string>): void {
+    for (const callId of callIds) this.#armed.delete(callId);
+  }
+}

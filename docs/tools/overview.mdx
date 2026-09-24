@@ -129,9 +129,12 @@ receive only the projected text.
 ### Tool calls finish inside the turn
 
 Every tool call resolves inside the turn that made it. The model sees the tool's output as the
-tool result before it continues. The one exception is a workflow tool defined with `detach: true`:
-its call resolves at once with a receipt, and the workflow's result arrives later in its own message.
-See [Return a receipt with `detach`](/docs/tools/workflows#return-a-receipt-with-detach).
+tool result before it continues. A workflow tool defined with `detach: true` is the exception: its
+call resolves at once with a receipt, and the workflow's result arrives later in its own message.
+See [Return a receipt with `detach`](/docs/tools/workflows#return-a-receipt-with-detach). In an
+interactive root session, a new message can also move a waiting workflow tool or subagent call to
+the background, which resolves it with a receipt; see
+[Detach a waited call](/docs/tools/workflows#detach-a-waited-call).
 
 | Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
 | -------------------- | -------------------------------------------------------- | ---------------------------------- |
@@ -139,8 +142,10 @@ See [Return a receipt with `detach`](/docs/tools/workflows#return-a-receipt-with
 | `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
 
 Several tool calls in one model step run concurrently, and the turn waits for all of them. A
-message that arrives while a tool call waits follows the channel's turn policy: `steer` (the
-default) is applied after the wait ends, in the same turn, and `queue` waits until the turn settles.
+message that arrives while a tool call waits follows the channel's turn policy. With `steer` (the
+default), the message is applied after the wait ends, in the same turn. In an interactive root
+session, waiting workflow tool and subagent calls move to the background instead, so the turn
+answers the message right away. With `queue`, the message waits until the turn settles.
 
 ### Yield and return
 

@@ -130,7 +130,6 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
-    // Only `true` changes behavior today; `{ timeout }` waits like `false` until timed detach lands.
     detach: z.union([z.boolean(), z.object({ timeout: z.number() }).strict()]).optional(),
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,

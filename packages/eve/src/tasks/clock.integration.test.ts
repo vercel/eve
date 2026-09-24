@@ -11,7 +11,10 @@ import {
 } from "#execution/durable-session-store.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
+import {
+  resumeWorkflowToolRunAnswers,
+  resumeWorkflowToolRunDismissal,
+} from "#execution/tools/workflow/answer.js";
 import { getProxyInputRequests, type AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -119,6 +122,39 @@ describe("task clock through the HITL proxy", () => {
     expect(records(answered)[0]).toMatchObject({
       deadlineAt: "2026-09-24T14:30:00.000Z",
       status: "working",
+    });
+  });
+});
+
+describe("dismissal through the HITL proxy", () => {
+  it("reports the task whose dismissible question a plain message dismissed", async () => {
+    const task = createTaskRecord({
+      child: { commandToken: "command-1", kind: "workflow", runId: "run-1" },
+      id: "ask_question-abc234",
+      kind: "workflow",
+      name: "ask_question",
+    });
+    const asked = await proxy(
+      task,
+      { childContinuationToken: "answer-hook-1", childSessionId: "run-1" },
+      {
+        question: { dismissible: true, options: [{ id: "yes", label: "Yes" }] },
+        runId: "run-1",
+      },
+    );
+    const message = { kind: "deliver" as const, payloads: [{ message: "What's the weather?" }] };
+
+    const routed = await routeProxiedDeliverStep({
+      delivery: message,
+      sessionState: asked,
+      sessionWritable: new WritableStream<Uint8Array>(),
+    });
+
+    expect(resumeWorkflowToolRunDismissal).toHaveBeenCalledWith("answer-hook-1");
+    expect(routed).toMatchObject({
+      dismissedTaskIds: [task.id],
+      kind: "continue",
+      remainder: message,
     });
   });
 });

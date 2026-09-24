@@ -21,7 +21,7 @@ import {
   stampMessageStreamEvent,
 } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
-import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { resumeResolvedTaskClocks } from "#tasks/clock.js";
 
 export type RoutedDeliverResult =
@@ -32,6 +32,8 @@ export type RoutedDeliverResult =
     }
   | {
       readonly kind: "continue";
+      /** Tasks whose dismissible `ctx.ask()` question a plain message dismissed. */
+      readonly dismissedTaskIds?: readonly string[];
       readonly remainder: DeliverHookPayload | undefined;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
@@ -56,6 +58,8 @@ export async function routeProxiedDeliverStep(input: {
 }): Promise<RoutedDeliverResult> {
   "use step";
   let durableSession = readDurableSession(input.sessionState);
+  const routes = getProxyInputRequests(durableSession.state);
+  const dismissedTaskIds = new Set<string>();
   const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
@@ -116,6 +120,10 @@ export async function routeProxiedDeliverStep(input: {
       await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
       if (child.dismissedRequestIds.length > 0) {
         await resumeWorkflowToolRunDismissal(child.childContinuationToken);
+        for (const requestId of child.dismissedRequestIds) {
+          const taskId = routes.get(requestId)?.taskId;
+          if (taskId !== undefined) dismissedTaskIds.add(taskId);
+        }
       }
       if (child.answerHook.question !== undefined) {
         await emitQuestionResolutions({
@@ -170,7 +178,9 @@ export async function routeProxiedDeliverStep(input: {
           deliveryMetadata: parentMetadata.length === 0 ? undefined : parentMetadata,
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
-  return { ...context, kind: "continue", remainder };
+  return dismissedTaskIds.size === 0
+    ? { ...context, kind: "continue", remainder }
+    : { ...context, dismissedTaskIds: [...dismissedTaskIds], kind: "continue", remainder };
 }
 
 // A `ctx.ask()` question is resolved by its workflow, not the harness, so the

@@ -10,8 +10,10 @@ delegate work to subagents, or coordinate retryable steps over a long period.
 
 By default, a workflow tool call resolves inside the turn that made it. The turn waits for the
 workflow's result, and the model sees that result as the tool result. While the body waits durably,
-the workflow holds no compute. A tool defined with `detach: true` returns a receipt at once and
-delivers its result later in its own message; see
+the workflow holds no compute. In an interactive root session, a new message moves a waited call to
+the background so the agent can answer the message; see
+[Detach a waited call](#detach-a-waited-call). A tool defined with `detach: true` returns a receipt
+at once and delivers its result later in its own message; see
 [Return a receipt with `detach`](#return-a-receipt-with-detach).
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
@@ -293,7 +295,9 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 - Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
 - Several requests may be outstanding at once.
 - A response never steers. A new human message that does not answer a pending request follows the
-  session's normal `turnPolicy`.
+  session's normal `turnPolicy`. In an interactive root session, a steering message that answers
+  nothing moves a call whose request is not dismissible to the background; see
+  [Detach on a new message](#detach-on-a-new-message).
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Both compose: `approval` before the run, `ctx.ask` inside it.
@@ -461,6 +465,92 @@ export default defineWorkflowTool({
 Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 [yield and return](/docs/tools#yield-and-return) for the final-output rules.
 
+## Detach a waited call
+
+The `detach` option on `defineWorkflowTool` decides when a call stops holding its turn:
+
+| Value             | Behavior                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `false` (default) | The call waits. In an interactive root session, it detaches only when a new message steers the turn.                      |
+| `true`            | The call returns a receipt at once. See [Return a receipt with `detach`](#return-a-receipt-with-detach).                  |
+| `{ timeout }`     | Like `false`. In an interactive root session, the call also detaches if it is still working after `timeout` milliseconds. |
+
+An interactive root session is a root session, not a subagent's session, in conversation mode. A
+turn that a schedule started never detaches, so a scheduled run posts one final reply.
+
+A detached call keeps working; detaching never stops its run. A receipt becomes the call's tool
+result, the task switches to the background and appears in the `[Tasks]` note, and its result
+arrives later in a `task.result` message, by the same rules as a
+[`detach: true` result](#return-a-receipt-with-detach). Detached tasks count toward the 10 working
+background tasks a session holds, but eve never rejects a detach.
+
+### Detach on a new message
+
+When a steering message (`turnPolicy: "steer"`, the default) arrives while an interactive root turn
+waits on calls, eve applies it in this order:
+
+1. If the message answers a pending question, it answers the question and does not steer. See
+   [Ask a human](#ask-a-human-ctxask) for when plain text answers a question.
+2. Otherwise, each pending question created with `dismissible: true` resolves as `dismissed`. Its
+   call keeps waiting and returns as usual.
+3. Every other waited call detaches. eve emits `task.detached` with `reason: "steer"` for each
+   one, and the turn continues in one model step with their receipts followed by the new message.
+
+The model reads a receipt such as:
+
+```text
+A new message arrived, so this call moved to the background as task deploy-3fq8wd. Its result will arrive in a later message. Do not poll or repeat this work.
+```
+
+The calls one message detaches form a detach group. eve delivers the group's results together, in
+one `task.result` message, once every member has finished; each call's time limit still bounds the
+wait. Agent calls in the same turn detach with them; see
+[Subagents](/docs/subagents#steering-while-a-call-waits).
+
+A call waiting on an approval, or on a question that is not dismissible, also detaches. Its request
+stays pending, and a later answer resumes the run, which reports its result in its own message.
+
+A message with `turnPolicy: "queue"` never detaches anything: it waits until the turn settles. In
+subagent sessions, task-mode runs, and turns started by a schedule, a steering message is applied
+after the waited calls return, in the same turn.
+
+eve's [`sleep` tool](/docs/concepts/built-in-tools#sleep) is the exception, in every session: a
+steering message ends a waited `sleep` early instead of detaching it. eve cancels the sleep's run,
+and the call's result reports the time it waited, such as
+`The sleep ended early after 12 s because a new message arrived.` Authored tools cannot opt into
+this behavior.
+
+### Detach after a timeout
+
+Use `detach: { timeout }` for a tool that is usually quick but sometimes long, such as a test run:
+
+```ts title="agent/tools/run_tests.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineWorkflowTool({
+  description: "Run the test suite in the sandbox.",
+  inputSchema: z.object({ filter: z.string().optional() }),
+  detach: { timeout: 2 * 60_000 },
+  async execute(input, ctx) {
+    "use workflow";
+    return await runTests(input, ctx); // A "use step" helper.
+  },
+});
+```
+
+In an interactive root turn, a call still working after `timeout` milliseconds detaches on its own.
+eve emits `task.detached` with `reason: "timeout"`, the model reads
+`This call is taking a while, so it moved to the background as task run_tests-3fq8wd.`, and the turn
+stops waiting for that call. Each call that times out detaches individually and delivers its result
+on its own, like a `detach: true` call. A result that arrives before the timer fires wins.
+
+The timer lives and dies with the turn. Outside interactive root turns, the call waits. Inside one,
+a steering message can still detach the call before its timer fires.
+
+`detach.timeout` only stops the turn from waiting. To end a call that runs too long, set the
+top-level [`timeout`](#limit-a-call-with-timeout) instead.
+
 ## Return a receipt with `detach`
 
 Set `detach: true` when the point of a tool is a later result, such as a reminder. The call returns
@@ -489,7 +579,8 @@ export default defineWorkflowTool({
 
 The model reads a receipt such as `Task remind-q4x1ze is working in the background.` Clients read
 the structured receipt on `action.result`: `output` is `{ status: "working", taskId }`. The task
-starts with `mode: "background"` on `task.started`. Without `detach: true`, the call waits.
+starts with `mode: "background"` on `task.started`. Without `detach: true`, the call waits until it
+returns or [detaches](#detach-a-waited-call).
 
 When the run finishes, eve delivers its outcome to the model as one user-role message of kind
 `task.result`, with one `<task_result>` block per result:
@@ -523,11 +614,11 @@ eve asks it once more and accepts whatever it returns.
 Until its result reaches history, a background task appears in the `[Tasks]` note that eve adds to
 the conversation, with its current status. The note drops the task once its result is delivered.
 
-A session holds at most 10 working background tasks. A `detach: true` call over that limit does not
-start and fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background run still publish
-`action.partial` for the originating call and never wake the model. Cancelling a turn does not
-cancel background tasks it started, and when the session ends, eve cancels every working task and
-delivers nothing afterward.
+A session holds at most 10 working background tasks, including detached calls. A `detach: true` call
+over that limit does not start and fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background
+run still publish `action.partial` for the originating call and never wake the model. Cancelling a
+turn does not cancel background tasks it started, and when the session ends, eve cancels every
+working task and delivers nothing afterward.
 
 To stop a background task, the model calls [`task_cancel`](/docs/concepts/built-in-tools#task_cancel)
 with its ID. Application code calls `session.cancel({ taskId })` to stop one task and leave the turn
@@ -563,11 +654,20 @@ export default defineWorkflowTool({
 ```
 
 A call still working at the limit fails with `TIMED_OUT`. A waited call gets that error as its tool
-result, a `detach: true` call delivers it as a failed task result, and `task.settled` reports
-`failed` with the same error. eve then cancels the run, which unwinds as described in
-[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). Time the run spends waiting on
-`ctx.ask` or an approval does not count toward the limit. `timeout: false` is the same as leaving it
-unset.
+result, a background call (`detach: true` or detached) delivers it as a failed task result, and
+`task.settled` reports `failed` with the same error. eve then cancels the run, which unwinds as
+described in [Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). Time the run spends waiting
+on `ctx.ask` or an approval does not count toward the limit. `timeout: false` is the same as leaving
+it unset.
+
+The top-level `timeout` and [`detach: { timeout }`](#detach-after-a-timeout) are different.
+`timeout` ends the call with `TIMED_OUT`. `detach.timeout` only stops the turn from waiting: the call
+keeps working and reports its result later. A tool can set both:
+
+```ts
+detach: { timeout: 2 * 60_000 }, // Stop waiting after 2 minutes.
+timeout: 20 * 60_000, // Fail the call after 20 minutes.
+```
 
 ## Cancel and clean up: `ctx.abortSignal`
 
@@ -691,23 +791,26 @@ the tool result.
 ## Semantics
 
 One call, one result. A waited workflow tool call resolves once, with the return value, the error,
-or a cancellation. A `detach: true` call resolves once with its receipt, and its task delivers the
-result once.
+or a cancellation. A `detach: true` or detached call resolves once with its receipt, and its task
+delivers the result once.
 
 Every workflow tool call is a task. When its run starts, the session stream emits `task.started`
 with `kind: "workflow"`, the tool `name`, `mode` (`"background"` for `detach: true`, otherwise
-`"foreground"`), and no `child`. The call's first outcome emits one `task.settled`, and a run that
-fails to start settles with `error.code` `START_FAILED`. Progress
-stays on `action.partial` and the result on `action.result`. Agent calls emit the same events with
-`kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
+`"foreground"`), and no `child`. A waited call that detaches emits `task.detached` with `reason`
+`"steer"` or `"timeout"`, and its `action.result` carries the receipt. The call's first outcome
+emits one `task.settled`, and a run that fails to start settles with `error.code` `START_FAILED`.
+Progress stays on `action.partial` and the result on `action.result`. Agent calls emit the same
+events with `kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
 [Sessions, runs and streaming](/docs/concepts/sessions-runs-and-streaming#stream-a-session) for the
 event fields.
 
 While a waited workflow tool runs, the turn waits for it. A message with `turnPolicy: "queue"` waits
-until the turn settles. A message with `turnPolicy: "steer"` (the default) is applied after the tool
-call resolves, in the same turn, so the model sees it before continuing. Steering does not cancel
-the run. Input responses never steer. Cancelling the turn cancels the waited run, which withdraws
-its requests.
+until the turn settles. A message with `turnPolicy: "steer"` (the default) detaches the call in an
+interactive root session, and the turn continues with the call's receipt and the message; see
+[Detach on a new message](#detach-on-a-new-message). Elsewhere, the message is applied after the
+tool call resolves, in the same turn, so the model sees it before continuing. Steering never cancels
+the run, except for eve's `sleep`, which ends early. Input responses never steer. Cancelling the turn
+cancels the waited run, which withdraws its requests.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the tool invocation.

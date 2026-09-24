@@ -11,7 +11,8 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 
 A subagent call is an ordinary tool call. The parent turn waits for the subagent's answer, and the
 answer becomes the tool result. Several subagent calls in one model step run in parallel, and the
-turn waits for all of them. If the child session expires, resets, or closes before replying, the
+turn waits for all of them. In an interactive root session, a new message can move waiting calls to
+the background; see [Steering while a call waits](#steering-while-a-call-waits). If the child session expires, resets, or closes before replying, the
 call fails with `AGENT_SESSION_ENDED` and reports the usage accumulated since the child's previous
 answer. This applies to root-agent copies, declared local subagents, and remote subagents. The
 subagent session remains available for later calls.
@@ -20,6 +21,22 @@ A subagent answers only when its session is quiescent. If the subagent calls a w
 defined with `detach: true`, its turn can end while that task still works; the parent's call stays
 open until the task reports, and the call's result is the reply the subagent gives in the result
 turn that delivers the task's result. An interim reply never settles the call.
+
+## Steering while a call waits
+
+In an interactive root session, a root session in conversation mode, a steering message that
+arrives while the turn waits on subagent calls moves those calls to the background so the agent can
+answer the message. Each child keeps working. The model reads a receipt such as
+`A new message arrived, so this call moved to the background as agent researcher-7k2m9q.`, and each
+child's answer arrives later in a `task.result` message. Calls that one message moves deliver their
+answers together, once every one of them has finished. The parent stream reports each moved call
+with `task.detached`, and the call's `action.result` carries the receipt
+`{ status: "working", taskId }`.
+
+A message with `turnPolicy: "queue"` waits for the calls instead. In a subagent's own session, in a
+task-mode run, and in a turn that a schedule started, a steering message is applied after the
+waited calls return, in the same turn. Workflow tool calls in the same turn follow the same rules;
+see [Detach a waited call](./tools/workflows#detach-a-waited-call).
 
 ## The built-in `agent` tool
 

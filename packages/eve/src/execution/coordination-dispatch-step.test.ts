@@ -86,3 +86,55 @@ it("applies a task_cancel call as the owner and returns its result at once", asy
     expect.objectContaining({ id: "remind-q4x1ze", status: "cancelled" }),
   ]);
 });
+
+it("returns how the turn waits: sleeps end on steer, and timers run only when detachable", async () => {
+  const base = createTestSessionState({ sessionId: "parent" });
+  const session = {
+    ...base.snapshot.session,
+    agent: { dynamicModel: true as const, system: "", tools: [] },
+    compaction: { recentWindowSize: 5, threshold: 10_000 },
+  };
+  const sleep = {
+    callId: "call-sleep",
+    input: { seconds: 60 },
+    kind: "workflow-task" as const,
+    toolName: "sleep",
+    workflowId: "workflow//eve@0.66.1//executeSleepTool",
+  };
+  const tests = {
+    callId: "call-tests",
+    detach: { timeout: 120_000 },
+    input: {},
+    kind: "workflow-task" as const,
+    toolName: "run_tests",
+    workflowId: "workflow//./agent/tools/run_tests//execute",
+  };
+  vi.mocked(startWorkflowToolRun).mockResolvedValue({ hookToken: "control", runId: "run-1" });
+  const dispatch = async (interactiveRootTurn: boolean) => {
+    vi.mocked(prepareCoordinationDispatch).mockResolvedValue({
+      batch: { event: { sequence: 1, stepIndex: 1, turnId: "turn-1" }, requests: [sleep, tests] },
+      interactiveRootTurn,
+      plan: [sleep, tests],
+      session,
+      sessionState: base,
+    } as never);
+    return await dispatchCoordinationStep({
+      action: "park",
+      serializedContext: {},
+      sessionState: base,
+      sessionWritable: new WritableStream(),
+      workflowToolRunOwner: { inbox: "owner-inbox" },
+    });
+  };
+
+  await expect(dispatch(true)).resolves.toMatchObject({
+    wait: {
+      detachable: true,
+      sleepCallIds: ["call-sleep"],
+      timeouts: [{ callId: "call-tests", timeoutMs: 120_000 }],
+    },
+  });
+  await expect(dispatch(false)).resolves.toMatchObject({
+    wait: { detachable: false, sleepCallIds: ["call-sleep"], timeouts: [] },
+  });
+});

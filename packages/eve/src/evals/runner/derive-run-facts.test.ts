@@ -420,6 +420,37 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
+  it("keeps a detached agent call working past its receipt until it settles", () => {
+    const receipt = { status: "working", taskId: "researcher-d1" };
+    const events: UnstampedMessageStreamEvent[] = [
+      turnStarted("t1", 0),
+      taskStarted({ callId: "d1", name: "researcher" }),
+      { type: "task.detached", data: { callId: "d1", reason: "steer", taskId: "researcher-d1" } },
+      actionResult({ callId: "d1", output: receipt, toolName: "researcher" }),
+    ];
+
+    expect(
+      derive(events).subagentCalls.map(({ callId, output, status }) => ({
+        callId,
+        output,
+        status,
+      })),
+    ).toEqual([{ callId: "d1", output: undefined, status: "working" }]);
+    const settled = derive([
+      ...events,
+      {
+        type: "task.settled",
+        data: { callId: "d1", output: "Found it.", status: "completed", taskId: "researcher-d1" },
+      },
+    ]);
+    expect(settled.subagentCalls).toEqual([
+      expect.objectContaining({ callId: "d1", output: "Found it.", status: "completed" }),
+    ]);
+    expect(settled.toolCalls).toEqual([
+      expect.objectContaining({ name: "researcher", output: receipt, status: "completed" }),
+    ]);
+  });
+
   it("records a workflow tool call as a tool call, not a subagent call", () => {
     const facts = derive([
       turnStarted("t1", 0),

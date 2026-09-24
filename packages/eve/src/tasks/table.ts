@@ -486,17 +486,20 @@ export function markTaskDelivered(table: TaskTable, taskId: string, generation: 
   return replace(table, { ...record, delivered: true });
 }
 
-/** Moves waited tasks to the background as one detach group. */
+/**
+ * Moves waited tasks to the background. Tasks sharing `detachGroup` deliver
+ * their results together; without one, each result is delivered on its own.
+ */
 export function detachTasks(
   table: TaskTable,
   taskIds: readonly string[],
-  detachGroup: string,
+  detachGroup?: string,
 ): TaskTable {
   let next = table;
   for (const taskId of taskIds) {
     const record = findTask(next, taskId);
     if (record === undefined || record.mode === "background") continue;
-    next = replace(next, { ...record, detachGroup, mode: "background" });
+    next = replace(next, withoutUndefined({ ...record, detachGroup, mode: "background" as const }));
   }
   return next;
 }

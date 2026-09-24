@@ -259,7 +259,7 @@ describe("startWorkflowTask with detach: true", () => {
     ]);
   });
 
-  it("waits like a default call for detach: { timeout } until timed detach lands", async () => {
+  it("starts a detach: { timeout } call waited, so only its timer can detach it", async () => {
     const started = await startWorkflowTask({
       now: NOW,
       request: { ...REQUEST, detach: { timeout: 120_000 } },

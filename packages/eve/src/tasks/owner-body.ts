@@ -8,6 +8,8 @@ import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
+import type { WaitedTaskChanges } from "#tasks/detach.js";
+import { detachWaitedTasksStep } from "#tasks/detach-step.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { planTaskTimer, readTaskCallbackAlias } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
@@ -131,6 +133,25 @@ export async function cancelTasks(
     cursor,
     await cancelTasksStep({
       selector,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    }),
+  );
+}
+
+/**
+ * Detaches or ends waited calls after a steering message or a detach timer.
+ * Returns their tool results: receipts for detached calls, and the time
+ * waited for each `sleep` that ended early.
+ */
+export async function interruptWaitedTasks(
+  cursor: SessionStateCursor,
+  changes: WaitedTaskChanges,
+): Promise<readonly RuntimeToolResultActionResult[]> {
+  return await applyTaskOwnerUpdate(
+    cursor,
+    await detachWaitedTasksStep({
+      ...changes,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }),

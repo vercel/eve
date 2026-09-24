@@ -151,21 +151,28 @@ never starts a replacement session for an address that is mid-handoff.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, the session owner signals pending model generation to stop, then applies the correction within the same turn and with the same turn ID. This includes model requests that perform provider-managed search before answering; interrupted search work may run again. Reasoning and search progress do not count as assistant output.
 
-An executing eve tool finishes and commits its result before steering reaches the next model request. This includes subagent calls and workflow tools that wait for a person, webhook, or timer: the message is applied after the wait ends. Steering does not cancel the turn or the calls it waits on. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
+An executing eve tool finishes and commits its result before steering reaches the next model request. Subagent calls and workflow tools that wait for a person, webhook, or timer behave differently depending on the session:
+
+- **Interactive root session** (a root session in conversation mode, in a turn a schedule did not start): a message that answers a pending question answers it and does not steer. Otherwise, pending questions created with `dismissible: true` resolve as `dismissed`, and every other waited call moves to the background. The turn continues at once with those calls' receipts and the message in one model step, and the calls' results arrive later as task results. See [Detach a waited call](../tools/workflows#detach-a-waited-call).
+- **Subagent sessions, task-mode runs, and scheduled turns:** the message is applied after the wait ends, in the same turn.
+
+Steering does not cancel the turn or the calls it waits on. The one exception is eve's `sleep` tool: in any session, a steering message ends a waited `sleep` early, and the call reports the time it waited. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
 
 Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+`turnPolicy: "queue"` preserves the message until the active turn settles, and never moves a waited call to the background. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
 
 Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
 
 ## Background tasks
 
 A [workflow tool](../tools/workflows#return-a-receipt-with-detach) defined with `detach: true` runs
-in the background: its call returns a receipt, and the turn continues without waiting. When the run
-finishes, eve holds its result in durable session state and delivers it as typed session input, not
-as a channel message. The model reads one `task.result` message per delivery, with a
-`<task_result>` block for each result.
+in the background: its call returns a receipt, and the turn continues without waiting. A waited call
+that [detaches](../tools/workflows#detach-a-waited-call) joins the background the same way. When a
+background task finishes, eve holds its result in durable session state and delivers it as typed
+session input, not as a channel message. The model reads one `task.result` message per delivery,
+with a `<task_result>` block for each result. The calls that one steering message detaches form a
+detach group, and their results are held until every member has finished, so they arrive together.
 
 An idle session starts a result turn for the result. A running turn from the same principal
 receives it at its next tool step; a turn from a different principal never sees it, and the result

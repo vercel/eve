@@ -64,6 +64,9 @@ export function deriveRunFacts(
   // Model calls whose input matches the agent tool contract, in case their
   // task settles without ever starting a child.
   const agentToolCallsByCallId = new Map<string, { name: string; turnIndex: number }>();
+  // Calls that moved to the background: their tool result is a receipt, and
+  // only `task.settled` resolves the agent call.
+  const detachedCallIds = new Set<string>();
   const inputRequests: InputRequest[] = [];
   let turnIndex = -1;
   let messageCount = 0;
@@ -135,7 +138,7 @@ export function deriveRunFacts(
           call.status = status;
           // A model-level agent call resolves as the tool result of the same call ID.
           const subagentCall = subagentCallsByCallId.get(result.callId);
-          if (subagentCall?.status === "working") {
+          if (subagentCall?.status === "working" && !detachedCallIds.has(result.callId)) {
             subagentCall.output = subagentCall.output ?? result.output;
             subagentCall.status = status === "completed" ? "completed" : "failed";
           }
@@ -160,6 +163,11 @@ export function deriveRunFacts(
           call.childSessionId = child.sessionId;
           if (child.remote !== undefined) call.remoteUrl = child.remote.url;
         }
+        break;
+      }
+
+      case "task.detached": {
+        detachedCallIds.add(event.data.callId);
         break;
       }
 

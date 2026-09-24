@@ -9,7 +9,11 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import type { SessionInboxPayload, SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import {
+  InboxWaitEnded,
+  type SessionInboxPayload,
+  type SessionInboxReader,
+} from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
@@ -31,9 +35,17 @@ import {
   applyTaskOwnerUpdate,
   applyTaskReport,
   cancelTurnDescendants,
+  interruptWaitedTasks,
   startPendingAgentTasks,
   syncTaskTimer,
 } from "#tasks/owner-body.js";
+import {
+  DetachTimers,
+  resolveWaitInterruption,
+  steeringInterruptsWait,
+  type TaskWaitPlan,
+  type WaitInterruption,
+} from "#tasks/detach.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -119,20 +131,18 @@ export class SessionExecution {
       }
 
       if (pendingCallIds !== undefined && result.action === "park") {
+        const dispatched = await dispatchCoordinationStep({
+          action: result.action,
+          callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
+          workflowToolRunOwner: {
+            inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+          },
+          sessionWritable: cursor.sessionWritable,
+          serializedContext: cursor.serializedContext,
+          sessionState: cursor.sessionState,
+        });
         const initialResults = [
-          ...(await applyTaskOwnerUpdate(
-            cursor,
-            await dispatchCoordinationStep({
-              action: result.action,
-              callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-              workflowToolRunOwner: {
-                inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
-              },
-              sessionWritable: cursor.sessionWritable,
-              serializedContext: cursor.serializedContext,
-              sessionState: cursor.sessionState,
-            }),
-          )),
+          ...(await applyTaskOwnerUpdate(cursor, dispatched)),
           ...(await startPendingAgentTasks(cursor)),
         ];
         const initialAcceptedAtMs = initialResults.length === 0 ? undefined : Date.now();
@@ -142,10 +152,11 @@ export class SessionExecution {
           initialResults,
           pendingCallIds,
           turn,
+          wait: dispatched.wait,
         });
         if (runtimeResults === "cancelled") return await this.finishCancelledTurn();
-        // Steering accepted during the wait is appended ahead of the result in
-        // the same step, so the model sees it before the blocking action resolves.
+        // Steering accepted during the wait joins the same step as the results,
+        // and receipts, of the calls it waited on.
         nextStepInput = { delivery: await turn.takeSteering(), runtimeResults };
         continue;
       }
@@ -194,11 +205,19 @@ export class SessionExecution {
     return { cancelled: true, kind: "park" };
   }
 
+  /**
+   * Waits for every call in the batch. In an interactive root turn, a
+   * steering message detaches the calls still waiting and a
+   * `detach: { timeout }` timer detaches its own call; in any session, a
+   * steering message ends a waited `sleep`. Each such call resolves at once
+   * with its receipt or early-end result.
+   */
   private async waitForRuntimeActionResults(input: {
     readonly initialAcceptedAtMs: number | undefined;
     readonly initialResults: readonly RuntimeActionResult[];
     readonly pendingCallIds: readonly string[];
     readonly turn: ActiveTurn;
+    readonly wait: TaskWaitPlan | undefined;
   }): Promise<RuntimeActionResultStepInput | "cancelled"> {
     const results: RuntimeActionResult[] = [...input.initialResults];
     const acceptedAtMsByCallId = new Map<string, number>();
@@ -206,6 +225,20 @@ export class SessionExecution {
       for (const result of results)
         acceptedAtMsByCallId.set(result.callId, input.initialAcceptedAtMs);
     }
+    const unresolved = () =>
+      input.pendingCallIds.filter((callId) => !results.some((result) => result.callId === callId));
+    const { wait } = input;
+    const steer = wait !== undefined && steeringInterruptsWait(wait);
+    const timers =
+      wait === undefined || !wait.detachable
+        ? undefined
+        : new DetachTimers(wait.timeouts.filter(({ callId }) => unresolved().includes(callId)));
+    const accept = (accepted: readonly RuntimeActionResult[]) => {
+      const acceptedAtMs = Date.now();
+      results.push(...accepted);
+      for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
+      timers?.disarm(accepted.map((result) => result.callId));
+    };
 
     while (true) {
       const ready = resolveRuntimeActionResultsForCallIds({
@@ -221,22 +254,35 @@ export class SessionExecution {
         };
       }
 
-      const next = await input.turn.nextRuntimeEvent();
+      const next = await input.turn.nextRuntimeEvent({ steer, timer: timers?.next() });
       if (next === "cancelled") return next;
-      const acceptedAtMs = Date.now();
-      results.push(...next.results);
-      for (const result of next.results) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
+      if (next.kind === "runtime-action-result") {
+        accept(next.results);
+        continue;
+      }
+      if (next.kind === "timeout") timers?.disarm([next.callId]);
+      const changes =
+        wait === undefined
+          ? undefined
+          : resolveWaitInterruption({
+              interruption: next,
+              plan: wait,
+              unresolvedCallIds: unresolved(),
+            });
+      if (changes !== undefined) {
+        accept(await interruptWaitedTasks(this.input.cursor, changes));
+      }
     }
   }
 }
 
-type RuntimeEvent =
-  | {
-      readonly kind: "runtime-action-result";
-      /** Produced by the owner's own task table, never read from the inbox as is. */
-      readonly results: readonly RuntimeActionResult[];
-    }
-  | "cancelled";
+interface RuntimeResultEvent {
+  readonly kind: "runtime-action-result";
+  /** Produced by the owner's own task table, never read from the inbox as is. */
+  readonly results: readonly RuntimeActionResult[];
+}
+
+type RuntimeEvent = RuntimeResultEvent | WaitInterruption | "cancelled";
 
 /**
  * Admission policy, cancellation, and steering for one active turn.
@@ -251,7 +297,11 @@ type RuntimeEvent =
 class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
-  private readonly runtimeResults: RuntimeEvent[] = [];
+  /** Tasks whose question each routed delivery dismissed, by admission sequence. */
+  private readonly dismissedBy = new Map<number, readonly string[]>();
+  /** Steering deliveries that already interrupted a runtime wait. */
+  private readonly interruptedBy = new Set<number>();
+  private readonly runtimeResults: RuntimeResultEvent[] = [];
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
   private readonly input: SessionExecutionInput;
@@ -334,18 +384,61 @@ class ActiveTurn {
     return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
   }
 
-  /** Next runtime result, admitting inbox traffic while waiting. */
-  async nextRuntimeEvent(): Promise<RuntimeEvent> {
+  /**
+   * Next runtime result, admitting inbox traffic while waiting. With `steer`,
+   * a steering message that remains after routing interrupts the wait once;
+   * results the owner already produced come first. `timer` interrupts the
+   * wait unless an inbox payload was accepted first.
+   */
+  async nextRuntimeEvent(
+    options: { readonly steer?: boolean; readonly timer?: Promise<string> } = {},
+  ): Promise<RuntimeEvent> {
     while (true) {
       if (this.signal.aborted) return "cancelled";
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
-      const payload = await this.input.inbox.next();
+      if (options.steer === true) {
+        // Deliveries admitted at the step boundary may answer a question first.
+        await this.routeAdmittedToChildren();
+        if (this.signal.aborted) return "cancelled";
+        const steering = this.takeWaitSteering();
+        if (steering !== undefined) return steering;
+      }
+      const payload =
+        options.timer === undefined
+          ? await this.input.inbox.next()
+          : await this.input.inbox.next(options.timer);
+      if (payload instanceof InboxWaitEnded) return { callId: payload.value, kind: "timeout" };
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
       await this.admit(payload);
       await this.routeAdmittedToChildren();
     }
+  }
+
+  /**
+   * Steering admitted during a runtime wait that has not interrupted it yet.
+   * A message that answered a pending question was consumed by routing and
+   * never steers.
+   */
+  private takeWaitSteering(): WaitInterruption | undefined {
+    const dismissedTaskIds: string[] = [];
+    let steered = false;
+    for (const sequence of this.admitted) {
+      if (this.interruptedBy.has(sequence) || !this.routedToChildren.has(sequence)) continue;
+      const delivery = this.input.queue.delivery(sequence);
+      if (
+        delivery === undefined ||
+        !isSteeringDelivery(delivery, this.callerCallId) ||
+        !delivery.payloads.some((payload) => payload.message !== undefined)
+      ) {
+        continue;
+      }
+      this.interruptedBy.add(sequence);
+      dismissedTaskIds.push(...(this.dismissedBy.get(sequence) ?? []));
+      steered = true;
+    }
+    return steered ? { dismissedTaskIds, kind: "steer" } : undefined;
   }
 
   private cancelsThisTurn(payload: SessionInboxPayload): boolean {
@@ -441,6 +534,9 @@ class ActiveTurn {
         this.admitted.delete(sequence);
         this.abort();
         return;
+      }
+      if (routed.dismissedTaskIds !== undefined) {
+        this.dismissedBy.set(sequence, routed.dismissedTaskIds);
       }
       this.input.queue.replaceDelivery(sequence, routed.remainder);
       if (routed.remainder === undefined) this.admitted.delete(sequence);
