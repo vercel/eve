@@ -52,6 +52,8 @@ const CHANNEL_MODULE_CACHE_KEY = "__eveChannelModuleCache__";
 
 export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
+  /** App root used exclusively to derive authored Workflow identifiers. */
+  readonly workflowAppRoot?: string;
   /**
    * When set, the module being loaded is extension-owned: its
    * `defineState`/`defineExtension` calls (and those of its same-package
@@ -162,7 +164,11 @@ export async function bundleAuthoredModuleCode(
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot,
     }),
-    plugins: [createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot })],
+    plugins: [
+      createAuthoredWorkflowDirectivePlugin({
+        appRoot: options.workflowAppRoot ?? packageRoot,
+      }),
+    ],
     sourcemap: "inline",
   });
 }
@@ -639,6 +645,8 @@ async function loadBundledAuthoredModule(
     .update("\0")
     .update(options.extensionScopeNamespace ?? "")
     .update("\0")
+    .update(options.workflowAppRoot ?? "")
+    .update("\0")
     .update(code)
     .digest("hex");
   const bundleDirectoryPath = join(
@@ -665,7 +673,7 @@ function createInFlightModuleLoadKey(
 ): string {
   const externalDependencies = normalizeExternalDependencies(options.externalDependencies);
 
-  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}`;
+  return `${modulePath}\0${externalDependencies.join("\0")}\0${options.extensionScopeNamespace ?? ""}\0${options.workflowAppRoot ?? ""}`;
 }
 
 export function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
