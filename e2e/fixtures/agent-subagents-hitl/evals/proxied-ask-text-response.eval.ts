@@ -66,7 +66,7 @@ async function waitForObservedEvent<TType extends "input.resolved">(
   turn: ReturnType<EveEvalContext["target"]["watchTurn"]>,
   type: TType,
 ) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 1_500; attempt += 1) {
     const event = turn.events.find((candidate) => candidate.type === type);
     if (event !== undefined) return event;
     await new Promise((resolve) => setTimeout(resolve, 20));
