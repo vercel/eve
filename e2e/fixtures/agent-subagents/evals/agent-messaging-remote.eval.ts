@@ -42,13 +42,12 @@ export default defineEval({
     t.succeeded();
     t.eventsSatisfy("both turns continue one remote child session", (events) => {
       const calls = events.flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "remote-loopback"
-          ? [event.data]
-          : [],
+        event.type === "task.started" && event.data.name === "remote-loopback" ? [event.data] : [],
       );
       return (
         calls.length >= 2 &&
-        new Set(calls.map((call) => call.childSessionId)).size === 1 &&
+        new Set(calls.map((call) => call.taskId)).size === 1 &&
+        new Set(calls.map((call) => call.child?.sessionId)).size === 1 &&
         new Set(calls.map((call) => call.turnId)).size >= 2
       );
     });

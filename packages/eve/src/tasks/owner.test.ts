@@ -229,18 +229,22 @@ describe("startAgentTasks", () => {
       url: "https://billing.example",
     });
     expect(update.events).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({
-          agentId: record?.id,
+      {
+        data: {
           callId: "call-1",
-          childSessionId: "remote-child",
+          child: {
+            remote: { resolverId: "subagents/billing.ts", url: "https://billing.example" },
+            sessionId: "remote-child",
+            streamPath: "/eve/v1/session/parent/subagents/call-1/remote-child/stream",
+          },
+          kind: "agent",
+          mode: "foreground",
           name: "billing",
-          remote: { resolverId: "subagents/billing.ts", url: "https://billing.example" },
-          toolName: "billing",
+          taskId: record?.id,
           turnId: "turn-1",
-        }),
-        type: "subagent.called",
-      }),
+        },
+        type: "task.started",
+      },
     ]);
     expect(update.results).toEqual([]);
     // Remote children call back on the owner's unguessable alias, never its stable inbox.
@@ -279,6 +283,14 @@ describe("startAgentTasks", () => {
     expect(update.results).toEqual([
       { callId: "call-1", isError: true, kind: "tool-result", output, toolName: "research" },
     ]);
+    const taskId = vi.mocked(startSubagent).mock.calls[0]![0].taskId;
+    // The child never started, so the task settles without a task.started.
+    expect(update.events).toEqual([
+      {
+        data: { callId: "call-1", error: output, status: "failed", taskId },
+        type: "task.settled",
+      },
+    ]);
     // The settled, delivered record has no child to continue, so the write prunes it.
     expect(records(update.sessionState)).toEqual([]);
   });
@@ -305,6 +317,8 @@ describe("startAgentTasks", () => {
         },
       },
     ]);
+    // No task exists for a call rejected before its record, so nothing is reported.
+    expect(update.events).toEqual([]);
     expect(prepareActionDispatch).not.toHaveBeenCalled();
   });
 
@@ -318,6 +332,7 @@ describe("startAgentTasks", () => {
         output: expect.objectContaining({ code: "UNKNOWN_AGENT" }),
       }),
     ]);
+    expect(update.events).toEqual([]);
     expect(startSubagent).not.toHaveBeenCalled();
     expect(records(update.sessionState)).toEqual([]);
   });
@@ -338,6 +353,8 @@ describe("startAgentTasks", () => {
         output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
       }),
     ]);
+    // The rejection neither created nor advanced a generation.
+    expect(update.events).toEqual([]);
     expect(startSubagent).not.toHaveBeenCalled();
     expect(dispatchSession).not.toHaveBeenCalled();
     expect(records(update.sessionState)).toEqual(table.records);
@@ -354,6 +371,7 @@ describe("startAgentTasks", () => {
         output: expect.objectContaining({ code: "AGENT_BUSY" }),
       }),
     ]);
+    expect(update.events).toEqual([]);
     expect(dispatchSession).not.toHaveBeenCalled();
     expect(records(update.sessionState)).toEqual([working]);
   });
@@ -400,10 +418,18 @@ describe("startAgentTasks", () => {
       }),
     ]);
     expect(update.events).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({ agentId: idle.id, childSessionId: "child-session" }),
-        type: "subagent.called",
-      }),
+      {
+        data: {
+          callId: "call-1",
+          child: { sessionId: "child-session", streamPath: "/eve/v1/session/child-session/stream" },
+          kind: "agent",
+          mode: "foreground",
+          name: "research",
+          taskId: idle.id,
+          turnId: "turn-1",
+        },
+        type: "task.started",
+      },
     ]);
   });
 });
@@ -425,16 +451,18 @@ describe("applyTaskReport", () => {
 
     expect(records(update.sessionState)).toEqual([{ ...record, child: LOCAL_CHILD }]);
     expect(update.events).toEqual([
-      expect.objectContaining({
-        data: expect.objectContaining({
-          agentId: record.id,
+      {
+        data: {
           callId: "call-1",
-          childSessionId: "child-session",
+          child: { sessionId: "child-session", streamPath: "/eve/v1/session/child-session/stream" },
+          kind: "agent",
+          mode: "foreground",
           name: "research",
+          taskId: record.id,
           turnId: "turn-1",
-        }),
-        type: "subagent.called",
-      }),
+        },
+        type: "task.started",
+      },
     ]);
     expect(update.results).toEqual([]);
   });
@@ -490,8 +518,14 @@ describe("applyTaskReport", () => {
       ]);
       expect(update.events).toEqual([
         {
-          data: { callId: "call-1", output: "Found three sources.", subagentName: "research" },
-          type: "subagent.completed",
+          data: {
+            callId: "call-1",
+            output: "Found three sources.",
+            status: "completed",
+            taskId: record.id,
+            usage: { ...ZERO_USAGE, inputTokens: 2, outputTokens: 3 },
+          },
+          type: "task.settled",
         },
       ]);
       expect(update.replies).toEqual([]);
@@ -515,7 +549,7 @@ describe("applyTaskReport", () => {
     },
   );
 
-  it("returns a failed child result as an error without announcing completion", async () => {
+  it("returns a failed child result as an error and reports the failure", async () => {
     const error = { code: "SESSION_FAILED", message: "The child failed." };
 
     const update = await applyTaskReport({
@@ -536,7 +570,18 @@ describe("applyTaskReport", () => {
     expect(update.results).toEqual([
       { callId: "call-1", isError: true, kind: "tool-result", output: error, toolName: "research" },
     ]);
-    expect(update.events).toEqual([]);
+    expect(update.events).toEqual([
+      {
+        data: {
+          callId: "call-1",
+          error,
+          status: "failed",
+          taskId: "research-abc234",
+          usage: ZERO_USAGE,
+        },
+        type: "task.settled",
+      },
+    ]);
     expect(records(update.sessionState)).toEqual([
       expect.objectContaining({ lastStatus: "Failed: The child failed.", status: "failed" }),
     ]);
@@ -563,6 +608,12 @@ describe("applyTaskReport", () => {
 
     expect(update.results).toEqual([]);
     expect(update.replies).toEqual([{ replyTo: "reply", result }]);
+    expect(update.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ output: "done", status: "completed" }),
+        type: "task.settled",
+      }),
+    ]);
   });
 
   it("drops a duplicate or unknown result", async () => {
@@ -657,6 +708,32 @@ describe("applyTaskReport", () => {
     });
   });
 
+  it("reports a cancellation the child made on its own", async () => {
+    const update = await applyTaskReport({
+      now: NOW,
+      payload: resultPayload(
+        childResult({ kind: "parked", result: { kind: "cancelled" }, usageDelta: ZERO_USAGE }),
+      ),
+      serializedContext: {},
+      sessionState: ownerState([createTaskRecord({ child: LOCAL_CHILD })]),
+    });
+
+    expect(update.events).toEqual([
+      {
+        data: {
+          callId: "call-1",
+          status: "cancelled",
+          taskId: "research-abc234",
+          usage: ZERO_USAGE,
+        },
+        type: "task.settled",
+      },
+    ]);
+    expect(update.results).toEqual([
+      expect.objectContaining({ callId: "call-1", isError: true, kind: "tool-result" }),
+    ]);
+  });
+
   it("counts a cancelled child's confirmation without reporting it", async () => {
     const { table } = cancelTask(
       {
@@ -735,7 +812,7 @@ describe("cancelTasksStep", () => {
       status: "completed",
     });
 
-    const { sessionState } = await cancelTasksStep({
+    const { events, sessionState } = await cancelTasksStep({
       selector: { kind: "active-turn" },
       serializedContext: {},
       sessionState: ownerState([started, starting, otherTurn, finished]),
@@ -744,6 +821,17 @@ describe("cancelTasksStep", () => {
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
       sessionId: "child-session",
     });
+    // A task cancelled before its child started still reports its outcome.
+    expect(events).toEqual([
+      {
+        data: { callId: "call-1", status: "cancelled", taskId: started.id },
+        type: "task.settled",
+      },
+      {
+        data: { callId: "call-2", status: "cancelled", taskId: starting.id },
+        type: "task.settled",
+      },
+    ]);
     expect(records(sessionState)).toEqual([
       expect.objectContaining({ delivered: true, id: started.id, status: "cancelled" }),
       expect.objectContaining({
@@ -768,7 +856,7 @@ describe("cancelTasksStep", () => {
       workflowCaller: { replyTo: "reply-2", runId: "run-2" },
     });
 
-    const { sessionState } = await cancelTasksStep({
+    const { events, sessionState } = await cancelTasksStep({
       selector: { kind: "workflow-run", runId: "run-1" },
       serializedContext: {},
       sessionState: ownerState([ownTask, otherRun]),
@@ -777,6 +865,11 @@ describe("cancelTasksStep", () => {
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
       sessionId: "child-session",
     });
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "cancelled", taskId: ownTask.id }),
+      }),
+    ]);
     expect(records(sessionState)).toEqual([
       expect.objectContaining({ id: ownTask.id, status: "cancelled" }),
       otherRun,
@@ -793,7 +886,41 @@ describe("cancelTasksStep", () => {
     });
 
     expect(cancelled.sessionState).toBe(state);
+    expect(cancelled.events).toEqual([]);
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
+  });
+
+  it("reports one cancellation per generation, and nothing for the child's confirmation or a repeat", async () => {
+    const working = createTaskRecord({ child: LOCAL_CHILD });
+
+    const cancelled = await cancelTasksStep({
+      selector: { kind: "active-turn" },
+      serializedContext: {},
+      sessionState: ownerState([working]),
+    });
+    const repeated = await cancelTasksStep({
+      selector: { kind: "active-turn" },
+      serializedContext: {},
+      sessionState: cancelled.sessionState,
+    });
+    const confirmed = await applyTaskReport({
+      now: NOW,
+      payload: resultPayload(
+        childResult({ kind: "parked", result: { kind: "cancelled" }, usageDelta: ZERO_USAGE }),
+      ),
+      serializedContext: {},
+      sessionState: cancelled.sessionState,
+    });
+
+    expect(cancelled.events).toEqual([
+      {
+        data: { callId: "call-1", status: "cancelled", taskId: working.id },
+        type: "task.settled",
+      },
+    ]);
+    expect(repeated.events).toEqual([]);
+    expect(repeated.sessionState).toBe(cancelled.sessionState);
+    expect(confirmed).toMatchObject({ events: [], replies: [], results: [] });
   });
 });
 

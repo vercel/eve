@@ -15,6 +15,7 @@ interface MutableToolCall {
 
 interface MutableSubagentCall {
   callId: string;
+  taskId?: string;
   childSessionId?: string;
   name: string;
   remoteUrl?: string;
@@ -47,9 +48,9 @@ const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new S
  * Extracts derived execution facts from a completed run's stream events.
  *
  * Tool calls pair each `actions.requested` entry with its matching
- * `action.result` by call id; subagent calls join `subagent.called` /
- * `subagent.started` with `subagent.completed` the same way. These facts
- * power checks, scorers, and reporters.
+ * `action.result` by call id; agent calls join `task.started` with
+ * `task.settled` the same way. These facts power checks, scorers, and
+ * reporters.
  */
 export function deriveRunFacts(
   events: readonly MessageStreamEvent[],
@@ -141,25 +142,25 @@ export function deriveRunFacts(
         break;
       }
 
-      case "subagent.called": {
+      case "task.started": {
+        if (event.data.kind !== "agent") break;
         const call = ensureSubagentCall(event.data.callId, event.data.name);
-        call.childSessionId = event.data.childSessionId;
-        if (event.data.remote !== undefined) {
-          call.remoteUrl = event.data.remote.url;
+        call.taskId = event.data.taskId;
+        const child = event.data.child;
+        if (child !== undefined) {
+          call.childSessionId = child.sessionId;
+          if (child.remote !== undefined) call.remoteUrl = child.remote.url;
         }
         break;
       }
 
-      case "subagent.started": {
-        ensureSubagentCall(event.data.callId, event.data.subagentName);
-        break;
-      }
-
-      case "subagent.completed": {
-        const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
-        if (call.status !== "working") break;
-        call.output = event.data.output;
-        call.status = "completed";
+      case "task.settled": {
+        // A call that failed before its child started has no `task.started`;
+        // its failure is still on the tool call.
+        const call = subagentCallsByCallId.get(event.data.callId);
+        if (call?.status !== "working") break;
+        call.output = event.data.status === "failed" ? event.data.error : event.data.output;
+        call.status = event.data.status;
         break;
       }
 

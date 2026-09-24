@@ -87,7 +87,7 @@ export default defineEval({
       },
     });
 
-    t.event("subagent.called", { data: { name: "remote-loopback" }, count: 3 })
+    t.event("task.started", { data: { name: "remote-loopback" }, count: 3 })
       .soft()
       .label("no repeated delegation");
     t.succeeded();
@@ -134,13 +134,14 @@ async function waitForRemoteChild(
     }
     turn.expectOk();
     const call = turn.events.find(
-      (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
+      (event) => event.type === "task.started" && event.data.name === "remote-loopback",
     );
-    if (call?.type === "subagent.called") {
-      if (expectedSessionId !== undefined && call.data.childSessionId !== expectedSessionId) {
+    const childSessionId = call?.type === "task.started" ? call.data.child?.sessionId : undefined;
+    if (childSessionId !== undefined) {
+      if (expectedSessionId !== undefined && childSessionId !== expectedSessionId) {
         throw new Error("The parent turn did not continue the existing remote child.");
       }
-      return { childSessionId: call.data.childSessionId, session };
+      return { childSessionId, session };
     }
     turn.noFailedActions();
     if (attempt === 4) break;

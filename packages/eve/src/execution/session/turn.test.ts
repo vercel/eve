@@ -30,9 +30,18 @@ vi.mock("#execution/route-child-delivery.js", () => ({
 }));
 vi.mock("#tasks/owner.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  cancelTasksStep: vi.fn(async (input: { readonly sessionState: DurableSessionState }) => ({
-    sessionState: input.sessionState,
-  })),
+  cancelTasksStep: vi.fn(
+    async (input: {
+      readonly serializedContext: Record<string, unknown>;
+      readonly sessionState: DurableSessionState;
+    }) => ({
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    }),
+  ),
 }));
 
 beforeEach(() => {

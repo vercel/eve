@@ -10,6 +10,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createContextClearedEvent,
+  createInputRequestedEvent,
   createInputResolvedEvent,
   createMessageAppendedEvent,
   createMessageReceivedEvent,
@@ -17,7 +18,8 @@ import {
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
-  createSubagentCalledEvent,
+  createTaskSettledEvent,
+  createTaskStartedEvent,
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
@@ -280,29 +282,103 @@ describe("message stream protocol", () => {
     });
   });
 
-  it("authors local and remote child stream paths", () => {
+  it("authors local and remote child stream paths on task.started", () => {
     const input = {
       callId: "call/1",
-      childSessionId: "child/1",
+      kind: "agent" as const,
+      mode: "foreground" as const,
       name: "research",
-      sequence: 1,
-      sessionId: "parent/1",
-      toolName: "research",
+      parentSessionId: "parent/1",
+      taskId: "research-abc234",
       turnId: "turn_1",
-      workflowId: "workflow_1",
     };
 
-    expect(createSubagentCalledEvent(input).data.childStreamPath).toBe(
-      "/eve/v1/session/child%2F1/stream",
-    );
+    expect(createTaskStartedEvent({ ...input, child: { sessionId: "child/1" } })).toEqual({
+      data: {
+        callId: "call/1",
+        child: { sessionId: "child/1", streamPath: "/eve/v1/session/child%2F1/stream" },
+        kind: "agent",
+        mode: "foreground",
+        name: "research",
+        taskId: "research-abc234",
+        turnId: "turn_1",
+      },
+      type: "task.started",
+    });
     expect(
-      createSubagentCalledEvent({
+      createTaskStartedEvent({
         ...input,
-        remote: { resolverId: "remote/research", url: "https://remote.example" },
-      }).data,
-    ).toMatchObject({
-      childStreamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
+        child: {
+          remote: { resolverId: "remote/research", url: "https://remote.example" },
+          sessionId: "child/1",
+        },
+      }).data.child,
+    ).toEqual({
       remote: { resolverId: "remote/research", url: "https://remote.example" },
+      sessionId: "child/1",
+      streamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
+    });
+    expect(
+      createTaskStartedEvent({
+        ...input,
+        child: { remote: { url: "https://remote.example" }, sessionId: "child/1" },
+      }).data.child?.remote,
+    ).toEqual({ url: "https://remote.example" });
+    expect(createTaskStartedEvent({ ...input, kind: "workflow" }).data).not.toHaveProperty("child");
+  });
+
+  it("creates task.settled with only the fields its status carries", () => {
+    const usage = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 3, outputTokens: 4 };
+
+    expect(
+      createTaskSettledEvent({
+        callId: "call_1",
+        output: { summary: "done" },
+        status: "completed",
+        taskId: "research-abc234",
+        usage,
+      }),
+    ).toEqual({
+      data: {
+        callId: "call_1",
+        output: { summary: "done" },
+        status: "completed",
+        taskId: "research-abc234",
+        usage,
+      },
+      type: "task.settled",
+    });
+    expect(
+      createTaskSettledEvent({
+        callId: "call_1",
+        error: { code: "TIMED_OUT", message: "Too slow." },
+        status: "failed",
+        taskId: "research-abc234",
+      }),
+    ).toEqual({
+      data: {
+        callId: "call_1",
+        error: { code: "TIMED_OUT", message: "Too slow." },
+        status: "failed",
+        taskId: "research-abc234",
+      },
+      type: "task.settled",
+    });
+    expect(
+      createTaskSettledEvent({ callId: "call_1", status: "cancelled", taskId: "research-abc234" }),
+    ).toEqual({
+      data: { callId: "call_1", status: "cancelled", taskId: "research-abc234" },
+      type: "task.settled",
+    });
+  });
+
+  it("attributes input requests to a task only when one asked", () => {
+    const input = { requests: [], sequence: 1, stepIndex: 0, turnId: "turn_1" };
+
+    expect(createInputRequestedEvent(input).data).not.toHaveProperty("taskId");
+    expect(createInputRequestedEvent({ ...input, taskId: "research-abc234" }).data).toEqual({
+      ...input,
+      taskId: "research-abc234",
     });
   });
 

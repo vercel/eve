@@ -3,7 +3,7 @@ import type { HookContext, HookEvent } from "eve/hooks";
 
 export interface SubagentHookObservation {
   readonly subscriber: "typed" | "wildcard";
-  readonly type: "subagent.called" | "subagent.completed";
+  readonly type: "task.started" | "task.settled";
   readonly callId: string;
   readonly eventId: string;
   readonly sessionId: string;
@@ -20,10 +20,7 @@ export async function recordSubagentHook(
   event: HookEvent,
   ctx: HookContext,
 ): Promise<void> {
-  if (event.type !== "subagent.called" && event.type !== "subagent.completed") return;
-  if (event.type === "subagent.called" && ctx.session.id !== event.data.sessionId) {
-    throw new Error("Subagent hook received a different parent session.");
-  }
+  if (event.type !== "task.started" && event.type !== "task.settled") return;
   const sandbox = await ctx.getSandbox();
   await sandbox.writeTextFile({
     path: `subagent-hook-${event.meta.id}-${subscriber}.txt`,
@@ -37,7 +34,10 @@ export async function recordSubagentHook(
       callId: event.data.callId,
       eventId: event.meta.id,
       sessionId: ctx.session.id,
-      output: event.type === "subagent.completed" ? event.data.output : undefined,
+      output:
+        event.type === "task.settled" && typeof event.data.output === "string"
+          ? event.data.output
+          : undefined,
     },
   ]);
 }

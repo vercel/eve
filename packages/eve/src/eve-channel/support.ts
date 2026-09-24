@@ -3,7 +3,7 @@ import type { UserContent } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
   defaultEveAuth,
@@ -25,36 +25,45 @@ export function healthResponse(): Response {
   });
 }
 
+/** A remote child the parent announced, with the coordinates its stream proxy needs. */
+export interface RemoteSubagentBinding {
+  readonly name: string;
+  readonly remote: { readonly resolverId?: string; readonly url: string };
+}
+
+/**
+ * Finds the `task.started` event on the parent's own stream that announced
+ * this remote child. The stream path embeds the parent session, call, and
+ * child session, so only the parent that started the child can proxy it.
+ */
 export async function findRemoteSubagentBinding(input: {
   readonly callId: string;
   readonly childSessionId: string;
   readonly childStreamPath: string;
-  readonly parentSessionId: string;
   readonly parent: {
     getEventStream(options?: { startIndex?: number }): Promise<ReadableStream<MessageStreamEvent>>;
     getStreamTailIndex(): Promise<number>;
   };
-}): Promise<SubagentCalledStreamEvent | undefined> {
+}): Promise<RemoteSubagentBinding | undefined> {
   const tailIndex = await input.parent.getStreamTailIndex();
   if (tailIndex < 0) return undefined;
 
   const events = await input.parent.getEventStream({ startIndex: 0 });
   const reader = events.getReader();
-  let binding: SubagentCalledStreamEvent | undefined;
+  let binding: RemoteSubagentBinding | undefined;
   try {
     for (let index = 0; index <= tailIndex; index += 1) {
       const next = await reader.read();
       if (next.done) break;
       const event = next.value;
       if (
-        event.type === "subagent.called" &&
-        event.data.sessionId === input.parentSessionId &&
+        event.type === "task.started" &&
         event.data.callId === input.callId &&
-        event.data.childSessionId === input.childSessionId &&
-        event.data.childStreamPath === input.childStreamPath &&
-        event.data.remote !== undefined
+        event.data.child?.sessionId === input.childSessionId &&
+        event.data.child.streamPath === input.childStreamPath &&
+        event.data.child.remote !== undefined
       ) {
-        binding = event;
+        binding = { name: event.data.name, remote: event.data.child.remote };
       }
     }
   } finally {

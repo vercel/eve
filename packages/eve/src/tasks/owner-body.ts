@@ -12,6 +12,7 @@ import {
   ensureTaskCallbackAliasStep,
   startAgentTasksStep,
   type AgentTaskCall,
+  type TaskCancelSelector,
   type TaskOwnerUpdate,
 } from "#tasks/owner.js";
 
@@ -91,14 +92,23 @@ export async function applyTaskReport(
 
 /** Cancels the agent tasks and workflow tool runs the active turn is waiting on. */
 export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<void> {
-  await cursor.apply(
+  await cancelTasks(cursor, { kind: "active-turn" });
+  await cancelDescendantTurnsStep({ sessionState: cursor.sessionState });
+}
+
+/** Cancels the selected working tasks and publishes their `task.settled` events. */
+export async function cancelTasks(
+  cursor: SessionStateCursor,
+  selector: TaskCancelSelector,
+): Promise<void> {
+  await applyTaskOwnerUpdate(
+    cursor,
     await cancelTasksStep({
-      selector: { kind: "active-turn" },
+      selector,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }),
   );
-  await cancelDescendantTurnsStep({ sessionState: cursor.sessionState });
 }
 
 /** Records and claims the remote callback alias before any child can call back on it. */

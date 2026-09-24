@@ -78,7 +78,7 @@ it("rejects an agent request from a run the turn no longer owns", async () => {
 
 it("cancels the run's agent tasks and returns its outcome as an ordinary tool result", async () => {
   const cursor = createCursor({ recorded: true });
-  vi.mocked(cancelTasksStep).mockResolvedValue({ sessionState: cursor.sessionState });
+  vi.mocked(cancelTasksStep).mockResolvedValue(unchanged(cursor));
 
   const outcome = await handleWorkflowToolRunMessage({
     cursor,
@@ -100,7 +100,7 @@ it("cancels the run's agent tasks and returns its outcome as an ordinary tool re
 
 it("still cancels the tasks of a run the turn no longer records, but ignores its outcome", async () => {
   const cursor = createCursor({ recorded: false });
-  vi.mocked(cancelTasksStep).mockResolvedValue({ sessionState: cursor.sessionState });
+  vi.mocked(cancelTasksStep).mockResolvedValue(unchanged(cursor));
 
   const outcome = await handleWorkflowToolRunMessage({
     cursor,
@@ -114,6 +114,16 @@ it("still cancels the tasks of a run the turn no longer records, but ignores its
     sessionState: cursor.sessionState,
   });
 });
+
+function unchanged(cursor: SessionStateCursor) {
+  return {
+    events: [],
+    replies: [],
+    results: [],
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+  };
+}
 
 function createCursor(input: { readonly recorded: boolean }): SessionStateCursor {
   const sessionState = createTestSessionState();

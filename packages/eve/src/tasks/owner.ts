@@ -31,7 +31,7 @@ import {
 import type { HarnessSession } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { createCalledEvent } from "#tasks/events.js";
+import { settledEvents, taskSettledEvent, taskStartedEvent } from "#tasks/events.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type {
   RuntimeAgentDispatchRequest,
@@ -54,7 +54,7 @@ import {
 } from "#tracing/agent-invocation-terminal.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
-import type { ChildAddress } from "#tasks/protocol.js";
+import { isTerminalTaskStatus, type ChildAddress } from "#tasks/protocol.js";
 import { createFailedResult, toTaskError, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
 import { deliverToChild, runCommands, type CommandEffect } from "#tasks/transport.js";
 import {
@@ -95,6 +95,7 @@ export interface WorkflowCallerReply {
 
 /** What the session body does after an owner step: publish events and resolve callers. */
 export interface TaskOwnerUpdate {
+  /** `task.*` lifecycle events: one `task.settled` per generation, whichever path settles it. */
   readonly events: readonly UnstampedMessageStreamEvent[];
   /** Tool results for waited model calls. */
   readonly results: readonly RuntimeToolResultActionResult[];
@@ -342,6 +343,7 @@ export async function startAgentTasks(input: {
         session,
         markTaskDelivered(settled.table, record.id, record.generation),
       );
+      events.push(...settledEvents(settled.effects));
       serializedContext = await flushAgentInvocationTraces(
         tracing.fail(createFailedResult(action, call.callId, failure)),
       );
@@ -353,13 +355,10 @@ export async function startAgentTasks(input: {
       session = setTaskTable(session, adopted.table);
       await runCommands(adopted.commands, ctx);
       events.push(
-        createCalledEvent({
+        taskStartedEvent({
           child,
+          ownerSessionId: session.sessionId,
           record: findTask(adopted.table, record.id)!,
-          sequence: emission.sequence,
-          sessionId: session.sessionId,
-          toolName: call.toolName ?? name,
-          turnId,
         }),
       );
     }
@@ -405,7 +404,6 @@ export async function applyTaskReport(input: {
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   const unchanged = session;
-  const emission = getHarnessEmissionState(session.state);
 
   if (input.payload.kind === "task.started") {
     // A cancelled task still adopts its child, so the held cancel reaches it.
@@ -421,16 +419,10 @@ export async function applyTaskReport(input: {
         await runCommands(adopted.commands, await readContext(input.serializedContext));
       }
       const current = findTask(adopted.table, record.id)!;
-      if (current.status === "working" || current.status === "input_required") {
+      // A task cancelled before its child started already reported `task.settled`.
+      if (!isTerminalTaskStatus(current.status)) {
         events.push(
-          createCalledEvent({
-            child,
-            record: current,
-            sequence: emission.sequence,
-            sessionId: session.sessionId,
-            toolName: current.name,
-            turnId: current.turnId,
-          }),
+          taskStartedEvent({ child, ownerSessionId: session.sessionId, record: current }),
         );
       }
     }
@@ -481,7 +473,9 @@ export async function applyTaskReport(input: {
         );
         continue;
       }
-      if (!applied.effects.some((effect) => effect.kind === "settled")) continue;
+      const settled = settledEvents(applied.effects);
+      if (settled.length === 0) continue;
+      events.push(...settled);
       let next = setTaskTable(
         session,
         markTaskDelivered(applied.table, record.id, record.generation),
@@ -504,17 +498,6 @@ export async function applyTaskReport(input: {
           sessionId: session.sessionId,
         }),
       );
-      if (outcome.status === "completed") {
-        events.push({
-          data: {
-            callId: result.callId,
-            output:
-              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-            subagentName: record.name,
-          },
-          type: "subagent.completed",
-        });
-      }
       if (record.workflowCaller !== undefined) {
         replies.push({ replyTo: record.workflowCaller.replyTo, result });
       } else {
@@ -538,17 +521,21 @@ export async function applyTaskReport(input: {
   };
 }
 
+/** Which working tasks {@link cancelTasksStep} cancels. */
+export type TaskCancelSelector =
+  /** The turn the session is running or parked in. */
+  { readonly kind: "active-turn" } | { readonly kind: "workflow-run"; readonly runId: string };
+
 /**
- * Records cancellation for every working task the predicate selects and asks
- * each started child to stop. It never waits for the child to confirm.
+ * Records cancellation for every working task the selector picks, reports
+ * each as settled, and asks each started child to stop. It never waits for
+ * the child to confirm, and the confirmation reports nothing.
  */
 export async function cancelTasksStep(input: {
-  readonly selector:
-    /** The turn the session is running or parked in. */
-    { readonly kind: "active-turn" } | { readonly kind: "workflow-run"; readonly runId: string };
+  readonly selector: TaskCancelSelector;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<{ readonly sessionState: DurableSessionState }> {
+}): Promise<TaskOwnerUpdate> {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
@@ -556,6 +543,7 @@ export async function cancelTasksStep(input: {
   let table = initial;
   const now = new Date().toISOString();
   const commands: CommandEffect[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   const turnId =
     getPendingCoordinationBatch(durable.state)?.event.turnId ??
     activeTurnId(input.sessionState.emissionState);
@@ -564,14 +552,17 @@ export async function cancelTasksStep(input: {
       input.selector.kind === "active-turn"
         ? record.turnId === turnId
         : record.workflowCaller?.runId === input.selector.runId;
-    if (!selected) continue;
+    if (!selected || isTerminalTaskStatus(record.status)) continue;
     const cancelled = cancelTask(table, record.id, now);
     table = cancelled.table;
     commands.push(...commandEffects(cancelled.effects));
+    events.push(taskSettledEvent({ outcome: { status: "cancelled" }, record }));
   }
-  if (table === initial) return { sessionState: input.sessionState };
+  const update = { events, replies: [], results: [], serializedContext: input.serializedContext };
+  if (table === initial) return { ...update, sessionState: input.sessionState };
   await runCommands(commands, await readContext(input.serializedContext));
   return {
+    ...update,
     sessionState: replaceDurableSessionSnapshot({
       session: setTaskTable(durable, table),
       state: input.sessionState,

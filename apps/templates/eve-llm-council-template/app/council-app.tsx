@@ -44,6 +44,7 @@ const initialMembers = (): Record<MemberId, MemberState> => ({
 export function CouncilApp() {
   const [client] = useState(() => new Client({ host: "" }));
   const completedMembersRef = useRef(new Set<MemberId>());
+  const memberTasksRef = useRef(new Map<string, MemberId>());
   const runIdRef = useRef(0);
   const synthesisStartedRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -119,24 +120,29 @@ export function CouncilApp() {
 
   const handleEvent = useCallback(
     (event: MessageStreamEvent) => {
-      if (event.type === "subagent.called" && isMemberId(event.data.name)) {
+      if (event.type === "task.started" && isMemberId(event.data.name) && event.data.child) {
         const memberId = event.data.name;
+        memberTasksRef.current.set(event.data.taskId, memberId);
         setMemberState((current) => ({
           ...current,
           [memberId]: { ...current[memberId], status: "running" },
         }));
-        void streamMember(memberId, event.data.childSessionId, runIdRef.current);
+        void streamMember(memberId, event.data.child.sessionId, runIdRef.current);
       }
 
-      if (event.type === "subagent.completed" && isMemberId(event.data.subagentName)) {
-        const memberId = event.data.subagentName;
+      const memberId =
+        event.type === "task.settled" && event.data.status === "completed"
+          ? memberTasksRef.current.get(event.data.taskId)
+          : undefined;
+      if (event.type === "task.settled" && memberId !== undefined) {
+        const output = event.data.output;
         completedMembersRef.current.add(memberId);
         synthesisStartedRef.current = completedMembersRef.current.size === members.length;
         setMemberState((current) => ({
           ...current,
           [memberId]: {
             ...current[memberId],
-            response: event.data.output || current[memberId].response,
+            response: typeof output === "string" && output ? output : current[memberId].response,
             status: "complete",
           },
         }));
@@ -178,6 +184,7 @@ export function CouncilApp() {
 
     runIdRef.current += 1;
     completedMembersRef.current.clear();
+    memberTasksRef.current.clear();
     synthesisStartedRef.current = false;
     setMemberState(initialMembers());
     setResult(undefined);

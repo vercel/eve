@@ -39,7 +39,7 @@ export default defineEval({
     turn.eventsSatisfy("analysis fans out before reproduction consumes both results", (events) => {
       const called = new Map<string, number>();
       for (const [index, event] of events.entries()) {
-        if (event.type === "subagent.called" && !called.has(event.data.name)) {
+        if (event.type === "task.started" && !called.has(event.data.name)) {
           called.set(event.data.name, index);
         }
       }

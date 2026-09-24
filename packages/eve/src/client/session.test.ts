@@ -6,8 +6,8 @@ import type { ClientSessionState } from "#client/types.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
-  createSubagentCalledEvent,
-  type SubagentCalledStreamEvent,
+  createTaskStartedEvent,
+  type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 
 afterEach(() => {
@@ -1325,22 +1325,22 @@ describe("ClientSession", () => {
 });
 
 describe("ClientSession.streamSubagent", () => {
-  function calledEvent(
-    input: { readonly remote?: boolean; readonly sessionId?: string } = {},
-  ): SubagentCalledStreamEvent {
-    return createSubagentCalledEvent({
+  function startedEvent(input: { readonly remote?: boolean } = {}): TaskStartedStreamEvent {
+    return createTaskStartedEvent({
       callId: "call_1",
-      childSessionId: "child_1",
+      child: {
+        remote:
+          input.remote === false
+            ? undefined
+            : { resolverId: "subagents/research", url: "https://remote.test" },
+        sessionId: "child_1",
+      },
+      kind: "agent",
+      mode: "foreground",
       name: "research",
-      remote:
-        input.remote === false
-          ? undefined
-          : { resolverId: "subagents/research", url: "https://remote.test" },
-      sequence: 1,
-      sessionId: input.sessionId ?? "session_1",
-      toolName: "research",
+      parentSessionId: "session_1",
+      taskId: "research-abc234",
       turnId: "turn_1",
-      workflowId: "workflow_1",
     });
   }
 
@@ -1364,7 +1364,7 @@ describe("ClientSession.streamSubagent", () => {
     });
 
     const types: string[] = [];
-    for await (const event of session.streamSubagent(calledEvent(), { follow: false })) {
+    for await (const event of session.streamSubagent(startedEvent(), { follow: false })) {
       types.push(event.type);
     }
 
@@ -1389,7 +1389,7 @@ describe("ClientSession.streamSubagent", () => {
     const session = createSession(parentState);
 
     const types: string[] = [];
-    for await (const event of session.streamSubagent(calledEvent(), {
+    for await (const event of session.streamSubagent(startedEvent(), {
       startIndex: 1,
       streamReconnectPolicy: { reconnect: false },
     })) {
@@ -1409,7 +1409,7 @@ describe("ClientSession.streamSubagent", () => {
     });
     const session = createSession();
 
-    for await (const _event of session.streamSubagent(calledEvent({ remote: false }), {
+    for await (const _event of session.streamSubagent(startedEvent({ remote: false }), {
       follow: false,
     })) {
       // Drain the bounded child stream.
@@ -1418,24 +1418,21 @@ describe("ClientSession.streamSubagent", () => {
     expect(urls[0]!.pathname).toBe("/eve/v1/session/child_1/stream");
   });
 
-  it("rejects a subagent event from a different parent session", () => {
+  it("rejects a task that runs no child session", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const session = createSession();
+    const started = createTaskStartedEvent({
+      callId: "call_2",
+      kind: "workflow",
+      mode: "foreground",
+      name: "deploy",
+      parentSessionId: "session_1",
+      taskId: "deploy-abc234",
+      turnId: "turn_1",
+    });
 
-    expect(() => session.streamSubagent(calledEvent({ sessionId: "session_2" }))).toThrow(
-      "streamSubagent() requires a subagent.called event from session session_1, but it came from session session_2.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("rejects a subagent event recorded before childStreamPath existed", () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    const session = createSession();
-    const { childStreamPath: _, ...legacyData } = calledEvent().data;
-    const legacy = { ...calledEvent(), data: legacyData } as SubagentCalledStreamEvent;
-
-    expect(() => session.streamSubagent(legacy)).toThrow(
-      "streamSubagent() requires a subagent.called event with childStreamPath, but call call_1 has none. The event was recorded by an older eve version.",
+    expect(() => session.streamSubagent(started)).toThrow(
+      "streamSubagent() requires a task.started event with a child session, but workflow task deploy-abc234 has none.",
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -38,9 +38,13 @@ export default defineEval({
     t.noFailedActions();
     t.calledTool("collision-gate", { count: 1, status: "completed" });
     t.calledSubagent("collision-child", { count: 1, status: "completed" });
-    t.event("subagent.completed", {
+    t.event("task.started", {
       count: 1,
-      data: { callId: "collision-child-call", subagentName: "collision-child" },
+      data: { callId: "collision-child-call", name: "collision-child" },
+    });
+    t.event("task.settled", {
+      count: 1,
+      data: { callId: "collision-child-call", status: "completed" },
     });
   },
 });

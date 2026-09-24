@@ -8,7 +8,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import { createSubagentCalledEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createTaskStartedEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none, type AuthFn } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
@@ -36,15 +36,19 @@ describe("eveChannel remote subagent stream", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects a forged tuple and a local child without fetching upstream", async () => {
+  it("rejects a forged tuple, another parent's child, and a local child without fetching upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const forged = createHarness({
       events: [remoteCalledEvent({ callId: "different-call" })],
     });
+    const otherParent = createHarness({
+      events: [remoteCalledEvent({ parentSessionId: "other-parent" })],
+    });
     const local = createHarness({ events: [localCalledEvent()] });
 
     expect((await forged.fetch(proxyRequest())).status).toBe(404);
+    expect((await otherParent.fetch(proxyRequest())).status).toBe(404);
     expect((await local.fetch(proxyRequest())).status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -161,19 +165,18 @@ describe("eveChannel remote subagent stream", () => {
 function remoteCalledEvent(overrides: Partial<typeof coordinates> = {}): MessageStreamEvent {
   const values = { ...coordinates, ...overrides };
   return stampTestEvent(
-    createSubagentCalledEvent({
+    createTaskStartedEvent({
       callId: values.callId,
-      childSessionId: values.childSessionId,
-      name: "research",
-      remote: {
-        resolverId: "subagents/research",
-        url: "https://remote.example/base",
+      child: {
+        remote: { resolverId: "subagents/research", url: "https://remote.example/base" },
+        sessionId: values.childSessionId,
       },
-      sequence: 1,
-      sessionId: values.parentSessionId,
-      toolName: "research",
+      kind: "agent",
+      mode: "foreground",
+      name: "research",
+      parentSessionId: values.parentSessionId,
+      taskId: "research-abc234",
       turnId: "turn-1",
-      workflowId: "workflow-1",
     }),
     0,
   );
@@ -181,15 +184,15 @@ function remoteCalledEvent(overrides: Partial<typeof coordinates> = {}): Message
 
 function localCalledEvent(): MessageStreamEvent {
   return stampTestEvent(
-    createSubagentCalledEvent({
+    createTaskStartedEvent({
       callId: coordinates.callId,
-      childSessionId: coordinates.childSessionId,
+      child: { sessionId: coordinates.childSessionId },
+      kind: "agent",
+      mode: "foreground",
       name: "research",
-      sequence: 1,
-      sessionId: coordinates.parentSessionId,
-      toolName: "research",
+      parentSessionId: coordinates.parentSessionId,
+      taskId: "research-abc234",
       turnId: "turn-1",
-      workflowId: "workflow-1",
     }),
     0,
   );

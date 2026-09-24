@@ -20,14 +20,23 @@ export default defineEval({
       `Call the stock-price subagent exactly once with message 'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.'. After that single subagent call finishes, do not call any subagent or tool again; include the exact stock price in your final reply.`,
     );
     blocked.expectOk();
-    blocked.notEvent("subagent.completed");
+    blocked.event("task.started", { data: { name: "stock-price" }, count: 1 });
+    blocked.notEvent("task.settled");
+    // The proxied approval names the delegated task that asked for it.
+    blocked.event("input.requested", {
+      data: { taskId: (taskId) => taskId?.startsWith("stock-price-") === true },
+      count: 1,
+    });
     blocked.session.requireInputRequest({ toolName: "get_stock_price" });
 
     const resumed = await blocked.session.respondAll("approve");
     resumed.expectOk();
     t.check(resumed.inputRequests, equals([]));
-    resumed.event("subagent.completed", {
-      data: { subagentName: "stock-price", output: (output) => output.includes(GOOG_PRICE) },
+    resumed.event("task.settled", {
+      data: {
+        output: (output) => JSON.stringify(output ?? null).includes(GOOG_PRICE),
+        status: "completed",
+      },
       count: 1,
     });
     resumed.messageIncludes(GOOG_PRICE);

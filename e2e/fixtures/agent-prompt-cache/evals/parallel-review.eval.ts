@@ -55,7 +55,8 @@ function expectFiveReviewers(started: EveEvalTurn) {
 
 /** The reviewers' answers return to the launch turn, which ends with one summary. */
 function expectSummary(turn: EveEvalTurn) {
-  turn.event("subagent.completed", { data: { subagentName: "reviewer" }, count: 5 });
+  turn.calledSubagent("reviewer", { status: "completed", count: 5 });
+  turn.event("task.settled", { data: { status: "completed" }, count: 5 });
   assert(turn.message?.trim(), "parent reports the completed reviews");
   turn.event("step.completed", { data: { finishReason: "stop" }, count: 1 });
   turn.notEvent("compaction.completed");
@@ -63,9 +64,9 @@ function expectSummary(turn: EveEvalTurn) {
 
 async function expectParallelReviews(t: EveEvalContext, turn: EveEvalTurn) {
   const calls = turn.events
-    .filter((event) => event.type === "subagent.called")
+    .filter((event) => event.type === "task.started")
     .filter(({ data }) => data.name === "reviewer");
-  const childIds = calls.map(({ data }) => data.childSessionId);
+  const childIds = calls.flatMap(({ data }) => (data.child ? [data.child.sessionId] : []));
   assert.equal(childIds.length, 5, "no repeated delegation");
   assert.equal(new Set(childIds).size, 5, "five distinct child sessions");
   const children = await Promise.all(childIds.map((id) => t.target.watchTurn(id).result()));

@@ -396,7 +396,7 @@ export function buildTraceTurnsFromTranscript(
 
     if (step !== undefined && eventStepIndex !== undefined) {
       step.events.push(event);
-    } else if (step !== undefined && event.type === "subagent.called") {
+    } else if (step !== undefined && event.type === "task.started") {
       step.events.push(event);
     }
 
@@ -557,7 +557,7 @@ export function buildTraceTurnsFromTranscript(
       continue;
     }
 
-    if (event.type === "subagent.called") {
+    if (event.type === "task.started" && event.data.kind === "agent") {
       turn.subagentCount += 1;
       if (step !== undefined) {
         step.subagentCount += 1;

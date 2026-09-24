@@ -33,22 +33,20 @@ beforeEach(() => vi.resetAllMocks());
 
 const events: UnstampedMessageStreamEvent[] = [
   {
-    type: "subagent.called",
+    type: "task.started",
     data: {
       callId: "call",
+      child: { sessionId: "child", streamPath: "/child" },
+      kind: "agent",
+      mode: "foreground",
       name: "research",
-      toolName: "research",
-      sessionId: "parent",
-      childSessionId: "child",
-      childStreamPath: "/child",
-      workflowId: "workflow",
+      taskId: "research-abc234",
       turnId: "turn",
-      sequence: 0,
     },
   },
   {
-    type: "subagent.completed",
-    data: { callId: "call", subagentName: "research", output: "done" },
+    type: "task.settled",
+    data: { callId: "call", output: "done", status: "completed", taskId: "research-abc234" },
   },
 ];
 
@@ -89,7 +87,7 @@ it.each(
       expect(hookCtx.session.id).toBe("parent");
       expect(hookCtx.session.auth).toEqual({ current: null, initiator: null });
       expect(received.type).toBe(event.type);
-      if (received.type === "subagent.completed") expect(received.data.output).toBe("done");
+      if (received.type === "task.settled") expect(received.data.output).toBe("done");
       expect(loadContext()).toBe(ctx);
       expect(stream.locked).toBe(false);
       expect(received).toEqual(JSON.parse(new TextDecoder().decode(chunks[0])));

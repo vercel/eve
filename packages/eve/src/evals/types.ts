@@ -5,7 +5,7 @@ import type {
   RuntimeIdentity,
   RuntimeTraceContext,
   MessageStreamEvent,
-  SubagentCalledStreamEvent,
+  TaskStartedStreamEvent,
 } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -50,21 +50,26 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One subagent delegation extracted from the captured stream
- * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
+ * One subagent delegation extracted from the captured stream: an agent
+ * task's `task.started`, joined with its `task.settled` by call id.
  */
 export interface EveEvalSubagentCall {
   /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
   readonly callId?: string;
-  /** Durable child session id for local and remote workflow delegations. */
+  /** Agent ID from `task.started`; pass it as `agentId` to continue the agent. */
+  readonly taskId?: string;
+  /** Durable child session id for local and remote delegations. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
+  /** Remote agent URL for remote delegations (`task.started` child remote metadata). */
   readonly remoteUrl?: string;
-  /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
+  /**
+   * Output from the matching `task.settled` event, or its error when the call
+   * failed; `undefined` while the call is working.
+   */
   readonly output?: JsonValue;
-  /** Lifecycle status inferred from the captured delegation events. */
+  /** Lifecycle status from the matching `task.settled` event; `working` until it arrives. */
   readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
@@ -332,7 +337,7 @@ export interface EveEvalSessionDriver {
    * children use the parent-origin proxy.
    */
   streamSubagent(
-    called: SubagentCalledStreamEvent,
+    started: TaskStartedStreamEvent,
     options?: StreamOptions,
   ): AsyncIterable<MessageStreamEvent>;
 }

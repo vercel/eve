@@ -314,29 +314,28 @@ describe("run assertions", () => {
   });
 
   it("matches typed event counts and ordered event groups", async () => {
-    const called = {
-      type: "subagent.called",
+    const called: UnstampedMessageStreamEvent = {
+      type: "task.started",
       data: {
-        name: "child",
         callId: "c",
-        childSessionId: "s",
-        sessionId: "p",
-        sequence: 1,
-        toolName: "subagent",
+        child: { sessionId: "s", streamPath: "/eve/v1/session/s/stream" },
+        kind: "agent",
+        mode: "foreground",
+        name: "child",
+        taskId: "child-abc234",
         turnId: "t",
-        workflowId: "w",
       },
-    } as UnstampedMessageStreamEvent;
-    const completed = {
-      type: "subagent.completed",
-      data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
-    } as UnstampedMessageStreamEvent;
+    };
+    const completed: UnstampedMessageStreamEvent = {
+      type: "task.settled",
+      data: { callId: "c", output: "ok", status: "completed", taskId: "child-abc234" },
+    };
     const result = makeResult({ events: [called, called, completed] });
 
     expect(
       (
         await Run.typedEvent({
-          type: "subagent.called",
+          type: "task.started",
           data: { name: "child" },
           count: 2,
         }).evaluate(result)
@@ -345,7 +344,7 @@ describe("run assertions", () => {
     expect(
       (
         await Run.typedEvent({
-          type: "subagent.called",
+          type: "task.started",
           data: { name: "child" },
           count: (count) => count >= 2,
         }).evaluate(result)
@@ -355,8 +354,8 @@ describe("run assertions", () => {
     expect(
       (
         await Run.eventOrder([
-          { type: "subagent.called", data: { name: "child" }, count: 2 },
-          { type: "subagent.completed", data: { subagentName: "child" } },
+          { type: "task.started", data: { name: "child" }, count: 2 },
+          { type: "task.settled", data: { status: "completed" } },
         ]).evaluate(result)
       ).score,
     ).toBe(1);
@@ -364,13 +363,13 @@ describe("run assertions", () => {
       (
         await Run.eventOrder([
           {
-            type: "subagent.called",
+            type: "task.started",
             data: { name: "child" },
             count: (count) => count >= 2,
           },
           {
-            type: "subagent.completed",
-            data: { subagentName: "child" },
+            type: "task.settled",
+            data: { status: "completed" },
             count: (count) => count >= 1,
           },
         ]).evaluate(result)
@@ -380,37 +379,36 @@ describe("run assertions", () => {
       (
         await Run.eventsSatisfy(
           "completion follows delegation",
-          (events) => events.at(-1)?.type === "subagent.completed",
+          (events) => events.at(-1)?.type === "task.settled",
         ).evaluate(result)
       ).score,
     ).toBe(1);
   });
 
   it("eventOrder rejects interleaved event groups", async () => {
-    const called = {
-      type: "subagent.called",
+    const called: UnstampedMessageStreamEvent = {
+      type: "task.started",
       data: {
-        name: "child",
         callId: "c",
-        childSessionId: "s",
-        sessionId: "p",
-        sequence: 1,
-        toolName: "subagent",
+        child: { sessionId: "s", streamPath: "/eve/v1/session/s/stream" },
+        kind: "agent",
+        mode: "foreground",
+        name: "child",
+        taskId: "child-abc234",
         turnId: "t",
-        workflowId: "w",
       },
-    } as UnstampedMessageStreamEvent;
-    const completed = {
-      type: "subagent.completed",
-      data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
-    } as UnstampedMessageStreamEvent;
+    };
+    const completed: UnstampedMessageStreamEvent = {
+      type: "task.settled",
+      data: { callId: "c", output: "ok", status: "completed", taskId: "child-abc234" },
+    };
     const result = makeResult({ events: [called, completed, called] });
 
     expect(
       (
         await Run.eventOrder([
-          { type: "subagent.called", data: { name: "child" }, count: 2 },
-          { type: "subagent.completed", data: { subagentName: "child" } },
+          { type: "task.started", data: { name: "child" }, count: 2 },
+          { type: "task.settled", data: { status: "completed" } },
         ]).evaluate(result)
       ).score,
     ).toBe(0);

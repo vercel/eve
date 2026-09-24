@@ -1,6 +1,6 @@
 /**
- * The subagent child-stream subsystem: for every `subagent.called` on the
- * parent stream, a parallel pump over the child session folds its events
+ * The subagent child-stream subsystem: for every `task.started` with a child
+ * session on the parent stream, a parallel pump over the child session folds its events
  * into the renderer's nested subagent view. Extracted from the runner —
  * the subsystem touches nothing but its own run state, the client, and the
  * {@link SubagentView} seam.
@@ -11,7 +11,7 @@ import {
   isCurrentTurnBoundaryEvent,
   type ActionResultStreamEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
+  type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 
 /**
@@ -78,8 +78,10 @@ export type SubagentRun = {
   background: boolean;
   /** Parent completion is provisional; only a child boundary is authoritative. */
   status: "open" | "provisional" | "authoritative";
-  /** Dispatch event whose parent-origin child stream this run follows. */
-  called: SubagentCalledStreamEvent;
+  /** Start event whose parent-origin child stream this run follows. */
+  started: TaskStartedStreamEvent;
+  /** Parent session that emitted `started`; the child stream is read through it. */
+  parentSessionId: string;
   /**
    * One entry per logical "child message" — independent of the child's
    * `stepIndex` field, which the harness can reuse across multiple
@@ -160,28 +162,31 @@ export class SubagentPump {
    * content arrives. A later parent-stream translator may replay the call;
    * re-entry only refreshes the name.
    */
-  begin(called: SubagentCalledStreamEvent): void {
-    const callId = called.data.callId;
+  begin(started: TaskStartedStreamEvent, parentSessionId: string): void {
+    const child = started.data.child;
+    if (child === undefined) return;
+    const callId = started.data.callId;
     const existing = this.#runs.get(callId);
     if (existing === undefined) {
       this.#runs.set(callId, {
-        name: called.data.name,
-        childSessionId: called.data.childSessionId,
-        parentTurnId: called.data.turnId,
+        name: started.data.name,
+        childSessionId: child.sessionId,
+        parentTurnId: started.data.turnId,
         background: false,
         status: "open",
-        called,
+        started,
+        parentSessionId,
         steps: new Map(),
         currentSectionKey: null,
         nextSectionKey: 0,
         tools: new Map(),
       });
     } else {
-      existing.name = called.data.name;
+      existing.name = started.data.name;
     }
     this.#view?.markChildToolCallId(callId);
     if (existing !== undefined && existing.status !== "open") return;
-    this.#view?.begin({ callId, name: called.data.name });
+    this.#view?.begin({ callId, name: started.data.name });
     if (this.#pendingBackgroundCalls.delete(callId)) this.background(callId);
     if (existing !== undefined) return;
     this.#activateOrQueue(callId);
@@ -278,13 +283,11 @@ export class SubagentPump {
       const { childSessionId } = run;
       let cursor = this.#childStreamIndices.get(childSessionId) ?? 0;
       try {
-        const events = client.sessions
-          .attach(run.called.data.sessionId)
-          .streamSubagent(run.called, {
-            signal: controller.signal,
-            startIndex: cursor,
-            streamReconnectPolicy: childStreamReconnectPolicy,
-          });
+        const events = client.sessions.attach(run.parentSessionId).streamSubagent(run.started, {
+          signal: controller.signal,
+          startIndex: cursor,
+          streamReconnectPolicy: childStreamReconnectPolicy,
+        });
         for await (const event of events) {
           if (controller.signal.aborted) return;
           this.#childStreamIndices.set(childSessionId, (cursor += 1));
@@ -300,7 +303,7 @@ export class SubagentPump {
         }
       } catch {
         // Only a non-retryable failure ends the follower early; the parent's
-        // `subagent.completed` still settles the section.
+        // `task.settled` still settles the section.
       } finally {
         controller.abort();
         if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
@@ -370,7 +373,7 @@ export class SubagentPump {
    * still-streaming step (flipping its right-title off `streaming`), sweeps
    * preparing ghosts, and marks the section Done. The run's status field is
    * the idempotency authority — the child's turn boundary and the parent's
-   * `subagent.completed` can both land here.
+   * `task.settled` can both land here.
    */
   #finalizeRun(callId: string, authoritative: boolean): void {
     const run = this.#runs.get(callId);

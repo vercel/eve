@@ -25,20 +25,25 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
-    const firstCalled = await parent.waitForEvent("subagent.called", {
+    const firstCalled = await parent.waitForEvent("task.started", {
       data: { name: "echo-marker" },
     });
-    const firstChild = t.target.watchTurn(firstCalled.data.childSessionId).result();
-    const secondCalled = await parent.waitForEvent("subagent.called", {
+    const firstChildSessionId = firstCalled.data.child?.sessionId;
+    if (firstChildSessionId === undefined) throw new Error("The first call has no child session.");
+    const firstChild = t.target.watchTurn(firstChildSessionId).result();
+    const secondCalled = await parent.waitForEvent("task.started", {
       data: {
         callId: (callId) => callId !== firstCalled.data.callId,
         name: "echo-marker",
       },
     });
-    if (secondCalled.data.childSessionId === firstCalled.data.childSessionId) {
+    const secondChildSessionId = secondCalled.data.child?.sessionId;
+    if (secondChildSessionId === undefined)
+      throw new Error("The second call has no child session.");
+    if (secondChildSessionId === firstChildSessionId) {
       throw new Error("Parallel workflow calls reused one child session.");
     }
-    const secondChild = t.target.watchTurn(secondCalled.data.childSessionId).result();
+    const secondChild = t.target.watchTurn(secondChildSessionId).result();
     const [turn, firstChildTurn, secondChildTurn] = await Promise.all([
       parent.result(),
       firstChild,

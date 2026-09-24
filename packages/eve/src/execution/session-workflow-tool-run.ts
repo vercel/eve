@@ -7,7 +7,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
-import { cancelTasksStep } from "#tasks/owner.js";
+import { cancelTasks } from "#tasks/owner-body.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   workflowToolRunOutcomeToToolResult,
@@ -62,13 +62,7 @@ async function handleWorkflowToolRunOutcome(
   );
   // A workflow run that ends cancels the agent tasks it still owns, even
   // when the turn no longer records it.
-  await cursor.apply(
-    await cancelTasksStep({
-      selector: { kind: "workflow-run", runId: message.from.runId },
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-    }),
-  );
+  await cancelTasks(cursor, { kind: "workflow-run", runId: message.from.runId });
   if (recorded?.address.runId !== message.from.runId) return undefined;
 
   const result = workflowToolRunOutcomeToToolResult(message);

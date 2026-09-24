@@ -65,6 +65,7 @@ export async function admitSessionInboxPayload(
           sessionWritable: input.cursor.sessionWritable,
           serializedContext: input.cursor.serializedContext,
           sessionState: input.cursor.sessionState,
+          taskId: task.id,
         }),
       );
     }

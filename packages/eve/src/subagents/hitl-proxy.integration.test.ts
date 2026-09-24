@@ -348,6 +348,35 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
 
     expect(events.map((event) => event.type)).toEqual(["input.requested"]);
   });
+
+  it("stamps the owner's task on the proxied input.requested", async () => {
+    const slackishAdapter = buildSlackishAdapter();
+    const ctx = new ContextContainer();
+    ctx.set(BundleKey, buildMockBundle([slackishAdapter]));
+    ctx.set(ChannelKey, slackishAdapter);
+
+    const { emit, events } = buildCapturingEmit(ctx);
+    await emitProxiedInputRequest({
+      emit,
+      hookPayload: buildHitlPayload({
+        callId: "call-task-2",
+        childContinuationToken: "subagent:task-parent:call-task-2",
+        childSessionId: "sess-task-child",
+        request: buildApprovalRequest("req-task-2"),
+        subagentName: "linear",
+      }),
+      mode: "task",
+      session: buildEmptySession("task-parent-token", "sess-task-parent"),
+      taskId: "linear-abc234",
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ taskId: "linear-abc234" }),
+        type: "input.requested",
+      }),
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------

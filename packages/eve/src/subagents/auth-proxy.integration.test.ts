@@ -254,4 +254,54 @@ describe("subagent authorization proxy", () => {
     expect(decodeEvent(chunks[4]!).type).toBe("turn.completed");
     expect(decodeEvent(chunks[5]!).type).toBe("session.waiting");
   });
+
+  it("attributes authorization events to the owner's task and leaves approvals unchanged", async () => {
+    const parentSessionId = "parent-task-session";
+    const session = createSession(parentSessionId);
+    const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
+    const chunks: Uint8Array[] = [];
+    const sessionWritable = createCapturingWritable(chunks);
+    // A grandchild's task ID from the child's own stream is replaced by the owner's.
+    const requiredEvent: SubagentAuthorizationEvent = {
+      data: {
+        description: "Authorization required for linear",
+        name: "linear",
+        sequence: 0,
+        stepIndex: 1,
+        taskId: "worker-zzzzzz",
+        turnId: "child-turn",
+      },
+      type: "authorization.required",
+    };
+    const settledEvent: SubagentAuthorizationEvent = {
+      data: {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U1",
+        sequence: 0,
+        stepIndex: 2,
+        turnId: "child-turn",
+      },
+      type: "approval.settled",
+    };
+
+    for (const event of [requiredEvent, settledEvent]) {
+      await emitProxiedSubagentEvent({
+        ctx,
+        durableSession: projectToDurableSession(session),
+        hookPayload: authorizationPayload(event),
+        sessionWritable,
+        taskId: "researcher-abc234",
+      });
+    }
+
+    const published = chunks.map(decodeEvent);
+    expect(published[0]).toMatchObject({
+      data: { ...requiredEvent.data, taskId: "researcher-abc234" },
+      type: "authorization.required",
+    });
+    const approval = published.find((event) => event.type === "approval.settled");
+    expect(approval).toMatchObject(settledEvent);
+    expect(approval?.data).not.toHaveProperty("taskId");
+  });
 });

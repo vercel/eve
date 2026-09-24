@@ -31,6 +31,8 @@ export async function emitProxiedInputRequest(input: {
   readonly hookPayload: SubagentInputRequestHookPayload;
   readonly mode: RunMode;
   readonly session: HarnessSession;
+  /** The owner's task for the asking child. */
+  readonly taskId?: string;
 }): Promise<{
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly session: HarnessSession;
@@ -40,6 +42,7 @@ export async function emitProxiedInputRequest(input: {
       requests: input.hookPayload.event.requests,
       sequence: input.hookPayload.event.sequence,
       stepIndex: input.hookPayload.event.stepIndex,
+      taskId: input.taskId,
       turnId: input.hookPayload.event.turnId,
     }),
   );

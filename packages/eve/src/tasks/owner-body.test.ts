@@ -2,11 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
-import { startAgentTasks } from "#tasks/owner-body.js";
-import { ensureTaskCallbackAliasStep, startAgentTasksStep } from "#tasks/owner.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { cancelTasks, startAgentTasks } from "#tasks/owner-body.js";
+import { cancelTasksStep, ensureTaskCallbackAliasStep, startAgentTasksStep } from "#tasks/owner.js";
 import { TASK_CALLBACK_ALIAS_STATE_KEY } from "#tasks/state.js";
 
+vi.mock("#execution/tools/subagent/emit-event-step.js", () => ({
+  emitSubagentEventStep: vi.fn(),
+}));
 vi.mock("#tasks/owner.js", () => ({
   applyTaskReportStep: vi.fn(),
   cancelTasksStep: vi.fn(),
@@ -56,6 +61,39 @@ describe("startAgentTasks", () => {
 
     expect(ensureTaskCallbackAliasStep).not.toHaveBeenCalled();
     expect(startAgentTasksStep).toHaveBeenCalledOnce();
+  });
+});
+
+describe("cancelTasks", () => {
+  it("publishes the task.settled event of each task it cancels", async () => {
+    const cursor = createCursor(
+      createTestSessionState(),
+      vi.fn(async () => {}),
+    );
+    const event: UnstampedMessageStreamEvent = {
+      data: { callId: "call-1", status: "cancelled", taskId: "research-abc234" },
+      type: "task.settled",
+    };
+    vi.mocked(cancelTasksStep).mockResolvedValue({
+      events: [event],
+      replies: [],
+      results: [],
+      serializedContext: {},
+      sessionState: cursor.sessionState,
+    });
+    vi.mocked(emitSubagentEventStep).mockImplementation(async (input) => ({
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    }));
+
+    await cancelTasks(cursor, { kind: "workflow-run", runId: "run-1" });
+
+    expect(cancelTasksStep).toHaveBeenCalledWith(
+      expect.objectContaining({ selector: { kind: "workflow-run", runId: "run-1" } }),
+    );
+    expect(emitSubagentEventStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ event }),
+    );
   });
 });
 

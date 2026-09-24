@@ -62,9 +62,9 @@ export interface EveEvalSubagentCallMatchOptions {
   readonly callId?: EveEvalValueMatcher<string | undefined>;
   /** Matcher over the durable child session id, when delegation started. */
   readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `subagent.called` remote URL. */
+  /** Matcher over the remote URL from `task.started`. */
   readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `subagent.completed` output. */
+  /** Matcher over the output from `task.settled` (the error when the call failed). */
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];

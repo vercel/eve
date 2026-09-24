@@ -12,9 +12,9 @@ import {
   EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-  createSubagentCalledEvent,
+  createTaskStartedEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
+  type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none } from "#public/channels/auth.js";
@@ -102,17 +102,19 @@ describe("ClientSession.streamSubagent through the parent proxy", () => {
   });
 });
 
-function createCalled(overrides: { readonly callId?: string } = {}): SubagentCalledStreamEvent {
-  return createSubagentCalledEvent({
+function createCalled(overrides: { readonly callId?: string } = {}): TaskStartedStreamEvent {
+  return createTaskStartedEvent({
     callId: overrides.callId ?? "call-1",
-    childSessionId: "child-1",
+    child: {
+      remote: { resolverId: "subagents/research", url: REMOTE_URL },
+      sessionId: "child-1",
+    },
+    kind: "agent",
+    mode: "foreground",
     name: "research",
-    remote: { resolverId: "subagents/research", url: REMOTE_URL },
-    sequence: 1,
-    sessionId: "parent-1",
-    toolName: "research",
+    parentSessionId: "parent-1",
+    taskId: "research-abc234",
     turnId: "turn-1",
-    workflowId: "workflow-1",
   });
 }
 

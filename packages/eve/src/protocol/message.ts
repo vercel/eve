@@ -289,6 +289,8 @@ export interface InputRequestedStreamEvent {
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
+    /** Set when a delegated task asked; the requests belong to that task. */
+    taskId?: string;
     turnId: string;
   };
   type: "input.requested";
@@ -351,48 +353,93 @@ export interface ActionPartialStreamEvent {
   type: "action.partial";
 }
 
-/**
- * Stream event emitted when the parent workflow starts a child subagent session.
- */
-export interface SubagentCalledStreamEvent {
-  data: {
-    agentId?: string;
-    callId: string;
-    childSessionId: string;
-    childStreamPath: string;
-    sessionId: string;
-    sequence: number;
-    name: string;
-    remote?: {
-      /**
-       * Key to the authored credential functions (`auth`/`headers`) for this
-       * remote child, resolved at stream-proxy time by
-       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
-       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
-       * `credentialsStepId` in the step registry. The event stores this key —
-       * never resolved header values — because tokens expire and this event
-       * is persisted and streamed to clients. Absent when the remote child
-       * has no authored credentials.
-       */
-      resolverId?: string;
-      url: string;
-    };
-    toolName: string;
-    turnId: string;
-    workflowId: string;
+/** The child session a task runs in, and where a client can follow its stream. */
+export interface TaskChildStream {
+  sessionId: string;
+  /**
+   * Route on this deployment that streams the child session. For a remote
+   * child it is a parent-origin proxy, which the parent authenticates to the
+   * remote deployment. Follow it with `session.streamSubagent()`.
+   */
+  streamPath: string;
+  /** Set when the child runs on another deployment. */
+  remote?: {
+    /**
+     * Key to the authored credential functions (`auth`/`headers`) for this
+     * remote child, resolved at stream-proxy time by
+     * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
+     * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
+     * `credentialsStepId` in the step registry. The event stores this key —
+     * never resolved header values — because tokens expire and this event
+     * is persisted and streamed to clients. Absent when the remote child
+     * has no authored credentials.
+     */
+    resolverId?: string;
+    url: string;
   };
-  type: "subagent.called";
+}
+
+/** Token usage one task generation reported when it settled. */
+export interface TaskUsage {
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+  readonly costUsd?: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
 }
 
 /**
- * Stream event emitted when an inline subagent execution starts.
+ * Stream event emitted when a task's child has started and the parent knows
+ * its address. `taskId` is stable across the task's generations; for an agent
+ * it is the agent ID that continues it. `callId` identifies the call that
+ * started this generation.
  */
-export interface SubagentStartedStreamEvent {
+export interface TaskStartedStreamEvent {
   data: {
     callId: string;
-    subagentName: string;
+    /** Absent when the task runs no child session. */
+    child?: TaskChildStream;
+    kind: "agent" | "workflow";
+    /** Whether the calling turn waits for the result. */
+    mode: "foreground" | "background";
+    name: string;
+    taskId: string;
+    turnId: string;
   };
-  type: "subagent.started";
+  type: "task.started";
+}
+
+/**
+ * Stream event for a waited task that moves to the background. Reserved:
+ * every task is waited on today, so eve does not emit it yet.
+ */
+export interface TaskDetachedStreamEvent {
+  data: {
+    callId: string;
+    reason: "steer" | "timeout";
+    taskId: string;
+  };
+  type: "task.detached";
+}
+
+/**
+ * Stream event emitted exactly once per task generation, with its first
+ * terminal outcome. A generation that fails before its child starts emits
+ * `task.settled` without a preceding `task.started`.
+ */
+export interface TaskSettledStreamEvent {
+  data: {
+    callId: string;
+    /** Present when `status` is `failed`. Consumers must handle unknown codes. */
+    error?: { code: string; message: string };
+    /** Present when `status` is `completed`. */
+    output?: JsonValue;
+    status: "completed" | "failed" | "cancelled";
+    taskId: string;
+    /** Present when the child reported the generation's usage. */
+    usage?: TaskUsage;
+  };
+  type: "task.settled";
 }
 
 /**
@@ -407,18 +454,6 @@ export interface SubagentChildEventStreamEvent {
     subagentName: string;
   };
   type: "subagent.event";
-}
-
-/**
- * Stream event emitted after the parent accepts a successful subagent invocation result.
- */
-export interface SubagentCompletedStreamEvent {
-  data: {
-    callId: string;
-    output: string;
-    subagentName: string;
-  };
-  type: "subagent.completed";
 }
 
 /**
@@ -656,6 +691,8 @@ export interface AuthorizationRequiredStreamEvent {
     name: string;
     sequence: number;
     stepIndex: number;
+    /** Set when a delegated task needs the authorization. */
+    taskId?: string;
     turnId: string;
     webhookUrl?: string;
   };
@@ -697,6 +734,8 @@ export interface AuthorizationCompletedStreamEvent {
     reason?: string;
     sequence: number;
     stepIndex: number;
+    /** Set when a delegated task needed the authorization. */
+    taskId?: string;
     turnId: string;
   };
   type: "authorization.completed";
@@ -759,10 +798,10 @@ export type UnstampedMessageStreamEvent =
   | SessionStartedStreamEvent
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
-  | SubagentCalledStreamEvent
   | SubagentChildEventStreamEvent
-  | SubagentCompletedStreamEvent
-  | SubagentStartedStreamEvent
+  | TaskDetachedStreamEvent
+  | TaskSettledStreamEvent
+  | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | InputResolvedStreamEvent
@@ -1245,17 +1284,17 @@ export function createInputRequestedEvent(input: {
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): InputRequestedStreamEvent {
-  return {
-    data: {
-      requests: input.requests,
-      sequence: input.sequence,
-      stepIndex: input.stepIndex,
-      turnId: input.turnId,
-    },
-    type: "input.requested",
+  const data: InputRequestedStreamEvent["data"] = {
+    requests: input.requests,
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
   };
+  if (input.taskId !== undefined) data.taskId = input.taskId;
+  return { data, type: "input.requested" };
 }
 
 /** Creates the authoritative `input.resolved` event for one pending HITL batch. */
@@ -1331,46 +1370,78 @@ export function createActionPartialEvent(input: {
 }
 
 /**
- * Creates the `subagent.called` event for one started child workflow session.
+ * Creates the `task.started` event for one task generation. A local child is
+ * streamed from its own session route; a remote child through the parent's
+ * proxy route, which the parent authenticates to the remote deployment.
  */
-export function createSubagentCalledEvent(input: {
-  readonly agentId?: string;
+export function createTaskStartedEvent(input: {
   readonly callId: string;
-  readonly childSessionId: string;
-  readonly sessionId: string;
-  readonly sequence: number;
+  readonly child?: {
+    readonly remote?: { readonly resolverId?: string; readonly url: string };
+    readonly sessionId: string;
+  };
+  readonly kind: TaskStartedStreamEvent["data"]["kind"];
+  readonly mode: TaskStartedStreamEvent["data"]["mode"];
   readonly name: string;
-  readonly remote?: {
-    readonly resolverId?: string;
-    readonly url: string;
-  };
-  readonly toolName: string;
+  readonly parentSessionId: string;
+  readonly taskId: string;
   readonly turnId: string;
-  readonly workflowId: string;
-}): SubagentCalledStreamEvent {
-  return {
-    data: {
-      agentId: input.agentId,
-      callId: input.callId,
-      childSessionId: input.childSessionId,
-      childStreamPath:
-        input.remote === undefined
-          ? createEveSessionStreamRoutePath(input.childSessionId)
-          : createEveSubagentStreamRoutePath({
-              callId: input.callId,
-              childSessionId: input.childSessionId,
-              parentSessionId: input.sessionId,
-            }),
-      sessionId: input.sessionId,
-      sequence: input.sequence,
-      name: input.name,
-      remote: input.remote,
-      toolName: input.toolName,
-      turnId: input.turnId,
-      workflowId: input.workflowId,
-    },
-    type: "subagent.called",
+}): TaskStartedStreamEvent {
+  const data: TaskStartedStreamEvent["data"] = {
+    callId: input.callId,
+    kind: input.kind,
+    mode: input.mode,
+    name: input.name,
+    taskId: input.taskId,
+    turnId: input.turnId,
   };
+  const { child } = input;
+  if (child !== undefined) {
+    data.child =
+      child.remote === undefined
+        ? {
+            sessionId: child.sessionId,
+            streamPath: createEveSessionStreamRoutePath(child.sessionId),
+          }
+        : {
+            remote:
+              child.remote.resolverId === undefined
+                ? { url: child.remote.url }
+                : { resolverId: child.remote.resolverId, url: child.remote.url },
+            sessionId: child.sessionId,
+            streamPath: createEveSubagentStreamRoutePath({
+              callId: input.callId,
+              childSessionId: child.sessionId,
+              parentSessionId: input.parentSessionId,
+            }),
+          };
+  }
+  return { data, type: "task.started" };
+}
+
+/** Creates the `task.settled` event for one task generation's first terminal outcome. */
+export function createTaskSettledEvent(
+  input: {
+    readonly callId: string;
+    readonly taskId: string;
+    readonly usage?: TaskUsage;
+  } & (
+    | { readonly status: "completed"; readonly output: JsonValue }
+    | { readonly status: "failed"; readonly error: { code: string; message: string } }
+    | { readonly status: "cancelled" }
+  ),
+): TaskSettledStreamEvent {
+  const data: TaskSettledStreamEvent["data"] = {
+    callId: input.callId,
+    status: input.status,
+    taskId: input.taskId,
+  };
+  if (input.status === "completed") data.output = input.output;
+  if (input.status === "failed") {
+    data.error = { code: input.error.code, message: input.error.message };
+  }
+  if (input.usage !== undefined) data.usage = input.usage;
+  return { data, type: "task.settled" };
 }
 
 /**

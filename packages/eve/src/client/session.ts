@@ -1,5 +1,5 @@
 import { updatePendingAuthorizations } from "#client/session-utils.js";
-import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, TaskStartedStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
@@ -212,30 +212,24 @@ export class ClientSession {
   /**
    * Follows one delegated child's durable event stream through this parent session.
    *
-   * Pass a `subagent.called` event from this session. The client reads its
-   * `childStreamPath` with this session's host and credentials: a local child's
+   * Pass a `task.started` event from this session's stream. The client reads its
+   * `child.streamPath` with this session's host and credentials: a local child's
    * own stream route, or the parent-origin proxy for a remote child, which the
    * parent deployment authenticates to the remote agent. Reading the child never
    * advances this session's cursor. The child cursor starts at `0`; pass
    * `startIndex` to resume. Stop at a child turn boundary with
    * `isCurrentTurnBoundaryEvent`.
    *
-   * @throws {Error} When `called` belongs to a different session or has no
-   * `childStreamPath` because an older eve version recorded it.
+   * @throws {Error} When the task runs no child session to follow.
    */
   streamSubagent(
-    called: SubagentCalledStreamEvent,
+    started: TaskStartedStreamEvent,
     options?: StreamOptions,
   ): AsyncIterable<MessageStreamEvent> {
-    if (called.data.sessionId !== this.#state.sessionId) {
+    const child = started.data.child;
+    if (child === undefined) {
       throw new Error(
-        `streamSubagent() requires a subagent.called event from session ${this.#state.sessionId}, but it came from session ${called.data.sessionId}.`,
-      );
-    }
-    // Events persisted before childStreamPath existed replay without it.
-    if (typeof called.data.childStreamPath !== "string") {
-      throw new Error(
-        `streamSubagent() requires a subagent.called event with childStreamPath, but call ${called.data.callId} has none. The event was recorded by an older eve version.`,
+        `streamSubagent() requires a task.started event with a child session, but ${started.data.kind} task ${started.data.taskId} has none.`,
       );
     }
     const startIndex = options?.startIndex ?? 0;
@@ -247,7 +241,7 @@ export class ClientSession {
     return followStreamIterable({
       follow: options?.follow,
       host: this.#context.host,
-      path: called.data.childStreamPath,
+      path: child.streamPath,
       redirect: this.#context.redirect,
       resolveHeaders: () => this.#context.resolveHeaders(),
       signal: options?.signal,

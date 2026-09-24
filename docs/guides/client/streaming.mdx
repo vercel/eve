@@ -243,29 +243,29 @@ stream index after the captured prefix.
 
 ## Follow a subagent
 
-A delegated subagent reports its progress on its own child session. The parent stream announces each dispatch with a `subagent.called` event. Pass that event to `streamSubagent()` on the parent's session handle to follow the child:
+A delegated subagent reports its progress on its own child session. The parent stream announces each started child with a `task.started` event. Pass that event to `streamSubagent()` on the parent's session handle to follow the child:
 
 ```ts
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
 const session = client.sessions.attach(parentSessionId);
 const { events } = await session.snapshot();
-const called = events.find((event) => event.type === "subagent.called");
+const started = events.find((event) => event.type === "task.started");
 
-if (called?.type === "subagent.called") {
-  for await (const event of session.streamSubagent(called)) {
-    console.log(called.data.name, event.type);
+if (started?.type === "task.started") {
+  for await (const event of session.streamSubagent(started)) {
+    console.log(started.data.name, event.type);
     if (isCurrentTurnBoundaryEvent(event)) break;
   }
 }
 ```
 
-`streamSubagent()` reads the event's `childStreamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
+`streamSubagent()` reads the event's `child.streamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
 
 - A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
 - A remote child's path is a proxy route on the parent deployment. The parent checks that the child belongs to this session, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.
 
-The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn. Passing a `subagent.called` event from a different session throws.
+The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn. The matching `task.settled` event on the parent stream reports the call's outcome. Passing a `task.started` event that has no `child` throws.
 
 ## Abort a request
 

@@ -39,30 +39,34 @@ export async function expectNestedDelegation(t: EveEvalContext, delegation: Nest
     const caller = await t.session();
     sessions.push(caller.sessionId);
     const callerTurn = await caller.start(signOffRequest(delegation.handoff, key));
-    const delegateCall = await callerTurn.waitForEvent("subagent.called");
+    const delegateCall = await callerTurn.waitForEvent("task.started");
     assert.equal(delegateCall.data.name, delegation.delegate);
+    const delegateChild = delegateCall.data.child;
+    assert.ok(delegateChild, "delegate must run in a child session");
     if (delegation.remote === true) {
-      assert.ok(delegateCall.data.remote, "delegate must use the remote HTTP transport");
+      assert.ok(delegateChild.remote, "delegate must use the remote HTTP transport");
     }
-    sessions.push(delegateCall.data.childSessionId);
+    sessions.push(delegateChild.sessionId);
 
-    const delegateTurn = t.target.watchTurn(delegateCall.data.childSessionId);
-    const workerCall = await delegateTurn.waitForEvent("subagent.called");
+    const delegateTurn = t.target.watchTurn(delegateChild.sessionId);
+    const workerCall = await delegateTurn.waitForEvent("task.started");
     assert.equal(workerCall.data.name, "verification-worker");
-    sessions.push(workerCall.data.childSessionId);
-    const workerTurn = t.target.watchTurn(workerCall.data.childSessionId);
+    const workerChild = workerCall.data.child;
+    assert.ok(workerChild, "verification worker must run in a child session");
+    sessions.push(workerChild.sessionId);
+    const workerTurn = t.target.watchTurn(workerChild.sessionId);
 
     // While the worker is gated, both outer delegations are still waiting inside their turns.
-    await waitForVerification(t, workerCall.data.childSessionId, key);
+    await waitForVerification(t, workerChild.sessionId, key);
     t.check(
       [...callerTurn.events, ...delegateTurn.events].some(
-        (event) => event.type === "subagent.completed" || event.type === "turn.completed",
+        (event) => event.type === "task.settled" || event.type === "turn.completed",
       ),
       equals(false),
     ).label("no delegation resolves before verification finishes");
 
     // The code is created on release, so no model can obtain it from the prompt.
-    const code = await releaseVerification(t, workerCall.data.childSessionId, key);
+    const code = await releaseVerification(t, workerChild.sessionId, key);
     const workerResult = (await workerTurn.result()).expectOk();
     workerResult.calledTool("verification_gate", {
       input: { key },
@@ -71,15 +75,16 @@ export async function expectNestedDelegation(t: EveEvalContext, delegation: Nest
       count: 1,
     });
     workerResult.messageIncludes(code);
+    const includesCode = (output: unknown) => JSON.stringify(output ?? null).includes(code);
     const delegateResult = (await delegateTurn.result()).expectOk();
-    delegateResult.event("subagent.completed", {
-      data: { subagentName: "verification-worker", output: (output) => output.includes(code) },
+    delegateResult.event("task.settled", {
+      data: { output: includesCode, status: "completed", taskId: workerCall.data.taskId },
       count: 1,
     });
     delegateResult.messageIncludes(code);
     const callerResult = (await callerTurn.result()).expectOk();
-    callerResult.event("subagent.completed", {
-      data: { subagentName: delegation.delegate, output: (output) => output.includes(code) },
+    callerResult.event("task.settled", {
+      data: { output: includesCode, status: "completed", taskId: delegateCall.data.taskId },
       count: 1,
     });
     callerResult.messageIncludes(code);

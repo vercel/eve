@@ -671,7 +671,7 @@ describe("executeTask", () => {
           sessionId: "parent-session",
           events: [
             turnStarted("parent-turn"),
-            subagentCalled("parent-turn", "child-session", "sleeper"),
+            taskStarted("parent-turn", "child-session", "sleeper"),
             turnCompleted("parent-turn"),
             sessionWaiting(),
           ],
@@ -711,12 +711,12 @@ describe("executeTask", () => {
         const parent = await conversation.start("delegate");
         expect(parent.sessionId).toBe("parent-session");
 
-        const called = await parent.waitForEvent("subagent.called", {
+        const started = await parent.waitForEvent("task.started", {
           data: { name: "sleeper" },
         });
-        expect(called.data.childSessionId).toBe("child-session");
+        expect(started.data.child?.sessionId).toBe("child-session");
 
-        const child = t.target.watchTurn(called.data.childSessionId);
+        const child = t.target.watchTurn(started.data.child!.sessionId);
         const requested = await child.waitForEvent("actions.requested", {
           data: {
             actions: (actions) =>
@@ -734,9 +734,9 @@ describe("executeTask", () => {
 
         const [parentTurn, childTurn] = await Promise.all([parent.result(), child.result()]);
         expect(await parent.result()).toBe(parentTurn);
-        parentTurn.event("subagent.called", { count: 1 });
+        parentTurn.event("task.started", { count: 1 });
         childTurn.calledTool("wait-for-cancellation", { status: "pending", count: 1 });
-        await expect(parent.waitForEvent("subagent.completed")).rejects.toThrow(/session\.waiting/);
+        await expect(parent.waitForEvent("task.settled")).rejects.toThrow(/session\.waiting/);
 
         const childFollowUp = await child.session.send("continue child");
         childFollowUp.messageIncludes("child continued");
@@ -1134,7 +1134,7 @@ function actionsRequested(
   };
 }
 
-function subagentCalled(
+function taskStarted(
   turnId: string,
   childSessionId: string,
   name: string,
@@ -1142,15 +1142,16 @@ function subagentCalled(
   return {
     data: {
       callId: "call_subagent",
-      childSessionId,
-      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
-      sessionId: "parent-session",
-      sequence: 1,
+      child: {
+        sessionId: childSessionId,
+        streamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
+      },
+      kind: "agent",
+      mode: "foreground",
       name,
-      toolName: name,
+      taskId: `${name}-abc234`,
       turnId,
-      workflowId: "workflow_child",
     },
-    type: "subagent.called",
+    type: "task.started",
   };
 }

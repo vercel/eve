@@ -16,13 +16,15 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
-    const called = await parent.waitForEvent("subagent.called", {
+    const started = await parent.waitForEvent("task.started", {
       data: { name: "sleeper" },
     });
-    const agentId = called.data.agentId;
-    if (agentId === undefined) throw new Error("Cancelled sleeper call has no agent id.");
+    const agentId = started.data.taskId;
+    const childSessionId = started.data.child?.sessionId;
+    if (childSessionId === undefined)
+      throw new Error("Cancelled sleeper task has no child session.");
 
-    const child = t.target.watchTurn(called.data.childSessionId);
+    const child = t.target.watchTurn(childSessionId);
     await child.waitForEvent("actions.requested", {
       data: {
         actions: (actions) =>
@@ -49,7 +51,9 @@ export default defineEval({
 
     parentTurn.event("turn.cancelled", { count: 1 });
     parentTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    parentTurn.notEvent("subagent.completed");
+    // The owner reports the cancelled task once; the child's confirmation adds nothing.
+    parentTurn.event("task.settled", { count: 1, data: { status: "cancelled", taskId: agentId } });
+    parentTurn.notEvent("task.settled", { data: { status: "completed" } });
     parentTurn.notEvent("turn.failed");
     parentTurn.notEvent("session.failed");
 
@@ -78,16 +82,13 @@ export default defineEval({
     );
     resumed.expectOk();
     resumed.messageIncludes(RECOVERY_RESULT);
-    resumed.event("subagent.called", {
+    resumed.event("task.started", {
       count: 1,
-      data: {
-        agentId,
-        childSessionId: called.data.childSessionId,
-        name: "sleeper",
-      },
+      data: { child: { sessionId: childSessionId }, name: "sleeper", taskId: agentId },
     });
+    resumed.event("task.settled", { count: 1, data: { status: "completed", taskId: agentId } });
 
     t.event("turn.cancelled", { count: 2 });
-    t.event("subagent.called", { count: 2, data: { name: "sleeper" } });
+    t.event("task.started", { count: 2, data: { name: "sleeper" } });
   },
 });

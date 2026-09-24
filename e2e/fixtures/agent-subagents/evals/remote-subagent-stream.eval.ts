@@ -1,7 +1,7 @@
 import {
   isCurrentTurnBoundaryEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
+  type TaskStartedStreamEvent,
 } from "eve/client";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
@@ -22,10 +22,10 @@ export default defineEval({
   async test(t) {
     const turn = await t.send(CREATE_CHILD_MESSAGE);
     turn.expectOk();
-    const called = await requireRemoteCall(t, turn);
+    const started = await requireRemoteCall(t, turn);
 
     const childEvents: MessageStreamEvent[] = [];
-    for await (const event of turn.session.streamSubagent(called)) {
+    for await (const event of turn.session.streamSubagent(started)) {
       childEvents.push(event);
       if (isCurrentTurnBoundaryEvent(event)) break;
     }
@@ -52,11 +52,11 @@ export default defineEval({
 async function requireRemoteCall(
   t: EveEvalContext,
   turn: EveEvalTurn,
-): Promise<SubagentCalledStreamEvent> {
+): Promise<TaskStartedStreamEvent> {
   for (const event of turn.events) {
-    if (event.type === "subagent.called" && event.data.name === "remote-loopback") return event;
+    if (event.type === "task.started" && event.data.name === "remote-loopback") return event;
   }
   return await t.target
     .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .waitForEvent("subagent.called", { data: { name: "remote-loopback" } });
+    .waitForEvent("task.started", { data: { name: "remote-loopback" } });
 }

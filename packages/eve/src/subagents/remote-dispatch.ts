@@ -501,8 +501,8 @@ export function resolveRemoteAgentForAction(input: {
 /**
  * Resolves authored outbound headers for a server-authored remote child event.
  *
- * `resolverId` is the key persisted on the `subagent.called` event (see
- * `SubagentCalledStreamEvent`): it identifies the authored credential
+ * `resolverId` is the key persisted on the `task.started` event (see
+ * `TaskChildStream`): it identifies the authored credential
  * functions, never their resolved values. Lookup order mirrors how dispatch
  * chose the key — first as a subagent node id (static remote definition),
  * then as a `credentialsStepId` in the step registry (dynamic remote

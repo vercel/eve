@@ -1,6 +1,7 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import type {
+  SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
@@ -50,6 +51,8 @@ export async function runProxySubagentEventStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** The owner's task for the child; stamped on proxied input and authorization events. */
+  readonly taskId?: string;
 }): Promise<ProxySubagentEventResult> {
   "use step";
 
@@ -62,6 +65,7 @@ export async function runProxySubagentEventStep(input: {
     durableSession,
     hookPayload: input.hookPayload,
     sessionWritable: input.sessionWritable,
+    taskId: input.taskId,
   });
 }
 
@@ -72,6 +76,7 @@ export async function emitProxiedSubagentEvent(input: {
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly taskId?: string;
 }): Promise<ProxySubagentEventResult> {
   const { ctx } = input;
   const adapter = ctx.require(ChannelKey);
@@ -99,7 +104,7 @@ export async function emitProxiedSubagentEvent(input: {
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
       if (input.hookPayload.kind === "subagent-authorization-event") {
-        await emit(input.hookPayload.event);
+        await emit(withTaskId(input.hookPayload.event, input.taskId));
         return {
           result: undefined,
           session: await closeStandaloneAuthorizationEvent({
@@ -116,6 +121,7 @@ export async function emitProxiedSubagentEvent(input: {
         hookPayload: input.hookPayload,
         mode: ctx.require(ModeKey),
         session: enrichedSession,
+        taskId: input.taskId,
       });
       return { result: proxyResult.entries, session: proxyResult.session };
     });
@@ -145,6 +151,22 @@ export async function emitProxiedSubagentEvent(input: {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: nextSession }),
   };
+}
+
+/** Attributes a proxied authorization to the owner's task, replacing any descendant's. */
+function withTaskId(
+  event: SubagentAuthorizationEvent,
+  taskId: string | undefined,
+): SubagentAuthorizationEvent {
+  if (taskId === undefined) return event;
+  switch (event.type) {
+    case "authorization.required":
+      return { ...event, data: { ...event.data, taskId } };
+    case "authorization.completed":
+      return { ...event, data: { ...event.data, taskId } };
+    default:
+      return event;
+  }
 }
 
 async function closeStandaloneAuthorizationEvent(input: {

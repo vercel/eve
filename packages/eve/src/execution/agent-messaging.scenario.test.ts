@@ -272,28 +272,33 @@ async function runScriptedParentSession(input: {
     await parentSession.send("Continue the same child and report its recalled codeword.")
   ).result();
   const parentEvents = [...firstTurnEvents, ...secondTurn.events];
-  const calls = filterEventsByType(parentEvents, "subagent.called");
+  const calls = filterEventsByType(parentEvents, "task.started");
 
   if (calls.length !== 2) {
-    throw new Error(`Expected two subagent calls. Parent events: ${JSON.stringify(parentEvents)}`);
+    throw new Error(`Expected two agent tasks. Parent events: ${JSON.stringify(parentEvents)}`);
   }
   expect(calls.map((call) => call.data.name)).toEqual([input.subagentName, input.subagentName]);
-  expect(calls[0]?.data.childSessionId).toBeDefined();
-  expect(calls[1]?.data.childSessionId).toBe(calls[0]?.data.childSessionId);
+  expect(calls[0]?.data.child?.sessionId).toBeDefined();
+  expect(calls[1]?.data.child?.sessionId).toBe(calls[0]?.data.child?.sessionId);
+  // Continuing the agent is its next generation, under the same task ID.
+  expect(calls[1]?.data.taskId).toBe(calls[0]?.data.taskId);
   if (input.expectedRemoteUrl === undefined) {
-    expect(calls.every((call) => call.data.remote === undefined)).toBe(true);
+    expect(calls.every((call) => call.data.child?.remote === undefined)).toBe(true);
   } else {
-    expect(calls.map((call) => call.data.remote?.url)).toEqual([
+    expect(calls.map((call) => call.data.child?.remote?.url)).toEqual([
       input.expectedRemoteUrl,
       input.expectedRemoteUrl,
     ]);
   }
+  expect(
+    filterEventsByType(parentEvents, "task.settled").map(({ data }) => [data.callId, data.status]),
+  ).toEqual(calls.map(({ data }) => [data.callId, "completed"]));
   expect(secondTurn.status).toBe("waiting");
   expect(secondTurn.message).toBe(PARENT_RESULT);
 
-  const childSessionId = calls[0]?.data.childSessionId;
+  const childSessionId = calls[0]?.data.child?.sessionId;
   if (childSessionId === undefined) {
-    throw new Error("First subagent.called event did not include a child session id.");
+    throw new Error("The first task.started event did not include a child session id.");
   }
   return childSessionId;
 }

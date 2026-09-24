@@ -166,22 +166,22 @@ export class SelfModificationHarness {
     if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");
 
-    const called = [...this.#turns]
+    const started = [...this.#turns]
       .filter((turn) => turn.sessionId === parent.sessionId)
       .flatMap((turn) => turn.events)
       .find(
         (event) =>
-          event.type === "subagent.called" &&
+          event.type === "task.started" &&
           event.data.name === SELF_MODIFICATION_AGENT &&
           (agentId === undefined
             ? liveParent.events.includes(event)
-            : event.data.agentId === agentId),
+            : event.data.taskId === agentId),
       );
-    if (called?.type !== "subagent.called") {
+    if (started?.type !== "task.started" || started.data.child === undefined) {
       throw new Error("The parent turn did not delegate to the self-modification agent.");
     }
     const child = await this.#readChild(
-      called.data.childSessionId,
+      started.data.child.sessionId,
       typeof message === "string" ? message : undefined,
     );
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT, { status: "completed" });
@@ -265,7 +265,9 @@ export class SelfModificationHarness {
     for (const turn of this.#turns) {
       sessionIds.add(turn.sessionId);
       for (const event of turn.events) {
-        if (event.type === "subagent.called") sessionIds.add(event.data.childSessionId);
+        if (event.type === "task.started" && event.data.child !== undefined) {
+          sessionIds.add(event.data.child.sessionId);
+        }
       }
     }
     const signal = AbortSignal.timeout(CLEANUP_TIMEOUT_MS);

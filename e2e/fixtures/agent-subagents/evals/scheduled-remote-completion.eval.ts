@@ -32,10 +32,7 @@ export default defineEval({
       status: "completed",
       count: 1,
     });
-    launch.event("subagent.completed", {
-      data: { subagentName: "remote-loopback" },
-      count: 1,
-    });
+    launch.event("task.settled", { data: { status: "completed" }, count: 1 });
     launch.messageIncludes(FINAL);
 
     // Exactly one final non-null delivery crosses the channel boundary.

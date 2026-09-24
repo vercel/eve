@@ -131,8 +131,8 @@ test("close retires every session before restoring the complete source tree", as
   const child = liveTurn("child");
   const verification = liveTurn("verification");
   const parentEvent = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: child.sessionId },
+    type: "task.started",
+    data: { name: "self-modification__agent", child: { sessionId: child.sessionId } },
   };
   const parent = liveTurn("parent", [parentEvent]);
 
@@ -212,8 +212,8 @@ test("one reset failure still retires other sessions and leaves unsafe source un
     return response({ revision: "revision" });
   };
   const parentEvent = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: "bad" },
+    type: "task.started",
+    data: { name: "self-modification__agent", child: { sessionId: "bad" } },
   };
   // The public request path is used to populate both tracked sessions.
   const liveParent = {
@@ -373,8 +373,8 @@ test("apply rejects a rebuild response without a runtime revision", async () => 
 for (const emitsCalled of [false, true]) {
   test(`request follows a reused agent past stale turns (new called event: ${emitsCalled})`, async () => {
     const called = {
-      type: "subagent.called",
-      data: { name: "self-modification__agent", agentId: "agent-1", childSessionId: "child" },
+      type: "task.started",
+      data: { name: "self-modification__agent", taskId: "agent-1", child: { sessionId: "child" } },
     };
     const initialParent = liveTurn("parent", [called]);
     initialParent.waitForEvent = async () => called;

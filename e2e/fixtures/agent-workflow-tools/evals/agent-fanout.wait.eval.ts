@@ -8,24 +8,22 @@ export default defineEval({
     const turn = await t.send("WORKFLOW-AGENT-FANOUT-START");
     turn.expectOk();
     turn.calledTool("fanout_agents", { count: 1, status: "completed" });
-    turn.event("subagent.called", { data: { name: "workflow-marker" }, count: 2 });
+    turn.event("task.started", { data: { name: "workflow-marker" }, count: 2 });
     turn.eventsSatisfy("parallel invocations keep distinct calls and child sessions", (events) => {
       const calls = events.flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "workflow-marker"
-          ? [event.data]
-          : [],
+        event.type === "task.started" && event.data.name === "workflow-marker" ? [event.data] : [],
       );
       return (
         calls.length === 2 &&
         new Set(calls.map((call) => call.callId)).size === 2 &&
-        new Set(calls.map((call) => call.childSessionId)).size === 2
+        new Set(calls.map((call) => call.child?.sessionId)).size === 2
       );
     });
     turn.messageIncludes("api:replica-0");
     turn.messageIncludes("api:replica-1");
     turn.eventsSatisfy("both children start before the waiting tool resolves", (events) => {
       const called = events.flatMap((event, index) =>
-        event.type === "subagent.called" && event.data.name === "workflow-marker" ? [index] : [],
+        event.type === "task.started" && event.data.name === "workflow-marker" ? [index] : [],
       );
       const toolResult = events.findIndex(
         (event) =>

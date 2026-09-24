@@ -22,7 +22,6 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-  type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
@@ -81,6 +80,7 @@ import {
   healthResponse,
   normalizeEveCors,
   resolveOnMessage,
+  type RemoteSubagentBinding,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
 
@@ -600,14 +600,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           childSessionId,
           parentSessionId,
         });
-        let binding: SubagentCalledStreamEvent;
+        let binding: RemoteSubagentBinding;
         try {
           const parent = args.attachSession(parentSessionId);
           const found = await findRemoteSubagentBinding({
             callId,
             childSessionId,
             childStreamPath,
-            parentSessionId,
             parent,
           });
           if (found === undefined) {
@@ -632,9 +631,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let headers: Record<string, string>;
         try {
           headers = await resolveHeaders({
-            name: binding.data.toolName,
-            resolverId: binding.data.remote!.resolverId,
-            url: binding.data.remote!.url,
+            name: binding.name,
+            resolverId: binding.remote.resolverId,
+            url: binding.remote.url,
           });
         } catch {
           return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
@@ -642,7 +641,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const upstreamUrl = new URL(
           createEveSessionStreamRoutePath(childSessionId).replace(/^\/+/, ""),
-          `${binding.data.remote!.url.replace(/\/+$/, "")}/`,
+          `${binding.remote.url.replace(/\/+$/, "")}/`,
         );
         if (startIndex !== undefined) {
           upstreamUrl.searchParams.set("startIndex", String(startIndex));

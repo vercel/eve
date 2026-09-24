@@ -42,8 +42,10 @@ export default (["direct", "waiting"] as const).map((mode) =>
       initial.calledTool("load_skill", { count: 1, status: "completed" });
       // Both delegation modes resolve inside the turn that started them.
       const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
-      const completion = initial.events.find((event) => event.type === "subagent.completed");
-      if (completion?.type !== "subagent.completed")
+      const completion = initial.events.find(
+        (event) => event.type === "task.settled" && event.data.status === "completed",
+      );
+      if (completion?.type !== "task.settled" || typeof completion.data.output !== "string")
         throw new Error("The delegated child's completion event is missing.");
       const childOutput = completion.data.output;
       t.check(childOutput.startsWith("WORKFLOW-CHILD:"), equals(true)).label(

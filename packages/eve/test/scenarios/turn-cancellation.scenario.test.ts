@@ -174,20 +174,20 @@ describe("turn cancellation descendant cascade", () => {
             ].join("\n"),
           });
           const parentIterator = response[Symbol.asyncIterator]();
-          const called = await readSubagentCalls({
+          const started = await readTaskStarts({
             count: 2,
             iterator: parentIterator,
             label: "local and remote subagent dispatch",
           });
-          const localCalled = called.find((event) => event.data.remote === undefined);
-          const remoteCalled = called.find((event) => event.data.remote !== undefined);
-          if (localCalled === undefined || remoteCalled === undefined) {
-            throw new Error("Expected one local and one remote subagent.called event.");
+          const localChild = started.find((event) => event.data.child?.remote === undefined)?.data;
+          const remoteChild = started.find((event) => event.data.child?.remote !== undefined)?.data;
+          if (localChild?.child === undefined || remoteChild?.child === undefined) {
+            throw new Error("Expected one local and one remote task.started event.");
           }
-          expect(remoteCalled.data.remote?.url).toBe(remoteServer.url);
+          expect(remoteChild.child.remote?.url).toBe(remoteServer.url);
 
           const localIterator = parentClient.sessions
-            .attach(localCalled.data.childSessionId)
+            .attach(localChild.child.sessionId)
             .stream()
             [Symbol.asyncIterator]();
 
@@ -196,7 +196,7 @@ describe("turn cancellation descendant cascade", () => {
             host: remoteServer.url,
           });
           const remoteIterator = remoteClient.sessions
-            .attach(remoteCalled.data.childSessionId)
+            .attach(remoteChild.child.sessionId)
             .stream()
             [Symbol.asyncIterator]();
           await Promise.all([
@@ -241,7 +241,14 @@ describe("turn cancellation descendant cascade", () => {
           expectCancellationBoundary(localEvents);
           expectCancellationBoundary(remoteEvents);
           expectCancellationBoundary(parentEvents);
-          expect(parentEvents.some((event) => event.type === "subagent.completed")).toBe(false);
+          // The owner reports each cancelled task once; the children's confirmations add nothing.
+          expect(
+            parentEvents
+              .flatMap((event) =>
+                event.type === "task.settled" ? [`${event.data.taskId}:${event.data.status}`] : [],
+              )
+              .sort(),
+          ).toEqual([`${localChild.taskId}:cancelled`, `${remoteChild.taskId}:cancelled`].sort());
 
           const followUp = await (
             await parentSession.send("Reply with the exact string `still-alive` and nothing else.")
@@ -290,7 +297,7 @@ describe("turn cancellation descendant cascade", () => {
           iterator: response[Symbol.asyncIterator](),
           label: "root session-limit prompt",
         });
-        const calls = events.filter((event) => event.type === "subagent.called");
+        const calls = events.filter((event) => event.type === "task.started");
         const requests = events.flatMap((event) =>
           event.type === "input.requested" ? event.data.requests : [],
         );
@@ -303,7 +310,7 @@ describe("turn cancellation descendant cascade", () => {
         const declined = await (await session.respond([{ optionId: "stop", requestId }])).result();
         expect(declined.status).toBe("waiting");
         expectCancellationBoundary(declined.events);
-        expect(declined.events.some((event) => event.type === "subagent.called")).toBe(false);
+        expect(declined.events.some((event) => event.type === "task.started")).toBe(false);
       } catch (error) {
         throw new Error(
           [
@@ -320,20 +327,20 @@ describe("turn cancellation descendant cascade", () => {
   );
 });
 
-type SubagentCalledEvent = Extract<MessageStreamEvent, { type: "subagent.called" }>;
+type TaskStartedEvent = Extract<MessageStreamEvent, { type: "task.started" }>;
 
-async function readSubagentCalls(input: {
+async function readTaskStarts(input: {
   readonly count: number;
   readonly iterator: AsyncIterator<MessageStreamEvent>;
   readonly label: string;
-}): Promise<readonly SubagentCalledEvent[]> {
+}): Promise<readonly TaskStartedEvent[]> {
   return await withinEventDeadline(
     (async () => {
-      const events: SubagentCalledEvent[] = [];
+      const events: TaskStartedEvent[] = [];
       while (events.length < input.count) {
         const next = await input.iterator.next();
         if (next.done) throw new Error(`Stream ended before ${input.label}.`);
-        if (next.value.type === "subagent.called") events.push(next.value);
+        if (next.value.type === "task.started") events.push(next.value);
       }
       return events;
     })(),

@@ -216,6 +216,9 @@ export interface ChannelEvents<TCtx = void> {
   readonly "session.waiting"?: ChannelEventHandler<"session.waiting", TCtx>;
   readonly "authorization.required"?: ChannelEventHandler<"authorization.required", TCtx>;
   readonly "authorization.completed"?: ChannelEventHandler<"authorization.completed", TCtx>;
+  readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
+  readonly "task.detached"?: ChannelEventHandler<"task.detached", TCtx>;
+  readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
 }
 
 /**
@@ -326,6 +329,9 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "session.waiting": null,
   "authorization.required": null,
   "authorization.completed": null,
+  "task.started": null,
+  "task.detached": null,
+  "task.settled": null,
 };
 
 const eventTypes = Object.keys(channelEventTypes) as readonly (keyof ChannelEvents)[];

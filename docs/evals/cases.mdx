@@ -111,7 +111,7 @@ Every `t.session()` or `t.send()` creates a new independent conversation. Contin
 - `session.start(message, options?)` starts a text turn and returns as soon as the server accepts it. The live turn exposes `.session`, `.sessionId`, `.waitForEvent(...)`, `.cancel()`, and `.result()`.
 - `session.cancel()` requests cooperative cancellation of that session's active turn. Both `accepted` and `no_active_turn` are successful outcomes.
 - `session.sendFile(text, path, mediaType?)` attaches a local file as a data URL.
-- `session.streamSubagent(called, options?)` follows a delegated child's stream through the parent with the eval client's credentials. Pass a `subagent.called` event from that session. It also reaches children on another deployment, which `t.target.watchTurn(...)` cannot address.
+- `session.streamSubagent(started, options?)` follows a delegated child's stream through the parent with the eval client's credentials. Pass a `task.started` event from that session. It also reaches children on another deployment, which `t.target.watchTurn(...)` cannot address.
 - `session.requireInputRequest(filter?)` records a gate, requires exactly one pending request, and returns it. Filters match tool name, action input, prompt, display, and option ids.
 - `session.respond(responses, options?)` answers specific pending input requests and sends them as the next turn. `session.startRespond(...)` returns a live turn for the same operation.
 - `session.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
