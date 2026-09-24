@@ -4,7 +4,7 @@ This internal harness compares immutable eve source revisions and named runtime 
 
 ## Define an experiment
 
-Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition.
+Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition. Selections currently support only eval files with a direct `export default defineEval(...)`; array-exported eval files are rejected until the planner can expand their indexed IDs. Runs are serial; parallel execution is not configurable.
 
 Both matrix axes are named maps. Omit `matrix.source` to run against the planner checkout's HEAD: the planner records one source entry named `head` with the full commit SHA. In GitHub Actions, this is the PR head commit or dispatched revision, not a moving branch reference. Uncommitted source changes are not included. Set `analysis.compare.axis` to `"configuration"` and choose a configuration baseline when using this default; the compared axis requires at least two entries. An explicit source map must be non-empty and use full commit SHAs, not `"HEAD"`.
 
@@ -58,7 +58,7 @@ node scripts/eval-experiments/extract.mjs ./execution ./plan.json ./samples.json
 node scripts/eval-experiments/compare.mjs ./plan.json ./samples.json ./report.json ./report.md
 ```
 
-The default analysis module should be the pinned experiment revision's module. If intentionally using changed modules, retain the original plan and invocation provenance and record the new analysis revision; never silently replace the original report meaning.
+The default analysis module should be the pinned experiment revision's module. Extraction checks the definition and imported module hashes against the plan. If intentionally using changed modules, retain the original plan and invocation provenance and supply a distinct analysis revision; never silently replace the original report meaning.
 
 ## Reading reports
 

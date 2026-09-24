@@ -80,7 +80,6 @@ export default {
   measurements: { creation: selfModificationCreationMetrics },
 
   sampling: { repetitions: 10, seed: 42 },
-  execution: { maxConcurrency: 1 },
 
   analysis: {
     compare: { axis: "source", baseline: "baseline" },
@@ -126,8 +125,9 @@ substitute a live model or revision for placeholders.
 separately for every configuration and eval. `axis: "configuration"` does the
 inverse, holding source and eval fixed. Support these two axes only initially.
 
-Seeded repetition blocks counterbalance the compared axis within each fixed-axis
-stratum. Pair samples by eval, fixed-axis entry, and repetition. A repetition is a
+Seeded repetition blocks reverse the shuffled compared-axis order on alternating
+repetitions within each fixed-axis stratum. Runs remain serial until fixture
+checkouts can be isolated for parallel execution. Pair samples by eval, fixed-axis entry, and repetition. A repetition is a
 scheduling block, not a promise of identical provider randomness.
 
 Preserve per-eval and per-configuration comparisons. Do not automatically pool

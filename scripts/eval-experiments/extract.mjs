@@ -1,5 +1,7 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { resolveImportedModules } from "./plan.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
@@ -55,6 +57,24 @@ export async function extractDirectory(root, plan, options = {}) {
   const definitionPath = resolve(
     options.definitionPath ?? join(process.cwd(), plan.definitionPath),
   );
+  const definitionBytes = await readFile(definitionPath);
+  const implementationRoot = await realpath(resolve(dirname(definitionPath), ".."));
+  const importedModules = await resolveImportedModules(
+    implementationRoot,
+    definitionPath,
+    definitionBytes.toString("utf8"),
+    false,
+  );
+  const sameImplementation =
+    createHash("sha256").update(definitionBytes).digest("hex") === plan.definitionSha256 &&
+    JSON.stringify(importedModules) === JSON.stringify(plan.measurementImplementation);
+  if (
+    !sameImplementation &&
+    (!options.analysisRevision || options.analysisRevision === plan.implementationRevision)
+  )
+    throw new Error(
+      "Analysis implementation differs from the plan; supply a new analysis revision.",
+    );
   const definition = (await import(pathToFileURL(definitionPath).href)).default;
   const bundles = definition.measurements;
   const artifactFiles = await findArtifacts(base);
@@ -67,6 +87,8 @@ export async function extractDirectory(root, plan, options = {}) {
       const artifactPath = invocation.artifact
         ? resolve(base, invocation.artifact, "evals", `${safe(evalId)}.json`)
         : undefined;
+      if (artifactPath && !relative(dirname(file), artifactPath).startsWith(`evals${sep}`))
+        throw new Error("Invocation artifact path must be inside its own evals/ directory.");
       const identity = invocation;
       const key = sampleKey(identity, evalId);
       if (byIdentity.has(key)) {
@@ -87,7 +109,10 @@ export async function extractDirectory(root, plan, options = {}) {
       analysisErrors.push({ path: file, error: "artifact-without-planned-invocation" });
       continue;
     }
-    previous.artifactPath = file;
+    if (previous.artifactPath !== file) {
+      analysisErrors.push({ path: file, error: "unexpected-or-duplicate-artifact" });
+      continue;
+    }
   }
 
   const samples = [];
@@ -174,7 +199,6 @@ export async function extractDirectory(root, plan, options = {}) {
         analysisErrors.push({ eval: cell.eval, namespace, error: error.message });
       }
     }
-    if (mismatch) analysisErrors.push({ eval: cell.eval, error: mismatch });
     samples.push({
       ...identity,
       execution: {

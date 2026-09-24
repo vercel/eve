@@ -31,7 +31,6 @@ export interface Experiment {
   };
   measurements: Record<string, MeasurementBundle>;
   sampling: { repetitions: number; seed: number };
-  execution: { maxConcurrency: number };
   analysis: {
     compare: { axis: "source" | "configuration"; baseline: string };
     primaryMetric: string;

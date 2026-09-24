@@ -9,7 +9,7 @@ if (process.env.EVE_EVAL_EXPERIMENT === "1" && process.env.EVE_EXPERIMENT_PARENT
 export default defineAgent({
   ...agentConfig,
   reasoning:
-    ((process.env.EVE_EVAL_EXPERIMENT === "1"
-      ? process.env.EVE_EXPERIMENT_PARENT_REASONING
-      : process.env.EVE_E2E_REASONING) as AgentReasoningDefinition | undefined) ?? "high",
+    (process.env.EVE_EVAL_EXPERIMENT === "1"
+      ? (process.env.EVE_EXPERIMENT_PARENT_REASONING as AgentReasoningDefinition | undefined)
+      : undefined) ?? "high",
 });

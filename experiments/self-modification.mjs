@@ -31,7 +31,6 @@ export default {
   },
   measurements: { selfModification: selfModificationMetrics },
   sampling: { repetitions: 2, seed: 42 },
-  execution: { maxConcurrency: 1 },
   analysis: {
     compare: { axis: "configuration", baseline: "lunaFastXhigh" },
     primaryMetric: "selfModification.totalChildDuration",

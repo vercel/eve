@@ -65,6 +65,11 @@ test("runs scheduled source/configuration cells and records eval exit outcomes",
     assert.equal(records[0].correctnessOutcome, "passed");
     assert.equal(records[0].requestedSettings.parent.model, "provider/model");
     assert.equal(records[0].scheduleIdentity.case.source, "base");
+    assert.deepEqual(
+      JSON.parse(await readFile(join(outputDir, records[0].artifact, "evals/case.json"), "utf8"))
+        .id,
+      "case",
+    );
     assert.equal(JSON.parse(await readFile(join(outputDir, "invocations.json"), "utf8")).length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });

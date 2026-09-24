@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
@@ -136,7 +136,9 @@ async function invoke({ checkout, fixture, identity, outputDir, env, timeoutMs, 
   try {
     artifactDirectory = await newestArtifact(join(appRoot, ".eve", "evals"));
     if (artifactDirectory)
-      await cp(artifactDirectory, join(attemptDir, "evals"), { recursive: true });
+      await cp(artifactDirectory, join(attemptDir, "evals", basename(artifactDirectory)), {
+        recursive: true,
+      });
     else infrastructureError ??= "Eval artifact directory is missing.";
   } catch (error) {
     infrastructureError ??= `Artifact archival failed: ${error.message}`;
@@ -166,7 +168,7 @@ async function invoke({ checkout, fixture, identity, outputDir, env, timeoutMs, 
           safe(identity.source),
           safe(identity.eval),
           "evals",
-          artifactDirectory.split("/").at(-1),
+          basename(artifactDirectory),
         )
       : undefined,
     environment: { node: process.version, platform: process.platform, arch: process.arch },

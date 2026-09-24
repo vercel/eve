@@ -17,7 +17,6 @@ function configurationExperiment() {
       },
     },
     sampling: { repetitions: 2, seed: 42 },
-    execution: { maxConcurrency: 1 },
     analysis: {
       compare: { axis: "configuration", baseline: "baseline" },
       primaryMetric: "timing.elapsed",
@@ -47,7 +46,14 @@ test("pins omitted sources to HEAD and preserves explicit source semantics", asy
     await mkdir(join(root, "experiments"));
     await mkdir(join(root, "e2e/fixtures/fixture/evals"), { recursive: true });
     await writeFile(join(root, "e2e/fixtures/fixture/package.json"), '{"name":"fixture"}');
-    await writeFile(join(root, "e2e/fixtures/fixture/evals/case.eval.ts"), "");
+    await writeFile(
+      join(root, "e2e/fixtures/fixture/evals/case.eval.ts"),
+      "export default defineEval({});",
+    );
+    await writeFile(
+      join(root, "e2e/fixtures/fixture/evals/array.eval.ts"),
+      "export default ['one', 'two'].map(defineEval);",
+    );
     git("add", ".");
     git(
       "-c",
@@ -65,6 +71,10 @@ test("pins omitted sources to HEAD and preserves explicit source semantics", asy
       ...omitted,
       matrix: { ...omitted.matrix, source: { pinned: { revision: earlierRevision } } },
     };
+    const three = {
+      ...omitted,
+      matrix: { configuration: { baseline: {}, candidate: {}, third: {} } },
+    };
     const sourceComparison = {
       ...omitted,
       analysis: { ...omitted.analysis, compare: { axis: "source", baseline: "head" } },
@@ -76,6 +86,7 @@ test("pins omitted sources to HEAD and preserves explicit source semantics", asy
     for (const [name, definition] of Object.entries({
       omitted,
       explicit,
+      three,
       sourceComparison,
       symbolic,
     })) {
@@ -127,6 +138,34 @@ test("pins omitted sources to HEAD and preserves explicit source semantics", asy
     await t.test("explicit symbolic revisions remain invalid", async () => {
       await assert.rejects(planFor("symbolic"), /Invalid source entry/);
     });
+    await t.test("rejects array-exported eval stems", async () => {
+      const file = join(root, "experiments/array.mjs");
+      await writeFile(
+        file,
+        `export default { ...${JSON.stringify(omitted)}, evals: [{ fixture: "fixture", include: ["array"] }], measurements: { timing: { version: 1, metrics: { elapsed: { unit: "ms", direction: "lower" } }, derive: () => ({}) } } };`,
+      );
+      git("add", ".");
+      git(
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "--quiet",
+        "--no-gpg-sign",
+        "-s",
+        "-m",
+        "Array selection",
+      );
+      await assert.rejects(planFor("array"), /Unknown or unsupported eval array/);
+    });
+    await t.test("reverses compared order on alternating repetitions", async () => {
+      const plan = await planFor("three");
+      const orders = [0, 1].map((repetition) =>
+        plan.schedule
+          .filter((cell) => cell.repetition === repetition)
+          .map((cell) => cell.configuration),
+      );
+      assert.deepEqual(orders[1], [...orders[0]].reverse());
+    });
     await t.test("includes transitive measurement imports in provenance", async () => {
       const plan = await planFor("recursiveImport");
       assert.deepEqual(plan.measurementImplementation.map((module) => module.path).sort(), [
@@ -150,7 +189,6 @@ test("rejects invalid repetition budgets before repository access", () => {
         },
         measurements: {},
         sampling: { repetitions: 31, seed: 42 },
-        execution: { maxConcurrency: 1 },
         analysis: {
           compare: { axis: "source", baseline: "baseline" },
           primaryMetric: "metric",
@@ -170,7 +208,6 @@ test("rejects unknown settings scopes and reasoning values", () => {
     },
     measurements: {},
     sampling: { repetitions: 1, seed: 1 },
-    execution: { maxConcurrency: 1 },
     analysis: {
       compare: { axis: "source", baseline: "baseline" },
       primaryMetric: "metric",

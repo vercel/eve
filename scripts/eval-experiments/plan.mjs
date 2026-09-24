@@ -114,10 +114,8 @@ export async function createPlan(definitionPath, options = {}) {
       const j = Math.floor(rng() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
     }
-    const offset = Math.floor(rng() * order.length);
     for (let repetition = 0; repetition < definition.sampling.repetitions; repetition++) {
-      const rotation = (repetition + offset) % order.length;
-      const blockOrder = [...order.slice(rotation), ...order.slice(0, rotation)];
+      const blockOrder = repetition % 2 === 0 ? order : [...order].reverse();
       for (const [executionOrder, compared] of blockOrder.entries()) {
         const source = definition.analysis.compare.axis === "source" ? compared : fixed.label;
         const configuration =
@@ -182,6 +180,7 @@ export async function createPlan(definitionPath, options = {}) {
     version: 2,
     experimentRevision: revision,
     definitionPath: relativeDefinition,
+    definitionSha256: createHash("sha256").update(sourceBytes).digest("hex"),
     planHash: createHash("sha256").update(hashInput).digest("hex"),
     implementationRevision: revision,
     sources,
@@ -192,7 +191,6 @@ export async function createPlan(definitionPath, options = {}) {
     measurementImplementation: importedModules,
     analysis: definition.analysis,
     sampling: definition.sampling,
-    maxConcurrency: definition.execution.maxConcurrency,
     schedule,
     diffs,
     executions: cells,
@@ -208,7 +206,6 @@ export function validateDefinition(d) {
     !d.matrix?.configuration ||
     !d.measurements ||
     !d.sampling ||
-    !d.execution ||
     !d.analysis
   )
     throw new Error("Invalid experiment definition.");
@@ -224,12 +221,8 @@ export function validateDefinition(d) {
     throw new Error("repetitions must be an integer from 1 to 30.");
   if (!Number.isInteger(d.sampling.seed) || d.sampling.seed < 0 || d.sampling.seed > 0xffffffff)
     throw new Error("seed must be an unsigned 32-bit integer.");
-  if (
-    !Number.isInteger(d.execution.maxConcurrency) ||
-    d.execution.maxConcurrency < 1 ||
-    d.execution.maxConcurrency > 10
-  )
-    throw new Error("maxConcurrency must be from 1 to 10.");
+  if (d.execution !== undefined)
+    throw new Error("Execution settings are not supported; runs are serial.");
   if (d.evals.length > 5 || d.evals.reduce((sum, f) => sum + f.include.length, 0) > 20)
     throw new Error("Selection exceeds experiment limits.");
   if (
@@ -303,7 +296,7 @@ export function mergeSettings(shared, override) {
   }
   return resolved;
 }
-async function resolveImportedModules(root, definitionFile, source) {
+export async function resolveImportedModules(root, definitionFile, source, requireClean = true) {
   const modules = [];
   const visited = new Set();
   async function visit(importer, contents) {
@@ -321,10 +314,14 @@ async function resolveImportedModules(root, definitionFile, source) {
         .slice(root.length + 1)
         .split(sep)
         .join("/");
-      const clean = await git(root, ["status", "--porcelain", "--", relativePath]);
-      if (clean)
-        throw new Error(`Imported experiment module must be committed and clean: ${relativePath}`);
-      await git(root, ["cat-file", "-e", `HEAD:${relativePath}`]);
+      if (requireClean) {
+        const clean = await git(root, ["status", "--porcelain", "--", relativePath]);
+        if (clean)
+          throw new Error(
+            `Imported experiment module must be committed and clean: ${relativePath}`,
+          );
+        await git(root, ["cat-file", "-e", `HEAD:${relativePath}`]);
+      }
       modules.push({
         path: relativePath,
         sha256: createHash("sha256").update(bytes).digest("hex"),
@@ -341,8 +338,12 @@ async function discoverEvalIds(root) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = resolve(dir, entry.name);
       if (entry.isDirectory()) await visit(path);
-      else if (entry.name.endsWith(".eval.ts"))
-        ids.add(path.slice(root.length + 1).replace(/\.eval\.ts$/, ""));
+      else if (entry.name.endsWith(".eval.ts")) {
+        const id = path.slice(root.length + 1).replace(/\.eval\.ts$/, "");
+        // Only direct defineEval exports are supported; array exports have indexed runner IDs.
+        const contents = await readFile(path, "utf8");
+        if (/export\s+default\s+defineEval\s*\(/u.test(contents)) ids.add(id);
+      }
     }
   }
   await visit(root);
