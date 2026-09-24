@@ -192,7 +192,7 @@ export default defineAgent({
         if (messages.includes(WORKSPACE_LOOKUP_MESSAGE)) {
           return { model: workspaceReader, modelContextWindowTokens: 1_000_000 };
         }
-        if (messages.includes(MODEL_CHOICE_SCENARIO)) {
+        if (messages.some((message) => message.includes(MODEL_CHOICE_SCENARIO))) {
           return { model: modelChoiceDispatcher, modelContextWindowTokens: 1_000_000 };
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
