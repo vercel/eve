@@ -740,7 +740,6 @@ describe("linkProject", () => {
     expect(mockedRunVercel).toHaveBeenCalledTimes(1);
     expect(mockedConfigureTraceSampling).toHaveBeenCalledWith(
       { orgId: "team_123", projectId: "prj_new", projectName: "my-agent" },
-      "/tmp/eve-agent",
       prompter,
       undefined,
     );

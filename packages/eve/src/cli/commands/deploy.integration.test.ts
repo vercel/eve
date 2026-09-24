@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { packageInstallResult } from "#internal/testing/package-process.js";
-import { captureVercel } from "#setup/primitives/run-vercel.js";
+import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
@@ -16,9 +16,9 @@ import { isEveProject } from "#setup/scaffold/index.js";
 import { runDeployCommand, type DeployCliLogger } from "./deploy.js";
 import type { NonInteractiveLinkDependencies } from "./vercel-non-interactive.js";
 
-vi.mock("#setup/primitives/run-vercel.js", async (importOriginal) => {
-  const original = await importOriginal<typeof import("#setup/primitives/run-vercel.js")>();
-  return { ...original, captureVercel: vi.fn(async () => ({ ok: true, stdout: "{}" })) };
+vi.mock("#internal/model-auth/vercel-cli.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("#internal/model-auth/vercel-cli.js")>();
+  return { ...original, readVercelCliToken: vi.fn(async () => "vercel-token") };
 });
 
 class TestLogger implements DeployCliLogger {
@@ -110,7 +110,7 @@ function createInteractiveLinkDeps() {
 
 afterEach(() => {
   process.exitCode = undefined;
-  vi.mocked(captureVercel).mockClear();
+  vi.unstubAllGlobals();
 });
 
 describe("runDeployCommand", () => {
@@ -271,6 +271,8 @@ describe("runDeployCommand", () => {
           new Error("Vercel API unavailable"),
         );
       }
+      const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+      vi.stubGlobal("fetch", fetchMock);
       const deployDeps = createDeployProjectDeps();
 
       await runDeployCommand(
@@ -292,23 +294,13 @@ describe("runDeployCommand", () => {
       expect(process.exitCode).toBeUndefined();
       expect(deployDeps.runVercel).toHaveBeenCalled();
       if (shouldConfigure) {
-        expect(captureVercel).toHaveBeenCalledWith(
-          [
-            "traces",
-            "config",
-            "set",
-            "any",
-            "100",
-            "--json",
-            "--project",
-            "prj_new",
-            "--scope",
-            "team_123",
-          ],
-          expect.objectContaining({ cwd: projectRoot, nonInteractive: true }),
+        expect(readVercelCliToken).toHaveBeenCalled();
+        expect(fetchMock).toHaveBeenCalledWith(
+          "https://api.vercel.com/v1/drains/tracing/config?projectId=prj_new&teamId=team_123",
+          expect.objectContaining({ method: "PUT" }),
         );
       } else {
-        expect(captureVercel).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
       }
       if (traceSampling === false) {
         expect(linkDeps.resolveProjectByNameOrId).not.toHaveBeenCalled();

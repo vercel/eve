@@ -2,6 +2,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
+import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
 import { captureVercel } from "./primitives/run-vercel.js";
@@ -10,6 +11,7 @@ import type { Prompter } from "./prompter.js";
 import { WizardCancelledError } from "./step.js";
 
 const TRACE_CONFIG_TIMEOUT_MS = 15_000;
+const AGENT_PROJECT_TRACING_SAMPLING = [{ type: "head_sampling", rate: 1 }] as const;
 const DeclinedOfferSchema = z.object({
   version: z.literal(1),
   orgId: z.string(),
@@ -60,14 +62,43 @@ async function setTraceSampling(
 
 export async function configureTraceSampling(
   link: VercelProjectReference,
-  appRoot: string,
   prompter: Pick<Prompter, "log">,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (await setTraceSampling(appRoot, link, signal)) return;
-  prompter.log.warning(
-    "The Vercel project was created, but trace sampling could not be configured. Set it to 100% for all environments in the Vercel project settings.",
-  );
+  try {
+    const token = await readVercelCliToken();
+    if (token === undefined) throw new Error("Vercel CLI credentials are unavailable.");
+    const tracingQuery = new URLSearchParams({
+      projectId: link.projectId,
+      teamId: link.orgId,
+    });
+    const response = await fetch(
+      `https://api.vercel.com/v1/drains/tracing/config?${tracingQuery.toString()}`,
+      {
+        body: JSON.stringify({
+          enabled: true,
+          sampling: AGENT_PROJECT_TRACING_SAMPLING,
+        }),
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        method: "PUT",
+        redirect: "error",
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+          : AbortSignal.timeout(15_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error("Vercel rejected the trace sampling configuration.");
+    }
+  } catch {
+    signal?.throwIfAborted();
+    prompter.log.warning(
+      "The Vercel project was created, but trace sampling could not be configured. Set it to 100% for all environments in the Vercel project settings.",
+    );
+  }
 }
 
 export async function offerTraceSampling(
