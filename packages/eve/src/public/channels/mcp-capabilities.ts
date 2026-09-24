@@ -171,11 +171,11 @@ async function annotateDiscover(
   }
   const body = readRecord(await response.json());
   const result = readRecord(body?.result);
-  if (body === undefined || result === undefined) {
-    return Response.json(body, { headers: response.headers, status: response.status });
-  }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
+  if (body === undefined || result === undefined) {
+    return Response.json(body ?? null, { headers, status: response.status });
+  }
   return Response.json(
     {
       ...body,
