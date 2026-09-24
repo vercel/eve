@@ -6678,7 +6678,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("dispatches resumed approval model selection with the active turn ID", async () => {
+  it("dispatches model selection with the active turn ID when a continuation has no turn input", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Done", role: "assistant" }] },
@@ -6688,15 +6688,12 @@ describe("createToolLoopHarness", () => {
     });
 
     const dispatchDynamicModelEvent = vi.fn();
+    const { emit } = createEventCollector();
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { dispatchDynamicModelEvent, tools: new Map() }),
+      createTestConfig("conversation", emit, { dispatchDynamicModelEvent, tools: new Map() }),
     );
 
-    await contextStorage.run(new ContextContainer(), () =>
-      harness(createPendingBashApprovalSession(), {
-        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-      }),
-    );
+    await contextStorage.run(new ContextContainer(), () => harness(createTestSession()));
 
     expect(dispatchDynamicModelEvent).toHaveBeenCalledWith(
       expect.objectContaining({
