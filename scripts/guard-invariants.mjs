@@ -114,8 +114,8 @@
  *             orchestration, registries, key derivation, or session state.
  *             Built-ins and authored providers must share one contract.
  *   rule 45 — The removed background-task surface stays removed. Source,
- *             tests, docs, apps, and e2e fixtures must not reintroduce task
- *             receipts, delivery policies, cohort notifications, the
+ *             tests, docs, apps, and e2e fixtures must not reintroduce
+ *             delivery policies, cohort notifications, the
  *             `execution: "background"` tool option, or the old
  *             `#execution/tasks` runtime.
  *
@@ -1072,7 +1072,6 @@ const REMOVED_BACKGROUND_TASK_REFERENCES = [
   /\btaskDeliveryPolicy\b/,
   /\bTaskDeliveryPolicy\b/,
   /\btaskDeliveryIds?\b/,
-  /\bTaskReceipt\b/,
   /\b(?:TurnTaskDeliveryKey|TaskDeliveryPolicyKey|BackgroundToolExecutorKey|getBackgroundTasks)\b/,
   /\bexecution\.background_task\b/,
   /\bexecution:\s*["']background["']/,
@@ -1111,7 +1110,7 @@ async function checkRule45RemovedBackgroundTaskReferences() {
         file: posix,
         line: index + 1,
         message:
-          'references the removed background-task surface (task receipts, delivery policies, cohort notifications, or `execution: "background"`). Historical mentions belong only in changelogs or changesets.',
+          'references the removed background-task surface (delivery policies, cohort notifications, or `execution: "background"`). Historical mentions belong only in changelogs or changesets.',
       });
     });
   }
