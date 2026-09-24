@@ -183,6 +183,28 @@ describe("executeTask", () => {
     expect((reset.mock.contexts[0] as ClientSession).state.sessionId).toBe("idle-session");
   });
 
+  it("waits for an eval to finish timeout cleanup before returning", async () => {
+    let cleanedUp = false;
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        try {
+          await new Promise<void>((_resolve, reject) => {
+            t.signal.addEventListener("abort", () => reject(t.signal.reason), { once: true });
+          });
+        } finally {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          cleanedUp = true;
+        }
+      }, "timeout-unwind"),
+      timeoutMs: 50,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(cleanedUp).toBe(true);
+  });
+
   it("settles when an eval ignores its timeout signal", async () => {
     const outcome = await executeTask({
       client: new Client({ host: target.url }),

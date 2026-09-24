@@ -21,6 +21,7 @@ import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 
 const EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS = 5_000;
+const EVAL_TIMEOUT_UNWIND_TIMEOUT_MS = 30_000;
 
 /**
  * Options for executing one eval's task.
@@ -83,10 +84,11 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
     },
   });
 
+  const task = Promise.resolve().then(() => evaluation.test(context));
   let error: string | undefined;
   let skipReason: string | undefined;
   try {
-    await runUntilAborted(evaluation.test(context), signal);
+    await runUntilAborted(task, signal);
   } catch (err) {
     if (err instanceof EvalSkipped) {
       skipReason = err.reason;
@@ -96,6 +98,14 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   }
 
   if (timeoutMs !== undefined && signal.aborted) {
+    // Eval-owned cleanup can still require the local target the CLI tears down after this returns.
+    const unwindError = await waitForTimedOutTask(
+      task,
+      Math.min(timeoutMs, EVAL_TIMEOUT_UNWIND_TIMEOUT_MS),
+    );
+    if (unwindError !== undefined && unwindError !== error)
+      error = error === undefined ? unwindError : `${error}\n${unwindError}`;
+
     const cleanupResults = await manager.cleanup(
       AbortSignal.timeout(EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS),
     );
@@ -116,6 +126,28 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   const assertions = await collector.finalize(result);
 
   return { result, assertions, error, skipReason };
+}
+
+async function waitForTimedOutTask(
+  task: Promise<void>,
+  timeoutMs: number,
+): Promise<string | undefined> {
+  return await new Promise((resolve) => {
+    const timer = setTimeout(
+      () => resolve(`Eval timeout unwind exceeded ${timeoutMs}ms.`),
+      timeoutMs,
+    );
+    void task.then(
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+      (error) => {
+        clearTimeout(timer);
+        resolve(toErrorMessage(error));
+      },
+    );
+  });
 }
 
 function buildTaskResult(input: {
