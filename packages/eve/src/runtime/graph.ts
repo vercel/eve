@@ -23,6 +23,12 @@ export interface ResolvedRuntimeAgentNode {
    */
   readonly channels: readonly ResolvedChannelDefinition[];
   /**
+   * Validated config of each extension this node mounts, keyed by package
+   * namespace. Inherited from the parent when the node has no mount of its
+   * own (for example a subagent the extension ships).
+   */
+  readonly extensionConfigs: ReadonlyMap<string, Record<string, unknown>>;
+  /**
    * Per-node hook registry. Stream-event subscribers fan out alongside
    * channel adapter event handlers.
    */
