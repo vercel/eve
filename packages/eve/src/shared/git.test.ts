@@ -14,9 +14,20 @@ describe("Git helpers", () => {
   });
 
   it("rejects unsafe Git refs", () => {
+    expect(isValidGitRef("main")).toBe(true);
     expect(isValidGitRef("feature/self-modification")).toBe(true);
+    expect(isValidGitRef("release/v1.0.0")).toBe(true);
+    expect(isValidGitRef(".hidden")).toBe(false);
+    expect(isValidGitRef("feature/.hidden")).toBe(false);
+    expect(isValidGitRef("feature/hidden.")).toBe(false);
     expect(isValidGitRef("main.lock")).toBe(false);
+    expect(isValidGitRef("feature/main.lock")).toBe(false);
+    expect(isValidGitRef("@")).toBe(false);
+    expect(isValidGitRef("-branch")).toBe(false);
     expect(isValidGitRef("main; curl example.com")).toBe(false);
+    expect(isValidGitRef("feature//branch")).toBe(false);
+    expect(isValidGitRef("/feature/branch")).toBe(false);
+    expect(isValidGitRef("feature/branch/")).toBe(false);
   });
 
   it("uses a clean GitHub remote and brokers credentials only at the firewall", () => {
