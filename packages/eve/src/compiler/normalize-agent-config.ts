@@ -227,7 +227,7 @@ async function compileModelChoices(
         value: choice.model,
       });
       return {
-        ...(choice.description === undefined ? {} : { description: choice.description }),
+        description: choice.description,
         model: model.source === undefined ? model : { ...model, sourceChoiceIndex: index },
       };
     }),

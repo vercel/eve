@@ -15,3 +15,4 @@ export {
   defineRemoteAgent,
   defineWorkspaceAgent,
 } from "../../src/public/index.ts";
+export { choice } from "../../src/public/models/index.ts";

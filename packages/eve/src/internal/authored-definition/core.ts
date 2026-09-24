@@ -19,6 +19,9 @@ import {
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
   isModelChoicesDefinition,
+  MODEL_CHOICE_KIND,
+  type PublicAgentModelChoice,
+  type PublicAgentModelChoicesDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import {
@@ -180,16 +183,13 @@ function normalizeAgentModelDefinition(
   } as NormalizedAgentDefinition["model"];
 }
 
-function normalizeModelChoices(
-  value: unknown,
-  message: string,
-): NormalizedAgentDefinition["model"] {
+function normalizeModelChoices(value: unknown, message: string): PublicAgentModelChoicesDefinition {
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(record, ["choices", "kind"], message);
   if (!Array.isArray(record.choices) || record.choices.length === 0) {
     throw new Error(`${message} choice() must list at least one model.`);
   }
-  const choices = record.choices.map((entry: unknown) => {
+  const choices: PublicAgentModelChoice[] = record.choices.map((entry: unknown) => {
     const choice = expectObjectRecord(entry, message);
     expectOnlyKnownKeys(choice, ["description", "model", "modelOptions"], message);
     const model = choice.model;
@@ -205,11 +205,12 @@ function normalizeModelChoices(
       throw new Error(`${message} A choice() description must be a non-empty string.`);
     }
     return {
-      model,
-      ...(choice.description === undefined ? {} : { description: choice.description }),
-      ...(choice.modelOptions === undefined
-        ? {}
-        : { modelOptions: normalizeAgentModelOptions(choice.modelOptions, message) }),
+      description: choice.description === undefined ? undefined : choice.description,
+      model: model as PublicAgentStaticModelDefinition,
+      modelOptions:
+        choice.modelOptions === undefined
+          ? undefined
+          : normalizeAgentModelOptions(choice.modelOptions, message),
     };
   });
   const slugs = choices.flatMap((choice) =>
@@ -219,7 +220,11 @@ function normalizeModelChoices(
   if (duplicate !== undefined) {
     throw new Error(`${message} choice() lists "${duplicate}" more than once.`);
   }
-  return { kind: record.kind, choices } as unknown as NormalizedAgentDefinition["model"];
+  const [first, ...rest] = choices;
+  if (first === undefined) {
+    throw new Error(`${message} choice() must list at least one model.`);
+  }
+  return { kind: MODEL_CHOICE_KIND, choices: [first, ...rest] };
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

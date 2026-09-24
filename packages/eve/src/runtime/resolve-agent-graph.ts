@@ -258,8 +258,8 @@ async function resolveRuntimeSubagent(input: {
       ? {
           description: input.sourceRef.description,
           modelChoices: input.sourceRef.agent.config.modelChoices?.map((choice) => ({
+            description: choice.description,
             id: choice.model.id,
-            ...(choice.description === undefined ? {} : { description: choice.description }),
           })),
           tool: input.sourceRef.agent.config.tool,
         }

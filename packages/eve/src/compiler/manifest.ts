@@ -1234,17 +1234,20 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
     };
   }
 
+  if (config.modelChoices === undefined) {
+    return {
+      ...base,
+      model: cloneCompiledRuntimeModelReference(config.model),
+    };
+  }
+
   return {
     ...base,
     model: cloneCompiledRuntimeModelReference(config.model),
-    ...(config.modelChoices === undefined
-      ? {}
-      : {
-          modelChoices: config.modelChoices.map((choice) => ({
-            ...(choice.description === undefined ? {} : { description: choice.description }),
-            model: cloneCompiledRuntimeModelReference(choice.model),
-          })),
-        }),
+    modelChoices: config.modelChoices.map((choice) => ({
+      description: choice.description,
+      model: cloneCompiledRuntimeModelReference(choice.model),
+    })),
   };
 }
 

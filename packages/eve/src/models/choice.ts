@@ -2,7 +2,6 @@ import {
   type AgentModelOptionsDefinition,
   MODEL_CHOICE_KIND,
   type PublicAgentModelChoice,
-  type PublicAgentModelChoicesDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 
@@ -27,6 +26,12 @@ export type ModelChoices =
   | readonly [string | ModelChoiceEntry, ...(string | ModelChoiceEntry)[]]
   | Readonly<Record<string, ModelChoiceValue>>;
 
+/** The normalized model-selection definition returned by `choice()`. */
+export interface ModelChoiceDefinition {
+  readonly kind: typeof MODEL_CHOICE_KIND;
+  readonly choices: readonly [ModelChoiceEntry, ...ModelChoiceEntry[]];
+}
+
 const INVALID_CHOICES =
   "choice() expects a non-empty list of AI Gateway slugs or models, or an object mapping slugs to descriptions.";
 
@@ -42,7 +47,7 @@ const INVALID_CHOICES =
  * })
  * ```
  */
-export function choice(choices: ModelChoices): PublicAgentModelChoicesDefinition {
+export function choice(choices: ModelChoices): ModelChoiceDefinition {
   const entries = Array.isArray(choices)
     ? choices.map(fromListEntry)
     : Object.entries(choices as Readonly<Record<string, ModelChoiceValue>>).map(fromMapEntry);
