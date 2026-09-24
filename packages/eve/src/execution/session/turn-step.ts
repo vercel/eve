@@ -31,6 +31,7 @@ import {
   ChannelDeliveryKey,
   HandleEventKey,
   ModeKey,
+  StepDynamicToolMetadataKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
@@ -57,6 +58,7 @@ import {
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import * as agentTraceState from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
+import { shouldRehydrateTurnStartedConnectionsForApprovalReplay } from "#harness/approval-delivery-coordinator.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
@@ -513,10 +515,18 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   session: enrichedSession,
                 })
               : enrichedSession;
+            const betweenTurns = isHarnessBetweenTurns(schemaSession);
+            const replayingConnectionApproval =
+              betweenTurns &&
+              shouldRehydrateTurnStartedConnectionsForApprovalReplay({
+                dynamicToolMetadata: ctx.get(StepDynamicToolMetadataKey) ?? [],
+                session: schemaSession,
+                stepInput,
+              });
             await dynamicConnections.rehydrate(
               getHarnessEmissionState(schemaSession.state),
               runtimeIdentity,
-              isHarnessBetweenTurns(schemaSession),
+              betweenTurns && !replayingConnectionApproval,
             );
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);

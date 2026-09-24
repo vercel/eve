@@ -102,8 +102,56 @@ export function shouldPrepareApprovalReplayTools(input: {
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): boolean {
-  if (shouldPrepareApprovalPolicyTools(input)) return true;
+  return shouldPrepareApprovalPolicyTools(input) || approvalReplayRequestIds(input).size > 0;
+}
 
+/**
+ * Turn-scoped connection resolvers must run before a pending connection tool's
+ * approval callback is rebuilt. Other approval replays keep the normal
+ * between-turn lifecycle.
+ */
+export function shouldRehydrateTurnStartedConnectionsForApprovalReplay(input: {
+  readonly dynamicToolMetadata: readonly { readonly name: string; readonly resolverSlug: string }[];
+  readonly now?: number;
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}): boolean {
+  const connectionToolNames = new Set(
+    input.dynamicToolMetadata
+      .filter((tool) => tool.resolverSlug === "connection-search")
+      .map((tool) => tool.name),
+  );
+  if (connectionToolNames.size === 0) return false;
+
+  const requestIds = approvalReplayRequestIds(input);
+  const now = input.now ?? Date.now();
+  for (const candidate of getApprovalAuditState(input.session.state).activeCandidates) {
+    if (
+      candidate.expiresAt > now &&
+      (candidate.status === "pending" ||
+        (candidate.authorizationChallenges?.some(
+          (challenge) => getAuthorizationResult(challenge.name) !== undefined,
+        ) ??
+          false))
+    ) {
+      requestIds.add(candidate.requestId);
+    }
+  }
+
+  return getPendingInputBatches(input.session.state).some((batch) =>
+    batch.requests.some(
+      (request) =>
+        isApprovalRequest(request) &&
+        requestIds.has(request.requestId) &&
+        connectionToolNames.has(request.action.toolName),
+    ),
+  );
+}
+
+function approvalReplayRequestIds(input: {
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}): Set<string> {
   const batches = getPendingInputBatches(input.session.state);
   const responses = [
     ...(input.stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
@@ -132,9 +180,13 @@ export function shouldPrepareApprovalReplayTools(input: {
       .filter((response) => response.optionId === "approve")
       .map((response) => response.requestId),
   );
-  return batches.some((batch) =>
-    batch.requests.some(
-      (request) => isApprovalRequest(request) && approvedRequestIds.has(request.requestId),
+  return new Set(
+    batches.flatMap((batch) =>
+      batch.requests
+        .filter(
+          (request) => isApprovalRequest(request) && approvedRequestIds.has(request.requestId),
+        )
+        .map((request) => request.requestId),
     ),
   );
 }
