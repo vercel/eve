@@ -7,7 +7,10 @@ import {
 import { defineEval, type EveEvalContext } from "eve/evals";
 import { equals } from "eve/evals/expect";
 
-const ALICE = { "x-eve-fixture-user": "alice" };
+const ALICE = {
+  "x-eve-fixture-user": "alice",
+  "x-eve-fixture-model": "continuation",
+};
 const TOOL = "authorized-change";
 
 type Store = EveAgentStore<EveMessageData>;
@@ -116,9 +119,7 @@ export default defineEval({
         t.log(
           `Alice prepares a change; after a refused answer and reload, finish with ${decision}.`,
         );
-        const session = await t.session({
-          headers: { ...ALICE, "x-eve-fixture-model": "continuation" },
-        });
+        const session = await t.session({ headers: ALICE });
         const page = new EveAgentStore({
           host,
           headers: ALICE,
