@@ -1,5 +1,13 @@
 # eve
 
+## 0.66.2
+
+### Patch Changes
+
+- 306f2ce: Configure 100% Vercel trace sampling across all environments when `eve deploy` creates a new project, with `--no-trace-sampling` to opt out.
+- fdf1364: Ignore JavaScript and TypeScript `*.test.*`/`*.spec.*` modules and `__tests__/` directories during agent discovery.
+- 8565550: Fix `auto()` model selection when a turn resumes after a question or tool approval.
+
 ## 0.66.1
 
 ### Patch Changes
