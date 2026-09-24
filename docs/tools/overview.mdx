@@ -39,6 +39,8 @@ eve validates the model's input against `inputSchema` before `execute` runs:
 - eve treats `format` as an annotation and does not reject input for it.
 - When eve cannot evaluate a JSON Schema locally, for example because of an unknown `type` name or a `$ref` it cannot resolve, the model still receives the schema and eve passes the input to `execute` unvalidated.
 
+Optional input fields remain optional for authored tools and connection tools. eve explicitly disables provider strict mode for function tools so providers such as OpenAI Responses do not implicitly require every property. Local input validation still follows the tool's schema.
+
 ### Hide a tool from delegated agents
 
 Set `availableInSubagents: false` when a tool should be callable only in a top-level root session:

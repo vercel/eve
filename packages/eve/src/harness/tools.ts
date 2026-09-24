@@ -76,6 +76,7 @@ export function buildToolSet(input: {
       description: definition.description,
       execute: wrapToolExecute(definition, backgroundBatch),
       inputSchema: toModelSchema(definition.inputSchema, "input"),
+      strict: false,
       ...(definition.execution === "background"
         ? {
             onInputAvailable: ({
