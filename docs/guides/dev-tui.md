@@ -86,7 +86,7 @@ Pass an item address to install it directly:
 /add @acme/analytics
 ```
 
-Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project.
+Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project. If dependency installation fails, the outcome shows the package manager's exit code and a pnpm error code when available. The installer may include credentials in its buffered output, so eve does not copy its raw stderr into the transcript.
 
 ## Work with the agent
 
@@ -110,7 +110,7 @@ Slash commands wait until the turn ends, except `/cancel`, which cancels directl
 
 ## Logs and traces
 
-By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>` to change the display; bare `/loglevel` reports the current setting. `Ctrl+L` cycles the same modes.
+By default, the UI shows `stderr` logs. Use `/loglevel <all|stderr|sandbox|none>` to change the display; bare `/loglevel` reports the current setting. `Ctrl+L` cycles the same modes. `/loglevel all` restores captured server and agent stdout/stderr, but it cannot reveal a dependency installer's buffered subprocess output from `/add`.
 
 Every `eve dev` process writes diagnostic logs to `.eve/logs/`, regardless of the display mode. Read them with [`eve logs`](../reference/cli#eve-logs).
 

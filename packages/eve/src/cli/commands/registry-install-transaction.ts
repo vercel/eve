@@ -89,6 +89,54 @@ export function registryInstallFailureMessage(code: RegistryInstallFailureCode):
     : "Dependency installation failed. Retry the eve add command in a terminal for details.";
 }
 
+const PNPM_INSTALL_FAILURE_REASONS = {
+  ERR_PNPM_FETCH_401: "Registry authentication failed",
+  ERR_PNPM_FETCH_403: "Registry access was denied",
+  ERR_PNPM_FETCH_404: "Package was not found in the registry",
+  ERR_PNPM_FETCH_429: "Registry rate limit reached",
+  ERR_PNPM_NO_MATCHING_VERSION: "No matching package version was found",
+  ERR_PNPM_PEER_DEP_ISSUES: "Peer dependencies are incompatible",
+  ERR_PNPM_OUTDATED_LOCKFILE: "The lockfile is out of date",
+} as const;
+
+/** shadcn buffers installer output in the thrown error, not in eve's runtime log stream. */
+function interactiveInstallFailureMessage(error: unknown): string {
+  if (typeof error !== "object" || error === null)
+    return "Dependency installation failed; no safe diagnostic was available.";
+  const failure = error as {
+    exitCode?: unknown;
+    code?: unknown;
+    stderr?: unknown;
+    message?: unknown;
+  };
+  // shadcn's execa failure may include credentials in stderr, command args, or
+  // URLs. Only recognized package-manager codes and numeric exit status are safe
+  // to surface in the transcript; /loglevel cannot retrieve this buffered output.
+  const text = [failure.stderr, failure.message]
+    .filter((part): part is string => typeof part === "string")
+    .join("\n");
+  const pnpmCode = /\bERR_PNPM_[A-Z0-9_]+\b/u.exec(text)?.[0];
+  const reason =
+    pnpmCode !== undefined && Object.hasOwn(PNPM_INSTALL_FAILURE_REASONS, pnpmCode)
+      ? PNPM_INSTALL_FAILURE_REASONS[pnpmCode as keyof typeof PNPM_INSTALL_FAILURE_REASONS]
+      : undefined;
+  const exitCode =
+    typeof failure.exitCode === "number" && Number.isSafeInteger(failure.exitCode)
+      ? failure.exitCode
+      : undefined;
+  const spawnCode = failure.code === "ENOENT" ? "package manager not found" : undefined;
+  const detail = [
+    spawnCode,
+    reason === undefined ? undefined : `${reason} (${pnpmCode})`,
+    exitCode === undefined ? undefined : `exit code ${exitCode}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return detail === ""
+    ? "Dependency installation failed; no safe diagnostic was available."
+    : `Dependency installation failed (${detail}).`;
+}
+
 export async function installRegistryItemTransaction(input: {
   readonly appRoot: string;
   readonly item: string;
@@ -117,6 +165,13 @@ export async function installRegistryItemTransaction(input: {
       if (rollback.changed.length > 0) failureEvent.changed = rollback.changed;
       input.logger.log(serializeHeadlessSetupEvent(failureEvent));
     }
-    throw new Error(message, { cause: error });
+    throw new Error(
+      failureCode === "pnpm_build_policy"
+        ? message
+        : input.nonInteractive
+          ? message
+          : interactiveInstallFailureMessage(error),
+      { cause: error },
+    );
   }
 }

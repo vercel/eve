@@ -304,6 +304,46 @@ describe("registry commands", () => {
     ]);
   });
 
+  it("reports a bounded package-manager failure reason without exposing stderr in the TUI", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "Command failed: pnpm add https://token@example.com\nERR_PNPM_FETCH_404 token=secret",
+        ),
+        {
+          exitCode: 1,
+          stderr: "ERR_PNPM_FETCH_404 token=secret",
+        },
+      ),
+    );
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", { silent: true });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed (Package was not found in the registry (ERR_PNPM_FETCH_404) · exit code 1).",
+    ]);
+    expect(logger.errors.join("\n")).not.toContain("secret");
+    expect(logger.errors.join("\n")).not.toContain("example.com");
+  });
+
+  it("does not echo arbitrary installer output when no safe diagnostic is available", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", { silent: true });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed; no safe diagnostic was available.",
+    ]);
+  });
+
   it("reports only paths that rollback could not restore", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
