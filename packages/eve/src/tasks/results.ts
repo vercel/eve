@@ -2,10 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { isTaskCancelTool } from "#tasks/cancel-tool.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
-import { isTerminalTaskStatus, type TaskKind, type TaskOutcome } from "#tasks/protocol.js";
+import type { TaskKind, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { findTask, markTaskDelivered, type TaskTable } from "#tasks/table.js";
+import { isReportedLoss, markTaskDelivered, readTaskTable, type TaskTable } from "#tasks/table.js";
 
 // Background results are held in session state from settlement until a model
 // step delivers them as one `task.result` message. Read by the session
@@ -32,6 +32,11 @@ export interface PendingTaskResult {
   readonly kind: TaskKind;
   readonly outcome: TaskOutcome;
   readonly creator?: JsonObject;
+  /**
+   * The detach group the task belonged to when it settled. Kept on the
+   * result, so giving the agent new work does not pull it out of its group.
+   */
+  readonly group?: string;
 }
 
 export function encodeTaskCreator(creator: TaskCreator): JsonObject {
@@ -83,7 +88,7 @@ export function readPendingTaskResults(
  */
 export function holdTaskResult<T extends { readonly state?: SessionStateMap }>(
   session: T,
-  record: TaskRecord,
+  record: Pick<TaskRecord, "creator" | "detachGroup" | "generation" | "id" | "kind" | "name">,
   outcome: TaskOutcome,
 ): T {
   const pending = readPendingTaskResults(session.state);
@@ -100,12 +105,15 @@ export function holdTaskResult<T extends { readonly state?: SessionStateMap }>(
     taskId: record.id,
   };
   if (record.creator !== undefined) entry.creator = record.creator;
+  if (record.detachGroup !== undefined) entry.group = record.detachGroup;
   return writePending(session, [...pending, entry]);
 }
 
 /**
  * Results that may be delivered now. Members of a detach group are held
- * until every member settled; deadlines bound that wait.
+ * while another member is working; each working member's time limit, or the
+ * session's lifetime, bounds that wait. A member waiting on a person does
+ * not hold the others: it reports on its own once answered.
  */
 export function deliverableTaskResults(
   state: SessionStateMap | undefined,
@@ -164,9 +172,10 @@ export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
  */
 export function hasPendingBackgroundWork(state: SessionStateMap | undefined): boolean {
   if (readPendingTaskResults(state).length > 0) return true;
-  return getTaskTable({ state }).records.some(
-    (record) => record.mode === "background" && !record.delivered,
-  );
+  const { lost, table } = readTaskTable(state);
+  // An unreadable record is reported as a result before the session is quiescent.
+  if (lost.some(isReportedLoss)) return true;
+  return table.records.some((record) => record.mode === "background" && !record.delivered);
 }
 
 /**
@@ -200,11 +209,10 @@ export function workingBackgroundTaskIds(table: TaskTable): readonly string[] {
 }
 
 function isGroupSettled(table: TaskTable, entry: PendingTaskResult): boolean {
-  const group = findTask(table, entry.taskId)?.detachGroup;
-  if (group === undefined) return true;
+  if (entry.group === undefined) return true;
   return table.records
-    .filter((record) => record.detachGroup === group)
-    .every((record) => isTerminalTaskStatus(record.status));
+    .filter((record) => record.detachGroup === entry.group)
+    .every((record) => record.status !== "working");
 }
 
 function writePending<T extends { readonly state?: SessionStateMap }>(
@@ -274,6 +282,7 @@ function isPendingTaskResult(value: unknown): value is PendingTaskResult {
     typeof entry.generation === "number" &&
     typeof entry.name === "string" &&
     (entry.kind === "agent" || entry.kind === "workflow") &&
+    (entry.group === undefined || typeof entry.group === "string") &&
     typeof outcome === "object" &&
     outcome !== null &&
     (outcome.status === "completed" ||

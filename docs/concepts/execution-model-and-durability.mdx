@@ -174,7 +174,9 @@ that [detaches](../tools/workflows#detach-a-waited-call) joins the background th
 background task finishes, eve holds its result in durable session state and delivers it as typed
 session input, not as a channel message. The model reads one `task.result` message per delivery,
 with a `<task_result>` block for each result. The calls that one steering message detaches form a
-detach group, and their results are held until every member has finished, so they arrive together.
+detach group, and their results are held while another member is still working, so they arrive
+together. A member waiting on a person's answer or approval does not hold the others; it reports on
+its own once answered.
 
 An idle session starts a result turn for the result. A running turn from the same principal
 receives it at its next tool step; a turn from a different principal never sees it, and the result
@@ -190,7 +192,7 @@ every working task, and eve delivers nothing afterward.
 
 ## Subagents
 
-A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result, unless the model [runs the call in the background](../subagents#run-a-call-in-the-background) in an interactive root session. A call that is still working at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
+A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result. In an interactive root session, the call returns a receipt instead when the model [runs it in the background](../subagents#run-a-call-in-the-background) or a steering message [detaches](../tools/workflows#detach-a-waited-call) it, and the answer arrives later as a task result. A call that is still working at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
 
 ## How eve orders session history
 

@@ -14,10 +14,9 @@ import { MAX_TASK_CANCEL_IDS, readTaskCancelIds } from "#tasks/cancel-tool.js";
 import { taskSettledEvent } from "#tasks/events.js";
 import { commandEffects, readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
-import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderInvalidTaskCancelInput, type TaskCancelOutput } from "#tasks/render.js";
-import { setTaskTable } from "#tasks/state.js";
+import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { cancelTask, findTask, type TaskTable } from "#tasks/table.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 
@@ -61,7 +60,7 @@ export async function cancelTasksStep(input: {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
-  const initial = readTasks(durable);
+  const initial = getTaskTable(durable);
   const selected = initial.records.filter(
     selectTasks(
       input.selector,
@@ -93,7 +92,9 @@ export async function cancelTasksStep(input: {
  * Applies one model call that stops background tasks. A working background
  * task is cancelled and never reports; a finished one keeps its result; any
  * other ID, including a call the turn is waiting on, is unknown. The caller
- * sends the commands and publishes the events.
+ * sends the commands and publishes the events. Access to a session includes
+ * the right to cancel its tasks, so a turn may stop tasks another principal
+ * started, as `session.cancel({ taskId })` may.
  */
 export function applyTaskCancelCall(
   table: TaskTable,

@@ -1,4 +1,5 @@
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { TaskKind } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
   renderBackgroundReceipt,
@@ -50,6 +51,7 @@ export function steeringReceiptResult(input: {
  */
 export function tooManyBackgroundTasksResult(input: {
   readonly callId: string;
+  readonly kind: TaskKind;
   readonly table: TaskTable;
   readonly toolName: string;
 }): RuntimeToolResultActionResult | undefined {
@@ -61,7 +63,7 @@ export function tooManyBackgroundTasksResult(input: {
     kind: "tool-result",
     output: {
       code: "TOO_MANY_BACKGROUND_TASKS",
-      message: renderTooManyBackgroundTasks(working, MAX_BACKGROUND_TASKS),
+      message: renderTooManyBackgroundTasks(working, MAX_BACKGROUND_TASKS, input.kind),
     },
     toolName: input.toolName,
   };

@@ -533,7 +533,7 @@ function checkRule47(posix, lines, violations) {
         file: posix,
         line: idx + 1,
         message:
-          "touches the eve.taskTable state key directly. Read the table with getTaskTable or readTasks and write it with setTaskTable from src/tasks/state.ts.",
+          "touches the eve.taskTable state key directly. Read the table with getTaskTable and write it with setTaskTable from src/tasks/state.ts.",
       });
     }
   });
@@ -673,7 +673,7 @@ function checkRule48(posix, sourceFile, violations) {
         file: posix,
         line: lineOf(sourceFile, node),
         message:
-          "encodes a task ID and generation in one string. Pass { taskId, generation } as typed fields; idempotency keys come from taskMessageKey in src/tasks/protocol.ts.",
+          "encodes a task ID and generation in one string. Pass { taskId, generation } as typed fields and let the task table deduplicate by generation.",
       });
     }
     ts.forEachChild(node, visit);

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DetachTimers,
+  DISMISSED_CALL_GRACE_MS,
   isSleepToolWorkflowId,
   planTaskWait,
   resolveWaitInterruption,
@@ -81,7 +82,25 @@ describe("resolveWaitInterruption", () => {
     ).toEqual({
       detachCallIds: ["call-d0", "call-ask"],
       endCallIds: ["call-sleep"],
+      groupCallId: "call-d0",
       keepTaskIds: ["ask_question-a1b2c3"],
+      reason: "steer",
+    });
+  });
+
+  it("detaches a dismissed call into its message's group when its grace period ends", () => {
+    expect(
+      resolveWaitInterruption({
+        dismissed: new Map([["call-ask", "call-d0"]]),
+        interruption: { callId: "call-ask", kind: "timeout" },
+        plan: interactive,
+        unresolvedCallIds: ["call-ask"],
+      }),
+    ).toEqual({
+      detachCallIds: ["call-ask"],
+      endCallIds: [],
+      groupCallId: "call-d0",
+      keepTaskIds: [],
       reason: "steer",
     });
   });
@@ -143,5 +162,10 @@ describe("DetachTimers", () => {
 
     timers.disarm(["call-slower", "call-slow"]);
     expect(timers.next()).toBeUndefined();
+
+    timers.arm("call-ask", DISMISSED_CALL_GRACE_MS);
+    const grace = timers.next();
+    fired.get(DISMISSED_CALL_GRACE_MS)!();
+    await expect(grace).resolves.toBe("call-ask");
   });
 });

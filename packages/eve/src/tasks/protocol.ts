@@ -2,9 +2,6 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
-/** Version of the owner/child wire protocol. A child rejects a start with another version. */
-export const TASK_PROTOCOL_VERSION = 1;
-
 export type TaskKind = "agent" | "workflow";
 
 /** Whether the owner's turn waits for the result (`foreground`) or not (`background`). */
@@ -58,7 +55,7 @@ export type ChildAddress =
       readonly credentialResolver?: string;
     };
 
-/** Child or timer → owner inbox. Deduplicated by {@link taskMessageKey}. */
+/** Child or timer → owner inbox. The table applies the first terminal outcome of each generation. */
 export type TaskMessage =
   | {
       readonly kind: "task.started";
@@ -104,31 +101,6 @@ export type TaskCommand =
   | { readonly kind: "cancel" }
   | { readonly kind: "answer"; readonly responses: readonly InputResponse[] }
   | { readonly kind: "message"; readonly message: string; readonly outputSchema?: JsonObject };
-
-const TASK_MESSAGE_KINDS = new Set(["task.started", "task.input", "task.settled", "task.deadline"]);
-
-/** Whether an inbox payload belongs to the task protocol. */
-export function isTaskMessage(value: unknown): value is TaskMessage {
-  if (typeof value !== "object" || value === null) return false;
-  const kind = (value as { readonly kind?: unknown }).kind;
-  return typeof kind === "string" && TASK_MESSAGE_KINDS.has(kind);
-}
-
-/**
- * Idempotency key for one message. `task.deadline` has no key: timers are
- * re-armed freely and every signal is re-evaluated against the table.
- */
-export function taskMessageKey(message: TaskMessage): string | undefined {
-  switch (message.kind) {
-    case "task.started":
-    case "task.settled":
-      return JSON.stringify([message.taskId, message.generation, message.kind]);
-    case "task.input":
-      return JSON.stringify([message.taskId, message.generation, message.kind, message.seq]);
-    case "task.deadline":
-      return undefined;
-  }
-}
 
 export function isTerminalTaskStatus(status: TaskStatus): status is TerminalTaskStatus {
   return status === "completed" || status === "failed" || status === "cancelled";

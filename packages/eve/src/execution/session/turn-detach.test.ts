@@ -18,7 +18,7 @@ import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import type { TaskWaitPlan } from "#tasks/detach.js";
+import { DISMISSED_CALL_GRACE_MS, type TaskWaitPlan } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -125,15 +125,8 @@ describe("detach on steer", () => {
   });
 
   it("keeps waiting on a call whose dismissible question the message dismissed", async () => {
-    vi.mocked(routeDeliverToChildren).mockImplementationOnce(
-      async ({ delivery, serializedContext, sessionState }) => ({
-        dismissedTaskIds: [taskIdOf("call-ask")],
-        kind: "continue",
-        remainder: delivery,
-        serializedContext,
-        sessionState,
-      }),
-    );
+    vi.mocked(sleep).mockImplementation(() => new Promise<void>(() => {}));
+    dismissAsk();
     const { execution, steps } = setup({
       calls: ["call-ask", "call-d0"],
       script: [STEERING, outcome("call-ask")],
@@ -148,10 +141,37 @@ describe("detach on steer", () => {
         keepTaskIds: [taskIdOf("call-ask")],
       }),
     );
+    expect(sleep).toHaveBeenCalledExactlyOnceWith(DISMISSED_CALL_GRACE_MS);
     // The dismissed call resolves normally, alongside the other call's receipt.
     expect(steps()[1]).toMatchObject({
       delivery: STEERING,
       runtimeResults: { results: [result("call-ask"), receipt("call-d0", "steer")] },
+    });
+  });
+
+  it("detaches a dismissed call into the message's group once its grace period ends", async () => {
+    vi.mocked(sleep).mockResolvedValue(undefined);
+    dismissAsk();
+    const { execution, steps } = setup({
+      calls: ["call-ask", "call-d0"],
+      script: [STEERING, "timer"],
+      wait: INTERACTIVE,
+    });
+
+    await execution.runTurn(undefined);
+
+    expect(vi.mocked(detachWaitedTasksStep).mock.calls.map(([call]) => call)).toEqual([
+      expect.objectContaining({ groupCallId: "call-ask", keepTaskIds: [taskIdOf("call-ask")] }),
+      expect.objectContaining({
+        detachCallIds: ["call-ask"],
+        groupCallId: "call-ask",
+        keepTaskIds: [],
+        reason: "steer",
+      }),
+    ]);
+    expect(steps()[1]).toMatchObject({
+      delivery: STEERING,
+      runtimeResults: { results: [receipt("call-ask", "steer"), receipt("call-d0", "steer")] },
     });
   });
 
@@ -283,6 +303,19 @@ describe("detach: { timeout }", () => {
 });
 
 type ScriptItem = SessionInboxPayload | "timer";
+
+/** The next routed message dismisses the dismissible question of `call-ask`. */
+function dismissAsk(): void {
+  vi.mocked(routeDeliverToChildren).mockImplementationOnce(
+    async ({ delivery, serializedContext, sessionState }) => ({
+      dismissedTaskIds: [taskIdOf("call-ask")],
+      kind: "continue",
+      remainder: delivery,
+      serializedContext,
+      sessionState,
+    }),
+  );
+}
 
 function setup(input: {
   readonly calls: readonly string[];

@@ -606,7 +606,9 @@ describe("explicit background agent calls", () => {
         kind: "tool-result",
         output: {
           code: "TOO_MANY_BACKGROUND_TASKS",
-          message: expect.stringContaining("10 background tasks are already running"),
+          message: expect.stringMatching(
+            /^10 background tasks are already running \(.+\)\. .*call without background\.$/u,
+          ),
         },
         toolName: "research",
       },

@@ -6,8 +6,10 @@ import {
 import { isInactiveTimeoutTarget } from "#execution/session/timeout-steps.js";
 import { resolveHookOwnerRunId, resolveSessionOwnerRunId } from "#execution/workflow-runtime.js";
 import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
+import type { SessionStateMap } from "#harness/types.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
+import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { settledEvents } from "#tasks/events.js";
 import {
@@ -17,11 +19,17 @@ import {
   type WorkflowCallerReply,
 } from "#tasks/owner.js";
 import type { TaskDeadlineSignal, TaskError, TaskOutcome } from "#tasks/protocol.js";
-import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { STATE_LOST_MESSAGE } from "#tasks/render.js";
 import { holdTaskResult } from "#tasks/results.js";
-import { readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
-import { evaluateTaskDeadlines, markTaskDelivered, type TaskEffect } from "#tasks/table.js";
+import { getTaskTable, readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
+import {
+  evaluateTaskDeadlines,
+  isReportedLoss,
+  markTaskDelivered,
+  readTaskTable,
+  type TaskEffect,
+} from "#tasks/table.js";
 import { runCommands } from "#tasks/transport.js";
 import {
   flushAgentInvocationTraces,
@@ -34,6 +42,11 @@ import {
 // Nothing here waits on a child.
 
 const HARD_STOP_REASON = "The task did not stop within its cancellation window.";
+
+const log = createLogger("tasks.deadlines");
+
+/** What a held result needs from its task: a record, or what an unreadable one still says. */
+type HeldRecord = Parameters<typeof holdTaskResult>[1];
 
 /** Applies one timer signal. Every signal is re-evaluated, so a stale one does nothing. */
 export async function applyTaskDeadlinesStep(input: {
@@ -64,13 +77,13 @@ export async function applyTaskDeadlines(input: {
       : Date.parse(input.now);
   const now = new Date(nowMs).toISOString();
 
-  const evaluated = evaluateTaskDeadlines(readTasks(session), now);
+  const evaluated = evaluateTaskDeadlines(getTaskTable(session), now);
   let table = evaluated.table;
   let serializedContext = input.serializedContext;
   const results: RuntimeToolResultActionResult[] = [];
   const replies: WorkflowCallerReply[] = [];
   // Background results are delivered by a later model step, not to a caller.
-  const held: { readonly outcome: TaskOutcome; readonly record: TaskRecord }[] = [];
+  const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
   for (const effect of evaluated.effects) {
     if (effect.kind === "unconfirmed") {
       const { child, record } = effect;
@@ -113,19 +126,81 @@ export async function applyTaskDeadlines(input: {
   const commands = commandEffects(evaluated.effects);
   if (commands.length > 0) await runCommands(commands, await readContext(serializedContext));
 
+  const lost = reportLostTasks(session, { replies, results });
+  held.push(...lost.held);
+
   // Once its wake time passes the armed timer has fired; clearing it lets the
   // owner arm one for the next deadline.
   const timer = armed !== undefined && Date.parse(armed.wakeAt) > nowMs ? armed : undefined;
   // Always written, so an unreadable record is removed and cannot block handoff.
-  session = setTaskTable({ ...session, state: writeTaskTimer(session.state, timer) }, table);
+  session = setTaskTable({ ...session, state: writeTaskTimer(session.state, timer) }, table, {
+    dropLost: true,
+  });
   for (const { outcome, record } of held) session = holdTaskResult(session, record, outcome);
   return {
-    events: settledEvents(evaluated.effects),
+    events: [...settledEvents(evaluated.effects), ...lost.events],
     replies,
     results,
     serializedContext: await flushAgentInvocationTraces(serializedContext),
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
+}
+
+/**
+ * Fails each task whose record could not be read with `STATE_LOST`, through
+ * the same routes as any outcome: a waited call's tool result, a `ctx.agent`
+ * caller's reply, or a held background result. The session continues.
+ */
+function reportLostTasks(
+  session: { readonly state?: SessionStateMap },
+  into: {
+    readonly replies: WorkflowCallerReply[];
+    readonly results: RuntimeToolResultActionResult[];
+  },
+): {
+  readonly events: readonly TaskSettledStreamEvent[];
+  readonly held: readonly { readonly outcome: TaskOutcome; readonly record: HeldRecord }[];
+} {
+  const events: TaskSettledStreamEvent[] = [];
+  const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
+  const error: TaskError = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
+  for (const task of readTaskTable(session.state).lost) {
+    log.warn("dropped an unreadable task record", {
+      reason: task.reason,
+      taskId: task.id,
+      taskName: task.name,
+    });
+    if (!isReportedLoss(task)) continue;
+    const { callId, id, name } = task;
+    if (callId !== undefined) {
+      events.push(createTaskSettledEvent({ callId, error, status: "failed", taskId: id }));
+    }
+    if (task.replyTo !== undefined || task.mode === "foreground") {
+      // Only the call that waits on the task can take its outcome.
+      if (callId === undefined) continue;
+      resolveCaller(
+        {
+          callId,
+          name,
+          workflowCaller: task.replyTo === undefined ? undefined : { replyTo: task.replyTo },
+        },
+        error,
+        into,
+      );
+      continue;
+    }
+    held.push({
+      outcome: { error, status: "failed" },
+      record: {
+        creator: task.creator,
+        generation: task.generation ?? 1,
+        id,
+        kind: task.kind ?? "workflow",
+        name,
+      },
+    });
+  }
+  return { events, held };
 }
 
 /**
@@ -147,7 +222,7 @@ async function hardStop(
     await cancelRun(await getWorld(), runId, { cancelReason: HARD_STOP_REASON });
   } catch (error) {
     if (!isInactiveTimeoutTarget(error)) {
-      logError(createLogger("tasks.deadlines"), "failed to hard-stop a task child", error, {
+      logError(log, "failed to hard-stop a task child", error, {
         childKind: child.kind,
         runId,
         taskId: record.id,
@@ -180,7 +255,9 @@ function recordTaskTraceTerminal(input: {
 }
 
 function resolveCaller(
-  record: TaskRecord,
+  record: Pick<TaskRecord, "callId" | "name"> & {
+    readonly workflowCaller?: { readonly replyTo: string };
+  },
   error: TaskError,
   into: {
     readonly replies: WorkflowCallerReply[];

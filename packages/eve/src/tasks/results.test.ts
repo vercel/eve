@@ -55,7 +55,7 @@ function settleAll(records: readonly TaskRecord[], ids: readonly string[]) {
       NOW,
     );
     session = { state: { ...session.state, ...taskTableState(applied.table.records) } };
-    session = holdTaskResult(session, { ...record, status: "completed" }, DONE);
+    session = holdTaskResult(session, record, DONE);
   }
   return session;
 }
@@ -64,7 +64,7 @@ describe("background task results", () => {
   it("holds one result per generation and keeps its task listed until delivery", () => {
     const remind = background("remind-a1", ALICE);
     const once = settleAll([remind], ["remind-a1"]);
-    const twice = holdTaskResult(once, { ...remind, status: "completed" }, DONE);
+    const twice = holdTaskResult(once, remind, DONE);
 
     expect(readPendingTaskResults(twice.state)).toHaveLength(1);
     expect(renderTasksNote(getTaskTable(twice).records)).toContain('id="remind-a1"');
@@ -134,6 +134,68 @@ describe("background task results", () => {
       "sre-g1",
       "d0-g2",
     ]);
+  });
+
+  it("does not let a member waiting on a person hold its group", () => {
+    const records = detachTasks(
+      taskTable([
+        background("approve-g1", ALICE, { mode: "foreground", status: "input_required" }),
+        background("d0-g2", ALICE, { mode: "foreground" }),
+      ]),
+      ["approve-g1", "d0-g2"],
+      "steer-1",
+    ).records;
+
+    const settled = settleAll(records, ["d0-g2"]);
+    expect(takeTaskResults(settled, ALICE).results.map((result) => result.taskId)).toEqual([
+      "d0-g2",
+    ]);
+    // Once answered, the member works again and holds the others until it settles.
+    const answered = settleAll(
+      records.map((record) =>
+        record.id === "approve-g1" ? { ...record, status: "working" as const } : record,
+      ),
+      ["d0-g2"],
+    );
+    expect(takeTaskResults(answered, ALICE).results).toEqual([]);
+  });
+
+  it("keeps a held result in its group after its agent is given new work", () => {
+    const records = detachTasks(
+      taskTable([
+        background("sre-g1", ALICE, { kind: "agent", mode: "foreground" }),
+        background("d0-g2", ALICE, { mode: "foreground" }),
+      ]),
+      ["sre-g1", "d0-g2"],
+      "steer-1",
+    ).records;
+    const held = settleAll(records, ["sre-g1"]);
+    expect(readPendingTaskResults(held.state)[0]?.group).toBe("steer-1");
+
+    // The next generation leaves the group, but the earlier result still waits for d0.
+    const continued = {
+      ...held,
+      state: {
+        ...held.state,
+        ...taskTableState(
+          getTaskTable(held).records.map((record) =>
+            record.id === "sre-g1"
+              ? { ...record, detachGroup: undefined, generation: 2, status: "working" as const }
+              : record,
+          ),
+        ),
+      },
+    };
+    expect(takeTaskResults(continued, ALICE).results).toEqual([]);
+  });
+
+  it("treats an unreadable record as outstanding until it is reported", () => {
+    const lost = { "eve.taskTable": { records: [{ id: "x-1", name: "x", v: 0 }] } };
+    expect(hasPendingBackgroundWork(lost)).toBe(true);
+    const delivered = {
+      "eve.taskTable": { records: [{ delivered: true, id: "x-1", name: "x", v: 0 }] },
+    };
+    expect(hasPendingBackgroundWork(delivered)).toBe(false);
   });
 
   it("treats a session as quiescent only when no background result is outstanding", () => {

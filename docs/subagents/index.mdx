@@ -301,7 +301,7 @@ Every call that starts a task emits exactly one `task.settled` with its first ou
 
 Channels with activity reporting show the child's tool activity as a child item under the parent turn. Activity reporting is best-effort and does not change execution or result delivery.
 
-Cancelling the parent turn cancels the child's current turn. Parent-session finalization terminates remaining children.
+Cancelling the parent turn cancels the child's current turn. If the child already replied but is holding its answer until its own background tasks report, the cancel reaches it anyway: the child cancels those tasks and confirms the cancel, so it stays available for another call. Parent-session finalization terminates remaining children.
 
 Each delegated agent call has a time limit of 2 hours of active time by default. Time the child spends waiting on a question or approval that reaches the root channel does not count. A call still working at the limit fails: the parent's tool call gets an error with code `TIMED_OUT`, `task.settled` reports `failed` with the same error, and eve cancels the child's current turn. The child stays available for another call. If a local child has not stopped 30 seconds after eve cancels it, whether for a timeout or a parent cancel, eve terminates the child's session, and a later call with its `agentId` fails with `UNKNOWN_AGENT`.
 

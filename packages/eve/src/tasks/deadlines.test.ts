@@ -20,6 +20,8 @@ import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { applyTaskDeadlines } from "#tasks/deadlines.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { STATE_LOST_MESSAGE } from "#tasks/render.js";
+import { readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable, planTaskTimer, readTaskTimer, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
 import { recordNestedAgentInvocationTerminal } from "#tracing/agent-invocation-terminal.js";
 
@@ -349,25 +351,116 @@ describe("applyTaskDeadlines", () => {
     expect(records(update.sessionState)).toEqual([waiting]);
   });
 
-  it("removes an unreadable record without failing or reporting it", async () => {
+  it("reports an unreadable background record as a held STATE_LOST result and removes it", async () => {
     const working = createTaskRecord({ child: LOCAL_CHILD, deadlineAt: DEADLINE });
-    const state = taskTableState([working]);
-    const table = state["eve.taskTable"] as { records: unknown[] };
-    table.records.push({ id: "old-abc234", name: "old", v: 0 });
-    expect(wakeToArm(state)).toBe(new Date(0).toISOString());
-
-    const update = await applyTaskDeadlines({
-      now: "2026-09-24T13:00:00.000Z",
-      serializedContext: {},
-      sessionState: ownerState(state),
-      signal: { kind: "task.deadline", ownerRunId: "owner", wakeAt: new Date(0).toISOString() },
+    const creator = { auth: null };
+    const update = await applyLost(working, {
+      callId: "call-9",
+      creator,
+      generation: 2,
+      id: "old-abc234",
+      kind: "workflow",
+      mode: "background",
+      name: "old",
+      v: 0,
     });
 
-    expect(update).toMatchObject({ events: [], replies: [], results: [] });
+    expect(update).toMatchObject({
+      events: [
+        {
+          data: {
+            callId: "call-9",
+            error: { code: "STATE_LOST", message: STATE_LOST_MESSAGE },
+            status: "failed",
+            taskId: "old-abc234",
+          },
+          type: "task.settled",
+        },
+      ],
+      replies: [],
+      results: [],
+    });
+    expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([
+      {
+        creator,
+        generation: 2,
+        kind: "workflow",
+        name: "old",
+        outcome: { error: { code: "STATE_LOST", message: STATE_LOST_MESSAGE }, status: "failed" },
+        taskId: "old-abc234",
+      },
+    ]);
     expect(stateOf(update.sessionState)?.["eve.taskTable"]).toEqual({ records: [working] });
     expect(wakeToArm(stateOf(update.sessionState))).toBe(DEADLINE);
   });
+
+  it("resolves a waited call or a ctx.agent caller whose record is unreadable", async () => {
+    const error = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
+    const waited = await applyLost(undefined, {
+      callId: "call-9",
+      id: "old-abc234",
+      mode: "foreground",
+      name: "old",
+      v: 0,
+    });
+    expect(waited.results).toEqual([
+      { callId: "call-9", isError: true, kind: "tool-result", output: error, toolName: "old" },
+    ]);
+
+    const nested = await applyLost(undefined, {
+      callId: "call-9",
+      id: "old-abc234",
+      mode: "foreground",
+      name: "old",
+      v: 0,
+      workflowCaller: { replyTo: "reply-hook", runId: "run-1" },
+    });
+    expect(nested.results).toEqual([]);
+    expect(nested.replies).toEqual([
+      {
+        replyTo: "reply-hook",
+        result: {
+          callId: "call-9",
+          isError: true,
+          kind: "subagent-result",
+          origin: "dispatch",
+          output: error,
+          subagentName: "old",
+        },
+      },
+    ]);
+    for (const update of [waited, nested]) {
+      expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([]);
+      expect(stateOf(update.sessionState)?.["eve.taskTable"]).toBeUndefined();
+    }
+  });
+
+  it("removes an unreadable record whose result was already delivered without reporting it", async () => {
+    const update = await applyLost(undefined, {
+      delivered: true,
+      id: "old-abc234",
+      name: "old",
+      v: 0,
+    });
+
+    expect(update).toMatchObject({ events: [], replies: [], results: [] });
+    expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([]);
+    expect(stateOf(update.sessionState)?.["eve.taskTable"]).toBeUndefined();
+  });
 });
+
+/** Applies the immediate wake an unreadable record arms, with `unreadable` stored beside `working`. */
+async function applyLost(working: TaskRecord | undefined, unreadable: Record<string, unknown>) {
+  const state = taskTableState(working === undefined ? [] : [working]);
+  (state["eve.taskTable"] as { records: unknown[] }).records.push(unreadable);
+  expect(wakeToArm(state)).toBe(new Date(0).toISOString());
+  return await applyTaskDeadlines({
+    now: "2026-09-24T13:00:00.000Z",
+    serializedContext: {},
+    sessionState: ownerState(state),
+    signal: { kind: "task.deadline", ownerRunId: "owner", wakeAt: new Date(0).toISOString() },
+  });
+}
 
 /** The wake the owner would arm next, ignoring clock and owner-run checks. */
 function wakeToArm(state: SessionStateMap | undefined): string | undefined {

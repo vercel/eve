@@ -69,6 +69,7 @@ import {
   type CommandEffect,
 } from "#tasks/transport.js";
 import {
+  getTaskTable,
   ownerInboxHookToken,
   readTaskCallbackAlias,
   setTaskTable,
@@ -76,7 +77,6 @@ import {
   TASK_CALLBACK_ALIAS_STATE_KEY,
 } from "#tasks/state.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { readTasks } from "#tasks/read.js";
 import { encodeTaskCreator, holdTaskResult } from "#tasks/results.js";
 import {
   applyTaskMessage,
@@ -244,7 +244,7 @@ export async function startAgentTasks(input: {
     const toolName = call.toolName ?? call.input.target;
     const background =
       call.background === true && call.workflowCaller === undefined && backgroundAllowed;
-    let table = readTasks(session);
+    let table = getTaskTable(session);
     const started = startTask(table, {
       agentId,
       callId: call.callId,
@@ -287,7 +287,12 @@ export async function startAgentTasks(input: {
       continue;
     }
     if (background) {
-      const rejected = tooManyBackgroundTasksResult({ callId: call.callId, table, toolName });
+      const rejected = tooManyBackgroundTasksResult({
+        callId: call.callId,
+        kind: "agent",
+        table,
+        toolName,
+      });
       if (rejected !== undefined) {
         results.push(rejected);
         continue;
@@ -386,7 +391,7 @@ export async function startAgentTasks(input: {
       continue;
     }
     if (child !== undefined) {
-      const adopted = adoptChild(readTasks(session), record, child, input.now);
+      const adopted = adoptChild(getTaskTable(session), record, child, input.now);
       session = setTaskTable(session, adopted.table);
       await runCommands(adopted.commands, ctx);
       events.push(
@@ -444,7 +449,7 @@ export async function applyTaskReport(input: {
   if (input.payload.kind === "task.started") {
     // A cancelled task still adopts its child, so the held cancel reaches it.
     const { callId: startedCallId, child: reported } = input.payload;
-    const tasks = readTasks(session);
+    const tasks = getTaskTable(session);
     const record = tasks.records.find(
       (candidate) => candidate.callId === startedCallId && candidate.child === undefined,
     );
@@ -459,7 +464,7 @@ export async function applyTaskReport(input: {
     }
     if (record !== undefined) {
       const child: ChildAddress = { kind: "local", ...input.payload.child };
-      const adopted = adoptChild(readTasks(session), record, child, input.now);
+      const adopted = adoptChild(getTaskTable(session), record, child, input.now);
       session = setTaskTable(session, adopted.table);
       if (adopted.commands.length > 0) {
         await runCommands(adopted.commands, await readContext(input.serializedContext));
@@ -476,7 +481,7 @@ export async function applyTaskReport(input: {
     const source = input.payload.source;
     for (const result of input.payload.results) {
       if (result.kind !== "subagent-result" || result.origin !== "child") continue;
-      const table = readTasks(session);
+      const table = getTaskTable(session);
       const record = findReportedTask(table, result, source);
       if (record === undefined) continue;
       const outcome = toTaskOutcome(result);

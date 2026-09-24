@@ -91,9 +91,7 @@ export function renderOutcomeBody(outcome: TaskOutcome): string {
     case "completed":
       return stringifyOutput(outcome.output);
     case "failed":
-      return outcome.error.code === "STATE_LOST"
-        ? `${outcome.error.message} Start it again if it is still needed.`
-        : outcome.error.message;
+      return outcome.error.message;
     case "cancelled":
       return "The task was cancelled.";
   }
@@ -108,9 +106,11 @@ export function resolveTasksAnnouncement(input: {
   readonly messages: readonly ModelMessage[];
   readonly records: readonly TaskRecord[];
 }): string | undefined {
+  // A person's message that happens to start with the label is not a note.
   const latest = input.messages.findLast(
     (message) =>
       message.role === "user" &&
+      (message as { readonly kind?: unknown }).kind === "context.state" &&
       typeof message.content === "string" &&
       message.content.startsWith(TASKS_NOTE_LABEL),
   );
@@ -158,9 +158,13 @@ export function renderTasksNote(records: readonly TaskRecord[]): string | undefi
   return lines.join("\n");
 }
 
-/** Static system block for agents that can delegate. */
+/**
+ * Static system block for agents that can delegate. It is the one
+ * explanation of the `[Tasks]` note wherever agents exist; the background
+ * block below adds only what background work changes.
+ */
 export const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nA subagent call runs until the agent answers, and its answer is the tool result. Agents you have already delegated to stay available after they answer. eve adds a note labeled `[Tasks]` to the conversation when that set changes; its `<idle_agents>` block lists each agent's id, name, and a summary of its last answer. The note is added by eve, not written by the user, and never requires a reply. It does not limit which subagent tools you can call: any subagent tool can always be called without `agentId` to start a new agent, including when the note is empty or absent. Pass an idle agent's id as `agentId` to the same subagent tool only to give that agent more work in its existing session.";
+  "Agent messaging\nAn agent call waits for the agent to answer, and its answer is the tool result. When the call returns a receipt instead, the agent keeps working in the background and its answer arrives later in a <task_result> message. Agents stay available after they answer. eve adds a note labeled `[Tasks]` to the conversation whenever its listing changes, and the latest note is current. The note is added by eve, not written by the user, and never requires a reply. Its `<tasks>` block lists background work whose result has not arrived yet, with its status, and its `<idle_agents>` block lists each idle agent's id, name, and a summary of its last answer. The note does not limit which agent tools you can call: any agent tool can always be called without `agentId` to start a new agent, including when the note is empty or absent. Pass an idle agent's id as `agentId` to the same agent tool to give that agent more work in its existing session.";
 
 /** Description of the `agentId` input on every agent tool. */
 export const AGENT_ID_PARAMETER_DESCRIPTION =
@@ -192,14 +196,33 @@ export function renderInvalidTaskCancelInput(maxIds: number): string {
 export const BACKGROUND_PARAMETER_DESCRIPTION =
   "Run in the background and return immediately. The result arrives later in its own message. Use only when the user does not need the answer to continue. Do not poll, sleep, or call again to check on it. To get several answers together, make the calls in the same step without background.";
 
-/** Static system block for sessions that can have background tasks. */
-export const BACKGROUND_TASKS_INSTRUCTION = [
-  "Background tasks",
-  "A background call returns a receipt right away, and its result arrives later in a <task_result> message. Never poll, sleep, or call again to check on background work. Reply to every result, in one line if it no longer matters. The latest [Tasks] note lists background tasks until their results arrive, plus idle agents; it is added by eve, not written by the user. Pass an agent's agentId to its tool to give it more work or redirect it while it works, and use task_cancel to stop a background agent or task.",
-].join("\n");
+/**
+ * Static system block for sessions that can have background tasks. With
+ * agents, {@link AGENT_MESSAGING_INSTRUCTION} already explains the `[Tasks]`
+ * note, so this block only adds redirecting a working agent.
+ */
+export function renderBackgroundTasksInstruction(options: { readonly agents: boolean }): string {
+  const rules =
+    "A background call returns a receipt right away, and its result arrives later in a <task_result> message. Never poll, sleep, or call again to check on background work. Reply to every result, in one line if it no longer matters.";
+  const specific = options.agents
+    ? "To redirect an agent that is still working, pass its agentId to its tool with your correction; its one result still arrives later. Use task_cancel to stop a background agent or task."
+    : "The latest [Tasks] note lists background tasks until their results arrive; it is added by eve, not written by the user, and never requires a reply. Use task_cancel to stop a background task.";
+  return `Background tasks\n${rules} ${specific}`;
+}
 
-export function renderTooManyBackgroundTasks(ids: readonly string[], limit: number): string {
-  return `${limit} background tasks are already running (${ids.join(", ")}). Wait for one to report, stop one with task_cancel, or call without background.`;
+/**
+ * `TOO_MANY_BACKGROUND_TASKS` error message. An agent call can run without
+ * `background`; a `detach: true` tool always runs in the background.
+ */
+export function renderTooManyBackgroundTasks(
+  ids: readonly string[],
+  limit: number,
+  kind: TaskKind,
+): string {
+  const running = `${limit} background tasks are already running (${ids.join(", ")}).`;
+  return kind === "agent"
+    ? `${running} Wait for one to report, stop one with task_cancel, or call without background.`
+    : `${running} Wait for one to report or stop one with task_cancel, then call this tool again.`;
 }
 
 /** Framework continuation for a result turn that ended without a reply. */
@@ -211,6 +234,10 @@ export const AGENT_SESSION_ENDED_MESSAGE = "The agent's session ended before it 
 
 /** Error message for an agent call the owner cancelled. */
 export const AGENT_CALL_CANCELLED_MESSAGE = "The agent invocation was cancelled.";
+
+/** `STATE_LOST` error message for a task whose stored record eve could not read. */
+export const STATE_LOST_MESSAGE =
+  "eve could not read this task's saved state, so its result is lost. Start it again if it is still needed.";
 
 /** `TIMED_OUT` error message for a call still working at its time limit. */
 export function renderTimedOut(kind: TaskKind): string {

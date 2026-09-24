@@ -8,7 +8,11 @@ import {
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
+import {
+  hasOpenTurnWork,
+  nextTurnDelivery,
+  type NextTurnInstruction,
+} from "#execution/session/next-input.js";
 import { cancelTasks, cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
@@ -230,6 +234,12 @@ async function runSessionLoop(
             hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)),
         expectedAttemptIds,
         inbox,
+        // A held caller, or a task-mode run waiting on its background tasks,
+        // is still owed the last turn's result, so a cancel stops that work.
+        ownsParkedWork: () =>
+          progress.caller !== undefined ||
+          (boot.mode === "task" &&
+            hasPendingBackgroundWork(cursor.sessionState.snapshot.session.state)),
         queue,
       });
       if (next.kind !== "workflow") return next;
@@ -292,6 +302,7 @@ async function runSessionLoop(
         case "turn":
           return await runDeliveredTurn(next);
         case "cancel-turn":
+        case "cancel-parked":
         case "authorization-resume":
           continue;
       }
@@ -377,13 +388,29 @@ async function runSessionLoop(
           action = await runResultTurn(next);
           continue;
         case "cancel-turn":
+        case "cancel-parked": {
+          const caller = progress.caller;
+          // Only a turn parked mid-way has an open turn to settle; a turn that
+          // ended while its caller waits for background work already did.
+          const turnOpen =
+            next.kind === "cancel-turn" ||
+            hasOpenTurnWork(cursor.sessionState.snapshot.session.state);
           await cancelTurnDescendants(cursor);
-          // A caller held for background work cancels that work too.
-          if (progress.caller !== undefined) await cancelTasks(cursor, { kind: "all" });
-          await settleCancelledTurn();
-          // Cancellation consumes any outstanding caller; do not report the prior turn.
+          // A cancelled agent, or task-mode run, also stops its own background tasks.
+          if (caller !== undefined || (next.kind === "cancel-parked" && boot.mode === "task")) {
+            await cancelTasks(cursor, { kind: "all" });
+          }
+          const usage = turnOpen ? (await settleCancelledTurn()).usage : action.settled?.usage;
+          progress.caller = undefined;
+          // The caller learns the call was cancelled; the prior turn is never reported.
+          await notifyCancelledTaskCallerStep(
+            usage === undefined
+              ? { caller, sessionId: boot.sessionId }
+              : { caller, sessionId: boot.sessionId, usage },
+          );
           action = { ...action, settled: undefined };
           continue;
+        }
         case "turn": {
           const result = await runDeliveredTurn(next);
           if (result.kind !== "action") return result;

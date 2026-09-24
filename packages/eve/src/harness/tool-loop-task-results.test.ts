@@ -14,10 +14,13 @@ import { createTaskRecord, taskTableState } from "#internal/testing/task-records
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 import {
-  BACKGROUND_TASKS_INSTRUCTION,
+  renderBackgroundTasksInstruction,
   RESULT_TURN_REPLY_PROMPT,
   TASKS_NOTE_LABEL,
 } from "#tasks/render.js";
+
+// These sessions have no agent tools, so the block explains the note itself.
+const BACKGROUND_TASKS_INSTRUCTION = renderBackgroundTasksInstruction({ agents: false });
 import { encodeTaskCreator, holdTaskResult, readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";

@@ -494,7 +494,8 @@ waits on calls, eve applies it in this order:
 1. If the message answers a pending question, it answers the question and does not steer. See
    [Ask a human](#ask-a-human-ctxask) for when plain text answers a question.
 2. Otherwise, each pending question created with `dismissible: true` resolves as `dismissed`. Its
-   call keeps waiting and returns as usual.
+   call keeps waiting for up to 10 seconds to return as usual. A call still working after that
+   detaches with the calls in step 3, so the turn never waits on it to show the model the message.
 3. Every other waited call detaches. eve emits `task.detached` with `reason: "steer"` for each
    one, and the turn continues in one model step with their receipts followed by the new message.
 
@@ -505,12 +506,15 @@ A new message arrived, so this call moved to the background as task deploy-3fq8w
 ```
 
 The calls one message detaches form a detach group. eve delivers the group's results together, in
-one `task.result` message, once every member has finished; each call's time limit still bounds the
-wait. Agent calls in the same turn detach with them; see
-[Subagents](/docs/subagents#steering-while-a-call-waits).
+one `task.result` message, once no member is still working. The wait is bounded by each working
+member's time limit, or by the session's lifetime for a workflow tool without `timeout`. Agent calls
+in the same turn detach with them; see
+[Subagents](/docs/subagents#steering-while-a-call-waits). A result stays in its group even if the
+model gives that agent new work before the group is delivered.
 
 A call waiting on an approval, or on a question that is not dismissible, also detaches. Its request
-stays pending, and a later answer resumes the run, which reports its result in its own message.
+stays pending, and it does not hold the rest of its group: the others are delivered once they
+finish. A later answer resumes the run, which reports its result in its own message.
 
 A message with `turnPolicy: "queue"` never detaches anything: it waits until the turn settles. In
 subagent sessions, task-mode runs, and turns started by a schedule, a steering message is applied
@@ -547,8 +551,10 @@ eve emits `task.detached` with `reason: "timeout"`, the model reads
 stops waiting for that call. Each call that times out detaches individually and delivers its result
 on its own, like a `detach: true` call. A result that arrives before the timer fires wins.
 
-The timer lives and dies with the turn. Outside interactive root turns, the call waits. Inside one,
-a steering message can still detach the call before its timer fires.
+The timer only affects the turn that made the call: once that turn stops waiting, a timer that has
+not fired no longer detaches anything. Outside interactive root turns, the call waits. Inside one,
+a steering message can still detach the call before its timer fires. `timeout` can be at most
+2,147,483,647 milliseconds (about 24.8 days), the longest delay `setTimeout` accepts.
 
 `detach.timeout` only stops the turn from waiting. To end a call that runs too long, set the
 top-level [`timeout`](#limit-a-call-with-timeout) instead.
@@ -608,6 +614,9 @@ authenticator, principal type, and principal ID match. eve delivers results by t
   never appears in another principal's turn.
 - **Several results.** Results from the same principal that are ready together share one message
   and one result turn.
+- **Turn waiting on a person.** While a turn waits on an approval or a question, no result turn
+  starts, whoever the result belongs to. Results wait until the request is answered or the turn
+  ends, then follow the rules above.
 
 A result turn runs with the auth of the call that started the task, and its activity attaches to
 the originating turn. A result turn must produce a reply: if the model ends one without replying,
@@ -627,6 +636,9 @@ To stop a background task, the model calls [`task_cancel`](/docs/concepts/built-
 with its ID. Application code calls `session.cancel({ taskId })` to stop one task and leave the turn
 running, or `session.cancel({ tasks: true })` to cancel the active turn and every working task (see
 [Cancel the in-flight turn](/docs/concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn)).
+Cancel rights come with access to the session, not with the principal that started a task: any
+caller that can reach the session, and the model in any principal's turn, can stop any of its
+tasks.
 eve records the task as cancelled at once, emits `task.settled` with `status: "cancelled"`, and
 signals the run, which unwinds as described in
 [Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). A cancelled task delivers no result and

@@ -22,13 +22,21 @@ export interface TaskWaitPlan {
   readonly timeouts: readonly { readonly callId: string; readonly timeoutMs: number }[];
 }
 
+/**
+ * How long a call whose question a steering message dismissed may keep the
+ * turn waiting. A call that is still working then detaches with the calls
+ * the message detached, so the model sees the message without waiting on it.
+ */
+export const DISMISSED_CALL_GRACE_MS = 10_000;
+
 /** What interrupted a foreground wait. */
 export type WaitInterruption =
   | {
-      /** A steering message; tasks whose dismissible question it dismissed keep waiting. */
+      /** A steering message; tasks whose dismissible question it dismissed keep waiting for now. */
       readonly kind: "steer";
       readonly dismissedTaskIds: readonly string[];
     }
+  /** A `detach: { timeout }` timer, or the grace period of a dismissed call. */
   | { readonly kind: "timeout"; readonly callId: string };
 
 /** The table changes one interruption makes. */
@@ -40,6 +48,11 @@ export interface WaitedTaskChanges {
   readonly endCallIds: readonly string[];
   /** Tasks that keep their call waiting, because the message dismissed their question. */
   readonly keepTaskIds: readonly string[];
+  /**
+   * The call whose ID names a steering message's detach group, so a
+   * dismissed call that detaches after its grace period joins the same group.
+   */
+  readonly groupCallId?: string;
 }
 
 const SLEEP_WORKFLOW_FUNCTION = "executeSleepTool";
@@ -95,37 +108,43 @@ export function steeringInterruptsWait(plan: TaskWaitPlan): boolean {
  * other waited call together. A timer detaches only its own call.
  */
 export function resolveWaitInterruption(input: {
+  /** Dismissed calls still in their grace period, mapped to their group's call ID. */
+  readonly dismissed?: ReadonlyMap<string, string>;
   readonly interruption: WaitInterruption;
   readonly plan: TaskWaitPlan;
   readonly unresolvedCallIds: readonly string[];
 }): WaitedTaskChanges | undefined {
   const { interruption, plan, unresolvedCallIds } = input;
   if (interruption.kind === "timeout") {
-    if (!plan.detachable || !unresolvedCallIds.includes(interruption.callId)) return undefined;
-    return {
-      detachCallIds: [interruption.callId],
-      endCallIds: [],
-      keepTaskIds: [],
-      reason: "timeout",
-    };
+    const { callId } = interruption;
+    if (!plan.detachable || !unresolvedCallIds.includes(callId)) return undefined;
+    const groupCallId = input.dismissed?.get(callId);
+    return groupCallId === undefined
+      ? { detachCallIds: [callId], endCallIds: [], keepTaskIds: [], reason: "timeout" }
+      : { detachCallIds: [callId], endCallIds: [], groupCallId, keepTaskIds: [], reason: "steer" };
   }
   const endCallIds = unresolvedCallIds.filter((callId) => plan.sleepCallIds.includes(callId));
   const detachCallIds = plan.detachable
     ? unresolvedCallIds.filter((callId) => !endCallIds.includes(callId))
     : [];
   if (endCallIds.length === 0 && detachCallIds.length === 0) return undefined;
-  return {
+  const changes: { -readonly [K in keyof WaitedTaskChanges]: WaitedTaskChanges[K] } = {
     detachCallIds,
     endCallIds,
     keepTaskIds: interruption.dismissedTaskIds,
     reason: "steer",
   };
+  const [groupCallId] = detachCallIds;
+  if (groupCallId !== undefined) changes.groupCallId = groupCallId;
+  return changes;
 }
 
 /**
- * The `detach: { timeout }` timers of one foreground wait: one durable sleep
- * per timed call, started with the wait. A timer still pending when the wait
- * ends is abandoned, so it lives and dies with the turn.
+ * The timers of one foreground wait: one durable sleep per timed call,
+ * started with the wait, plus the grace period of each dismissed call. A
+ * timer still pending when the wait ends is abandoned: it no longer affects
+ * the turn, though its durable sleep may still wake the run once when it
+ * elapses.
  */
 export class DetachTimers {
   readonly #armed: Map<string, Promise<string>>;
@@ -133,6 +152,14 @@ export class DetachTimers {
   constructor(timeouts: TaskWaitPlan["timeouts"]) {
     this.#armed = new Map(
       timeouts.map(({ callId, timeoutMs }) => [callId, sleep(timeoutMs).then(() => callId)]),
+    );
+  }
+
+  /** Starts a timer for one call, replacing any timer it already had. */
+  arm(callId: string, ms: number): void {
+    this.#armed.set(
+      callId,
+      sleep(ms).then(() => callId),
     );
   }
 

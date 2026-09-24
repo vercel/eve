@@ -255,6 +255,8 @@ The result lists each ID once:
 
 A cancelled agent stays available: pass its ID as `agentId` to give it new work.
 
+In a session several people share, `task_cancel` can stop any background task in the session, whichever principal's turn started it, as [`session.cancel({ taskId })`](./sessions-runs-and-streaming#cancel-the-in-flight-turn) can. Access to a session includes the right to cancel its tasks.
+
 ```sh
 eve add tool/task_cancel
 ```

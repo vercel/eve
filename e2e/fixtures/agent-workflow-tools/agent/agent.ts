@@ -2,11 +2,99 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
+function text(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value ?? null);
+}
+
+/**
+ * Background task flows, one `BG-*-START` directive per session. A result
+ * turn echoes its `<task_result>` message, a steering message containing
+ * `BG-PING` gets a short reply, and each flow starts its tools once.
+ */
+function respondBackground(request: MockModelRequest): MockModelResponse | string | undefined {
+  const last = request.lastUserMessage ?? "";
+  const directive = request.userMessages
+    .map((entry) => /BG-[A-Z]+-START/u.exec(entry)?.[0])
+    .find((entry) => entry !== undefined);
+  // A check can follow a compaction that summarized the directive away.
+  const noteCheck = last.includes("BG-NOTE-CHECK");
+  if (directive === undefined && !noteCheck) return undefined;
+  // Compaction summarizes without tools.
+  if (request.tools.length === 0) return "BG-SUMMARY";
+  if (last.startsWith("<task_result")) return `BG-RESULT ${last}`;
+  if (noteCheck) {
+    const note = request.messages
+      .filter((message) => message.role === "user" && message.text.startsWith("[Tasks]"))
+      .at(-1);
+    return `BG-NOTE ${note?.text ?? "none"}`;
+  }
+  const results = (name: string) => request.toolResults.filter((entry) => entry.name === name);
+
+  switch (directive) {
+    case "BG-GROUP-START":
+      if (last.includes("BG-PING")) return "BG-PING-REPLY";
+      if (results("slow_lookup").length > 0) return "BG-GROUP-WAITED";
+      return {
+        toolCalls: [
+          { input: { seconds: 20, topic: "billing" }, name: "slow_lookup" },
+          { input: { seconds: 25, topic: "search" }, name: "slow_lookup" },
+        ],
+      };
+    case "BG-APPROVAL-START":
+      if (last.includes("BG-PING")) return "BG-PING-REPLY";
+      if (results("confirm_deploy").length > 0) return "BG-APPROVAL-WAITED";
+      return { toolCalls: [{ input: { service: "billing" }, name: "confirm_deploy" }] };
+    case "BG-TIMEOUT-START": {
+      const checks = results("timed_check");
+      if (checks.length > 0)
+        return `BG-TIMED ${checks.map((entry) => text(entry.output)).join(" | ")}`;
+      return {
+        toolCalls: [
+          { input: { label: "lint", seconds: 0 }, name: "timed_check" },
+          { input: { label: "integration", seconds: 30 }, name: "timed_check" },
+        ],
+      };
+    }
+    case "BG-SLEEP-START": {
+      const slept = results("sleep")[0];
+      if (slept !== undefined) return `BG-SLEPT ${text(slept.output)}`;
+      return { toolCalls: [{ input: { seconds: 600 }, name: "sleep" }] };
+    }
+    case "BG-DEADLINE-START":
+      if (results("stuck_job").length > 0) return "BG-STARTED";
+      return { toolCalls: [{ input: {}, name: "stuck_job" }] };
+    case "BG-REMIND-START":
+    case "BG-CANCEL-START":
+    case "BG-NOTE-START": {
+      if (last.includes("BG-IDLE")) return "BG-IDLE-REPLY";
+      const receipt = text(results("remind_later")[0]?.output);
+      if (last.includes("BG-STOP")) {
+        const stopped = results("task_cancel")[0];
+        if (stopped !== undefined) return `BG-CANCELLED ${text(stopped.output)}`;
+        const taskId = /remind_later-[0-9a-z]{6}/u.exec(receipt)?.[0] ?? "unknown";
+        return { toolCalls: [{ input: { taskIds: [taskId] }, name: "task_cancel" }] };
+      }
+      if (results("remind_later").length > 0) return "BG-STARTED";
+      const seconds = { "BG-CANCEL-START": 8, "BG-NOTE-START": 120, "BG-REMIND-START": 3 }[
+        directive
+      ];
+      return {
+        toolCalls: [{ input: { note: "water the office plants", seconds }, name: "remind_later" }],
+      };
+    }
+    default:
+      return "BG-IDLE-REPLY";
+  }
+}
+
 /**
  * Deterministic script: each directive names the workflow tool to call with
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
+  const background = respondBackground(request);
+  if (background !== undefined) return background;
+
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
     const auditing = request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT");

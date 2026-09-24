@@ -16,8 +16,7 @@ import { applyTaskCancelCall } from "#tasks/cancel.js";
 import { isTaskCancelRequest } from "#tasks/cancel-tool.js";
 import { planTaskWait, type TaskWaitPlan } from "#tasks/detach.js";
 import { readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
-import { readTasks } from "#tasks/read.js";
-import { setTaskTable } from "#tasks/state.js";
+import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 import { startWorkflowTask } from "#tasks/workflow-task.js";
 
@@ -54,7 +53,7 @@ export async function dispatchCoordinationStep(
   for (const request of prepared.plan) {
     if (isAgentTaskRequest(request)) continue;
     if (isTaskCancelRequest(request)) {
-      const table = readTasks(nextSession);
+      const table = getTaskTable(nextSession);
       const cancelled = applyTaskCancelCall(table, request, now);
       if (cancelled.table !== table) nextSession = setTaskTable(nextSession, cancelled.table);
       commands.push(...cancelled.commands);

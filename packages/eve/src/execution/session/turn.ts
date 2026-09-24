@@ -41,6 +41,7 @@ import {
 } from "#tasks/owner-body.js";
 import {
   DetachTimers,
+  DISMISSED_CALL_GRACE_MS,
   resolveWaitInterruption,
   steeringInterruptsWait,
   type TaskWaitPlan,
@@ -239,6 +240,9 @@ export class SessionExecution {
       for (const result of accepted) acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
       timers?.disarm(accepted.map((result) => result.callId));
     };
+    // Calls a steering message left waiting because it dismissed their
+    // question, mapped to the call that names the message's detach group.
+    const dismissed = new Map<string, string>();
 
     while (true) {
       const ready = resolveRuntimeActionResultsForCallIds({
@@ -265,12 +269,21 @@ export class SessionExecution {
         wait === undefined
           ? undefined
           : resolveWaitInterruption({
+              dismissed,
               interruption: next,
               plan: wait,
               unresolvedCallIds: unresolved(),
             });
-      if (changes !== undefined) {
-        accept(await interruptWaitedTasks(this.input.cursor, changes));
+      if (changes === undefined) continue;
+      accept(await interruptWaitedTasks(this.input.cursor, changes));
+      // A dismissed call that keeps working past its grace period detaches
+      // with the rest of the group, so the message never waits on it.
+      const { groupCallId } = changes;
+      if (changes.keepTaskIds.length === 0 || groupCallId === undefined) continue;
+      for (const callId of changes.detachCallIds) {
+        if (dismissed.has(callId) || !unresolved().includes(callId)) continue;
+        dismissed.set(callId, groupCallId);
+        timers?.arm(callId, DISMISSED_CALL_GRACE_MS);
       }
     }
   }

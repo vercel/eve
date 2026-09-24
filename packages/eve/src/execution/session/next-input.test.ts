@@ -289,6 +289,29 @@ describe("nextTurnDelivery", () => {
     expect(next.kind).toBe("authorization-resume");
   });
 
+  it("surfaces a cancel while the parked session still owes its last turn's result", async () => {
+    const owed = vi.fn(() => true);
+    const inbox = createMockInbox([cancelRead()]);
+
+    const next = await nextTurnDelivery({ ...waitInput(inbox), ownsParkedWork: owed });
+
+    expect(next).toEqual({ kind: "cancel-parked" });
+    expect(owed).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a cancel while parked when nothing is owed, and never surfaces a reset", async () => {
+    const idle = createMockInbox([cancelRead(), authorizationRead()]);
+    await expect(
+      nextTurnDelivery({ ...waitInput(idle), ownsParkedWork: () => false }),
+    ).resolves.toMatchObject({ kind: "authorization-resume" });
+
+    const queue = new SessionInputQueue();
+    const reset = createMockInbox([{ result: { done: false, value: { kind: "reset" } } }]);
+    await expect(
+      nextTurnDelivery({ ...waitInput(reset), ownsParkedWork: () => true, queue }),
+    ).resolves.toEqual({ kind: "reset" });
+  });
+
   it("does not let buffered deliveries bypass a ready authorization callback", async () => {
     const inbox = createMockInbox([]);
     const queue = queueOf({ kind: "deliver", payloads: [{ message: "later" }] });

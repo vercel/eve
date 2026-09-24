@@ -11,10 +11,9 @@ import type { WaitedTaskChanges } from "#tasks/detach.js";
 import { taskDetachedEvent, taskSettledEvent } from "#tasks/events.js";
 import { commandEffects, readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
-import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderDetachedReceipt, renderSleepEndedEarly, type TaskReceipt } from "#tasks/render.js";
-import { setTaskTable } from "#tasks/state.js";
+import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { cancelTask, detachTasks, type TaskTable } from "#tasks/table.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 
@@ -37,7 +36,7 @@ export async function detachWaitedTasksStep(
 
   const durable = readDurableSession(input.sessionState);
   const batch = getPendingCoordinationBatch(durable.state);
-  const table = readTasks(durable);
+  const table = getTaskTable(durable);
   const applied = applyWaitedTaskChanges({
     changes: input,
     now: new Date().toISOString(),
@@ -118,7 +117,10 @@ export function applyWaitedTaskChanges(input: {
   if (first !== undefined) {
     // Tasks one steering message detaches deliver their results together; a
     // timer detaches its call on its own.
-    const group = changes.reason === "steer" ? `${first.turnId}/${first.callId}` : undefined;
+    const group =
+      changes.reason === "steer"
+        ? `${first.turnId}/${changes.groupCallId ?? first.callId}`
+        : undefined;
     table = detachTasks(
       table,
       detached.map((record) => record.id),

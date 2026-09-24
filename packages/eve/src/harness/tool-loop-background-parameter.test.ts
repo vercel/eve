@@ -9,7 +9,10 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
-import { BACKGROUND_PARAMETER_DESCRIPTION } from "#tasks/render.js";
+import {
+  BACKGROUND_PARAMETER_DESCRIPTION,
+  renderBackgroundTasksInstruction,
+} from "#tasks/render.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 
 const RESEARCHER: HarnessToolDefinition = {
@@ -97,6 +100,17 @@ describe("the agent tool background parameter", () => {
     expect(request.tools.map((tool) => tool.name)).toContain("researcher");
     expect(properties(request, "researcher").background).toBeUndefined();
     expect(properties(request, "researcher").message).toBeDefined();
+  });
+
+  it("adds the background block that defers the [Tasks] note to the agent messaging block", async () => {
+    const { request } = await firstRequest({});
+    const system = request.messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.text)
+      .join("\n");
+
+    expect(system).toContain(renderBackgroundTasksInstruction({ agents: true }));
+    expect(system).not.toContain(renderBackgroundTasksInstruction({ agents: false }));
   });
 
   it("commits a background call for the owner with the flag in its input", async () => {

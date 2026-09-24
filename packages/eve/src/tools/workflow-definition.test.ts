@@ -5,6 +5,7 @@ import { defineTool } from "#tools/definition.js";
 import {
   defineWorkflowTool,
   isWorkflowToolDefinition,
+  MAX_DETACH_TIMEOUT_MS,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
   type WorkflowToolContext,
@@ -154,6 +155,24 @@ describe("defineWorkflowTool", () => {
       }),
     ).toThrow(
       'defineWorkflowTool: "detach" must be true, false, or { timeout } with a positive number of milliseconds',
+    );
+  });
+
+  it("rejects a detach timeout no timer can schedule", () => {
+    const define = (timeout: number) =>
+      defineWorkflowTool({
+        description: "Remind Alice later.",
+        detach: { timeout },
+        async execute() {
+          "use workflow";
+          return 1;
+        },
+        inputSchema: {},
+      });
+
+    expect(() => define(MAX_DETACH_TIMEOUT_MS)).not.toThrow();
+    expect(() => define(Number.MAX_SAFE_INTEGER)).toThrow(
+      `defineWorkflowTool: "detach.timeout" must be at most ${MAX_DETACH_TIMEOUT_MS} milliseconds (about 24.8 days), received ${Number.MAX_SAFE_INTEGER}.`,
     );
   });
 

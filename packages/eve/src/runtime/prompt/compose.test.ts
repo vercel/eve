@@ -13,13 +13,16 @@ describe("composeRuntimeBasePrompt", () => {
     expect(prompt).toContainEqual(expect.stringContaining("<idle_agents>"));
   });
 
-  it("describes subagent calls as blocking until the agent answers", () => {
+  it("describes subagent calls as waiting for the answer unless they return a receipt", () => {
     const prompt = composeRuntimeBasePrompt({
       subagentsAvailable: true,
     });
 
     expect(prompt).toContainEqual(
-      expect.stringContaining("runs until the agent answers, and its answer is the tool result"),
+      expect.stringContaining("waits for the agent to answer, and its answer is the tool result"),
+    );
+    expect(prompt).toContainEqual(
+      expect.stringContaining("its answer arrives later in a <task_result> message"),
     );
     expect(prompt).not.toContainEqual(expect.stringContaining("task receipt"));
     expect(prompt).not.toContainEqual(expect.stringContaining("task_peek"));

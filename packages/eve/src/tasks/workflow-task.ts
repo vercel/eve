@@ -20,11 +20,10 @@ import { settledEvents, taskStartedEvent } from "#tasks/events.js";
 import { toTaskError } from "#tasks/outcome.js";
 import type { TaskOwnerUpdate } from "#tasks/owner.js";
 import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
-import { readTasks } from "#tasks/read.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { backgroundReceiptResult, tooManyBackgroundTasksResult } from "#tasks/receipts.js";
 import { encodeTaskCreator, holdTaskResult, type TaskCreator } from "#tasks/results.js";
-import { findWorkflowTask, setTaskTable } from "#tasks/state.js";
+import { findWorkflowTask, getTaskTable, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
 
 // Owner-side lifecycle of workflow tool calls: each call is a task whose
@@ -61,13 +60,14 @@ export async function startWorkflowTask<
   const { now, request, session } = input;
   // `false` and `{ timeout }` start waited; the turn may detach them later.
   const background = request.detach === true;
-  const table = readTasks(session);
+  const table = getTaskTable(session);
   const existing = table.records.find(
     (record) => record.callId === request.callId && record.turnId === input.turnId,
   );
   if (background && existing === undefined) {
     const rejected = tooManyBackgroundTasksResult({
       callId: request.callId,
+      kind: "workflow",
       table,
       toolName: request.toolName,
     });
@@ -179,7 +179,7 @@ export function settleWorkflowTask(input: {
 }): TaskOwnerUpdate {
   const { from } = input.message;
   const session = readDurableSession(input.sessionState);
-  const table = readTasks(session);
+  const table = getTaskTable(session);
   const record = findWorkflowTask(table, from);
   if (record === undefined) {
     return {

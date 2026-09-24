@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskRecord } from "#tasks/record.js";
 import {
+  AGENT_MESSAGING_INSTRUCTION,
   renderBackgroundReceipt,
+  renderBackgroundTasksInstruction,
   renderDetachedReceipt,
   renderModelOutputBody,
   renderSleepEndedEarly,
   renderTaskResults,
   renderTasksNote,
+  renderTooManyBackgroundTasks,
   resolveTasksAnnouncement,
 } from "#tasks/render.js";
 
@@ -120,7 +123,40 @@ describe("renderTasksNote", () => {
   });
 });
 
+describe("system blocks", () => {
+  it("explain the [Tasks] note once, whichever blocks a session gets", () => {
+    const mentions = (text: string) =>
+      text.split("added by eve, not written by the user").length - 1;
+    const withAgents = renderBackgroundTasksInstruction({ agents: true });
+    const withoutAgents = renderBackgroundTasksInstruction({ agents: false });
+
+    expect(mentions(AGENT_MESSAGING_INSTRUCTION)).toBe(1);
+    expect(mentions(`${AGENT_MESSAGING_INSTRUCTION}\n${withAgents}`)).toBe(1);
+    expect(mentions(withoutAgents)).toBe(1);
+    // A delegated answer can arrive as a receipt; only a session with agents can redirect one.
+    expect(AGENT_MESSAGING_INSTRUCTION).toContain("When the call returns a receipt instead");
+    expect(withAgents).toContain("To redirect an agent that is still working");
+    expect(withoutAgents).not.toContain("agentId");
+  });
+});
+
+describe("renderTooManyBackgroundTasks", () => {
+  it("offers a waited call only where the call can wait", () => {
+    expect(renderTooManyBackgroundTasks(["a-1", "b-2"], 10, "agent")).toBe(
+      "10 background tasks are already running (a-1, b-2). Wait for one to report, stop one with task_cancel, or call without background.",
+    );
+    expect(renderTooManyBackgroundTasks(["a-1"], 10, "workflow")).toBe(
+      "10 background tasks are already running (a-1). Wait for one to report or stop one with task_cancel, then call this tool again.",
+    );
+  });
+});
+
 describe("resolveTasksAnnouncement", () => {
+  const tasksNote = (content: string) => ({
+    content,
+    kind: "context.state",
+    role: "user" as const,
+  });
   const working = record({ id: "remind-q4x1ze", kind: "workflow", name: "remind" });
 
   it("lists a background task again once compaction or a clear removed the latest note", () => {
@@ -131,9 +167,19 @@ describe("resolveTasksAnnouncement", () => {
     expect(resolveTasksAnnouncement({ messages: compacted, records: [working] })).toBe(note);
     expect(
       resolveTasksAnnouncement({
-        messages: [...compacted, { content: note, role: "user" }],
+        messages: [...compacted, tasksNote(note)],
         records: [working],
       }),
+    ).toBeUndefined();
+  });
+
+  it("ignores a person's message that starts with the note label", () => {
+    const note = renderTasksNote([working])!;
+    const typed = { content: note, kind: "user", role: "user" as const };
+
+    expect(resolveTasksAnnouncement({ messages: [typed], records: [working] })).toBe(note);
+    expect(
+      resolveTasksAnnouncement({ messages: [tasksNote(note), typed], records: [working] }),
     ).toBeUndefined();
   });
 
@@ -142,7 +188,7 @@ describe("resolveTasksAnnouncement", () => {
 
     expect(
       resolveTasksAnnouncement({
-        messages: [{ content: note, role: "user" }],
+        messages: [tasksNote(note)],
         records: [{ ...working, delivered: true, status: "completed" }],
       }),
     ).toBe(["[Tasks]", "<tasks>", "</tasks>", "<idle_agents>", "</idle_agents>"].join("\n"));

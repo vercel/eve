@@ -89,7 +89,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     );
   });
 
-  it("includes blocking messaging instructions for the root framework agent tool", () => {
+  it("includes agent messaging instructions for the root framework agent tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -97,7 +97,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     });
 
     expect(turnAgent.instructions).toContainEqual(
-      expect.stringContaining("runs until the agent answers"),
+      expect.stringContaining("An agent call waits for the agent to answer"),
     );
     expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("task receipt"));
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Tool execution"));

@@ -21,8 +21,8 @@ export function ownerInboxHookToken(ownerSessionId: string): string {
 }
 
 /**
- * Reads the owner's task table. Unreadable records are dropped here and
- * logged by the owner step that next writes the table.
+ * Reads the owner's task table. Unreadable records are left out; writes keep
+ * them until the owner's deadline step reports each one as `STATE_LOST`.
  */
 export function getTaskTable(session: { readonly state?: SessionStateMap }): TaskTable {
   return readTaskTable(session.state).table;
@@ -32,8 +32,9 @@ export function getTaskTable(session: { readonly state?: SessionStateMap }): Tas
 export function setTaskTable<T extends { readonly state?: SessionStateMap }>(
   session: T,
   table: TaskTable,
+  options?: { readonly dropLost?: boolean },
 ): T {
-  return { ...session, state: writeTaskTable(session.state, pruneTaskTable(table)) };
+  return { ...session, state: writeTaskTable(session.state, pruneTaskTable(table), options) };
 }
 
 /** Session state key holding the owner's armed deadline timer. */
@@ -95,8 +96,8 @@ export type TaskTimerPlan =
  * Decides whether the owner arms, keeps, or cancels its timer. The armed
  * timer is kept only when this owner run armed it, it fires no later than
  * the table needs, and its signal is not overdue. An unreadable record wakes
- * the owner at once: the deadline step's write removes it, so it cannot
- * block handoff. A wake time in the past is armed for `nowMs`.
+ * the owner at once: the deadline step reports it as `STATE_LOST` and removes
+ * it, so it cannot block handoff. A wake time in the past is armed for `nowMs`.
  */
 export function planTaskTimer(
   state: SessionStateMap | undefined,

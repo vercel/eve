@@ -1,8 +1,7 @@
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
-import { readTasks } from "#tasks/read.js";
-import { setTaskTable } from "#tasks/state.js";
+import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, findTask } from "#tasks/table.js";
 
 // The clock rule: a task's deadline clock stops while a request it (or a
@@ -19,7 +18,7 @@ export function stopTaskClock<T extends { readonly state?: SessionStateMap }>(
     readonly taskId: string;
   },
 ): T {
-  const table = readTasks(session);
+  const table = getTaskTable(session);
   const record = findTask(table, input.taskId);
   if (record === undefined) return session;
   const applied = applyTaskMessage(
@@ -41,7 +40,7 @@ export function resumeResolvedTaskClocks<T extends { readonly state?: SessionSta
   session: T,
   now: string,
 ): T {
-  const table = readTasks(session);
+  const table = getTaskTable(session);
   const waiting = new Set<string>();
   for (const route of getProxyInputRequests(session.state).values()) {
     if (route.taskId !== undefined) waiting.add(route.taskId);

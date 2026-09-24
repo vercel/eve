@@ -14,7 +14,12 @@ import {
   type TaskMode,
   type TaskOutcome,
 } from "#tasks/protocol.js";
-import { decodeTaskRecord, TASK_RECORD_VERSION, type TaskRecord } from "#tasks/record.js";
+import {
+  decodeTaskRecord,
+  TASK_RECORD_VERSION,
+  type RecoveredTaskFields,
+  type TaskRecord,
+} from "#tasks/record.js";
 import {
   renderAgentMismatch,
   renderAgentUnreachable,
@@ -55,11 +60,31 @@ export interface TaskTable {
   readonly [TASK_TABLE]: true;
 }
 
-/** A record that could not be decoded; it is reported as `STATE_LOST` and removed. */
-export interface LostTask {
-  readonly id?: string;
-  readonly name?: string;
+/**
+ * A record that could not be decoded. Writes keep it until the owner's
+ * deadline step reports it as `STATE_LOST` and removes it.
+ */
+export type LostTask = RecoveredTaskFields & {
   readonly reason: string;
+  /** The stored value, kept by writes until the loss is reported. */
+  readonly value?: unknown;
+  /** A second record with a readable task's ID; it is dropped, not reported. */
+  readonly duplicate?: true;
+};
+
+/**
+ * Whether a lost record stands for a result someone still waits on. A
+ * record whose result already reached history is dropped silently.
+ */
+export function isReportedLoss(
+  lost: LostTask,
+): lost is LostTask & { readonly id: string; readonly name: string } {
+  return (
+    lost.id !== undefined &&
+    lost.name !== undefined &&
+    lost.duplicate !== true &&
+    lost.delivered !== true
+  );
 }
 
 /** What the owner must do after a table transition. Effects are never persisted. */
@@ -134,11 +159,16 @@ export function readTaskTable(state: SessionStateMap | undefined): {
     const decoded = decodeTaskRecord(value);
     if (!decoded.ok) {
       const { ok: _ok, ...loss } = decoded;
-      lost.push(loss);
+      lost.push({ ...loss, value });
       continue;
     }
     if (ids.has(decoded.record.id)) {
-      lost.push({ id: decoded.record.id, name: decoded.record.name, reason: "duplicate id" });
+      lost.push({
+        duplicate: true,
+        id: decoded.record.id,
+        name: decoded.record.name,
+        reason: "duplicate id",
+      });
       continue;
     }
     ids.add(decoded.record.id);
@@ -147,17 +177,30 @@ export function readTaskTable(state: SessionStateMap | undefined): {
   return { lost, table: toTable(records) };
 }
 
+/**
+ * Writes the table. Unreadable records already in `state` are kept, so no
+ * write loses a task silently; `dropLost` removes them once the owner has
+ * reported each loss.
+ */
 export function writeTaskTable(
   state: SessionStateMap | undefined,
   table: TaskTable,
+  options: { readonly dropLost?: boolean } = {},
 ): SessionStateMap | undefined {
-  if (table.records.length === 0) {
+  const kept =
+    options.dropLost === true
+      ? []
+      : readTaskTable(state).lost.flatMap((lost) =>
+          lost.value === undefined || lost.duplicate === true ? [] : [lost.value],
+        );
+  const records = [...table.records, ...kept];
+  if (records.length === 0) {
     if (state?.[TASK_TABLE_STATE_KEY] === undefined) return state;
     const next = { ...state };
     delete next[TASK_TABLE_STATE_KEY];
     return Object.keys(next).length === 0 ? undefined : next;
   }
-  return { ...state, [TASK_TABLE_STATE_KEY]: { records: table.records } };
+  return { ...state, [TASK_TABLE_STATE_KEY]: { records } };
 }
 
 export function findTask(table: TaskTable, taskId: string): TaskRecord | undefined {
@@ -515,20 +558,6 @@ export function pruneTaskTable(table: TaskTable): TaskTable {
     return record.kind === "agent" && record.child !== undefined;
   });
   return records.length === table.records.length ? table : toTable(records);
-}
-
-/** Removes one agent record, for example after its child session ended. */
-export function removeTask(table: TaskTable, taskId: string): TaskTable {
-  const records = table.records.filter((record) => record.id !== taskId);
-  return records.length === table.records.length ? table : toTable(records);
-}
-
-/** Agents that finished their last generation and can be given more work. */
-export function idleAgents(table: TaskTable): readonly TaskRecord[] {
-  return table.records.filter(
-    (record) =>
-      record.kind === "agent" && record.child !== undefined && isTerminalTaskStatus(record.status),
-  );
 }
 
 function issueCommand(table: TaskTable, record: TaskRecord, command: TaskCommand): TaskTransition {

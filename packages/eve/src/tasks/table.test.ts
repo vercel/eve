@@ -7,7 +7,7 @@ import {
   applyTaskMessage,
   cancelTask,
   evaluateTaskDeadlines,
-  idleAgents,
+  isReportedLoss,
   nextTaskWakeAt,
   pruneTaskTable,
   readTaskTable,
@@ -425,6 +425,12 @@ describe("deadlines", () => {
   });
 });
 
+/** The raw records a write stored, including any it kept unread. */
+function storedRecords(state: ReturnType<typeof writeTaskTable>): unknown[] {
+  const stored = state?.[TASK_TABLE_STATE_KEY] as { records?: unknown[] } | undefined;
+  return stored?.records ?? [];
+}
+
 describe("persistence", () => {
   it("round-trips through session state and quarantines invalid records", () => {
     const task = started();
@@ -441,10 +447,62 @@ describe("persistence", () => {
     const read = readTaskTable(corrupt);
     expect(read.table.records).toEqual(task.table.records);
     expect(read.lost).toEqual([
-      { id: "old-aaaaaa", name: "old", reason: "unsupported version 0" },
-      { reason: "not an object" },
+      {
+        id: "old-aaaaaa",
+        name: "old",
+        reason: "unsupported version 0",
+        value: { id: "old-aaaaaa", name: "old", v: 0 },
+      },
+      { reason: "not an object", value: "garbage" },
     ]);
     expect(writeTaskTable(state, taskTable([]))).toBeUndefined();
+  });
+
+  it("keeps unreadable records through writes until their loss is reported", () => {
+    const task = started();
+    const unreadable = {
+      callId: "call_9",
+      creator: { auth: null },
+      delivered: false,
+      generation: 2,
+      id: "old-aaaaaa",
+      kind: "agent",
+      mode: "background",
+      name: "old",
+      v: 0,
+      workflowCaller: { replyTo: "hook-1", runId: "run-1" },
+    };
+    const corrupt = { [TASK_TABLE_STATE_KEY]: { records: [unreadable] } };
+
+    const written = writeTaskTable(corrupt, task.table);
+    expect(storedRecords(written)).toEqual([...task.table.records, unreadable]);
+    const [lost] = readTaskTable(written).lost;
+    expect(lost).toMatchObject({
+      callId: "call_9",
+      creator: { auth: null },
+      delivered: false,
+      generation: 2,
+      kind: "agent",
+      mode: "background",
+      replyTo: "hook-1",
+    });
+    expect(isReportedLoss(lost!)).toBe(true);
+    expect(isReportedLoss({ ...lost!, delivered: true })).toBe(false);
+    expect(isReportedLoss({ reason: "not an object" })).toBe(false);
+
+    const dropped = writeTaskTable(written, task.table, { dropLost: true });
+    expect(readTaskTable(dropped)).toEqual({ lost: [], table: task.table });
+  });
+
+  it("drops a second record with a readable task's id without reporting it", () => {
+    const task = started();
+    const [record] = task.table.records;
+    const state = { [TASK_TABLE_STATE_KEY]: { records: [record, record] } };
+
+    const [lost] = readTaskTable(state).lost;
+    expect(lost).toMatchObject({ duplicate: true, reason: "duplicate id" });
+    expect(isReportedLoss(lost!)).toBe(false);
+    expect(storedRecords(writeTaskTable(state, task.table))).toEqual([record]);
   });
 
   it("decodes one record without validating others", () => {
@@ -486,7 +544,6 @@ describe("persistence", () => {
     table = taskTable(table.records.map((record) => ({ ...record, delivered: true })));
     const pruned = pruneTaskTable(table);
     expect(pruned.records.map((record) => record.kind)).toEqual(["agent"]);
-    expect(idleAgents(pruned)).toHaveLength(1);
     expect(pruned.records[0]?.lastStatus).toBe("done");
   });
 });

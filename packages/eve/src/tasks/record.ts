@@ -49,15 +49,26 @@ export interface TaskRecord {
   readonly delivered: boolean;
 }
 
+/**
+ * What an unreadable record still says about its task, read field by field,
+ * so the owner can report the loss to whoever waits on the task.
+ */
+export interface RecoveredTaskFields {
+  readonly id?: string;
+  readonly name?: string;
+  readonly callId?: string;
+  readonly generation?: number;
+  readonly kind?: TaskKind;
+  readonly mode?: TaskMode;
+  readonly creator?: JsonObject;
+  /** Reply hook of the `ctx.agent` call waiting on the task. */
+  readonly replyTo?: string;
+  readonly delivered?: boolean;
+}
+
 export type TaskRecordDecodeResult =
   | { readonly ok: true; readonly record: TaskRecord }
-  | {
-      readonly ok: false;
-      /** Identity recovered from the invalid value, so the loss can be reported. */
-      readonly id?: string;
-      readonly name?: string;
-      readonly reason: string;
-    };
+  | ({ readonly ok: false; readonly reason: string } & RecoveredTaskFields);
 
 const KINDS = new Set<TaskKind>(["agent", "workflow"]);
 const MODES = new Set<TaskMode>(["foreground", "background"]);
@@ -132,15 +143,11 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   if (!isRecordObject(value)) return { ok: false, reason: "not an object" };
   const id = isString(value.id) ? value.id : undefined;
   const name = isString(value.name) ? value.name : undefined;
-  const fail = (reason: string): TaskRecordDecodeResult => {
-    const failure: { ok: false; id?: string; name?: string; reason: string } = {
-      ok: false,
-      reason,
-    };
-    if (id !== undefined) failure.id = id;
-    if (name !== undefined) failure.name = name;
-    return failure;
-  };
+  const fail = (reason: string): TaskRecordDecodeResult => ({
+    ok: false,
+    reason,
+    ...recoverTaskFields(value),
+  });
   if (value.v !== TASK_RECORD_VERSION) return fail(`unsupported version ${String(value.v)}`);
   if (id === undefined || name === undefined) return fail("missing identity");
   if (
@@ -186,4 +193,22 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   if (typeof value.delivered !== "boolean") return fail("invalid delivered");
   const fields: Partial<Record<keyof TaskRecord, unknown>> = value;
   return { ok: true, record: fields as TaskRecord };
+}
+
+function recoverTaskFields(value: Record<string, unknown>): RecoveredTaskFields {
+  const fields: { -readonly [K in keyof RecoveredTaskFields]: RecoveredTaskFields[K] } = {};
+  if (isString(value.id)) fields.id = value.id;
+  if (isString(value.name)) fields.name = value.name;
+  if (isString(value.callId)) fields.callId = value.callId;
+  if (typeof value.generation === "number" && Number.isSafeInteger(value.generation)) {
+    fields.generation = value.generation;
+  }
+  if (KINDS.has(value.kind as TaskKind)) fields.kind = value.kind as TaskKind;
+  if (MODES.has(value.mode as TaskMode)) fields.mode = value.mode as TaskMode;
+  if (isRecordObject(value.creator)) fields.creator = value.creator as JsonObject;
+  if (isRecordObject(value.workflowCaller) && isString(value.workflowCaller.replyTo)) {
+    fields.replyTo = value.workflowCaller.replyTo;
+  }
+  if (typeof value.delivered === "boolean") fields.delivered = value.delivered;
+  return fields;
 }

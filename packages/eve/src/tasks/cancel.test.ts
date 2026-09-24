@@ -11,7 +11,12 @@ import { applyTaskCancelCall, cancelTasksStep } from "#tasks/cancel.js";
 import { TASK_CANCEL_WORKFLOW_ID } from "#tasks/cancel-tool.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderTasksNote } from "#tasks/render.js";
-import { holdTaskResult, readPendingTaskResults, takeTaskResults } from "#tasks/results.js";
+import {
+  encodeTaskCreator,
+  holdTaskResult,
+  readPendingTaskResults,
+  takeTaskResults,
+} from "#tasks/results.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { applyTaskMessage, startTask, type TaskTable } from "#tasks/table.js";
 import { settleWorkflowTask } from "#tasks/workflow-task.js";
@@ -228,6 +233,29 @@ describe("applyTaskCancelCall", () => {
     });
     expect(cancelled).toMatchObject({ commands: [], events: [] });
     expect(cancelled.table).toBe(initial);
+  });
+
+  it("stops a task another principal started: access to the session includes cancel rights", () => {
+    const alices = {
+      ...REMINDER,
+      creator: encodeTaskCreator({
+        auth: {
+          attributes: {},
+          authenticator: "slack",
+          principalId: "U-alice",
+          principalType: "user",
+        },
+      }),
+    };
+
+    // The call runs in Bob's turn; nothing about it names a principal.
+    const { result } = applyTaskCancelCall(taskTable([alices]), call(["remind-q4x1ze"]), NOW);
+
+    expect(result.output).toEqual({
+      alreadyFinished: [],
+      cancelled: ["remind-q4x1ze"],
+      unknown: [],
+    });
   });
 
   it("keeps a cancelled agent available for new work", () => {

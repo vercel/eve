@@ -223,6 +223,128 @@ export default defineAgent({
   );
 
   it(
+    "cancels a child that holds its caller for background work, and keeps the agent available",
+    async () => {
+      const app = await scenarioApp({
+        dependencies: { zod: "^4.3.6" },
+        files: {
+          "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  model: mockModel(({ lastUserMessage, messages, toolResults }) => {
+    if (lastUserMessage?.includes("again")) {
+      const back = toolResults.find((result) => JSON.stringify(result.output).includes("back"));
+      if (back !== undefined) return "Parent got: " + JSON.stringify(back.output);
+      const agentId = /worker-[0-9a-z]{6}/u.exec(messages.map((message) => message.text).join(" "))?.[0];
+      return { toolCalls: [{ name: "worker", input: { agentId, message: "Please check in again." } }] };
+    }
+    if (toolResults.length === 0) {
+      return { toolCalls: [{ name: "worker", input: { message: "Set a stand-up reminder." } }] };
+    }
+    return "Parent got: " + JSON.stringify(toolResults[0].output);
+  }),
+  modelContextWindowTokens: 32_000,
+});
+`,
+          "agent/instructions.md": "Delegate reminders to the worker.\n",
+          "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  description: "Sets reminders.",
+  model: mockModel(({ lastUserMessage, toolResults }) => {
+    if (lastUserMessage?.includes("again")) return "Worker is back.";
+    if (lastUserMessage?.startsWith("<task_result")) return "Final: the reminder fired.";
+    if (toolResults.length === 0) {
+      return { toolCalls: [{ name: "remind", input: { note: "stand-up at 10" } }] };
+    }
+    return "Interim: reminder started.";
+  }),
+  modelContextWindowTokens: 32_000,
+});
+`,
+          "agent/subagents/worker/instructions.md": "Set the reminder, then report.\n",
+          "agent/subagents/worker/tools/remind.ts": REMIND_TOOL.replace(
+            'sleep("3s")',
+            'sleep("20s")',
+          ),
+        },
+        installDependencies: true,
+        name: "background-cancel-held-child",
+      });
+      const server = await startEveDev(app.appRoot, {
+        env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+      });
+      try {
+        const client = new Client({ host: server.url });
+        const { session, response } = await client.sessions.create({
+          message: "Remind me about stand-up.",
+        });
+        const rootEvents = await collectUntil(session.stream(), (events) =>
+          events.some((event) => event.type === "task.started" && event.data.name === "worker"),
+        );
+        const started = rootEvents.find(
+          (event): event is Extract<MessageStreamEvent, { type: "task.started" }> =>
+            event.type === "task.started" && event.data.name === "worker",
+        )!;
+        // The worker replies, then holds the parent's call until its reminder reports.
+        const held = await collectUntil(session.streamSubagent(started), (events) =>
+          events.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message === "Interim: reminder started.",
+          ),
+        );
+        const reminder = held.find((event) => event.type === "task.started");
+        expect(reminder?.data).toMatchObject({ mode: "background", name: "remind" });
+
+        await session.cancel();
+        const cancelled = await response.result();
+        expect(cancelled.events.some((event) => event.type === "turn.cancelled")).toBe(true);
+
+        // The held worker stops its own reminder instead of dropping the cancel.
+        await collectUntil(session.streamSubagent(started), (events) =>
+          events.some(
+            (event) =>
+              event.type === "task.settled" &&
+              event.data.taskId === reminder?.data.taskId &&
+              event.data.status === "cancelled",
+          ),
+        );
+
+        // Past the 30-second window: an unconfirmed cancel would have hard-stopped the worker.
+        await new Promise((resolve) => setTimeout(resolve, 35_000));
+        const again = await (
+          await session.send("Please ask the worker to check in again.")
+        ).result();
+        const workerCalls = again.events.flatMap((event) =>
+          event.type === "action.result" &&
+          event.data.result.kind === "tool-result" &&
+          event.data.result.toolName === "worker"
+            ? [event.data.result]
+            : [],
+        );
+        expect(workerCalls).toEqual([expect.objectContaining({ output: "Worker is back." })]);
+        const restarted = again.events.find((event) => event.type === "task.started");
+        expect(restarted?.data.taskId).toBe(started.data.taskId);
+
+        const history = await collectFor(session.streamSubagent(started), 2_000);
+        expect(
+          history.some(
+            (event) =>
+              event.type === "message.completed" &&
+              event.data.message === "Final: the reminder fired.",
+          ),
+        ).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
     "stops background tasks through task_cancel and session.cancel({ taskId }) without a later result",
     async () => {
       const app = await scenarioApp({

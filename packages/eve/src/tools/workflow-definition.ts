@@ -136,6 +136,12 @@ export interface WorkflowToolDefinition<
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
+/**
+ * Longest `detach.timeout`: the largest delay `setTimeout` accepts, about
+ * 24.8 days. A longer timer could not be scheduled reliably.
+ */
+export const MAX_DETACH_TIMEOUT_MS = 2_147_483_647;
+
 /** Validates an authored `detach` value. */
 export function normalizeWorkflowToolDetach(
   value: unknown,
@@ -152,6 +158,11 @@ export function normalizeWorkflowToolDetach(
       Number.isFinite(timeout) &&
       timeout > 0
     ) {
+      if (timeout > MAX_DETACH_TIMEOUT_MS) {
+        throw new Error(
+          `${factory}: "detach.timeout" must be at most ${MAX_DETACH_TIMEOUT_MS} milliseconds (about 24.8 days), received ${timeout}. Use the top-level "timeout" to limit how long a call runs.`,
+        );
+      }
       return { timeout };
     }
   }

@@ -327,6 +327,7 @@ describe("startWorkflowTask with detach: true", () => {
         message: renderTooManyBackgroundTasks(
           working.map((record) => record.id),
           10,
+          "workflow",
         ),
       },
       toolName: "deploy",

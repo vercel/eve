@@ -22,6 +22,8 @@ export type NextTurnInstruction =
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
+  /** A cancel reached a parked session that still owes a result for its last turn. */
+  | { readonly kind: "cancel-parked" }
   | TurnSelection;
 
 /**
@@ -34,11 +36,16 @@ export type NextTurnInstruction =
  * Background results never coalesce with deliveries: once queued input is
  * handled and no turn is open, each creator's held results start their own
  * result turn.
+ *
+ * A cancel is dropped while parked unless `ownsParkedWork` holds: the session
+ * still owes its delegated caller, or a task-mode run its result, so the
+ * cancel stops that work instead.
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
   readonly deferDeliveries?: boolean;
+  readonly ownsParkedWork?: () => boolean;
   readonly expectedAttemptIds?: ReadonlySet<string>;
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
@@ -107,6 +114,11 @@ export async function nextTurnDelivery(input: {
         break;
       }
       case "cancel":
+        // A reset also admits as a cancel; the session ends through its control instead.
+        if (payload.kind === "cancel" && input.ownsParkedWork?.() === true) {
+          return { kind: "cancel-parked" };
+        }
+        break;
       case "delivery":
       case "consumed":
         break;
@@ -123,7 +135,7 @@ const OPEN_TURN_STATE_KEYS = [
 ];
 
 /** Whether a turn still waits on answers or actions, even though its stream turn closed. */
-function hasOpenTurnWork(state: Record<string, unknown> | undefined): boolean {
+export function hasOpenTurnWork(state: Record<string, unknown> | undefined): boolean {
   if (OPEN_TURN_STATE_KEYS.some((key) => state?.[key] !== undefined)) return true;
   const batches = state?.["eve.runtime.pendingInputBatches"];
   return Array.isArray(batches) && batches.length > 0;
