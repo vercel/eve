@@ -67,6 +67,7 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
+import { hasPendingApprovalBatch } from "#harness/input-requests.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
@@ -517,10 +518,29 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
               getHarnessEmissionState(schemaSession.state),
               runtimeIdentity,
               isHarnessBetweenTurns(schemaSession),
+              input.input?.control === undefined
+                ? {
+                    session: schemaSession,
+                    stepInput: consumeDeferredStepInput({
+                      input: stepInput,
+                      preferCurrentInput:
+                        mode !== "conversation" &&
+                        stepInput !== undefined &&
+                        hasPendingApprovalBatch(schemaSession),
+                      session: schemaSession,
+                    }).input,
+                  }
+                : undefined,
             );
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
-              if (isHarnessBetweenTurns(schemaSession)) {
+              const startsTurn = completedAuths.some(
+                ({ result }) =>
+                  pendingAuth?.challenges.find(
+                    (challenge) => challenge.attemptId === result.attemptId,
+                  )?.candidateId === undefined,
+              );
+              if (startsTurn && isHarnessBetweenTurns(schemaSession)) {
                 const turnInput = createTurnInputMessages(
                   consumeDeferredStepInput({ session: schemaSession, input: stepInput }).input,
                 );
