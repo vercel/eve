@@ -539,30 +539,64 @@ describe("reportTaskStartedStep", () => {
     resumeHookMock.mockReset();
   });
 
-  const input = {
-    callId: "call-1",
-    child: { continuationToken: "subagent:parent:research-abc234", sessionId: "child-session" },
-    token: "eve:inbox:v1:eve:session:parent:inbox",
+  const child = {
+    continuationToken: "subagent:parent:research-abc234",
+    sessionId: "child-session",
   };
+  const OWNER_INBOX = "eve:inbox:v1:eve:session:parent:inbox";
 
-  it("reports the child's address to the owner inbox", async () => {
+  it("resolves the caller and reports the child's address to the owner inbox in one step", async () => {
     resumeHookMock.mockResolvedValue(undefined as never);
 
-    await expect(reportTaskStartedStep(input)).resolves.toBe(true);
+    await expect(
+      reportTaskStartedStep({
+        child,
+        serializedContext: createSerializedContext({ parentContinuationToken: OWNER_INBOX }),
+      }),
+    ).resolves.toEqual({
+      caller: {
+        callId: "call-1",
+        replyTo: { kind: "hook", token: OWNER_INBOX },
+        subagentName: "research",
+      },
+      ownerGone: false,
+    });
 
-    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(input.token, {
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(OWNER_INBOX, {
       callId: "call-1",
-      child: input.child,
+      child,
       kind: "task.started",
     });
   });
 
+  it("reports nothing for a remote owner, which learns the address from its create response", async () => {
+    const result = await reportTaskStartedStep({
+      child,
+      serializedContext: {
+        [SessionCallbackKey.name]: {
+          callId: "call-1",
+          subagentName: "research",
+          token: "reply-token",
+          url: "https://parent.example/eve/v1/callback/reply-token",
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ caller: { replyTo: { kind: "callback" } }, ownerGone: false });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("tells the child to exit when its owner no longer exists", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    resumeHookMock.mockRejectedValue(new HookNotFoundError(input.token));
+    resumeHookMock.mockRejectedValue(new HookNotFoundError(OWNER_INBOX));
 
     try {
-      await expect(reportTaskStartedStep(input)).resolves.toBe(false);
+      await expect(
+        reportTaskStartedStep({
+          child,
+          serializedContext: createSerializedContext({ parentContinuationToken: OWNER_INBOX }),
+        }),
+      ).resolves.toMatchObject({ ownerGone: true });
       expect(warnSpy).toHaveBeenCalledWith(
         "[eve:execution.delegated-parent-notification] task owner no longer exists; the child exits",
         expect.objectContaining({ callId: "call-1" }),
@@ -576,6 +610,11 @@ describe("reportTaskStartedStep", () => {
     const failure = new Error("queue unavailable");
     resumeHookMock.mockRejectedValue(failure);
 
-    await expect(reportTaskStartedStep(input)).rejects.toBe(failure);
+    await expect(
+      reportTaskStartedStep({
+        child,
+        serializedContext: createSerializedContext({ parentContinuationToken: OWNER_INBOX }),
+      }),
+    ).rejects.toBe(failure);
   });
 });

@@ -78,7 +78,7 @@ describe("terminateChildSessionsStep", () => {
     vi.useRealTimers();
   });
 
-  it("asks working and idle local children to end, and hard-stops them only after 30 seconds", async () => {
+  it("asks working and idle local children to end, and arms a hard stop for the working one before any request", async () => {
     const working = localRecord({ id: "research-aaaaaa", sessionId: "session-working" });
     const idle = localRecord({
       id: "research-bbbbbb",
@@ -94,12 +94,44 @@ describe("terminateChildSessionsStep", () => {
       [{ reason: "Parent session ended", sessionId: "session-idle" }],
     ]);
     expect(cancelRunMock).not.toHaveBeenCalled();
+    // An idle agent runs nothing, so ending its session is enough.
     expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith({
       ownerSessionId: "parent-session",
-      targets: [working.child, idle.child],
+      targets: [working.child],
       wakeAt: "2026-09-24T14:00:30.000Z",
     });
+    // Armed first, so a hard stop of this step's own session midway still reaches the child.
+    expect(armChildHardStopMock.mock.invocationCallOrder[0]).toBeLessThan(
+      requestWorkflowSessionEndMock.mock.invocationCallOrder[0]!,
+    );
     expect(deserializeContextMock).not.toHaveBeenCalled();
+  });
+
+  it("arms no timer when every child is idle and every request reached it", async () => {
+    await terminateChildSessionsStep({
+      sessionState: makeSessionState([
+        localRecord({ id: "research-aaaaaa", sessionId: "session-1", status: "completed" }),
+        localRecord({ id: "research-bbbbbb", sessionId: "session-2", status: "failed" }),
+      ]),
+    });
+
+    expect(requestWorkflowSessionEndMock).toHaveBeenCalledTimes(2);
+    expect(armChildHardStopMock).not.toHaveBeenCalled();
+  });
+
+  it("sends every request before any answers, so one slow child does not hold up the rest", async () => {
+    const slow = Promise.withResolvers<undefined>();
+    requestWorkflowSessionEndMock.mockReturnValueOnce(slow.promise);
+
+    const ending = terminateChildSessionsStep({
+      sessionState: makeSessionState([
+        localRecord({ id: "research-aaaaaa", sessionId: "session-1" }),
+        localRecord({ id: "research-bbbbbb", sessionId: "session-2" }),
+      ]),
+    });
+    await vi.waitFor(() => expect(requestWorkflowSessionEndMock).toHaveBeenCalledTimes(2));
+    slow.resolve(undefined);
+    await ending;
   });
 
   it("cancels a working workflow run and hard-stops each run that still owes a stop", async () => {
@@ -150,6 +182,7 @@ describe("terminateChildSessionsStep", () => {
     });
     expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
       headers: { authorization: "Bearer fresh" },
+      reason: "Parent session ended",
       remote: { name: "research", url: "https://remote.example.com" },
       sessionId: "session-remote",
     });
@@ -172,6 +205,7 @@ describe("terminateChildSessionsStep", () => {
     expect(resolveRemoteAgentStreamHeadersMock).not.toHaveBeenCalled();
     expect(resetRemoteAgentSessionMock).toHaveBeenCalledWith({
       headers: {},
+      reason: "Parent session ended",
       remote: { name: "research", url: "https://remote.example.com" },
       sessionId: "session-remote",
     });
@@ -225,7 +259,7 @@ describe("terminateChildSessionsStep", () => {
     });
   });
 
-  it("keeps ending children after one request fails, and still arms the hard stop", async () => {
+  it("keeps ending children after one request fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     requestWorkflowSessionEndMock
       .mockRejectedValueOnce(new Error("inbox unavailable"))
@@ -246,6 +280,7 @@ describe("terminateChildSessionsStep", () => {
         "[eve:execution.terminate-child-sessions] failed to end a child",
         expect.objectContaining({ childKind: "local", taskId: "research-aaaaaa" }),
       );
+      // Both were working, so the timer armed up front already covers them.
       expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           targets: [
@@ -254,6 +289,35 @@ describe("terminateChildSessionsStep", () => {
           ],
         }),
       );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("hard-stops an idle agent whose request to end did not reach it", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const unreached = localRecord({
+      id: "research-aaaaaa",
+      sessionId: "session-moving",
+      status: "completed",
+    });
+    requestWorkflowSessionEndMock
+      .mockRejectedValueOnce(new Error("moving to another deployment"))
+      .mockResolvedValueOnce(undefined);
+
+    try {
+      await terminateChildSessionsStep({
+        sessionState: makeSessionState([
+          unreached,
+          localRecord({ id: "research-bbbbbb", sessionId: "session-idle", status: "completed" }),
+        ]),
+      });
+
+      expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith({
+        ownerSessionId: "parent-session",
+        targets: [unreached.child],
+        wakeAt: "2026-09-24T14:00:30.000Z",
+      });
     } finally {
       errorSpy.mockRestore();
     }

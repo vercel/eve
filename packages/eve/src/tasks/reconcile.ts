@@ -102,10 +102,11 @@ async function reconcileDueRemoteTasks(input: {
 
 /**
  * Settles each due workflow task whose run already ended, through the same
- * path as the run's own outcome report. A run that completed returns the
- * outcome it reported; one that failed before reporting fails the task with
- * `EXECUTION_FAILED`; one that was stopped cancels it. A run still working,
- * or one that returned nothing, such as a duplicate start, times out.
+ * path as the run's own outcome report. A run that completed returns its
+ * outcome, including one whose report never reached the owner; one that
+ * failed before it had an outcome fails the task with `EXECUTION_FAILED`;
+ * one that was stopped cancels it. A run still working, or one that
+ * returned nothing, such as a duplicate start, times out.
  */
 async function reconcileDueWorkflowTasks(
   input: ReconciledTasks & { readonly now: string },
@@ -138,7 +139,6 @@ async function readEndedWorkflowRun(
     const status = await run.status;
     const from = {
       callId: record.callId,
-      input: {},
       runId,
       sequence: 0,
       stepIndex: 0,

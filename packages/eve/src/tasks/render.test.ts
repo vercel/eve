@@ -14,6 +14,7 @@ import {
   renderTooManyBackgroundTasks,
   resolveTasksAnnouncement,
   truncateTaskResult,
+  truncateTaskResultParts,
 } from "#tasks/render.js";
 
 function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
@@ -111,6 +112,48 @@ describe("truncateTaskResult", () => {
 
   it("cuts a line longer than 2,000 characters", () => {
     expect(truncateTaskResult("z".repeat(2500))).toBe(`${"z".repeat(2000)} [truncated]`);
+  });
+
+  it("leaves an already truncated result as it is, so a result cut twice has one marker", () => {
+    for (const text of [
+      Array.from({ length: 2500 }, (_, index) => `line ${String(index)}`).join("\n"),
+      Array.from({ length: 100 }, () => "y".repeat(1000)).join("\n"),
+      Array.from({ length: 60 }, () => "w".repeat(2500)).join("\n"),
+    ]) {
+      const once = truncateTaskResult(text);
+      expect(truncateTaskResult(once)).toBe(once);
+      expect(once.match(/\n\[truncated\]/g)).toHaveLength(1);
+    }
+  });
+});
+
+describe("truncateTaskResultParts", () => {
+  it("leaves parts within the limit as they are", () => {
+    expect(truncateTaskResultParts(["first", "second\nline"])).toEqual(["first", "second\nline"]);
+  });
+
+  it("cuts several parts under one shared limit, dropping the parts past the cut", () => {
+    const part = Array.from({ length: 30 }, () => "p".repeat(1000)).join("\n");
+
+    const parts = truncateTaskResultParts([part, part, part]);
+
+    // Each part alone fits, but together they pass 50 KB.
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toBe(part);
+    expect(parts[1]!.endsWith("\n[truncated]")).toBe(true);
+    expect(Buffer.byteLength(parts.join("\n"))).toBeLessThanOrEqual(
+      50 * 1024 + "\n[truncated]".length,
+    );
+  });
+
+  it("marks the part that holds a cut at 2,000 lines", () => {
+    const part = Array.from({ length: 1500 }, () => "x").join("\n");
+
+    const parts = truncateTaskResultParts([part, part]);
+
+    expect(parts[0]).toBe(part);
+    expect(parts[1]!.split("\n")).toHaveLength(501);
+    expect(parts[1]!.endsWith("\n[truncated]")).toBe(true);
   });
 });
 

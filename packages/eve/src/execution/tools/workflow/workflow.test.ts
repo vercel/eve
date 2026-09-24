@@ -11,10 +11,14 @@ const mocks = vi.hoisted(() => ({
   control: vi.fn(),
   deliver: vi.fn(),
   executeWorkflowBody: vi.fn(),
+  logUndelivered: vi.fn(),
   openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({ sleep: mocks.sleep }));
+vi.mock("#execution/tools/workflow/undelivered-outcome-step.js", () => ({
+  logUndeliveredWorkflowOutcomeStep: mocks.logUndelivered,
+}));
 
 vi.mock("#execution/tools/workflow/workflow-owner-blocking.js", () => ({
   createBlockingWorkflow: mocks.control,
@@ -358,20 +362,35 @@ it("keeps waiting for the body after the control hook closes", async () => {
   );
 });
 
-it("propagates terminal delivery failure instead of replacing the invocation outcome", async () => {
-  mocks.executeWorkflowBody.mockResolvedValue({
-    reportCount: 0,
-    outcome: { status: "completed", output: "done" },
-  });
-  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
-    owner: { inbox: "owner" },
-    reader: createChannelReader("workflow", {
-      [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+it.each([
+  { output: "done", status: "completed" },
+  { error: "body failed", status: "failed" },
+] as const)(
+  "returns a $status outcome whose report could not be delivered, for the owner's deadline to read",
+  async (outcome) => {
+    mocks.executeWorkflowBody.mockResolvedValue({ reportCount: 0, outcome });
+    mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+      owner: { inbox: "owner" },
+      reader: createChannelReader("workflow", {
+        [Symbol.asyncIterator]: () => ({
+          next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+        }),
       }),
-    }),
-  });
-  mocks.deliver.mockRejectedValue(new Error("delivery failed"));
-  await expect(workflowToolRunWorkflow(input)).rejects.toThrow("delivery failed");
-  expect(mocks.deliver).toHaveBeenCalledOnce();
-});
+    });
+    mocks.deliver.mockRejectedValue(new Error("delivery failed"));
+
+    const returned = await workflowToolRunWorkflow(input);
+
+    expect(returned).toEqual({
+      from: expect.objectContaining({ callId: "call-1" }),
+      result: outcome,
+    });
+    // The return value names the task without a copy of the call's input.
+    expect(returned?.from).not.toHaveProperty("input");
+    expect(mocks.deliver).toHaveBeenCalledOnce();
+    expect(mocks.logUndelivered).toHaveBeenCalledExactlyOnceWith({
+      error: expect.objectContaining({ message: "delivery failed" }),
+      message: returned,
+    });
+  },
+);

@@ -57,6 +57,11 @@ export type SessionAnchor =
 export interface SessionBoot {
   readonly anchor: SessionAnchor;
   readonly caller: TurnCaller | undefined;
+  /**
+   * The context is already bound to `caller`, because the boot resolved that
+   * local caller from it, so the first turn skips rebinding.
+   */
+  readonly callerBound?: boolean;
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
   readonly initialInput: DeliverHookPayload | undefined;
@@ -259,9 +264,12 @@ async function runSessionLoop(
   };
 
   let turnIndex = 0;
+  let boundCaller = boot.callerBound === true ? boot.caller : undefined;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
-    if (caller !== undefined) {
+    const bound = caller !== undefined && caller === boundCaller;
+    boundCaller = undefined;
+    if (caller !== undefined && !bound) {
       await cursor.apply({
         serializedContext: await bindTurnCallerContextStep({
           caller,

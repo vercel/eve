@@ -10,7 +10,9 @@ import {
   armTaskTimerStep,
   cancelTaskTimerStep,
   signalTaskDeadlineStep,
+  syncTaskTimerInStep,
 } from "#tasks/timer-steps.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { taskTimerWorkflow } from "#tasks/timer.js";
 
 const startMock = vi.fn();
@@ -149,6 +151,60 @@ describe("task timer steps", () => {
       [{ hardStop: targets, ownerRunId: "owner-run", token: TOKEN, wakeAt: WAKE_AT }],
       { deploymentId: "dpl_current" },
     );
+  });
+
+  describe("syncTaskTimerInStep", () => {
+    const withState = (state: Record<string, unknown>) => {
+      const base = createTestSessionState({ sessionId: "parent" });
+      return { ...base, snapshot: { session: { ...base.snapshot.session, state } } };
+    };
+    const record = (deadlineAt?: string) =>
+      createTaskRecord(deadlineAt === undefined ? {} : { deadlineAt });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ now: Date.parse("2026-09-24T12:00:00.000Z"), toFake: ["Date"] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("arms the timer in the step that recorded a deadline", async () => {
+      startMock.mockResolvedValue({ runId: "timer-1" });
+
+      const synced = await syncTaskTimerInStep(withState(taskTableState([record(WAKE_AT)])));
+
+      expect(startMock).toHaveBeenCalledOnce();
+      expect(readTaskTimer(readDurableSession(synced).state)).toEqual({
+        ownerRunId: "owner-run",
+        runId: "timer-1",
+        wakeAt: WAKE_AT,
+      });
+    });
+
+    it("cancels the timer in the step that settled the last deadline", async () => {
+      const synced = await syncTaskTimerInStep(
+        withState({
+          ...taskTableState([{ ...record(), status: "completed" }]),
+          [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner-run", runId: "timer-1", wakeAt: WAKE_AT },
+        }),
+      );
+
+      expect(cancelRunMock).toHaveBeenCalledWith(expect.anything(), "timer-1", {
+        cancelReason: expect.any(String),
+      });
+      expect(readTaskTimer(readDurableSession(synced).state)).toBeUndefined();
+    });
+
+    it("leaves a timer that is already in line alone", async () => {
+      const sessionState = withState({
+        ...taskTableState([record(WAKE_AT)]),
+        [TASK_TIMER_STATE_KEY]: { ownerRunId: "owner-run", runId: "timer-1", wakeAt: WAKE_AT },
+      });
+
+      await expect(syncTaskTimerInStep(sessionState)).resolves.toBe(sessionState);
+      expect(startMock).not.toHaveBeenCalled();
+      expect(cancelRunMock).not.toHaveBeenCalled();
+    });
   });
 
   it("cancels the armed timer and clears it once nothing is due", async () => {

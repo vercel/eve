@@ -213,7 +213,10 @@ async function retireIncompatibleSession(input: {
   readonly sessionId: string;
 }): Promise<void> {
   try {
-    await resetRemoteAgentSession(input);
+    await resetRemoteAgentSession({
+      ...input,
+      reason: "The caller uses another task protocol version.",
+    });
   } catch (error) {
     logError(log, "failed to reset a session an incompatible remote agent started", error, {
       remoteAgentName: input.remote.name,
@@ -337,6 +340,8 @@ function setHeader(headers: Record<string, string>, name: string, value: string 
 /** Retires one exact remote child session through eve's authenticated reset route. */
 export async function resetRemoteAgentSession(input: {
   readonly headers?: Record<string, string>;
+  /** Why the caller ends the session; the remote session records it. */
+  readonly reason: string;
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
 }): Promise<ResetResponse> {
@@ -344,7 +349,7 @@ export async function resetRemoteAgentSession(input: {
   const response = await fetchRemoteAgent(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
     {
-      body: JSON.stringify({ reason: "Parent session ended" }),
+      body: JSON.stringify({ reason: input.reason }),
       headers: { "content-type": "application/json", ...headers },
       method: "POST",
     },

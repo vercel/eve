@@ -16,6 +16,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   activityCollectorWorkflowReference,
+  requestWorkflowSessionEnd,
   sessionTimeoutWorkflowReference,
   startSessionOwnerStep,
   startWorkflowOnCurrentDeployment,
@@ -1258,5 +1259,50 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(serialized["eve.sessionTraceSeed"]).toBeUndefined();
     expect(serialized["eve.otelTraceEnabled"]).toBe(false);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("false");
+  });
+});
+
+describe("requestWorkflowSessionEnd", () => {
+  const marker = sessionHandoffMarkerToken(sessionCommandHookToken("child-1"));
+
+  it("sends the session a reset", async () => {
+    await requestWorkflowSessionEnd({ reason: "Parent session ended", sessionId: "child-1" });
+
+    expect(resumeHookMock).toHaveBeenCalledExactlyOnceWith(
+      sessionInboxHookToken(sessionCommandHookToken("child-1")),
+      { kind: "reset", reason: "Parent session ended" },
+    );
+  });
+
+  it("leaves a session that already ended alone", async () => {
+    resumeHookMock.mockRejectedValue(new HookNotFoundError("missing"));
+    getHookByTokenMock.mockRejectedValue(new HookNotFoundError("missing"));
+
+    await expect(
+      requestWorkflowSessionEnd({ reason: "Parent session ended", sessionId: "child-1" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails when the session is still moving to another deployment after the retry window", async () => {
+    vi.useFakeTimers();
+    try {
+      resumeHookMock.mockRejectedValue(new HookNotFoundError("missing"));
+      getHookByTokenMock.mockImplementation(async (token: string) => {
+        if (token === marker) return { runId: "releasing-owner", token };
+        throw new HookNotFoundError(token);
+      });
+
+      const request = requestWorkflowSessionEnd({
+        reason: "The parent retired this idle agent.",
+        sessionId: "child-1",
+      });
+      const outcome = expect(request).rejects.toThrow(
+        'Session "child-1" was moving to another deployment and did not receive the request to end.',
+      );
+      await vi.advanceTimersByTimeAsync(6_000);
+      await outcome;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

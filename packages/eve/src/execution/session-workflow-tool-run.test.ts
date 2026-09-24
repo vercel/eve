@@ -196,20 +196,23 @@ it("proxies a working task's authorization event with its taskId and drops a sta
   expect(dismissStaleWorkflowRequestStep).toHaveBeenCalledOnce();
 });
 
-it("cancels the run's agent tasks, settles its task, and returns the outcome as a tool result", async () => {
-  const cursor = createCursor([workflowTask]);
-  vi.mocked(cancelTasksStep).mockResolvedValue(unchanged(cursor));
+const ownedAgent = createTaskRecord({
+  callId: "call:reply",
+  id: "researcher-def567",
+  name: "researcher",
+  workflowCaller: { replyTo: "reply", runId: "run" },
+});
+
+it("settles the run's task and returns the outcome as a tool result", async () => {
+  const cursor = createCursor([workflowTask, { ...ownedAgent, status: "completed" }]);
 
   const outcome = await handleWorkflowToolRunMessage({
     cursor,
     message: { from, kind: "outcome", result: { output: "done", status: "completed" } },
   });
 
-  expect(cancelTasksStep).toHaveBeenCalledWith({
-    selector: { kind: "workflow-run", runId: "run" },
-    serializedContext: {},
-    sessionState: expect.anything(),
-  });
+  // Every agent call the run made already settled, so nothing is left to cancel.
+  expect(cancelTasksStep).not.toHaveBeenCalled();
   expect(outcome).toEqual({
     callId: "call",
     kind: "tool-result",
@@ -225,11 +228,29 @@ it("cancels the run's agent tasks, settles its task, and returns the outcome as 
     }),
   );
   // Delivered with its result, the settled record is no longer kept.
-  expect(getTaskTable(cursor.sessionState.snapshot.session).records).toEqual([]);
+  expect(
+    getTaskTable(cursor.sessionState.snapshot.session).records.map((record) => record.id),
+  ).not.toContain(workflowTask.id);
+});
+
+it("cancels the agent tasks an ending run still owns before settling its task", async () => {
+  const cursor = createCursor([workflowTask, ownedAgent]);
+  vi.mocked(cancelTasksStep).mockResolvedValue(unchanged(cursor));
+
+  await handleWorkflowToolRunMessage({
+    cursor,
+    message: { from, kind: "outcome", result: { output: "done", status: "completed" } },
+  });
+
+  expect(cancelTasksStep).toHaveBeenCalledWith({
+    selector: { kind: "workflow-run", runId: "run" },
+    serializedContext: {},
+    sessionState: expect.anything(),
+  });
 });
 
 it("still cancels the tasks of a run the owner no longer waits on, but ignores its outcome", async () => {
-  const cursor = createCursor([]);
+  const cursor = createCursor([ownedAgent]);
   vi.mocked(cancelTasksStep).mockResolvedValue(unchanged(cursor));
 
   const outcome = await handleWorkflowToolRunMessage({

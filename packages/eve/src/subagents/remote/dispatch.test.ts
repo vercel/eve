@@ -1227,6 +1227,7 @@ describe("resetRemoteAgentSession", () => {
 
     await expect(
       resetRemoteAgentSession({
+        reason: "Parent session ended",
         remote: {
           ...createRemoteAgent(),
           url: "https://remote.example.com/eve/researcher/",
@@ -1264,10 +1265,18 @@ describe("resetRemoteAgentSession", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      resetRemoteAgentSession({ remote: createRemoteAgent(), sessionId: "remote-session" }),
+      resetRemoteAgentSession({
+        reason: "Parent session ended",
+        remote: createRemoteAgent(),
+        sessionId: "remote-session",
+      }),
     ).resolves.toEqual({ ok: true, status: "no_active_session" });
     await expect(
-      resetRemoteAgentSession({ remote: createRemoteAgent(), sessionId: "remote-session" }),
+      resetRemoteAgentSession({
+        reason: "Parent session ended",
+        remote: createRemoteAgent(),
+        sessionId: "remote-session",
+      }),
     ).rejects.toThrow("response was invalid");
   });
 });

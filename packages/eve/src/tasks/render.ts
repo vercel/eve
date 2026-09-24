@@ -74,8 +74,30 @@ export function renderSleepEndedEarly(waitedMs: number): string {
  * A line longer than 2,000 characters is cut the same way.
  */
 export function truncateTaskResult(text: string): string {
-  const truncated = truncateHead(text);
-  return truncated.truncated ? `${truncated.output}\n[truncated]` : truncated.output;
+  return truncateTaskResultParts([text])[0]!;
+}
+
+/**
+ * Truncates the text parts of one result under a single shared limit, so
+ * the parts together stay within it. Parts past the cut are dropped, and the
+ * part that holds the cut ends with the `[truncated]` line.
+ */
+export function truncateTaskResultParts(texts: readonly string[]): string[] {
+  const joined = texts.join("\n");
+  const truncated = truncateHead(joined);
+  if (truncated.output === joined) return [...texts];
+  // The per-line cut keeps every line, so kept lines map back onto the parts in order.
+  const kept = truncated.output.split("\n");
+  const parts: string[] = [];
+  let offset = 0;
+  for (const text of texts) {
+    if (offset >= kept.length) break;
+    const lineCount = text.split("\n").length;
+    parts.push(kept.slice(offset, offset + lineCount).join("\n"));
+    offset += lineCount;
+  }
+  if (truncated.truncated) parts[parts.length - 1] += "\n[truncated]";
+  return parts;
 }
 
 /** One `<task_result>` block per result, truncated like a waited call's result. */

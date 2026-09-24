@@ -22,9 +22,10 @@ const decoder = new TextDecoder();
 
 /**
  * Records the callback body a session is about to send its caller for one
- * call. A retried callback step records the same answer once. Output past
- * the result truncation limit is kept as the truncated text the caller's
- * model would read.
+ * call. A retried callback step records the same answer once. Output larger
+ * than 50 KB is kept as the truncated text the caller's model would read, so
+ * a result recovered from this record reaches the caller's events truncated.
+ * Truncating it again at render leaves it as it is.
  */
 export async function recordTaskReport(input: {
   readonly callbackToken: string;

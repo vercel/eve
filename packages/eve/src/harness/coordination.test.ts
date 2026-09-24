@@ -10,7 +10,7 @@ import {
 } from "#harness/coordination.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 
-import { toolOutput } from "#tools/model-output.js";
+import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -427,6 +427,69 @@ describe("resolvePendingCoordination", () => {
     expect(toolMessage?.role).toBe("tool");
     expect(JSON.stringify(toolMessage?.content)).toContain("deployed to https://api.example");
     expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
+  });
+
+  it("truncates the text parts of a content result under one shared limit", async () => {
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-1",
+          input: {},
+          kind: "workflow-task",
+          toolName: "screenshot",
+          workflowId: "workflow//./agent/tools/screenshot//execute",
+        },
+      ],
+    });
+    const page = Array.from({ length: 30 }, () => "p".repeat(1000)).join("\n");
+    const tools = new Map([
+      [
+        "screenshot",
+        {
+          description: "Screenshot.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "screenshot",
+          toModelOutput: () =>
+            toolOutput.content([
+              toolOutputPart.text(page),
+              toolOutputPart.file("aGVsbG8=", { mediaType: "image/png" }),
+              toolOutputPart.text(page),
+              toolOutputPart.text(page),
+            ]),
+        },
+      ],
+    ]);
+
+    const resolved = await resolvePendingCoordination({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          { callId: "call-1", kind: "tool-result", output: "ok", toolName: "screenshot" },
+        ],
+      },
+      tools,
+    });
+
+    const [part] = resolved.messages.at(-1)!.content as readonly {
+      readonly output: {
+        readonly type: string;
+        readonly value: readonly { readonly type: string; readonly text?: string }[];
+      };
+    }[];
+    const texts = part!.output.value.flatMap((entry) =>
+      entry.type === "text" ? [entry.text!] : [],
+    );
+    // Each page fits alone; together they pass 50 KB, so the third page is dropped.
+    expect(texts).toHaveLength(2);
+    expect(texts[1]!.endsWith("\n[truncated]")).toBe(true);
+    expect(Buffer.byteLength(texts.join("\n"))).toBeLessThanOrEqual(
+      50 * 1024 + "\n[truncated]".length,
+    );
+    // Parts that are not text are kept.
+    expect(part!.output.value.map((entry) => entry.type)).toEqual(["text", "file", "text"]);
   });
 
   it("shows the model a receipt's text instead of projecting its output", async () => {

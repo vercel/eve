@@ -185,29 +185,33 @@ function createSettledTurnResult(input: {
 }
 
 /**
- * Tells the owner that this child claimed its addresses and can be reached.
- * Returns `false` when the owner no longer exists, so the child exits instead
- * of doing work nobody will receive.
+ * Resolves the caller that created this delegated session and, for a local
+ * owner, tells it in the same step that this child claimed its addresses and
+ * can be reached, so the report adds no step before the child's first turn.
+ * `ownerGone` means the owner no longer exists: the child exits instead of
+ * doing work nobody will receive. It runs only after the child's claims made
+ * this run the only one.
  */
 export async function reportTaskStartedStep(input: {
-  readonly callId: string;
   readonly child: TaskStartedHookPayload["child"];
-  readonly token: string;
-}): Promise<boolean> {
+  readonly serializedContext: Record<string, unknown>;
+}): Promise<{ readonly caller: TurnCaller | undefined; readonly ownerGone: boolean }> {
   "use step";
 
+  const caller = await resolveInitialTurnCaller(input.serializedContext);
+  if (caller?.replyTo.kind !== "hook") return { caller, ownerGone: false };
   const payload: TaskStartedHookPayload = {
-    callId: input.callId,
+    callId: caller.callId,
     child: input.child,
     kind: "task.started",
   };
   try {
-    await resumeHook(input.token, payload);
-    return true;
+    await resumeHook(caller.replyTo.token, payload);
+    return { caller, ownerGone: false };
   } catch (error) {
     if (!HookNotFoundError.is(error)) throw error;
-    log.warn("task owner no longer exists; the child exits", { callId: input.callId });
-    return false;
+    log.warn("task owner no longer exists; the child exits", { callId: caller.callId });
+    return { caller, ownerGone: true };
   }
 }
 
@@ -217,7 +221,13 @@ export async function resolveInitialTurnCallerStep(input: {
 }): Promise<TurnCaller | undefined> {
   "use step";
 
-  const callbackValue = input.serializedContext[SessionCallbackKey.name];
+  return await resolveInitialTurnCaller(input.serializedContext);
+}
+
+async function resolveInitialTurnCaller(
+  serializedContext: Record<string, unknown>,
+): Promise<TurnCaller | undefined> {
+  const callbackValue = serializedContext[SessionCallbackKey.name];
   if (callbackValue !== undefined) {
     const parsed = parseSessionCallback(callbackValue);
     if (!parsed.ok) {
@@ -236,7 +246,7 @@ export async function resolveInitialTurnCallerStep(input: {
     };
   }
 
-  const ctx = await deserializeContext(input.serializedContext);
+  const ctx = await deserializeContext(serializedContext);
   const adapter = ctx.get(ChannelKey);
   if (adapter?.kind !== SUBAGENT_ADAPTER_KIND || !isSubagentAdapterState(adapter.state)) {
     return undefined;

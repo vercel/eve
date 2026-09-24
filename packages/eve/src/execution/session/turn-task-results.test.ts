@@ -23,7 +23,6 @@ vi.mock("#execution/session-workflow-tool-run.js", () => ({
 const OUTCOME: SessionInboxPayload = {
   from: {
     callId: "call-remind",
-    input: {},
     runId: "run-1",
     sequence: 0,
     stepIndex: 0,

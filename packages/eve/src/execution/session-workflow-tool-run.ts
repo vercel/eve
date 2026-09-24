@@ -51,8 +51,16 @@ async function handleWorkflowToolRunOutcome(
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
   // A workflow run that ends cancels the agent tasks it still owns, even
-  // when the owner no longer waits on the run.
-  await cancelTasks(cursor, { kind: "workflow-run", runId: message.from.runId });
+  // when the owner no longer waits on the run. Usually its calls all
+  // settled already, and then there is nothing to cancel.
+  const { runId } = message.from;
+  if (
+    getTaskTable(cursor.sessionState.snapshot.session).records.some(
+      (record) => record.workflowCaller?.runId === runId && !isTerminalTaskStatus(record.status),
+    )
+  ) {
+    await cancelTasks(cursor, { kind: "workflow-run", runId });
+  }
   const [result] = await settleWorkflowTask(cursor, message);
   return result;
 }

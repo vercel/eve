@@ -10,7 +10,7 @@ import type {
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
-import { truncateTaskResult } from "#tasks/render.js";
+import { truncateTaskResult, truncateTaskResultParts } from "#tasks/render.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type {
   HarnessEmitFn,
@@ -395,13 +395,17 @@ function truncateTaskResultOutput(output: ToolResultPart["output"]): ToolResultP
       if (truncated === text) return output;
       return { type: output.type === "json" ? "text" : "error-text", value: truncated };
     }
-    case "content":
-      return {
-        ...output,
-        value: output.value.map((part) =>
-          part.type === "text" ? { ...part, text: truncateTaskResult(part.text) } : part,
-        ),
-      };
+    case "content": {
+      const texts = truncateTaskResultParts(
+        output.value.flatMap((part) => (part.type === "text" ? [part.text] : [])),
+      );
+      const value: typeof output.value = [];
+      for (const part of output.value) {
+        if (part.type !== "text") value.push(part);
+        else if (texts.length > 0) value.push({ ...part, text: texts.shift()! });
+      }
+      return { ...output, value };
+    }
     default:
       return output;
   }

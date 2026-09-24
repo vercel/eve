@@ -108,7 +108,6 @@ describe("applyTaskCancelCall", () => {
       message: {
         from: {
           callId: "call-remind",
-          input: {},
           runId: "run-remind",
           sequence: 1,
           stepIndex: 0,

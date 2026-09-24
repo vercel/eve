@@ -17,7 +17,7 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import type { ChildAddress } from "#tasks/protocol.js";
-import { readTaskTimer, writeTaskTimer } from "#tasks/state.js";
+import { planTaskTimer, readTaskTimer, writeTaskTimer } from "#tasks/state.js";
 import type { TaskTimerWorkflowInput } from "#tasks/timer.js";
 
 /** A child the owner can hard-stop: a local agent session or a workflow tool run. */
@@ -39,29 +39,7 @@ export async function armTaskTimerStep(input: {
 }): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
-  const session = readDurableSession(input.sessionState);
-  const ownerRunId = getWorkflowMetadata().workflowRunId;
-  const timerInput: TaskTimerWorkflowInput = {
-    ownerRunId,
-    token: sessionCommandHookToken(session.sessionId),
-    wakeAt: input.wakeAt,
-  };
-  const run = await startWorkflowOnCurrentDeployment(taskTimerWorkflowReference, [timerInput]);
-  const replaced = readTaskTimer(session.state);
-  if (replaced !== undefined) await cancelTaskTimer(replaced.runId, "Replaced by another timer");
-  return {
-    sessionState: replaceDurableSessionSnapshot({
-      session: {
-        ...session,
-        state: writeTaskTimer(session.state, {
-          ownerRunId,
-          runId: run.runId,
-          wakeAt: input.wakeAt,
-        }),
-      },
-      state: input.sessionState,
-    }),
-  };
+  return { sessionState: await armTaskTimer(input.sessionState, input.wakeAt) };
 }
 
 /** Stops the armed timer once no task needs a wake, so a settled session is not woken. */
@@ -70,16 +48,65 @@ export async function cancelTaskTimerStep(input: {
 }): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
-  const session = readDurableSession(input.sessionState);
-  const armed = readTaskTimer(session.state);
-  if (armed === undefined) return input;
-  await cancelTaskTimer(armed.runId, "No task deadline remains");
-  return {
-    sessionState: replaceDurableSessionSnapshot({
-      session: { ...session, state: writeTaskTimer(session.state, undefined) },
-      state: input.sessionState,
-    }),
+  return { sessionState: await clearTaskTimer(input.sessionState) };
+}
+
+/**
+ * Brings the owner's timer in line with its task table from inside the step
+ * that changed the table, so the owner needs no separate timer step on its
+ * busiest paths; its own check after the step then finds the timer in line.
+ */
+export async function syncTaskTimerInStep(
+  sessionState: DurableSessionState,
+): Promise<DurableSessionState> {
+  const plan = planTaskTimer(readDurableSession(sessionState).state, {
+    nowMs: Date.now(),
+    get ownerRunId() {
+      return getWorkflowMetadata().workflowRunId;
+    },
+  });
+  switch (plan.kind) {
+    case "arm":
+      return await armTaskTimer(sessionState, plan.wakeAt);
+    case "cancel":
+      return await clearTaskTimer(sessionState);
+    case "keep":
+      return sessionState;
+  }
+}
+
+async function armTaskTimer(
+  sessionState: DurableSessionState,
+  wakeAt: string,
+): Promise<DurableSessionState> {
+  const session = readDurableSession(sessionState);
+  const ownerRunId = getWorkflowMetadata().workflowRunId;
+  const timerInput: TaskTimerWorkflowInput = {
+    ownerRunId,
+    token: sessionCommandHookToken(session.sessionId),
+    wakeAt,
   };
+  const run = await startWorkflowOnCurrentDeployment(taskTimerWorkflowReference, [timerInput]);
+  const replaced = readTaskTimer(session.state);
+  if (replaced !== undefined) await cancelTaskTimer(replaced.runId, "Replaced by another timer");
+  return replaceDurableSessionSnapshot({
+    session: {
+      ...session,
+      state: writeTaskTimer(session.state, { ownerRunId, runId: run.runId, wakeAt }),
+    },
+    state: sessionState,
+  });
+}
+
+async function clearTaskTimer(sessionState: DurableSessionState): Promise<DurableSessionState> {
+  const session = readDurableSession(sessionState);
+  const armed = readTaskTimer(session.state);
+  if (armed === undefined) return sessionState;
+  await cancelTaskTimer(armed.runId, "No task deadline remains");
+  return replaceDurableSessionSnapshot({
+    session: { ...session, state: writeTaskTimer(session.state, undefined) },
+    state: sessionState,
+  });
 }
 
 /**

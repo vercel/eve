@@ -75,6 +75,7 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   AcceptedSessionIdentityError,
+  isSessionHandoffPending,
   resolveSessionInbox,
   resumeSessionInbox,
 } from "#execution/session-inbox/resume.js";
@@ -468,7 +469,9 @@ export async function requestWorkflowTurnCancellation(
 /**
  * Asks a session to end, as `reset` does, without waiting for it to release
  * its inbox: it cancels its turn and its own tasks, ends its children, and
- * settles its caller. A session that already ended is left alone.
+ * settles its caller. A session that already ended is left alone. A session
+ * still moving to another deployment after the inbox's retry window did not
+ * get the request, so this throws: the caller must stop it another way.
  */
 export async function requestWorkflowSessionEnd(input: {
   readonly reason: string;
@@ -481,6 +484,15 @@ export async function requestWorkflowSessionEnd(input: {
     );
   } catch (error) {
     if (!isInactiveCommandTarget(error)) throw error;
+    if (
+      HookNotFoundError.is(error) &&
+      (await isSessionHandoffPending(sessionCommandHookToken(input.sessionId)))
+    ) {
+      throw new Error(
+        `Session "${input.sessionId}" was moving to another deployment and did not receive the request to end.`,
+        { cause: error },
+      );
+    }
   }
 }
 

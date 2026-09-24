@@ -289,7 +289,6 @@ describe("applyTaskDeadlines", () => {
         run("completed", {
           from: {
             callId: "call-1",
-            input: {},
             runId: "run-1",
             sequence: 0,
             stepIndex: 0,
@@ -320,6 +319,43 @@ describe("applyTaskDeadlines", () => {
       expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
       // Delivered to the waiting call, the finished workflow task is pruned.
       expect(records(update.sessionState)).toEqual([]);
+    });
+
+    it("fails the task with the error its run returned when the run's report never arrived", async () => {
+      // The run could not deliver its failed outcome, so it completed with it instead.
+      vi.mocked(getRun).mockReturnValue(
+        run("completed", {
+          from: {
+            callId: "call-1",
+            runId: "run-1",
+            sequence: 0,
+            stepIndex: 0,
+            taskId: "deploy-abc234",
+            toolName: "deploy",
+            turnId: "turn-1",
+          },
+          result: { error: { code: "DEPLOY_REJECTED", message: "Rejected." }, status: "failed" },
+        }),
+      );
+
+      const update = await applyTaskDeadlines(input([working], { now: AFTER_DEADLINE }));
+
+      expect(update.results[0]).toMatchObject({
+        isError: true,
+        output: { code: "DEPLOY_REJECTED", message: "Rejected." },
+      });
+      expect(update.events).toEqual([
+        {
+          data: {
+            callId: "call-1",
+            error: { code: "DEPLOY_REJECTED", message: "Rejected." },
+            status: "failed",
+            taskId: "deploy-abc234",
+          },
+          type: "task.settled",
+        },
+      ]);
+      expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
     });
 
     it("fails the task when its run failed before it reported", async () => {

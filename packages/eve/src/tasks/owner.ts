@@ -21,6 +21,7 @@ import {
   startSubagent,
 } from "#tasks/start.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { createLogger, logError } from "#internal/logging.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
@@ -92,9 +93,13 @@ import {
   findTask,
   markTaskDelivered,
   startTask,
+  TASK_CANCEL_CONFIRM_MS,
   type TaskEffect,
   type TaskTable,
 } from "#tasks/table.js";
+import { armChildHardStop, syncTaskTimerInStep } from "#tasks/timer-steps.js";
+
+const log = createLogger("tasks.owner");
 
 /** One agent call: from the model, or from `ctx.agent` inside a workflow tool body. */
 export interface AgentTaskCall {
@@ -123,27 +128,16 @@ export interface TaskOwnerUpdate {
   readonly sessionState: DurableSessionState;
 }
 
-/**
- * Mints the owner's remote callback alias if it has none. It runs before any
- * start step, so the alias is recorded and claimed before a remote child
- * could call back, and a retried start step reuses it.
- */
-export async function ensureTaskCallbackAliasStep(input: {
-  readonly sessionState: DurableSessionState;
-}): Promise<{ readonly sessionState: DurableSessionState }> {
-  "use step";
-
-  const session = readDurableSession(input.sessionState);
-  if (readTaskCallbackAlias(session.state) !== undefined) return input;
-  const bytes = crypto.getRandomValues(new Uint8Array(24));
-  const alias = `${TASK_CALLBACK_ALIAS_PREFIX}${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
-  return {
-    sessionState: replaceDurableSessionSnapshot({
-      session: { ...session, state: { ...session.state, [TASK_CALLBACK_ALIAS_STATE_KEY]: alias } },
-      state: input.sessionState,
-    }),
-  };
-}
+/** What starting agent calls returns: the owner update, or a request to claim the new callback alias first. */
+export type StartAgentTasksUpdate = TaskOwnerUpdate & {
+  /**
+   * Set when the calls include a remote agent and the owner had no callback
+   * alias: the step minted one into `sessionState` and started nothing. The
+   * owner claims the alias and runs the step again, so the alias is claimed
+   * before a remote child could call back on it.
+   */
+  readonly callbackAliasMinted?: true;
+};
 
 /**
  * Starts one child per agent call. Each call first commits its task record,
@@ -152,10 +146,10 @@ export async function ensureTaskCallbackAliasStep(input: {
  */
 export async function startAgentTasksStep(input: {
   /** Calls to start; absent means the agent calls in the pending coordination batch. */
-  readonly calls?: readonly AgentTaskCall[];
+  readonly calls?: readonly AgentTaskCall[] | undefined;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<TaskOwnerUpdate> {
+}): Promise<StartAgentTasksUpdate> {
   "use step";
 
   const calls =
@@ -163,12 +157,14 @@ export async function startAgentTasksStep(input: {
     (getPendingCoordinationBatch(readDurableSession(input.sessionState).state)?.tasks ?? [])
       .filter(isAgentTaskRequest)
       .map(agentTaskCallFromRequest);
-  return await startAgentTasks({
+  const update = await startAgentTasks({
     ...input,
     calls,
     callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
     now: new Date().toISOString(),
   });
+  // Arms the new calls' deadline after their children started, off their path.
+  return { ...update, sessionState: await syncTaskTimerInStep(update.sessionState) };
 }
 
 export async function startAgentTasks(input: {
@@ -177,7 +173,7 @@ export async function startAgentTasks(input: {
   readonly now: string;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<TaskOwnerUpdate> {
+}): Promise<StartAgentTasksUpdate> {
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const emission = getHarnessEmissionState(durableSession.state);
@@ -215,6 +211,27 @@ export async function startAgentTasks(input: {
       results,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
+    };
+  }
+  // Only remote children call back on the alias, so a session that never
+  // calls a remote agent never mints one.
+  if (
+    readTaskCallbackAlias(durableSession.state) === undefined &&
+    actions.some(({ action }) => action.kind === "remote-agent-call")
+  ) {
+    return {
+      callbackAliasMinted: true,
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: input.serializedContext,
+      sessionState: replaceDurableSessionSnapshot({
+        session: {
+          ...durableSession,
+          state: { ...durableSession.state, [TASK_CALLBACK_ALIAS_STATE_KEY]: mintCallbackAlias() },
+        },
+        state: input.sessionState,
+      }),
     };
   }
 
@@ -433,10 +450,26 @@ export async function startAgentTasks(input: {
   }
 
   // New agents are the only way idle agents accumulate, so retiring here bounds them.
-  const retired = retireIdleAgents(getTaskTable(session));
+  const retired = retireIdleAgents(getTaskTable(session), prepared.auth);
   if (retired.retired.length > 0) {
     session = setTaskTable(session, retired.table);
-    await Promise.all(retired.retired.map((record) => retireIdleAgent(record, ctx)));
+    const unreached = (
+      await Promise.all(retired.retired.map((record) => retireIdleAgent(record, ctx)))
+    ).filter((child) => child !== undefined);
+    // The records are gone, so no later deadline or session end can stop these.
+    if (unreached.length > 0) {
+      try {
+        await armChildHardStop({
+          ownerSessionId: session.sessionId,
+          targets: unreached,
+          wakeAt: new Date(Date.parse(input.now) + TASK_CANCEL_CONFIRM_MS).toISOString(),
+        });
+      } catch (error) {
+        logError(log, "failed to arm the hard stop for retired idle agents", error, {
+          ownerSessionId: session.sessionId,
+        });
+      }
+    }
   }
 
   return {
@@ -464,7 +497,8 @@ export async function applyTaskReportStep(input: {
 }): Promise<TaskOwnerUpdate> {
   "use step";
 
-  return await applyTaskReport({ ...input, now: new Date().toISOString() });
+  const update = await applyTaskReport({ ...input, now: new Date().toISOString() });
+  return { ...update, sessionState: await syncTaskTimerInStep(update.sessionState) };
 }
 
 export async function applyTaskReport(input: {
@@ -628,6 +662,12 @@ function adoptChild(
     now,
   );
   return { commands: commandEffects(applied.effects), table: applied.table };
+}
+
+/** An unguessable alias: remote children present it as their callback token. */
+function mintCallbackAlias(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return `${TASK_CALLBACK_ALIAS_PREFIX}${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function commandEffects(effects: readonly TaskEffect[]): CommandEffect[] {

@@ -5,7 +5,7 @@ import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
-import { reportTaskStartedStep, resolveInitialTurnCallerStep } from "#tasks/child.js";
+import { reportTaskStartedStep } from "#tasks/child.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
@@ -126,27 +126,26 @@ async function bootInitialOwner(
       await inbox.dispose();
       return undefined;
     }
-    const caller = hasDelegatedCallerContext(serializedContext)
-      ? await resolveInitialTurnCallerStep({ serializedContext })
-      : undefined;
     // The owner assigned this child's identity; now that the claims above
     // made this run the only one, report the address it can be reached at.
-    if (
-      caller?.replyTo.kind === "hook" &&
-      !(await reportTaskStartedStep({
-        callId: caller.callId,
-        child: { continuationToken, sessionId },
-        token: caller.replyTo.token,
-      }))
-    ) {
+    const started = hasDelegatedCallerContext(serializedContext)
+      ? await reportTaskStartedStep({
+          child: { continuationToken, sessionId },
+          serializedContext,
+        })
+      : undefined;
+    if (started?.ownerGone === true) {
       await inbox.dispose();
       return undefined;
     }
+    const caller = started?.caller;
     return {
       inbox,
       session: {
         anchor: { kind: "self" },
         caller,
+        // Binding a local caller writes back the adapter state it was read from.
+        callerBound: caller?.replyTo.kind === "hook",
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         initialInput: createInitialDelivery(input, serializedContext),

@@ -27,12 +27,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
-import {
-  applyTaskReport,
-  ensureTaskCallbackAliasStep,
-  startAgentTasks,
-  type AgentTaskCall,
-} from "#tasks/owner.js";
+import { applyTaskReport, startAgentTasks, type AgentTaskCall } from "#tasks/owner.js";
 import type { ChildTaskReport } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
@@ -43,6 +38,7 @@ import {
 } from "#tasks/state.js";
 import { cancelTask, evaluateTaskDeadlines, pruneTaskTable } from "#tasks/table.js";
 import { MAX_RETAINED_IDLE_AGENTS } from "#tasks/owner-calls.js";
+import { armChildHardStop } from "#tasks/timer-steps.js";
 import { renderBackgroundReceipt, renderSteeringReceipt } from "#tasks/render.js";
 import { deliverableTaskResults, encodeTaskCreator } from "#tasks/results.js";
 
@@ -54,6 +50,10 @@ vi.mock("#tasks/start.js", async (importOriginal) => ({
   startSubagent: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
+vi.mock("#tasks/timer-steps.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  armChildHardStop: vi.fn(),
+}));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   createWorkflowRuntime: vi.fn(),
@@ -313,11 +313,27 @@ describe("startAgentTasks", () => {
     expect(update.serializedContext).toEqual({});
   });
 
-  it("refuses to start a remote child before the owner has a callback alias", async () => {
-    await expect(start([modelCall({ target: "billing" })])).rejects.toThrow(
-      "Remote agent tasks require the owner's callback alias.",
+  it("mints a callback alias and starts nothing when a remote call finds none", async () => {
+    const update = await start([modelCall({ target: "billing" }), modelCall({ callId: "call-2" })]);
+
+    // The owner claims the alias and starts the whole batch again.
+    expect(update.callbackAliasMinted).toBe(true);
+    expect(readTaskCallbackAlias(readDurableSession(update.sessionState).state)).toMatch(
+      /^eve:task-callback:[0-9a-f]{48}$/u,
     );
+    expect(records(update.sessionState)).toEqual([]);
+    expect(update.results).toEqual([]);
     expect(startSubagent).not.toHaveBeenCalled();
+  });
+
+  it("starts local calls without minting a callback alias", async () => {
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+
+    const update = await start([modelCall()]);
+
+    expect(update.callbackAliasMinted).toBeUndefined();
+    expect(readTaskCallbackAlias(readDurableSession(update.sessionState).state)).toBeUndefined();
+    expect(startSubagent).toHaveBeenCalledOnce();
   });
 
   it("returns the start error and keeps no record of an agent that never started", async () => {
@@ -553,9 +569,45 @@ describe("explicit background agent calls", () => {
     expect(records(update.sessionState).map((record) => record.id)).not.toContain(oldest.id);
     expect(records(update.sessionState)).toHaveLength(MAX_RETAINED_IDLE_AGENTS + 1);
     expect(requestWorkflowSessionEnd).toHaveBeenCalledExactlyOnceWith({
-      reason: expect.any(String),
+      reason: "The parent retired this idle agent.",
       sessionId: `idle-session-${String(MAX_RETAINED_IDLE_AGENTS)}`,
     });
+    // The request reached the agent, so nothing needs a hard stop.
+    expect(armChildHardStop).not.toHaveBeenCalled();
+  });
+
+  it("hard-stops a retired idle agent that the request to end did not reach", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
+    vi.mocked(requestWorkflowSessionEnd).mockRejectedValue(
+      new Error("moving to another deployment"),
+    );
+    const idle = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 1 }, (_, index) =>
+      createTaskRecord({
+        callId: `call-idle-${String(index)}`,
+        child: {
+          continuationToken: `idle-token-${String(index)}`,
+          kind: "local",
+          sessionId: `idle-session-${String(index)}`,
+        },
+        delivered: true,
+        id: `research-idle${String(index).padStart(2, "0")}`,
+        startedAt: new Date(Date.parse(NOW) - (index + 1) * 60_000).toISOString(),
+        status: "completed",
+      }),
+    );
+
+    try {
+      await start([modelCall()], idle);
+
+      expect(armChildHardStop).toHaveBeenCalledExactlyOnceWith({
+        ownerSessionId: "parent",
+        targets: [idle.at(-1)!.child],
+        wakeAt: "2026-09-24T14:00:30.000Z",
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it("holds the background result for its own task.result message, not the tool result", async () => {
@@ -1437,17 +1489,6 @@ describe("applyTaskReport", () => {
       sessionState: update.sessionState,
     });
     expect(repeated.sessionState).toBe(update.sessionState);
-  });
-});
-
-describe("ensureTaskCallbackAliasStep", () => {
-  it("mints the callback alias once and keeps it on every later call", async () => {
-    const minted = await ensureTaskCallbackAliasStep({ sessionState: ownerState([]) });
-
-    expect(readTaskCallbackAlias(readDurableSession(minted.sessionState).state)).toMatch(
-      /^eve:task-callback:[0-9a-f]{48}$/u,
-    );
-    await expect(ensureTaskCallbackAliasStep(minted)).resolves.toBe(minted);
   });
 });
 

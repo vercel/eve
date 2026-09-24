@@ -11,12 +11,11 @@ import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import type { WaitedTaskChanges } from "#tasks/detach.js";
 import { detachWaitedTasksStep } from "#tasks/detach-step.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
-import { planTaskTimer, readTaskCallbackAlias } from "#tasks/state.js";
+import { planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import { cancelTasksStep, type TaskCancelSelector } from "#tasks/cancel.js";
 import {
   applyTaskReportStep,
-  ensureTaskCallbackAliasStep,
   startAgentTasksStep,
   type AgentTaskCall,
   type TaskOwnerUpdate,
@@ -29,14 +28,36 @@ import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 /**
  * Adopts an owner step's state, publishes its events, answers `ctx.agent`
  * callers, and arms the owner's timer if the table now needs an earlier wake.
+ *
+ * A `ctx.agent` caller's reply goes out while the events are published, so
+ * its workflow run resumes at once. The run can only answer through this
+ * owner's inbox, which the owner reads again after this update returns, so
+ * the events still precede anything the run causes on the stream.
  */
 export async function applyTaskOwnerUpdate(
   cursor: SessionStateCursor,
   update: TaskOwnerUpdate,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
   await cursor.apply(update);
+  await Promise.all([
+    ...update.replies.map((reply) =>
+      resumeHookStep(
+        reply.replyTo,
+        { kind: "runtime-action-result", results: [reply.result] },
+        { ifPresent: true },
+      ),
+    ),
+    publishTaskEvents(cursor, update.events),
+  ]);
+  return update.results;
+}
+
+async function publishTaskEvents(
+  cursor: SessionStateCursor,
+  events: TaskOwnerUpdate["events"],
+): Promise<void> {
   await syncTaskTimer(cursor);
-  for (const event of update.events) {
+  for (const event of events) {
     await cursor.apply(
       await emitSubagentEventStep({
         event,
@@ -46,14 +67,6 @@ export async function applyTaskOwnerUpdate(
       }),
     );
   }
-  for (const reply of update.replies) {
-    await resumeHookStep(
-      reply.replyTo,
-      { kind: "runtime-action-result", results: [reply.result] },
-      { ifPresent: true },
-    );
-  }
-  return update.results;
 }
 
 /** Starts the agent calls in the pending coordination batch and returns their immediate results. */
@@ -61,29 +74,27 @@ export async function startPendingAgentTasks(
   cursor: SessionStateCursor,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
   if (!hasPendingAgentTaskCalls(cursor.sessionState.snapshot.session.state)) return [];
-  await ensureTaskCallbackAlias(cursor);
-  return await applyTaskOwnerUpdate(
-    cursor,
-    await startAgentTasksStep({
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-    }),
-  );
+  return await startAgentTasks(cursor, undefined);
 }
 
+/** Starts agent calls; `undefined` starts the agent calls in the pending coordination batch. */
 export async function startAgentTasks(
   cursor: SessionStateCursor,
-  calls: readonly AgentTaskCall[],
+  calls: readonly AgentTaskCall[] | undefined,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
-  await ensureTaskCallbackAlias(cursor);
-  return await applyTaskOwnerUpdate(
-    cursor,
-    await startAgentTasksStep({
+  const start = () =>
+    startAgentTasksStep({
       calls,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
-    }),
-  );
+    });
+  let update = await start();
+  if (update.callbackAliasMinted === true) {
+    // Claimed before any remote child exists that could call back on it.
+    await cursor.apply(update);
+    update = await start();
+  }
+  return await applyTaskOwnerUpdate(cursor, update);
 }
 
 /** Applies one child report and returns tool results for waited calls it settled. */
@@ -199,10 +210,4 @@ export async function syncTaskTimer(cursor: SessionStateCursor): Promise<void> {
   } else if (plan.kind === "cancel") {
     await cursor.apply(await cancelTaskTimerStep({ sessionState: cursor.sessionState }));
   }
-}
-
-/** Records and claims the remote callback alias before any child can call back on it. */
-async function ensureTaskCallbackAlias(cursor: SessionStateCursor): Promise<void> {
-  if (readTaskCallbackAlias(cursor.sessionState.snapshot.session.state) !== undefined) return;
-  await cursor.apply(await ensureTaskCallbackAliasStep({ sessionState: cursor.sessionState }));
 }

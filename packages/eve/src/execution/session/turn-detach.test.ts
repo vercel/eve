@@ -403,7 +403,6 @@ function outcome(callId: string): SessionInboxPayload {
   return {
     from: {
       callId,
-      input: {},
       runId: `run-${callId}`,
       sequence: 0,
       stepIndex: 0,

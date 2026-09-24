@@ -77,8 +77,12 @@ export interface WorkflowToolRunRequestMessage {
   };
 }
 
+/**
+ * An outcome names its run without the call's input: the owner settles the
+ * call by task, and the run keeps the message as its return value.
+ */
 export interface WorkflowToolRunOutcomeMessage {
-  readonly from: WorkflowToolRunRef;
+  readonly from: Omit<WorkflowToolRunRef, "input">;
   readonly result: WorkflowToolRunOutcome;
 }
 

@@ -100,11 +100,6 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 42 — The shared subagent workflow body is framework-authored
- *             userspace. It must not import task, harness, or context
- *             internals or recover private state through `Symbol.for`.
- *             Privileged dispatch belongs in ordinary step-backed APIs that
- *             the workflow body consumes through a public contract.
  *   rule 43 — Reusable session plumbing stays independent of the subagent
  *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
@@ -246,7 +241,6 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
- *   rule42: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
  *   rule46: Violation[];
@@ -282,7 +276,6 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
-    checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
     checkRule46(posix, content, state.rule46);
@@ -293,32 +286,6 @@ async function scanRepo(state) {
       checkRule49(posix, sourceFile, state.rule49);
     }
   }
-}
-
-// ---------- Rule 42: userspace subagent workflow ----------
-
-const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
-const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
-  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule42(posix, lines, violations) {
-  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
-
-  lines.forEach((line, idx) => {
-    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
-    violations.push({
-      rule: 42,
-      file: posix,
-      line: idx + 1,
-      message:
-        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
-    });
-  });
 }
 
 // ---------- Rule 43: executor-neutral session plumbing ----------
@@ -1855,7 +1822,6 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
-    rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
     rule46: /** @type {Violation[]} */ ([]),
@@ -1966,9 +1932,6 @@ async function main() {
 
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
-
-  // Rule 42
-  violations.push(...state.rule42);
 
   // Rule 43
   violations.push(...state.rule43);

@@ -8,6 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable, readTaskTimer } from "#tasks/state.js";
 import { TASK_CANCEL_CONFIRM_MS, WORKFLOW_TASK_CANCEL_CONFIRM_MS } from "#tasks/table.js";
 import { armChildHardStop, cancelTaskTimer, type HardStopTarget } from "#tasks/timer-steps.js";
@@ -28,7 +29,11 @@ const PARENT_SESSION_ENDED = "Parent session ended";
  *
  * The ending owner cannot wait for its children, so it arms one last timer
  * that hard-stops each local agent or workflow run still running when its
- * cancellation window passes, as the owner's own deadline would have.
+ * cancellation window passes, as the owner's own deadline would have. The
+ * timer targets children with work in flight or an unconfirmed cancel, and
+ * is armed before any request: this step may itself be the cleanup of a
+ * child whose parent hard-stops it midway. The requests go out together, and
+ * an idle agent whose request did not reach it gets a timer of its own.
  */
 export async function terminateChildSessionsStep(input: {
   readonly serializedContext?: Record<string, unknown>;
@@ -45,6 +50,7 @@ export async function terminateChildSessionsStep(input: {
     });
     return;
   }
+  const ownerSessionId = session.sessionId;
 
   const timer = readTaskTimer(session.state);
   if (timer !== undefined) await cancelTaskTimer(timer.runId, PARENT_SESSION_ENDED);
@@ -59,72 +65,101 @@ export async function terminateChildSessionsStep(input: {
     bundle = (await deserializeContext(input.serializedContext)).require(BundleKey);
   }
 
-  const agents: HardStopTarget[] = [];
-  const runs: HardStopTarget[] = [];
-  for (const record of records) {
-    const child = record.child!;
-    try {
-      if (child.kind === "remote") {
-        const headers =
-          child.credentialResolver === undefined
-            ? {}
-            : await resolveRemoteAgentStreamHeaders({
-                bundle: bundle!,
-                name: record.name,
-                resolverId: child.credentialResolver,
-                url: child.url,
-              });
-        await resetRemoteAgentSession({
-          headers,
-          remote: { name: record.name, url: child.url },
-          sessionId: child.sessionId,
-        });
-        continue;
-      }
-      if (child.kind === "local") {
-        agents.push(child);
-        await requestWorkflowSessionEnd({
-          reason: PARENT_SESSION_ENDED,
-          sessionId: child.sessionId,
-        });
-        continue;
-      }
-      // A run the owner already cancelled still owes its confirmation.
-      if (!isTerminalTaskStatus(record.status) || record.cancelConfirmBy !== undefined) {
-        runs.push(child);
-      }
-      if (!isTerminalTaskStatus(record.status)) {
-        await cancelWorkflowToolRun(
-          { hookToken: child.commandToken, runId: child.runId },
-          PARENT_SESSION_ENDED,
-        );
-      }
-    } catch (error) {
-      logError(log, "failed to end a child", error, {
-        childKind: child.kind,
-        parentSessionId: session.sessionId,
-        taskId: record.id,
-      });
-    }
-  }
+  await armHardStop(ownerSessionId, hardStopTargets(records, "local"), TASK_CANCEL_CONFIRM_MS);
+  await armHardStop(
+    ownerSessionId,
+    hardStopTargets(records, "workflow"),
+    WORKFLOW_TASK_CANCEL_CONFIRM_MS,
+  );
 
-  const nowMs = Date.now();
-  const hardStops = [
-    { targets: agents, windowMs: TASK_CANCEL_CONFIRM_MS },
-    { targets: runs, windowMs: WORKFLOW_TASK_CANCEL_CONFIRM_MS },
-  ];
-  for (const { targets, windowMs } of hardStops) {
-    if (targets.length === 0) continue;
-    try {
-      await armChildHardStop({
-        ownerSessionId: session.sessionId,
-        targets,
-        wakeAt: new Date(nowMs + windowMs).toISOString(),
+  const outcomes = await Promise.allSettled(records.map((record) => endChild(record, bundle)));
+  const unreached: HardStopTarget[] = [];
+  outcomes.forEach((outcome, index) => {
+    const record = records[index]!;
+    const child = record.child!;
+    if (outcome.status === "fulfilled") return;
+    logError(log, "failed to end a child", outcome.reason, {
+      childKind: child.kind,
+      parentSessionId: ownerSessionId,
+      taskId: record.id,
+    });
+    // A child with work in flight is already covered by the timer above.
+    if (child.kind === "local" && !hasWorkInFlight(record)) unreached.push(child);
+  });
+  await armHardStop(ownerSessionId, unreached, TASK_CANCEL_CONFIRM_MS);
+}
+
+/**
+ * A child that may still be running work: a working task, or a cancelled one
+ * whose child has not confirmed it stopped. An idle agent's session runs
+ * nothing, so the request to end it is enough.
+ */
+function hasWorkInFlight(record: TaskRecord): boolean {
+  return !isTerminalTaskStatus(record.status) || record.cancelConfirmBy !== undefined;
+}
+
+function hardStopTargets(
+  records: readonly TaskRecord[],
+  kind: HardStopTarget["kind"],
+): HardStopTarget[] {
+  return records.flatMap((record) => {
+    const { child } = record;
+    return (child?.kind === "local" || child?.kind === "workflow") &&
+      child.kind === kind &&
+      hasWorkInFlight(record)
+      ? [child]
+      : [];
+  });
+}
+
+async function endChild(record: TaskRecord, bundle: CompiledBundle | undefined): Promise<void> {
+  const child = record.child!;
+  switch (child.kind) {
+    case "remote": {
+      const headers =
+        child.credentialResolver === undefined
+          ? {}
+          : await resolveRemoteAgentStreamHeaders({
+              bundle: bundle!,
+              name: record.name,
+              resolverId: child.credentialResolver,
+              url: child.url,
+            });
+      await resetRemoteAgentSession({
+        headers,
+        reason: PARENT_SESSION_ENDED,
+        remote: { name: record.name, url: child.url },
+        sessionId: child.sessionId,
       });
-    } catch (error) {
-      logError(log, "failed to arm the hard stop for ended children", error, {
-        parentSessionId: session.sessionId,
-      });
+      return;
     }
+    case "local":
+      await requestWorkflowSessionEnd({ reason: PARENT_SESSION_ENDED, sessionId: child.sessionId });
+      return;
+    case "workflow":
+      if (isTerminalTaskStatus(record.status)) return;
+      await cancelWorkflowToolRun(
+        { hookToken: child.commandToken, runId: child.runId },
+        PARENT_SESSION_ENDED,
+      );
+  }
+}
+
+async function armHardStop(
+  ownerSessionId: string,
+  targets: readonly HardStopTarget[],
+  windowMs: number,
+): Promise<void> {
+  if (targets.length === 0) return;
+  try {
+    await armChildHardStop({
+      ownerSessionId,
+      targets,
+      wakeAt: new Date(Date.now() + windowMs).toISOString(),
+    });
+  } catch (error) {
+    logError(log, "failed to arm the hard stop for ended children", error, {
+      parentSessionId: ownerSessionId,
+    });
   }
 }

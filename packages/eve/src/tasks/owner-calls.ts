@@ -33,25 +33,37 @@ import { findTask, removeTasks, type TaskTable } from "#tasks/table.js";
 export const MAX_RETAINED_IDLE_AGENTS = 50;
 
 /**
- * Removes the idle agents past the {@link MAX_RETAINED_IDLE_AGENTS} most
- * recently started. The owner ends each retired agent's session; a later
- * call with its ID fails `UNKNOWN_AGENT`.
+ * Removes idle agents past {@link MAX_RETAINED_IDLE_AGENTS}, least recently
+ * started first. The calling principal's own idle agents go before anyone
+ * else's, so in a shared session one caller's new agents end another
+ * caller's agents only once the first has none idle. The owner ends each
+ * retired agent's session; a later call with its ID fails `UNKNOWN_AGENT`.
  */
-export function retireIdleAgents(table: TaskTable): {
+export function retireIdleAgents(
+  table: TaskTable,
+  caller: SessionAuthContext | null,
+): {
   readonly table: TaskTable;
   readonly retired: readonly TaskRecord[];
 } {
-  const retired = table.records
-    .filter(
-      (record) =>
-        record.kind === "agent" &&
-        record.child !== undefined &&
-        record.delivered &&
-        record.cancelConfirmBy === undefined &&
-        isTerminalTaskStatus(record.status),
+  const idle = table.records.filter(
+    (record) =>
+      record.kind === "agent" &&
+      record.child !== undefined &&
+      record.delivered &&
+      record.cancelConfirmBy === undefined &&
+      isTerminalTaskStatus(record.status),
+  );
+  const excess = idle.length - MAX_RETAINED_IDLE_AGENTS;
+  if (excess <= 0) return { retired: [], table };
+  const others = (record: TaskRecord) =>
+    sameTaskPrincipal(readTaskCreator(record.creator).auth, caller) ? 0 : 1;
+  const retired = idle
+    .toSorted(
+      (left, right) =>
+        others(left) - others(right) || Date.parse(left.startedAt) - Date.parse(right.startedAt),
     )
-    .toSorted((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))
-    .slice(MAX_RETAINED_IDLE_AGENTS);
+    .slice(0, excess);
   return {
     retired,
     table: removeTasks(table, new Set(retired.map((record) => record.id))),

@@ -10,6 +10,7 @@ import { createTaskRecord, taskTableState } from "#internal/testing/task-records
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import {
   applyTaskDeadline,
+  applyTaskOwnerUpdate,
   cancelTasks,
   cancelTurnDescendants,
   settleWorkflowTask,
@@ -17,9 +18,10 @@ import {
   syncTaskTimer,
 } from "#tasks/owner-body.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
-import { ensureTaskCallbackAliasStep, startAgentTasksStep } from "#tasks/owner.js";
+import { startAgentTasksStep } from "#tasks/owner.js";
 import { TASK_CALLBACK_ALIAS_STATE_KEY, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
 vi.mock("#tasks/emit-event-step.js", () => ({
@@ -35,9 +37,9 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 }));
 vi.mock("#tasks/owner.js", () => ({
   applyTaskReportStep: vi.fn(),
-  ensureTaskCallbackAliasStep: vi.fn(),
   startAgentTasksStep: vi.fn(),
 }));
+vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: vi.fn() }));
 vi.mock("#tasks/cancel.js", () => ({ cancelTasksStep: vi.fn() }));
 vi.mock("#tasks/workflow-task.js", () => ({ settleWorkflowTaskStep: vi.fn() }));
 
@@ -56,33 +58,113 @@ beforeEach(() => {
 });
 
 describe("startAgentTasks", () => {
-  it("records and claims the callback alias before any child can start", async () => {
+  it("claims a callback alias the start step minted, then starts the calls again", async () => {
     const withAlias = stateWithAlias();
-    vi.mocked(ensureTaskCallbackAliasStep).mockResolvedValue({ sessionState: withAlias });
+    vi.mocked(startAgentTasksStep)
+      .mockResolvedValueOnce({
+        callbackAliasMinted: true,
+        events: [],
+        replies: [],
+        results: [],
+        serializedContext: {},
+        sessionState: withAlias,
+      })
+      .mockImplementationOnce(async (input) => ({
+        events: [],
+        replies: [],
+        results: [],
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      }));
     const claimSessionHooks = vi.fn(async () => {});
     const cursor = createCursor(createTestSessionState(), claimSessionHooks);
 
     await startAgentTasks(cursor, [CALL]);
 
-    expect(startAgentTasksStep).toHaveBeenCalledWith(
+    expect(startAgentTasksStep).toHaveBeenCalledTimes(2);
+    expect(startAgentTasksStep).toHaveBeenLastCalledWith(
       expect.objectContaining({ calls: [CALL], sessionState: withAlias }),
     );
+    // The alias is claimed before the step that can start a remote child.
     expect(claimSessionHooks).toHaveBeenCalledWith(expect.arrayContaining([ALIAS]));
     expect(claimSessionHooks.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(startAgentTasksStep).mock.invocationCallOrder[0]!,
+      vi.mocked(startAgentTasksStep).mock.invocationCallOrder[1]!,
     );
   });
 
-  it("reuses the alias the session already recorded", async () => {
+  it("starts local calls in one step", async () => {
     const cursor = createCursor(
-      stateWithAlias(),
+      createTestSessionState(),
       vi.fn(async () => {}),
     );
 
     await startAgentTasks(cursor, [CALL]);
 
-    expect(ensureTaskCallbackAliasStep).not.toHaveBeenCalled();
+    expect(startAgentTasksStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ calls: [CALL] }),
+    );
+  });
+
+  it("starts the pending batch's calls when given none", async () => {
+    const cursor = createCursor(
+      createTestSessionState(),
+      vi.fn(async () => {}),
+    );
+
+    await startAgentTasks(cursor, undefined);
+
     expect(startAgentTasksStep).toHaveBeenCalledOnce();
+    expect(vi.mocked(startAgentTasksStep).mock.calls[0]![0].calls).toBeUndefined();
+  });
+});
+
+describe("applyTaskOwnerUpdate", () => {
+  it("answers a ctx.agent caller while it publishes the update's events", async () => {
+    const cursor = createCursor(
+      createTestSessionState(),
+      vi.fn(async () => {}),
+    );
+    const event: UnstampedMessageStreamEvent = {
+      data: { callId: "call-1", output: "done", status: "completed", taskId: "research-abc234" },
+      type: "task.settled",
+    };
+    const published = Promise.withResolvers<{
+      serializedContext: Record<string, unknown>;
+      sessionState: DurableSessionState;
+    }>();
+    vi.mocked(emitSubagentEventStep).mockReturnValue(published.promise);
+    const result = {
+      callId: "call-1",
+      kind: "subagent-result",
+      origin: "child",
+      output: "done",
+      subagentName: "research",
+    } as never;
+
+    let applied = false;
+    const applying = applyTaskOwnerUpdate(cursor, {
+      events: [event],
+      replies: [{ replyTo: "reply-hook", result }],
+      results: [],
+      serializedContext: {},
+      sessionState: cursor.sessionState,
+    }).then(() => {
+      applied = true;
+    });
+
+    // The reply does not wait for the event.
+    await vi.waitFor(() =>
+      expect(resumeHookStep).toHaveBeenCalledExactlyOnceWith(
+        "reply-hook",
+        { kind: "runtime-action-result", results: [result] },
+        { ifPresent: true },
+      ),
+    );
+    // The owner moves on only once the event is published.
+    expect(applied).toBe(false);
+    published.resolve({ serializedContext: {}, sessionState: cursor.sessionState });
+    await applying;
+    expect(applied).toBe(true);
   });
 });
 
@@ -226,7 +308,6 @@ describe("syncTaskTimer", () => {
       serializedContext: {},
       sessionState: stateWith(taskTableState([createTaskRecord({ deadlineAt: DEADLINE })])),
     });
-    vi.mocked(ensureTaskCallbackAliasStep).mockResolvedValue({ sessionState: stateWithAlias() });
 
     await startAgentTasks(cursor, [CALL]);
 

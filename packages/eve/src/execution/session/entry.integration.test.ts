@@ -1226,12 +1226,12 @@ describe("workflowEntry integration", () => {
             },
           ],
         });
+        // The first turn's caller is already bound: the boot read it from the context.
         expect(await listCallerStepNames(child.runId)).toEqual([
           "bindTurnCallerContextStep",
-          "bindTurnCallerContextStep",
           "notifyTurnCallerStep",
           "notifyTurnCallerStep",
-          "resolveInitialTurnCallerStep",
+          "reportTaskStartedStep",
         ]);
       } finally {
         stream.dispose();
@@ -2319,6 +2319,7 @@ describe("workflowEntry integration", () => {
 const CALLER_STEP_NAMES = new Set([
   "bindTurnCallerContextStep",
   "notifyTurnCallerStep",
+  "reportTaskStartedStep",
   "resolveInitialTurnCallerStep",
 ]);
 

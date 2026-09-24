@@ -21,11 +21,13 @@ import {
 } from "#execution/tools/workflow/owner.js";
 import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner-blocking.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
+import { logUndeliveredWorkflowOutcomeStep } from "#execution/tools/workflow/undelivered-outcome-step.js";
 
 /**
  * Owns command intake, body execution, and settlement for one turn-owned tool
  * call. The run returns the outcome it reported, so the owner's deadline can
- * read it once if the report never arrived; a duplicate start returns nothing.
+ * read it once if the report never arrived, including a report whose
+ * delivery failed for good; a duplicate start returns nothing.
  */
 export async function workflowToolRunWorkflow(
   input: WorkflowToolRunInput,
@@ -127,11 +129,18 @@ export async function workflowToolRunWorkflow(
     };
   }
   if (outcome === undefined) return undefined;
-  const message: WorkflowToolRunOutcomeMessage = {
-    from: createWorkflowBodyRef(definition),
-    result: outcome,
-  };
-  await owner.handleMessage({ ...message, kind: "outcome" });
+  const { input: _input, ...from } = createWorkflowBodyRef(definition);
+  const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
+  try {
+    await owner.handleMessage({ ...message, kind: "outcome" });
+  } catch (error) {
+    // Failing the run would turn a finished body into EXECUTION_FAILED; the
+    // owner's deadline reads the returned outcome instead.
+    await logUndeliveredWorkflowOutcomeStep({
+      error: normalizeSerializableError(error),
+      message,
+    });
+  }
   return message;
 }
 
