@@ -241,6 +241,32 @@ Unlike `stream()`, `snapshot()` does not advance the originating
 `ClientSession`. Its returned cursor contains the fixed session ID and the exact
 stream index after the captured prefix.
 
+## Follow a subagent
+
+A delegated subagent reports its progress on its own child session. The parent stream announces each dispatch with a `subagent.called` event. Pass that event to `streamSubagent()` on the parent's session handle to follow the child:
+
+```ts
+import { isCurrentTurnBoundaryEvent } from "eve/client";
+
+const session = client.sessions.attach(parentSessionId);
+const { events } = await session.snapshot();
+const called = events.find((event) => event.type === "subagent.called");
+
+if (called?.type === "subagent.called") {
+  for await (const event of session.streamSubagent(called)) {
+    console.log(called.data.name, event.type);
+    if (isCurrentTurnBoundaryEvent(event)) break;
+  }
+}
+```
+
+`streamSubagent()` reads the event's `childStreamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
+
+- A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
+- A remote child's path is a proxy route on the parent deployment. The parent checks that the child belongs to this session, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.
+
+The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn. Passing a `subagent.called` event from a different session throws.
+
 ## Abort a request
 
 Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn, or `session.cancel({ tasks: true })` to also stop background tasks owned by the session. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`, and inspect task state in a later turn to confirm task cancellation.

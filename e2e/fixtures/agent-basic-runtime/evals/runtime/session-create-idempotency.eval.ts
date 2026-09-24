@@ -49,12 +49,14 @@ export default defineEval({
       t.target.watchTurn(replay.sessionId).result(),
       t.target.watchTurn(otherIssuer.sessionId).result(),
     ]);
+    // A real model may take extra tool steps on the opaque marker message, so
+    // duplicate execution is detected by a repeated first step, not a step count.
     firstTurn.expectOk();
     firstTurn.event("message.received", { count: 1, data: { message } });
-    firstTurn.event("step.started", { count: 1 });
+    firstTurn.event("step.started", { count: 1, data: { stepIndex: 0 } });
     issuerTurn.expectOk();
     issuerTurn.event("message.received", { count: 1, data: { message } });
-    issuerTurn.event("step.started", { count: 1 });
+    issuerTurn.event("step.started", { count: 1, data: { stepIndex: 0 } });
 
     const probe = `CREATE-ONCE-PROBE-${crypto.randomUUID()}`;
     const liveProbe = t.target.watchTurn(firstTurn.sessionId, {
@@ -64,7 +66,7 @@ export default defineEval({
     const probeTurn = await liveProbe.result();
     probeTurn.expectOk();
     probeTurn.event("message.received", { count: 1, data: { message: probe } });
-    probeTurn.event("step.started", { count: 1 });
+    probeTurn.event("step.started", { count: 1, data: { stepIndex: 0 } });
   },
 });
 

@@ -6,18 +6,23 @@
  * {@link SubagentView} seam.
  */
 
-import type { Client } from "#client/index.js";
-import { readNdjsonStream } from "#client/ndjson.js";
-import { readMessageStreamVersion } from "#client/stream-version.js";
-import { createEventDeduper, type EventDeduper } from "#protocol/event-dedupe.js";
+import type { Client, StreamReconnectPolicy } from "#client/index.js";
 import {
   isCurrentTurnBoundaryEvent,
   type ActionResultStreamEvent,
   type MessageStreamEvent,
   type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
-const childStreamReconnectBaseDelayMs = 100;
-const childStreamReconnectMaxDelayMs = 2_000;
+
+/**
+ * Pumps end on the child boundary or abort, never on a retry budget: a child
+ * parked for HITL can stay silent indefinitely, and the dev server can restart
+ * underneath an open follower.
+ */
+const childStreamReconnectPolicy = {
+  streamIdleReconnectPolicy: { maxAttempts: Infinity },
+  streamOpenReconnectPolicy: { maxAttempts: Infinity },
+} as const satisfies StreamReconnectPolicy;
 
 /**
  * The renderer's subagent surface. One cohesive capability: a renderer that
@@ -73,10 +78,8 @@ export type SubagentRun = {
   background: boolean;
   /** Parent completion is provisional; only a child boundary is authoritative. */
   status: "open" | "provisional" | "authoritative";
-  /** Parent-authored route on the parent origin, valid for local and remote children. */
-  childStreamPath: string;
-  /** Absolute durable cursor retained across exhausted transport sources. */
-  childStreamIndex: number;
+  /** Dispatch event whose parent-origin child stream this run follows. */
+  called: SubagentCalledStreamEvent;
   /**
    * One entry per logical "child message" — independent of the child's
    * `stepIndex` field, which the harness can reuse across multiple
@@ -94,11 +97,6 @@ export type SubagentRun = {
   /** Monotonic counter for new section keys. */
   nextSectionKey: number;
   tools: Map<string, SubagentToolState>;
-  /**
-   * Child events already folded into this run. A restarted pump replays the
-   * child stream from `streamIndex: 0` while this run's state survives.
-   */
-  seenChildEvents: EventDeduper;
 };
 
 export type SubagentStepUpdate = {
@@ -172,13 +170,11 @@ export class SubagentPump {
         parentTurnId: called.data.turnId,
         background: false,
         status: "open",
-        childStreamPath: called.data.childStreamPath,
-        childStreamIndex: this.#childStreamIndices.get(called.data.childSessionId) ?? 0,
+        called,
         steps: new Map(),
         currentSectionKey: null,
         nextSectionKey: 0,
         tools: new Map(),
-        seenChildEvents: createEventDeduper(),
       });
     } else {
       existing.name = called.data.name;
@@ -258,7 +254,6 @@ export class SubagentPump {
     if (run === undefined || run.status === "authoritative") return;
     const activeCallId = this.#activeChildCalls.get(run.childSessionId);
     if (activeCallId === undefined) {
-      run.childStreamIndex = this.#childStreamIndices.get(run.childSessionId) ?? 0;
       this.#activeChildCalls.set(run.childSessionId, callId);
       this.#startPump(callId);
       return;
@@ -280,50 +275,32 @@ export class SubagentPump {
     this.#pumps.set(callId, controller);
 
     void (async () => {
-      let reconnectDelayMs = childStreamReconnectBaseDelayMs;
+      const { childSessionId } = run;
+      let cursor = this.#childStreamIndices.get(childSessionId) ?? 0;
       try {
-        while (!controller.signal.aborted && run.status !== "authoritative") {
-          let deliveredEvent = false;
-          try {
-            const response = await client.fetch(
-              streamPathAt(run.childStreamPath, run.childStreamIndex),
-              {
-                cache: "no-store",
-                signal: controller.signal,
-              },
-            );
-            if (!response.ok || response.body === null) {
-              await response.body?.cancel().catch(() => {});
-              throw new Error(`Child stream returned ${response.status}.`);
-            }
-
-            for await (const event of readNdjsonStream(response.body, {
-              streamVersion: readMessageStreamVersion(response.headers),
-            })) {
-              if (controller.signal.aborted) return;
-              deliveredEvent = true;
-              run.childStreamIndex += 1;
-              this.#childStreamIndices.set(run.childSessionId, run.childStreamIndex);
-              const childEventWork = this.#applyChildEvent(callId, event);
-              if (childEventWork !== undefined) await childEventWork;
-              if (isCurrentTurnBoundaryEvent(event)) {
-                // A proxied child approval parks at an intermediate
-                // `session.waiting`. Keep following from this cursor so the
-                // approved tool result can still update the nested view.
-                if (event.type === "session.waiting" && hasPendingChildApproval(run)) continue;
-                this.#finalizeRun(callId, true);
-                return;
-              }
-            }
-          } catch {
-            if (controller.signal.aborted) return;
-          }
-
-          reconnectDelayMs = deliveredEvent
-            ? childStreamReconnectBaseDelayMs
-            : Math.min(reconnectDelayMs * 2, childStreamReconnectMaxDelayMs);
-          await abortableDelay(reconnectDelayMs, controller.signal);
+        const events = client.sessions
+          .attach(run.called.data.sessionId)
+          .streamSubagent(run.called, {
+            signal: controller.signal,
+            startIndex: cursor,
+            streamReconnectPolicy: childStreamReconnectPolicy,
+          });
+        for await (const event of events) {
+          if (controller.signal.aborted) return;
+          this.#childStreamIndices.set(childSessionId, (cursor += 1));
+          const childEventWork = this.#applyChildEvent(callId, event);
+          if (childEventWork !== undefined) await childEventWork;
+          if (!isCurrentTurnBoundaryEvent(event)) continue;
+          // A proxied child approval parks at an intermediate
+          // `session.waiting`. Keep following so the approved tool result
+          // can still update the nested view.
+          if (event.type === "session.waiting" && hasPendingChildApproval(run)) continue;
+          this.#finalizeRun(callId, true);
+          return;
         }
+      } catch {
+        // Only a non-retryable failure ends the follower early; the parent's
+        // `subagent.completed` still settles the section.
       } finally {
         controller.abort();
         if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
@@ -435,7 +412,6 @@ export class SubagentPump {
       if (nextRun === undefined || nextRun.status === "authoritative") continue;
       if (remaining.length === 0) this.#queuedChildCalls.delete(childSessionId);
       else this.#queuedChildCalls.set(childSessionId, remaining);
-      nextRun.childStreamIndex = this.#childStreamIndices.get(childSessionId) ?? 0;
       this.#activeChildCalls.set(childSessionId, nextCallId);
       this.#startPump(nextCallId);
       return;
@@ -460,7 +436,6 @@ export class SubagentPump {
   #applyChildEvent(callId: string, event: MessageStreamEvent): Promise<void> | undefined {
     const run = this.#runs.get(callId);
     if (!run) return;
-    if (!run.seenChildEvents.admit(event)) return;
     // Parent completion is provisional. Any delayed child event reopens the
     // mutable cohort until the child stream supplies its own boundary.
     if (run.status === "provisional") {
@@ -607,27 +582,6 @@ export class SubagentPump {
 
 function hasPendingChildApproval(run: SubagentRun): boolean {
   return [...run.tools.values()].some((tool) => tool.status === "approval-requested");
-}
-
-function streamPathAt(path: string, startIndex: number): string {
-  if (startIndex === 0) return path;
-  return `${path}${path.includes("?") ? "&" : "?"}startIndex=${startIndex}`;
-}
-
-async function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return;
-  await new Promise<void>((resolve) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    timer.unref?.();
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 function openCurrentSubagentSection(run: SubagentRun): {

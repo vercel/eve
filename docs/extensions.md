@@ -273,7 +273,9 @@ The mount is intentionally per agent. Each consumer chooses its own mount namesp
 
 When `eve dev` starts a consuming agent, it builds mounted, source-backed extensions found inside the same workspace before compiling the agent. It watches the extension source and relevant package and TypeScript configuration, then rebuilds only the affected extension. If an extension edit fails to build, the previous successful development generation keeps running.
 
-Production `eve build` expects the extension distribution to exist already. Keep `eve extension build` in the extension package's `build` and `prepare` scripts, as the scaffold does, and run workspace builds in dependency order so extensions build before their consuming agents.
+Production builds build the same extensions from source. `eve build` builds each mounted, source-backed workspace extension before it compiles the agent, and `withEve` does the same for its agents during `next build`. Production builds therefore do not depend on the extension package's `prepare` script, which package managers skip for no-op installs and with `--ignore-scripts`. eve skips an extension whose distribution was built by the same eve version and is newer than the extension's source, `package.json`, and TypeScript configuration.
+
+If an extension fails to build, the agent build stops with an error that names the extension package and its directory. Fix the reported error, or run `eve extension build` in that package directory to build it on its own.
 
 ### Override a contribution
 

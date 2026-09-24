@@ -8,7 +8,7 @@ import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
-import { resolveEveDestinationPrefix } from "./server.js";
+import { NEXT_PHASE_PRODUCTION_BUILD, resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
@@ -401,12 +401,34 @@ async function normalizeAgentsConfig(
   });
 }
 
+async function buildAgentWorkspaceExtensions(
+  agents: readonly ResolvedEveNextAgent[],
+): Promise<void> {
+  // Loaded lazily so development config loads skip the extension builder.
+  const [{ buildWorkspaceExtensions }, { DiscoveryProjectResolutionError }] = await Promise.all([
+    import("#internal/nitro/host/workspace-extensions.js"),
+    import("#discover/project.js"),
+  ]);
+  // Agents can mount the same extension, so build them one at a time.
+  for (const agent of agents) {
+    try {
+      await buildWorkspaceExtensions(agent.appRoot);
+    } catch (error) {
+      // The Next.js app can proxy to an agent built and deployed elsewhere.
+      if (error instanceof DiscoveryProjectResolutionError) continue;
+      throw error;
+    }
+  }
+}
+
 /**
  * Wraps a Next.js config so same-origin eve endpoints proxy to a separate eve
  * service.
  *
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
- * rewrites eve protocol endpoints to that local URL. In Vercel production,
+ * rewrites eve protocol endpoints to that local URL. During `next build`,
+ * builds each agent's mounted source-backed workspace extensions so the
+ * Next.js type check can resolve them. In Vercel production,
  * writes Build Output service routes so Vercel sends eve protocol endpoints to
  * the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
@@ -425,6 +447,9 @@ export function withEve<TConfig extends EveNextConfig>(
       normalizeAgentsConfig(options),
       resolveNextConfig(configOrFunction, phase, context),
     ]);
+    if (phase === NEXT_PHASE_PRODUCTION_BUILD) {
+      await buildAgentWorkspaceExtensions(agents);
+    }
     const existingRewrites = nextConfig.rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({
       agents: agents.map((agent) => {

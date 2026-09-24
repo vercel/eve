@@ -239,9 +239,41 @@ export default eveChannel({
 
 `trustedForwarders` authorizes the verified forwarder to supply eve delegation context: principal identity, parent session lineage, and, with principal forwarding, trace-content constraints. Match it precisely: `() => true` grants this authority to every caller that passes route auth, including preview deployments accepted by `vercelOidc()`. The framework default channel rejects forwarded principals and ignores the other context.
 
+### Limiting what a forwarder may assert
+
+A forwarder accepted on its identity alone can assert any principal, including identities your tools trust directly, such as a Slack user or an app principal. When a forwarder should speak only for its own users, check what it asserts with the predicate's second argument:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import type { SessionAuthContext } from "eve/context";
+
+const router = vercelSubject({ teamSlug: "acme", projectName: "router" });
+
+/** The router forwards only users signed in through its own identity provider. */
+function isRouterUser(context: SessionAuthContext): boolean {
+  return (
+    context.authenticator === "router-sso" &&
+    context.issuer === "router" &&
+    context.principalType === "user"
+  );
+}
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  trustedForwarders: (forwarder, assertion) =>
+    forwarder.subject === router &&
+    assertion.principal !== undefined &&
+    isRouterUser(assertion.principal.current) &&
+    isRouterUser(assertion.principal.initiator),
+});
+```
+
+`assertion.principal` holds the `current` and `initiator` contexts the forwarder asserts, already stamped with `eve:forwarded-by`. `initiator` equals `current` when the sender omits it. `initiator` takes effect only on session creation; on continuation the predicate still sees the asserted `initiator`, but the session keeps its original initiator, so checking it does not constrain that pinned value. Attributes are asserted too, so check any attribute your tools trust. `assertion.principal` is absent when the predicate decides parent session lineage for a request that forwards no principal; a predicate that requires it accepts that forwarder's lineage only alongside a principal it accepts. The `ForwardedAssertion` and `TrustedForwarders` types are exported from `eve/channels/eve` for named predicates.
+
 When the predicate accepts a create request, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller.
 
-The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured, or with a forwarder or assertion the predicate refuses, is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
 
 Trusted parent session lineage populates `ctx.session.parent` and preserves the root session across the delegation chain. Untrusted lineage is ignored, and accepted lineage does not remove the normal root-session token cap.
 

@@ -35,7 +35,7 @@ describe("openStreamBody", () => {
     const connection = await openStreamBody({
       host: "https://agent.example",
       resolveHeaders: () => Promise.resolve(new Headers()),
-      sessionId: "session_1",
+      path: "/eve/v1/session/session_1/stream",
       startIndex: 0,
     });
     connection.close();
@@ -64,7 +64,7 @@ describe("openStreamBody", () => {
     const connection = await openStreamBody({
       host: "https://agent.example",
       resolveHeaders: () => Promise.resolve(new Headers()),
-      sessionId: "session_1",
+      path: "/eve/v1/session/session_1/stream",
       startIndex: 0,
     });
     connection.close();
@@ -91,7 +91,7 @@ describe("followStreamIterable", () => {
       resolveReconnectPolicy: () => ({
         streamIdleReconnectPolicy: { maxAttempts: 1, baseDelayMs: 0 },
       }),
-      sessionId: "session_1",
+      path: "/eve/v1/session/session_1/stream",
       startIndex: 0,
     })) {
       expect.unreachable(`Unexpected event: ${event.type}`);
@@ -124,7 +124,7 @@ describe("followStreamIterable", () => {
     for await (const event of followStreamIterable({
       host: "https://agent.example",
       resolveHeaders: () => Promise.resolve(new Headers()),
-      sessionId: "session_1",
+      path: "/eve/v1/session/session_1/stream",
       ...options,
     })) {
       expect.unreachable(`Unexpected event: ${event.type}`);
@@ -179,7 +179,7 @@ describe("followStreamIterable", () => {
       for await (const event of followStreamIterable({
         host: "https://agent.example",
         resolveHeaders: () => Promise.resolve(new Headers()),
-        sessionId: "session_1",
+        path: "/eve/v1/session/session_1/stream",
         startIndex: 1,
         follow,
       })) {
@@ -213,7 +213,7 @@ describe("followStreamIterable", () => {
     for await (const _event of followStreamIterable({
       host: "https://agent.example",
       resolveHeaders: () => Promise.resolve(new Headers()),
-      sessionId: "session_1",
+      path: "/eve/v1/session/session_1/stream",
       signal: abort.signal,
       startIndex: 0,
     })) {
