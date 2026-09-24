@@ -1,6 +1,44 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { coalesceDeliveries } from "#harness/messages.js";
+import type { SessionStateMap } from "#harness/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
+
+/** How many admitted operations a session remembers; a resend older than that is admitted again. */
+export const MAX_ADMITTED_OPERATIONS = 256;
+
+/** Session state key a session hands its admitted operations to its successor under. */
+export const ADMITTED_OPERATIONS_STATE_KEY = "eve.admittedOperations";
+
+/** The admitted operations a predecessor handed this session, oldest first. */
+export function readAdmittedOperations(state: SessionStateMap | undefined): readonly string[] {
+  const value = state?.[ADMITTED_OPERATIONS_STATE_KEY];
+  return Array.isArray(value)
+    ? value.filter((key): key is string => typeof key === "string").slice(-MAX_ADMITTED_OPERATIONS)
+    : [];
+}
+
+/**
+ * Records the admitted operations in the session state a successor starts
+ * from. It runs in the workflow body, so it edits the snapshot directly
+ * rather than through the session store, which the body must not import.
+ */
+export function withAdmittedOperations(
+  sessionState: DurableSessionState,
+  keys: readonly string[],
+): DurableSessionState {
+  const { session } = sessionState.snapshot;
+  return {
+    ...sessionState,
+    snapshot: {
+      ...sessionState.snapshot,
+      session: {
+        ...session,
+        state: { ...session.state, [ADMITTED_OPERATIONS_STATE_KEY]: [...keys] },
+      },
+    },
+  };
+}
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
 
@@ -54,24 +92,38 @@ export type SessionInputSelection =
 export class SessionInputQueue {
   private readonly entries: QueuedSessionInput[] = [];
   private nextSequence = 0;
-  /** Every operation admitted, so a resent delivery is dropped. */
-  private readonly operationIds = new Set<string>();
+  /**
+   * The most recent operations admitted, per principal and oldest first, so a
+   * resent delivery is dropped. A successor starts from its predecessor's.
+   */
+  private readonly operations: string[];
   /** Steering messages admitted per delegated call since the session last answered it. */
   private readonly steerCounts = new Map<string, number>();
+
+  constructor(options: { readonly admittedOperations?: readonly string[] } = {}) {
+    this.operations = [...(options.admittedOperations ?? [])];
+  }
 
   get pendingCount(): number {
     return this.entries.length;
   }
 
+  /** The operations this session remembers, to hand to a successor. */
+  admittedOperations(): readonly string[] {
+    return [...this.operations];
+  }
+
   /**
-   * Admits a delivery. A delivery with an `operationId` is admitted once; a
-   * repeat, such as one resent by a retried owner step, returns `undefined`.
+   * Admits a delivery. A delivery with an `operationId` is admitted once per
+   * principal; a repeat, such as one resent by a retried owner step, returns
+   * `undefined`. Two principals may use the same `operationId`.
    */
   enqueueDelivery(delivery: DeliverHookPayload): DeliveryAdmission | undefined {
-    const key = delivery.operationId;
+    const key = operationKey(delivery);
     if (key !== undefined) {
-      if (this.operationIds.has(key)) return undefined;
-      this.operationIds.add(key);
+      if (this.operations.includes(key)) return undefined;
+      this.operations.push(key);
+      if (this.operations.length > MAX_ADMITTED_OPERATIONS) this.operations.shift();
       const callId = delivery.caller?.callId;
       if (callId !== undefined && isOwnerSteer(delivery))
         this.steerCounts.set(callId, (this.steerCounts.get(callId) ?? 0) + 1);
@@ -270,6 +322,19 @@ export function isSteeringDelivery(
     (delivery.turnPolicy ?? "steer") === "steer" &&
     (delivery.caller === undefined || delivery.caller.callId === callerCallId)
   );
+}
+
+/** A delivery's operation identity, scoped to the principal that sent it. */
+function operationKey(delivery: DeliverHookPayload): string | undefined {
+  if (delivery.operationId === undefined) return undefined;
+  const auth = delivery.auth ?? null;
+  return JSON.stringify([
+    auth?.authenticator ?? null,
+    auth?.issuer ?? null,
+    auth?.principalType ?? null,
+    auth?.principalId ?? null,
+    delivery.operationId,
+  ]);
 }
 
 /**

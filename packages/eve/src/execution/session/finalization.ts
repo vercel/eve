@@ -12,6 +12,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { notifyDelegatedParentStep, notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { answerOrder } from "#tasks/protocol.js";
 import {
   createDelegatedSubagentErrorResult,
   createDelegatedSubagentSuccessResult,
@@ -78,6 +80,7 @@ export async function finalizeSession(
     });
   } else if (context.caller !== undefined) {
     const notification: {
+      answer?: number;
       errorCode?: string;
       isError?: boolean;
       output: unknown;
@@ -86,6 +89,13 @@ export async function finalizeSession(
       output: settled.output,
       usage: settled.turnUsage,
     };
+    const session = context.cursor.sessionState?.snapshot.session;
+    if (session !== undefined) {
+      notification.answer = answerOrder(
+        getHarnessEmissionState(session.state).sequence,
+        "terminal",
+      );
+    }
     if (settled.isError) notification.isError = true;
     if (settled.errorCode !== undefined) notification.errorCode = settled.errorCode;
     await notifyTurnCallerStep({

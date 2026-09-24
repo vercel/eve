@@ -39,6 +39,7 @@ export default defineEval({
     const aliceTurn = await t.send(CREATE_CHILD_MESSAGE);
     const aliceParent = await waitForRemoteChild(t, aliceTurn.session, aliceTurn);
     const childSessionId = aliceParent.childSessionId;
+    const aliceAgentId = aliceParent.taskId;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     await expectWorkspaceReads(t, aliceChild, ALICE_WORKSPACE_LABEL);
 
@@ -60,11 +61,12 @@ export default defineEval({
       authorization: BOB_AUTHORIZATION,
       otherThan: childSessionId,
     });
-    expectRefused(bobParent.turn);
+    expectRefused(bobParent.turn, aliceAgentId);
     const bobChild = await t.target.watchTurn(bobParent.childSessionId).result();
     await expectWorkspaceReads(t, bobChild, BOB_WORKSPACE_LABEL);
 
-    // The observer, who has no membership, is refused too; its own child is denied access.
+    // The observer, who has no membership, names Alice's agent too and is refused;
+    // its own child is denied access.
     const observerTurn = await bobParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: OBSERVER_AUTHORIZATION },
     });
@@ -72,7 +74,7 @@ export default defineEval({
       authorization: OBSERVER_AUTHORIZATION,
       otherThan: childSessionId,
     });
-    expectRefused(observerParent.turn);
+    expectRefused(observerParent.turn, aliceAgentId);
     if (observerParent.childSessionId === bobParent.childSessionId) {
       throw new Error("The observer's lookup ran in Bob's remote child.");
     }
@@ -95,7 +97,9 @@ export default defineEval({
   },
 });
 
-function expectRefused(turn: EveEvalTurn): void {
+/** The turn named Alice's agent, and the agent refused a caller other than Alice. */
+function expectRefused(turn: EveEvalTurn, aliceAgentId: string): void {
+  turn.calledTool("remote-loopback", { input: { agentId: aliceAgentId }, status: "failed" });
   turn.event("action.result", {
     data: {
       result: {
@@ -145,6 +149,7 @@ async function waitForRemoteChild(
 ): Promise<{
   readonly childSessionId: string;
   readonly session: SessionCursor;
+  readonly taskId: string;
   readonly turn: EveEvalTurn;
 }> {
   const { authorization, expectedSessionId, otherThan } = options;
@@ -159,14 +164,14 @@ async function waitForRemoteChild(
       (event) => event.type === "task.started" && event.data.name === "remote-loopback",
     );
     const childSessionId = call?.type === "task.started" ? call.data.child?.sessionId : undefined;
-    if (childSessionId !== undefined) {
+    if (call?.type === "task.started" && childSessionId !== undefined) {
       if (expectedSessionId !== undefined && childSessionId !== expectedSessionId) {
         throw new Error("The parent turn did not continue the existing remote child.");
       }
       if (childSessionId === otherThan) {
         throw new Error("Another user's remote child took this caller's lookup.");
       }
-      return { childSessionId, session, turn };
+      return { childSessionId, session, taskId: call.data.taskId, turn };
     }
     turn.noFailedActions();
     if (attempt === 4) break;

@@ -25,6 +25,10 @@ export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
 export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
 export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
+/** Health route response header reporting the deployment's task protocol version. */
+export const EVE_TASK_PROTOCOL_HEADER = "x-eve-task-protocol";
+/** Request header of a report read: the callback token the report was sent to. */
+export const EVE_CALLBACK_TOKEN_HEADER = "x-eve-callback-token";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
 /**
@@ -275,6 +279,8 @@ export interface ApprovalCandidateStreamEvent {
     reason?: string;
     sequence: number;
     stepIndex: number;
+    /** Set when a delegated task's approval is proxied; the approval belongs to that task. */
+    taskId?: string;
     turnId: string;
   };
   type: "approval.candidate";
@@ -288,6 +294,8 @@ export interface ApprovalSettledStreamEvent {
     responderPrincipalId: string;
     sequence: number;
     stepIndex: number;
+    /** Set when a delegated task's approval is proxied; the approval belongs to that task. */
+    taskId?: string;
     turnId: string;
   };
   type: "approval.settled";

@@ -1,5 +1,15 @@
-import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import {
+  sessionInboxHookToken,
+  type SessionInboxAddress,
+} from "#execution/session-inbox/address.js";
+import type {
+  DeliverHookPayload,
+  DeliverPayload,
+  RuntimeActionResultHookPayload,
+} from "#channel/types.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
+import type { TaskError } from "#tasks/protocol.js";
+import type { TaskRecord } from "#tasks/record.js";
 import { deserializeContext } from "#context/serialize.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
@@ -28,7 +38,7 @@ import {
   retireProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { resumeResolvedTaskClocks } from "#tasks/clock.js";
-import { getTaskTable } from "#tasks/state.js";
+import { getTaskTable, readTaskCallbackAlias } from "#tasks/state.js";
 import { findTask } from "#tasks/table.js";
 import { answerRemoteTask } from "#tasks/transport.js";
 
@@ -127,19 +137,25 @@ export async function routeProxiedDeliverStep(input: {
       const taskId = routes.get(child.retireRequestIds[0] ?? "")?.taskId;
       const record =
         taskId === undefined ? undefined : findTask(getTaskTable(durableSession), taskId);
-      const answered =
-        record !== undefined &&
-        (await answerRemoteTask({
-          auth: sourceDelivery.auth ?? null,
-          ctx: await deserializeContext(input.serializedContext ?? {}),
-          inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
-          record,
-        }));
+      const inputResponses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
+      // Remote routes carry no answer hook, so no message dismisses one; with
+      // nothing to answer there is nothing to send.
+      if (record === undefined || inputResponses.length === 0) continue;
+      const outcome = await answerRemoteTask({
+        auth: sourceDelivery.auth ?? null,
+        ctx: await deserializeContext(input.serializedContext ?? {}),
+        inputResponses,
+        record,
+      });
       // An answer that did not reach the remote child stays answerable.
-      if (answered) {
-        durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
-        retired = true;
+      if (outcome.kind === "retry") continue;
+      if (outcome.kind === "failed") {
+        // It never can: the task fails through the owner's inbox, like a
+        // result from the child, and its requests are no longer answerable.
+        await failRemoteTask({ ...outcome, record, sessionState: durableSession.state });
       }
+      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+      retired = true;
       continue;
     }
     if (child.answerHook !== undefined) {
@@ -165,6 +181,7 @@ export async function routeProxiedDeliverStep(input: {
       continue;
     }
 
+    // The answer keeps its answerer; the child attributes it without taking on that principal.
     const childDelivery: DeliverHookPayload = {
       ...sourceDelivery,
       deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
@@ -208,6 +225,43 @@ export async function routeProxiedDeliverStep(input: {
   return dismissedTaskIds.size === 0
     ? { ...context, kind: "continue", remainder }
     : { ...context, dismissedTaskIds: [...dismissedTaskIds], kind: "continue", remainder };
+}
+
+/**
+ * Fails a remote task whose answers can never reach its child. The failure
+ * enters the owner's inbox through the callback alias, exactly as the child's
+ * own result would, so the owner settles the task on its one path.
+ */
+async function failRemoteTask(input: {
+  readonly childEnded: boolean;
+  readonly error: TaskError;
+  readonly record: TaskRecord;
+  readonly sessionState: Parameters<typeof readTaskCallbackAlias>[0];
+}): Promise<void> {
+  const { record } = input;
+  const alias = readTaskCallbackAlias(input.sessionState);
+  if (alias === undefined || record.child?.kind !== "remote") return;
+  const error = { code: input.error.code, message: input.error.message };
+  const payload: RuntimeActionResultHookPayload = {
+    kind: "runtime-action-result",
+    results: [
+      {
+        callId: record.callId,
+        isError: true,
+        kind: "subagent-result",
+        origin: "child",
+        outcome: {
+          kind: input.childEnded ? "terminal" : "parked",
+          result: { error, kind: "failed" },
+          usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
+        output: error,
+        subagentName: record.name,
+      },
+    ],
+    source: { kind: "remote", sessionId: record.child.sessionId },
+  };
+  await resumeHook(sessionInboxHookToken(alias), payload);
 }
 
 // A `ctx.ask()` question is resolved by its workflow, not the harness, so the

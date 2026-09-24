@@ -58,7 +58,11 @@ export function readTaskCreator(value: JsonObject | undefined): TaskCreator {
   return creator;
 }
 
-/** Two principals are the same when their authenticator, type, and id match. */
+/**
+ * Two principals are the same when their authenticator, type, and id match.
+ * Every unauthenticated caller shares one anonymous principal, so they all
+ * match each other.
+ */
 export function sameTaskPrincipal(
   left: SessionAuthContext | null | undefined,
   right: SessionAuthContext | null | undefined,

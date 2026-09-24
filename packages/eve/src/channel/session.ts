@@ -91,7 +91,9 @@ interface SessionDeliveryOptions {
 export type SessionSendOptions = SessionDeliveryOptions & {
   /**
    * Replay-stable identity of this send. The session admits one delivery per
-   * `operationId`, so a retried request does not deliver the message twice.
+   * `operationId` for each principal, so a retried request does not deliver
+   * the message twice. It remembers its most recent 256 operation IDs,
+   * including after it moves to another deployment.
    */
   readonly operationId?: string;
   /** Initial workflow title for a prewarmed session. */

@@ -8,6 +8,8 @@ import {
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { answerOrder, reportOrdering } from "#tasks/protocol.js";
 import {
   hasOpenTurnWork,
   nextTurnDelivery,
@@ -15,7 +17,12 @@ import {
 } from "#execution/session/next-input.js";
 import { cancelTasks, cancelTurnDescendants, syncTaskTimer } from "#tasks/owner-body.js";
 import { hasPendingBackgroundWork } from "#tasks/results.js";
-import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { flushUnsentCallerEvents } from "#subagents/unsent-caller-events.js";
+import {
+  readAdmittedOperations,
+  SessionInputQueue,
+  withAdmittedOperations,
+} from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
@@ -203,7 +210,9 @@ async function runSessionLoop(
   },
 ): Promise<SessionLoopOutcome> {
   const { cursor, handoff, inbox, progress } = deps;
-  const queue = new SessionInputQueue();
+  const queue = new SessionInputQueue({
+    admittedOperations: readAdmittedOperations(cursor.sessionState.snapshot.session.state),
+  });
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
     cursor,
@@ -224,6 +233,8 @@ async function runSessionLoop(
     expectedAttemptIds: ReadonlySet<string>,
   ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
     while (true) {
+      // A remote caller must see this session's questions before it waits on them.
+      await flushUnsentCallerEvents(cursor);
       const next = await nextTurnDelivery({
         cursor,
         // A task-mode run takes no follow-up input while it waits for an
@@ -268,7 +279,8 @@ async function runSessionLoop(
   ): Promise<SessionActionResult> => {
     const transfer = await handoff.tryTransfer(next, {
       serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
+      // The successor keeps dropping resent deliveries this session admitted.
+      sessionState: withAdmittedOperations(cursor.sessionState, queue.admittedOperations()),
     });
     if (transfer.kind === "transferred") return transfer;
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
@@ -366,7 +378,16 @@ async function runSessionLoop(
             caller: progress.caller,
             lifecycle: "parked",
             sessionId: boot.sessionId,
-            settled: steers === 0 ? action.settled : { ...action.settled, steers },
+            settled: {
+              ...action.settled,
+              ...reportOrdering(
+                steers,
+                answerOrder(
+                  getHarnessEmissionState(cursor.sessionState.snapshot.session.state).sequence,
+                  "parked",
+                ),
+              ),
+            },
           });
         }
         progress.caller = undefined;

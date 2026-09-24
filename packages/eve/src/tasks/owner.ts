@@ -49,8 +49,19 @@ import {
 } from "#tracing/agent-invocation-terminal.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
-import { isTerminalTaskStatus, reportedSteers, type ChildAddress } from "#tasks/protocol.js";
-import { createFailedResult, toTaskError, toTaskOutcome, toToolResult } from "#tasks/outcome.js";
+import {
+  isTerminalTaskStatus,
+  reportedAnswer,
+  reportedSteers,
+  type ChildAddress,
+} from "#tasks/protocol.js";
+import {
+  createFailedResult,
+  failEmptyResult,
+  toTaskError,
+  toTaskOutcome,
+  toToolResult,
+} from "#tasks/outcome.js";
 import { cancelOrphanedChild, deliverToChild, type CommandEffect } from "#tasks/transport.js";
 import {
   clearReportedChildRoutes,
@@ -496,8 +507,9 @@ export async function applyTaskReport(input: {
     }
   } else {
     const source = input.payload.source;
-    for (const result of input.payload.results) {
-      if (result.kind !== "subagent-result" || result.origin !== "child") continue;
+    for (const reported of input.payload.results) {
+      if (reported.kind !== "subagent-result" || reported.origin !== "child") continue;
+      const result = failEmptyResult(reported);
       const table = getTaskTable(session);
       const record = findReportedTask(table, result, source);
       if (record === undefined) continue;
@@ -506,6 +518,7 @@ export async function applyTaskReport(input: {
       const applied = applyTaskMessage(
         table,
         {
+          answer: reportedAnswer(result),
           childEnded,
           generation: record.generation,
           kind: "task.settled",

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionInputQueue } from "#execution/session/input-queue.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  MAX_ADMITTED_OPERATIONS,
+  readAdmittedOperations,
+  SessionInputQueue,
+  withAdmittedOperations,
+} from "#execution/session/input-queue.js";
 
 const caller = {
   callId: "call-1",
@@ -113,5 +120,66 @@ describe("an owner's steering messages", () => {
     expect(queue.takeSteerCount("call-1")).toBe(0);
     // A resent copy of the dropped message stays dropped.
     expect(queue.enqueueDelivery(steer("turn-1:call-2"))).toBeUndefined();
+  });
+});
+
+describe("follow-up operation ids", () => {
+  const ALICE = {
+    attributes: {},
+    authenticator: "slack",
+    principalId: "U-alice",
+    principalType: "user",
+  } as const;
+  const BOB = { ...ALICE, principalId: "U-bob" } as const;
+  const followUp = (auth: SessionAuthContext, operationId: string) => ({
+    auth,
+    kind: "deliver" as const,
+    operationId,
+    payloads: [{ message: "Also check the invoice." }],
+  });
+
+  it("admits the same operation id once per principal, so two clients never drop each other", () => {
+    const queue = new SessionInputQueue();
+
+    expect(queue.enqueueDelivery(followUp(ALICE, "retry-1"))).toBeDefined();
+    expect(queue.enqueueDelivery(followUp(BOB, "retry-1"))).toBeDefined();
+    expect(queue.enqueueDelivery(followUp(ALICE, "retry-1"))).toBeUndefined();
+    expect(queue.pendingCount).toBe(2);
+  });
+
+  it("keeps dropping resends after a handoff, from the operations its predecessor admitted", () => {
+    const predecessor = new SessionInputQueue();
+    predecessor.enqueueDelivery(followUp(ALICE, "retry-1"));
+    const session = {
+      agent: { dynamicModel: true as const, system: "", tools: [] },
+      compaction: { recentWindowSize: 5, threshold: 10_000 },
+      continuationToken: "token",
+      history: [],
+      sessionId: "session",
+    };
+    const handedOff = withAdmittedOperations(
+      createDurableSessionState({ session }),
+      predecessor.admittedOperations(),
+    );
+
+    const successor = new SessionInputQueue({
+      admittedOperations: readAdmittedOperations(readDurableSession(handedOff).state),
+    });
+
+    expect(successor.enqueueDelivery(followUp(ALICE, "retry-1"))).toBeUndefined();
+    expect(successor.enqueueDelivery(followUp(ALICE, "retry-2"))).toBeDefined();
+  });
+
+  it("remembers a bounded number of operations, oldest dropped first", () => {
+    const queue = new SessionInputQueue();
+    for (let index = 0; index <= MAX_ADMITTED_OPERATIONS; index += 1) {
+      queue.enqueueDelivery(followUp(ALICE, `op-${String(index)}`));
+    }
+
+    expect(queue.admittedOperations()).toHaveLength(MAX_ADMITTED_OPERATIONS);
+    expect(queue.enqueueDelivery(followUp(ALICE, "op-0"))).toBeDefined();
+    expect(
+      queue.enqueueDelivery(followUp(ALICE, `op-${String(MAX_ADMITTED_OPERATIONS)}`)),
+    ).toBeUndefined();
   });
 });

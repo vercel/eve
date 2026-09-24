@@ -1284,7 +1284,9 @@ describe("eveChannel — create session (text)", () => {
       await expect(response.json()).resolves.toEqual({
         code: "TASK_PROTOCOL_MISMATCH",
         error: expect.stringMatching(
-          new RegExp(`the calling deployment sent ${sent}.*Upgrade both deployments`),
+          new RegExp(
+            `the calling deployment sent ${sent}.*Upgrade so both deployments use the same task protocol version`,
+          ),
         ),
         ok: false,
         taskProtocol: 1,

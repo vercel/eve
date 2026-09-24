@@ -14,9 +14,13 @@ import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-contex
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
-import { renderAgentUnreachable } from "#tasks/render.js";
+import { AGENT_SESSION_ENDED_MESSAGE, renderAgentUnreachable } from "#tasks/render.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
-import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
+import {
+  cancelRemoteAgentTurn,
+  isRetryableRemoteAgentCancelError,
+  resolveRemoteAgentForAction,
+} from "#subagents/remote-dispatch.js";
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
@@ -29,7 +33,7 @@ import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { InputResponse } from "#shared/input.js";
 import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
-import type { ChildAddress, TaskCommand } from "#tasks/protocol.js";
+import type { ChildAddress, TaskCommand, TaskError } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { readTaskCreator } from "#tasks/results.js";
 import { ownerInboxHookToken } from "#tasks/state.js";
@@ -71,10 +75,18 @@ async function runCommand(
       const remote = resolveRemoteChild(record, ctx);
       if (remote === undefined) return;
       // Cancel where the child runs; the registry may point at a newer deployment.
-      await cancelRemoteAgentTurn({
-        remote: { ...remote, url: child.url },
-        sessionId: child.sessionId,
-      });
+      const cancel = () =>
+        cancelRemoteAgentTurn({
+          remote: { ...remote, url: child.url },
+          sessionId: child.sessionId,
+        });
+      try {
+        await cancel();
+      } catch (error) {
+        // A cancel is safe to repeat; one more try covers a dropped or slow request.
+        if (!isRetryableRemoteAgentCancelError(error)) throw error;
+        await cancel();
+      }
       return;
     }
     if (child.kind === "local") {
@@ -163,7 +175,10 @@ export async function sendAgentMessage(input: {
       childKind: child.kind,
       taskId: record.id,
     });
-    if (error instanceof RemoteTaskProtocolError) return protocolFailure(error);
+    // A working agent that no longer speaks this protocol cannot take the message.
+    if (error instanceof RemoteTaskProtocolError) {
+      return { code: AGENT_UNREACHABLE, message: error.message };
+    }
     return unreachable(
       isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
     );
@@ -171,19 +186,33 @@ export async function sendAgentMessage(input: {
 }
 
 /**
- * Answers input requests a remote agent surfaced. Returns whether the
- * answers reached it; ones that did not stay answerable.
+ * What became of answers sent to a remote agent: they reached it; they did
+ * not but may on a later try, so the requests stay answerable; or they never
+ * can, because the agent's session is gone or speaks another protocol, so
+ * the task fails with `error`.
+ */
+export type RemoteAnswerOutcome =
+  | { readonly kind: "answered" }
+  | { readonly kind: "retry" }
+  | { readonly kind: "failed"; readonly error: TaskError; readonly childEnded: boolean };
+
+/**
+ * Answers input requests a remote agent surfaced, as the principal that
+ * answered: an approval policy checks that responder. The agent itself keeps
+ * acting as the principal that started it, because a delegated session never
+ * takes on an answer's principal.
  */
 export async function answerRemoteTask(input: {
+  /** The answering principal, forwarded when the definition forwards the caller identity. */
   readonly auth: SessionAuthContext | null;
   readonly ctx: ContextContainer | undefined;
   readonly inputResponses: readonly InputResponse[];
   readonly record: TaskRecord;
-}): Promise<boolean> {
+}): Promise<RemoteAnswerOutcome> {
   const { record } = input;
   const child = record.child;
   const remote = resolveRemoteChild(record, input.ctx);
-  if (child?.kind !== "remote" || remote === undefined) return false;
+  if (child?.kind !== "remote" || remote === undefined) return { kind: "retry" };
   try {
     await answerRemoteAgentSession({
       auth: input.auth,
@@ -191,12 +220,26 @@ export async function answerRemoteTask(input: {
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
     });
-    return true;
+    return { kind: "answered" };
   } catch (error) {
     logError(log, "failed to answer a remote agent's input request", error, {
       taskId: record.id,
     });
-    return false;
+    if (error instanceof RemoteTaskProtocolError) {
+      return {
+        childEnded: false,
+        error: { code: AGENT_UNREACHABLE, message: error.message },
+        kind: "failed",
+      };
+    }
+    if (!isRetryableRemoteAgentContinueError(error)) {
+      return {
+        childEnded: true,
+        error: { code: "AGENT_SESSION_ENDED", message: AGENT_SESSION_ENDED_MESSAGE },
+        kind: "failed",
+      };
+    }
+    return { kind: "retry" };
   }
 }
 
@@ -208,6 +251,8 @@ export async function answerRemoteTask(input: {
 export async function readRemoteTaskReport(
   record: TaskRecord,
   ctx: ContextContainer | undefined,
+  /** The owner's callback token, which the child requires before it shows a report. */
+  callbackToken: string,
 ): Promise<RuntimeSubagentChildResult | undefined> {
   const child = record.child;
   const remote = resolveRemoteChild(record, ctx);
@@ -215,6 +260,7 @@ export async function readRemoteTaskReport(
   try {
     const report = await readRemoteAgentReport({
       callId: record.callId,
+      callbackToken,
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
     });

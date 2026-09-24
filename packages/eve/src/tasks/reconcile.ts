@@ -1,10 +1,11 @@
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { applyTaskReport, readContext, type WorkflowCallerReply } from "#tasks/owner.js";
-import { isTerminalTaskStatus, reportedSteers } from "#tasks/protocol.js";
+import { isTerminalTaskStatus, reportedAnswer } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { getTaskTable } from "#tasks/state.js";
+import { getTaskTable, readTaskCallbackAlias } from "#tasks/state.js";
 import { readRemoteTaskReport } from "#tasks/transport.js";
 
 // The deadline's reconciliation: before a remote task times out, the owner
@@ -20,19 +21,19 @@ export interface ReconciledTasks {
 }
 
 /**
- * Settles each due remote task whose child already reported its result,
- * through the same path as that child's callback. A report that accounts for
- * fewer steering messages than the owner sent answers an earlier turn, so
- * the task is still working and times out as usual.
+ * Settles each due remote task whose child already reported an answer the
+ * owner has not applied, through the same path as that child's callback. The
+ * latest answer is one the owner already applied when the child has not
+ * answered the current generation, such as an agent that runs a steering
+ * message it received after answering; the task then times out as usual.
  */
 export async function reconcileDueRemoteTasks(input: {
   readonly now: string;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }): Promise<ReconciledTasks> {
-  const due = getTaskTable(readDurableSession(input.sessionState)).records.filter((record) =>
-    isDueRemoteTask(record, input.now),
-  );
+  const session = readDurableSession(input.sessionState);
+  const due = getTaskTable(session).records.filter((record) => isDueRemoteTask(record, input.now));
   let reconciled: ReconciledTasks = {
     events: [],
     replies: [],
@@ -40,12 +41,18 @@ export async function reconcileDueRemoteTasks(input: {
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   };
-  if (due.length === 0) return reconciled;
+  const alias = readTaskCallbackAlias(session.state);
+  if (due.length === 0 || alias === undefined) return reconciled;
 
   const ctx = await readContext(input.serializedContext);
+  // The child keeps each report for the callback it was sent to, and shows it
+  // only to the holder of that callback.
+  const callbackToken = sessionInboxHookToken(alias);
   for (const record of due) {
-    const result = await readRemoteTaskReport(record, ctx);
-    if (result === undefined || (reportedSteers(result) ?? 0) < (record.steers ?? 0)) continue;
+    const result = await readRemoteTaskReport(record, ctx, callbackToken);
+    if (result === undefined) continue;
+    const answer = reportedAnswer(result);
+    if (answer === undefined || answer <= (record.answerSeq ?? -1)) continue;
     const update = await applyTaskReport({
       now: input.now,
       payload: {

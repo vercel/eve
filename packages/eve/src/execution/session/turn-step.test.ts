@@ -11,6 +11,7 @@ import { ContextContainer, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import {
   AuthKey,
+  DelegatedSessionKey,
   ChannelInstrumentationKey,
   ContinuationHookTokensKey,
   ContinuationTokenKey,
@@ -35,7 +36,7 @@ import { getPendingAuthorization, setPendingAuthorization } from "#harness/autho
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
-import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepFn, StepInput, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
@@ -1539,6 +1540,73 @@ describe("turnStep", () => {
     });
 
     expect(observed).toEqual(expected);
+  });
+
+  it("keeps a delegated session's principal when a person answers it, and attributes the answer", async () => {
+    // The default deliver hook keeps answers structured, as the subagent adapter does.
+    const plainAdapter: ChannelAdapter = { kind: "plain" };
+    const bundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[plainAdapter.kind, plainAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      principalId: "slack:U-alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "slack:U-bob" };
+    const answer = { optionId: "approve", requestId: "approval-1" };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, alice);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, plainAdapter);
+    ctx.set(ContinuationTokenKey, "http:delegated-answer");
+    ctx.set(DelegatedSessionKey, true);
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+
+    let observed: { auth: SessionAuthContext | null | undefined; input: StepInput | undefined } = {
+      auth: undefined,
+      input: undefined,
+    };
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session, input): Promise<StepResult> => {
+        observed = { auth: loadContext().get(AuthKey), input };
+        return { next: null, session };
+      };
+    });
+
+    await turnStep({
+      input: { auth: bob, kind: "deliver", payloads: [{ inputResponses: [answer] }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    // Bob's approval is checked as Bob's, and the session goes on acting as Alice.
+    expect(observed.auth).toEqual(alice);
+    expect(observed.input).toMatchObject({
+      attributedInputResponses: [{ auth: bob, response: answer }],
+      inputResponses: [answer],
+    });
   });
 
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {

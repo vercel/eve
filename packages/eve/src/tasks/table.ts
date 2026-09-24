@@ -419,10 +419,21 @@ export function applyTaskMessage(
       };
     }
     case "task.settled": {
+      // A repeat of an answer already applied, even one to an earlier
+      // generation of the same call, settles nothing.
+      if (
+        message.answer !== undefined &&
+        record.answerSeq !== undefined &&
+        message.answer <= record.answerSeq
+      ) {
+        return { effects: [], table };
+      }
+      const answerSeq = message.answer ?? record.answerSeq;
       // A child the owner stopped (cancelled or timed out) confirms here.
       if (isTerminalTaskStatus(record.status) && record.cancelConfirmBy !== undefined) {
         const confirmed = withoutUndefined({
           ...record,
+          answerSeq,
           cancelConfirmBy: undefined,
           child: message.childEnded === true ? undefined : record.child,
         });
@@ -438,7 +449,7 @@ export function applyTaskMessage(
         };
       }
       if (isTerminalTaskStatus(record.status)) return { effects: [], table };
-      const settled = settleRecord(record, message.outcome);
+      const settled = withoutUndefined({ ...settleRecord(record, message.outcome), answerSeq });
       const next =
         message.childEnded === true ? withoutUndefined({ ...settled, child: undefined }) : settled;
       const effects: TaskEffect[] = [

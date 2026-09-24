@@ -8,7 +8,14 @@ import { deserializeContext } from "#context/serialize.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import type { TaskStartedHookPayload, TurnCaller } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { reportedSteers, type ChildTaskReport } from "#tasks/protocol.js";
+import {
+  reportedAnswer,
+  reportedSteers,
+  reportOrdering,
+  TASK_PROTOCOL_VERSION,
+  type ChildTaskReport,
+} from "#tasks/protocol.js";
+import { isTaskProtocolRefusal } from "#subagents/remote-protocol.js";
 import { recordTaskReport } from "#subagents/task-reports.js";
 import { ActivityObserverKey, SessionCallbackKey } from "#context/keys.js";
 import {
@@ -87,6 +94,8 @@ export interface SettledTurnNotification {
   readonly usage?: TokenUsage;
   /** Steering messages for the call that the session received since it last answered it. */
   readonly steers?: number;
+  /** The answer's place among this session's answers; see `answerOrder`. */
+  readonly answer?: number;
 }
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
@@ -128,6 +137,7 @@ export async function notifyTurnCallerStep(input: {
     await postSettledTurnCallback({
       result,
       sessionId: input.sessionId,
+      token: input.caller.replyTo.token,
       url: input.caller.replyTo.url,
     });
     return;
@@ -168,6 +178,7 @@ export async function notifyCancelledTaskCallerStep(input: {
     await postSettledTurnCallback({
       result,
       sessionId: input.sessionId,
+      token: input.caller.replyTo.token,
       url: input.caller.replyTo.url,
     });
     return;
@@ -182,10 +193,7 @@ function createSettledTurnResult(input: {
   readonly settled: SettledTurnNotification;
 }): ChildTaskReport {
   const usageDelta = input.settled.usage ?? ZERO_TOKEN_USAGE;
-  const steers =
-    input.settled.steers === undefined || input.settled.steers === 0
-      ? {}
-      : { steers: input.settled.steers };
+  const steers = reportOrdering(input.settled.steers, input.settled.answer);
 
   if (input.settled.isError === true) {
     const error = {
@@ -348,35 +356,45 @@ async function postSettledTurnCallback(input: {
   readonly result: RuntimeSubagentChildResult;
   /** Narrows which remote task the report may settle; it is also the report's store. */
   readonly sessionId: string;
+  /** The caller's callback token; only its holder may read the recorded report. */
+  readonly token: string;
   readonly url: string;
 }): Promise<void> {
   const { result, sessionId } = input;
   const common = {
+    answer: reportedAnswer(result),
     callId: result.callId,
     sessionId,
     steers: reportedSteers(result),
     subagentName: result.subagentName,
+    taskProtocol: TASK_PROTOCOL_VERSION,
   };
   const payload =
     result.isError === true
       ? { ...common, error: result.output, kind: "turn.failed", outcome: result.outcome }
       : { ...common, kind: "turn.completed", outcome: result.outcome, output: result.output };
-  await recordTaskReport({ report: payload, sessionId });
+  await recordTaskReport({ callbackToken: input.token, report: payload, sessionId });
   await postCallbackPayload({ payload, url: input.url });
 }
 
 async function postCallbackPayload(input: {
-  readonly payload: unknown;
+  readonly payload: { readonly callId: string; readonly subagentName: string };
   readonly url: string;
 }): Promise<void> {
   const response = await postSessionCallbackRequest({
     body: input.payload,
     url: input.url,
   });
-
-  if (!response.ok) {
-    throw new Error(`Turn callback failed with HTTP ${response.status}.`);
+  if (response.ok) return;
+  if (await isTaskProtocolRefusal(response)) {
+    // Retrying cannot change the caller's version; its deadline ends the call.
+    log.error("turn caller refused the result for its task protocol version", {
+      callId: input.payload.callId,
+      subagentName: input.payload.subagentName,
+    });
+    return;
   }
+  throw new Error(`Turn callback failed with HTTP ${response.status}.`);
 }
 
 async function resumeSettledTurnHook(

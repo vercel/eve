@@ -2757,7 +2757,9 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Hi" });
 
     expect(result.next).toBeNull();
+    // A delegating caller receives the task code, not a generic execution failure.
     expect(result.settledTurn).toEqual({
+      errorCode: "OUTPUT_SCHEMA_NOT_FULFILLED",
       isError: true,
       output: "The agent could not produce a result matching the requested schema.",
     });

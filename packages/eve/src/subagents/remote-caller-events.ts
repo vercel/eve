@@ -1,5 +1,9 @@
 import type { ContextContainer } from "#context/container.js";
-import { SessionCallbackKey } from "#context/keys.js";
+import {
+  SessionCallbackKey,
+  UnsentCallerEventsKey,
+  type UnsentCallerEvent,
+} from "#context/keys.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -8,6 +12,8 @@ import {
   type RemoteAuthorizationCallback,
   type RemoteInputRequestedCallback,
 } from "#subagents/callback-hitl.js";
+import { isTaskProtocolRefusal } from "#subagents/remote-protocol.js";
+import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
 
 const log = createLogger("subagents.remote-caller-events");
 
@@ -15,11 +21,13 @@ const log = createLogger("subagents.remote-caller-events");
  * Forwards a remotely called session's input requests and authorization
  * events to its caller's callback, the way the subagent adapter forwards a
  * local child's to its owner's inbox, so the caller's client can answer
- * them. A request that does not arrive is bounded by the caller's deadline;
- * like the local path, a failed forward is logged, not retried.
+ * them. A forward that fails, or that would overtake an earlier failed one,
+ * is kept in context and sent again before the session waits for input
+ * (`flushUnsentCallerEvents`); retrying it here would re-run the step that
+ * emitted it.
  */
 export async function forwardEventToRemoteCaller(input: {
-  readonly ctx: Pick<ContextContainer, "get">;
+  readonly ctx: Pick<ContextContainer, "get" | "set">;
   readonly event: UnstampedMessageStreamEvent;
   readonly sessionId: string;
 }): Promise<void> {
@@ -30,6 +38,7 @@ export async function forwardEventToRemoteCaller(input: {
     callId: callback.callId,
     sessionId: input.sessionId,
     subagentName: callback.subagentName,
+    taskProtocol: TASK_PROTOCOL_VERSION,
   };
   let body: RemoteInputRequestedCallback | RemoteAuthorizationCallback;
   if (event.type === "input.requested") {
@@ -44,12 +53,50 @@ export async function forwardEventToRemoteCaller(input: {
   } else {
     return;
   }
-  try {
-    await postSessionCallbackRequest({ body, url: callback.url });
-  } catch {
-    log.warn("failed to forward an input request to the remote caller", {
-      callId: callback.callId,
-      eventType: event.type,
-    });
+  const entry: UnsentCallerEvent = { body, url: callback.url };
+  const unsent = input.ctx.get(UnsentCallerEventsKey) ?? [];
+  if (unsent.length === 0 && (await sendCallerEvent(entry, { logFailures: false })) !== "retry") {
+    return;
   }
+  log.warn("keeping an input request for the remote caller to send again", {
+    callId: callback.callId,
+    eventType: event.type,
+  });
+  input.ctx.set(UnsentCallerEventsKey, [...unsent, entry]);
+}
+
+/**
+ * Posts one caller event. `retry` for a transport failure or a status that
+ * may clear; a caller that can never take the event (it rejects the body,
+ * knows no such callback, or speaks another task protocol version) drops it.
+ */
+export async function sendCallerEvent(
+  entry: UnsentCallerEvent,
+  options: { readonly logFailures: boolean },
+): Promise<"sent" | "dropped" | "retry"> {
+  let response: Response;
+  try {
+    response = await postSessionCallbackRequest({
+      body: entry.body,
+      logFailures: options.logFailures,
+      url: entry.url,
+    });
+  } catch {
+    return "retry";
+  }
+  if (response.ok) return "sent";
+  if (
+    response.status === 400 ||
+    response.status === 404 ||
+    response.status === 410 ||
+    (await isTaskProtocolRefusal(response))
+  ) {
+    log.warn("the remote caller refused an input request; it is dropped", {
+      callId: entry.body.callId,
+      kind: entry.body.kind,
+      status: response.status,
+    });
+    return "dropped";
+  }
+  return "retry";
 }

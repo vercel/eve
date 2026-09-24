@@ -6,6 +6,7 @@ import { SESSION_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
 
 const log = createLogger("execution.session-callback");
 
@@ -62,6 +63,7 @@ export async function fireSessionCallbackStep(input: {
           kind: "session.failed" as const,
           sessionId,
           subagentName: callback.subagentName,
+          taskProtocol: TASK_PROTOCOL_VERSION,
           usage: input.usage,
         };
 
@@ -84,6 +86,7 @@ function buildCompletedCallbackBody(input: {
     output: input.output ?? "",
     sessionId: input.sessionId,
     subagentName: input.callback.subagentName,
+    taskProtocol: TASK_PROTOCOL_VERSION,
   };
   return input.usage === undefined ? base : { ...base, usage: input.usage };
 }

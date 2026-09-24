@@ -17,7 +17,7 @@ describe("continueRemoteAgentSession", () => {
   });
 
   it("posts raw continuation input with callback metadata and fresh auth headers", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValue(accepted());
     vi.stubGlobal("fetch", fetchMock);
 
     await continueRemoteAgentSession({
@@ -86,12 +86,15 @@ describe("continueRemoteAgentSession", () => {
           "x-static": "yes",
         },
         method: "POST",
+        // A remote cannot bounce the request, with its credentials, elsewhere.
+        redirect: "error",
+        signal: expect.any(AbortSignal),
       },
     );
   });
 
   it("forwards only the current turn principal when continuation forwarding is enabled", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValue(accepted());
     vi.stubGlobal("fetch", fetchMock);
     const current: SessionAuthContext = {
       attributes: { user_id: "U456" },
@@ -163,7 +166,10 @@ describe("continueRemoteAgentSession", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ code: "SESSION_NOT_RESUMABLE" }), { status: 410 }),
       )
-      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(
+        Response.json({ code: "session_not_active", ok: false }, { status: 409 }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const continueInput = () => ({
@@ -192,6 +198,9 @@ describe("continueRemoteAgentSession", () => {
     const missing = await continueRemoteAgentSession(continueInput()).catch(
       (error: unknown) => error,
     );
+    const ended = await continueRemoteAgentSession(continueInput()).catch(
+      (error: unknown) => error,
+    );
 
     expect(isRetryableRemoteAgentContinueError(transient)).toBe(true);
     expect(isAmbiguousRemoteAgentContinueError(transient)).toBe(true);
@@ -201,14 +210,70 @@ describe("continueRemoteAgentSession", () => {
     expect(isAmbiguousRemoteAgentContinueError(sessionNotResumable)).toBe(false);
     expect(isRetryableRemoteAgentContinueError(missing)).toBe(false);
     expect(isAmbiguousRemoteAgentContinueError(missing)).toBe(false);
+    expect(isRetryableRemoteAgentContinueError(ended)).toBe(false);
     expect(isRetryableRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
     expect(isAmbiguousRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
   });
 });
 
-describe("continueRemoteAgentSession — task protocol", () => {
+describe("continueRemoteAgentSession — task protocol and time limits", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const continueInput = () => ({
+    auth: null,
+    callback: {
+      callId: "call-next",
+      subagentName: "research",
+      token: "parent-inbox",
+      url: "https://caller.example.com/eve/v1/callback/parent-inbox",
+    },
+    message: "follow up",
+    operationId: "turn-2:call-next",
+    remote: createRemoteAgent(),
+    sessionId: "remote-session",
+    turnPolicy: "steer" as const,
+  });
+
+  it("rejects an accepted message from a remote that reports another protocol version", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, taskProtocol: 2 })));
+
+    const error = await continueRemoteAgentSession(continueInput()).catch(
+      (cause: unknown) => cause,
+    );
+
+    expect(error).toBeInstanceOf(RemoteTaskProtocolError);
+    expect(error).toMatchObject({ remoteVersion: 2 });
+    expect(isRetryableRemoteAgentContinueError(error)).toBe(false);
+  });
+
+  it("fails a request the remote never answers as a retryable, ambiguous timeout", async () => {
+    const timer = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timer.signal);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            if (init.signal?.aborted === true) reject(init.signal.reason);
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      ),
+    );
+
+    const pending = continueRemoteAgentSession(continueInput()).catch((cause: unknown) => cause);
+    timer.abort(new DOMException("The operation timed out.", "TimeoutError"));
+    const error = await pending;
+
+    expect(timeout).toHaveBeenCalledWith(30_000);
+
+    expect(error).toMatchObject({
+      message: 'Remote agent "research" did not answer the continue-session request within 30 s.',
+    });
+    expect(isRetryableRemoteAgentContinueError(error)).toBe(true);
+    expect(isAmbiguousRemoteAgentContinueError(error)).toBe(true);
   });
 
   it("surfaces a remote's protocol rejection as a permanent version error", async () => {
@@ -242,7 +307,7 @@ describe("continueRemoteAgentSession — task protocol", () => {
     expect(error).toBeInstanceOf(RemoteTaskProtocolError);
     expect(error).toMatchObject({
       message:
-        'Remote agent "research" cannot be called: its deployment uses task protocol version 2, and this deployment uses version 1. Upgrade both deployments to the same eve version.',
+        'Remote agent "research" cannot be called: its deployment uses task protocol version 2, and this deployment uses version 1. Upgrade so both deployments use the same task protocol version.',
       remoteVersion: 2,
     });
     expect(isRetryableRemoteAgentContinueError(error)).toBe(false);
@@ -256,7 +321,7 @@ describe("answerRemoteAgentSession", () => {
   });
 
   it("posts answers to the remote session with the protocol version and fresh auth", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    const fetchMock = vi.fn().mockResolvedValue(accepted());
     vi.stubGlobal("fetch", fetchMock);
 
     await answerRemoteAgentSession({
@@ -294,15 +359,22 @@ describe("readRemoteAgentReport", () => {
     await expect(
       readRemoteAgentReport({
         callId: "call-1",
+        callbackToken: "callback-token",
         remote: createRemoteAgent(),
         sessionId: "remote-session",
       }),
     ).resolves.toEqual(report);
+    // The report is kept for the callback it was sent to; the reader proves it holds it.
     expect(fetchMock).toHaveBeenCalledWith(
       "https://remote.example.com/eve/v1/session/remote-session/reports/call-1",
       expect.objectContaining({
-        headers: { authorization: "Bearer remote-token", "x-static": "yes" },
+        headers: {
+          authorization: "Bearer remote-token",
+          "x-eve-callback-token": "callback-token",
+          "x-static": "yes",
+        },
         method: "GET",
+        redirect: "error",
       }),
     );
   });
@@ -317,12 +389,18 @@ describe("readRemoteAgentReport", () => {
     await expect(
       readRemoteAgentReport({
         callId: "call-1",
+        callbackToken: "callback-token",
         remote: createRemoteAgent(),
         sessionId: "remote-session",
       }),
     ).resolves.toBeUndefined();
   });
 });
+
+/** An eve remote's accepted response, which reports its task protocol version. */
+function accepted(): Response {
+  return Response.json({ ok: true, status: "accepted", taskProtocol: 1 }, { status: 202 });
+}
 
 function createRemoteAgent(): ResolvedRuntimeRemoteAgentNode {
   return {

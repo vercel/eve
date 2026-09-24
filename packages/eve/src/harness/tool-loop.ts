@@ -728,6 +728,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       tools: responseAuthorizationTools,
     });
     session = coordinated.session;
+    // A resumed turn settles its approvals before its preamble, so they carry
+    // the ID that turn runs under.
     if (emit) {
       for (const message of coordinated.feedback) {
         await emit(
@@ -735,7 +737,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             message,
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
+            turnId: activeTurnId(emissionState),
           }),
         );
       }
@@ -751,7 +753,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             responderPrincipalId: candidate.responder.principalId,
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
+            turnId: activeTurnId(emissionState),
           }),
         );
         session = {
@@ -777,7 +779,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             reason: candidate.reason,
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
+            turnId: activeTurnId(emissionState),
           }),
         );
         session = {
@@ -796,7 +798,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             responderPrincipalId: settlement.actor.principalId,
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
-            turnId: emissionState.turnId,
+            turnId: activeTurnId(emissionState),
           }),
         );
         session = {
@@ -3095,6 +3097,7 @@ async function finishConversationTurn(input: {
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = {
+      errorCode: OUTPUT_SCHEMA_NOT_FULFILLED.code,
       isError: true,
       output: OUTPUT_SCHEMA_NOT_FULFILLED.message,
     } satisfies SettledTurn;

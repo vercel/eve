@@ -182,8 +182,10 @@ function withTaskId(
       return { ...event, data: { ...event.data, taskId } };
     case "authorization.completed":
       return { ...event, data: { ...event.data, taskId } };
-    default:
-      return event;
+    case "approval.candidate":
+      return { ...event, data: { ...event.data, taskId } };
+    case "approval.settled":
+      return { ...event, data: { ...event.data, taskId } };
   }
 }
 

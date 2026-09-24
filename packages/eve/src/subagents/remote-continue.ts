@@ -11,11 +11,15 @@ import {
 } from "#subagents/remote-dispatch.js";
 import { createRemoteAgentRouteUrl } from "#subagents/remote-route-url.js";
 import {
+  fetchRemoteAgent,
   readJsonBody,
   readTaskProtocol,
   readTaskProtocolRejection,
   RemoteTaskProtocolError,
+  requireTaskProtocol,
 } from "#subagents/remote-protocol.js";
+import { EVE_CALLBACK_TOKEN_HEADER } from "#protocol/message.js";
+import { toErrorMessage } from "#shared/errors.js";
 import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
 
 // Owner → remote child requests on an existing session: new work, steering
@@ -23,6 +27,9 @@ import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
 
 /** How long the deadline's reconciliation read waits for a remote. */
 const REPORT_READ_TIMEOUT_MS = 10_000;
+
+/** The eve channel's code for a message to a session that no longer exists or ended. */
+const SESSION_NOT_ACTIVE_CODE = "session_not_active";
 
 /** The owner's callback for the call a request belongs to. */
 export interface RemoteCallback {
@@ -106,24 +113,29 @@ export async function answerRemoteAgentSession(input: {
 
 /**
  * Reads the latest result a remote child reported for one call: the body of
- * the callback it sent. `undefined` when it has not answered the call, or the
- * read fails; the owner then treats the call as unfinished.
+ * the callback it sent. It presents the callback token the report was sent
+ * to, which the child requires. `undefined` when it has not answered the
+ * call, or the read fails; the owner then treats the call as unfinished.
  */
 export async function readRemoteAgentReport(input: {
   readonly callId: string;
+  readonly callbackToken: string;
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
 }): Promise<unknown> {
-  const response = await fetch(
+  const response = await fetchRemoteAgent(
     createRemoteAgentRouteUrl(
       input.remote.url,
       createEveSessionReportRoutePath(input.sessionId, input.callId),
     ),
     {
-      headers: await resolveRemoteAgentRequestHeaders(input.remote),
+      headers: {
+        ...(await resolveRemoteAgentRequestHeaders(input.remote)),
+        [EVE_CALLBACK_TOKEN_HEADER]: input.callbackToken,
+      },
       method: "GET",
-      signal: AbortSignal.timeout(REPORT_READ_TIMEOUT_MS),
     },
+    { name: input.remote.name, request: "session-report", timeoutMs: REPORT_READ_TIMEOUT_MS },
   );
   const body = await readJsonBody(response);
   if (!response.ok || readTaskProtocol(body) !== TASK_PROTOCOL_VERSION) return undefined;
@@ -137,20 +149,34 @@ async function postSessionMessage(input: {
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly sessionId: string;
 }): Promise<void> {
-  const response = await fetch(
-    createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.sessionId)),
-    {
-      body: JSON.stringify(input.body),
-      headers: {
-        "content-type": "application/json",
-        ...(await resolveRemoteAgentRequestHeaders(input.remote)),
+  let response: Response;
+  try {
+    response = await fetchRemoteAgent(
+      createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.sessionId)),
+      {
+        body: JSON.stringify(input.body),
+        headers: {
+          "content-type": "application/json",
+          ...(await resolveRemoteAgentRequestHeaders(input.remote)),
+        },
+        method: "POST",
       },
-      method: "POST",
-    },
-  );
-  if (response.ok) return;
-
+      { name: input.remote.name, request: "continue-session" },
+    );
+  } catch (error) {
+    // The remote may have admitted the message before the response was lost.
+    throw new RemoteAgentContinueRequestError(toErrorMessage(error), {
+      deliveryAmbiguous: true,
+      retryable: true,
+    });
+  }
   const body = await readJsonBody(response);
+  if (response.ok) {
+    // A remote that accepts the message must still speak this protocol.
+    requireTaskProtocol({ body, name: input.remote.name });
+    return;
+  }
+
   const protocolError = readTaskProtocolRejection({
     body,
     name: input.remote.name,
@@ -158,7 +184,10 @@ async function postSessionMessage(input: {
   });
   if (protocolError !== undefined) throw protocolError;
   const code = body !== null && typeof body === "object" ? Reflect.get(body, "code") : undefined;
-  const permanent = response.status === 404 || code === AgentHandleError.SessionNotResumable.code;
+  const permanent =
+    response.status === 404 ||
+    code === AgentHandleError.SessionNotResumable.code ||
+    code === SESSION_NOT_ACTIVE_CODE;
   const compatibilityHint =
     response.status === 400 && input.forwardsPrincipal
       ? " The receiver may support forwarded principals only on session creation; upgrade it before retrying."

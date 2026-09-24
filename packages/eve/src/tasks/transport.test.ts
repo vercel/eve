@@ -9,7 +9,11 @@ import {
 import { createTaskRecord } from "#internal/testing/task-records.js";
 import { cancelRun, getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
+import {
+  cancelRemoteAgentTurn,
+  isRetryableRemoteAgentCancelError,
+  resolveRemoteAgentForAction,
+} from "#subagents/remote-dispatch.js";
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
@@ -40,6 +44,7 @@ vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
 }));
 vi.mock("#subagents/remote-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
+  isRetryableRemoteAgentCancelError: vi.fn(),
   resolveRemoteAgentForAction: vi.fn(),
 }));
 vi.mock("#subagents/remote-continue.js", () => ({
@@ -192,7 +197,9 @@ describe("deliverToChild", () => {
 
     expect(failure).toEqual({
       code: "START_FAILED",
-      message: expect.stringContaining("Upgrade both deployments to the same eve version."),
+      message: expect.stringContaining(
+        "Upgrade so both deployments use the same task protocol version.",
+      ),
     });
     error.mockRestore();
   });
@@ -300,6 +307,26 @@ describe("runCommands", () => {
     );
 
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
+  });
+
+  it("tries a remote cancel once more when the first request fails in a way that may clear", async () => {
+    vi.mocked(cancelRemoteAgentTurn)
+      .mockRejectedValueOnce(new Error("timed out"))
+      .mockResolvedValueOnce({ sessionId: "remote-child", status: "accepted" });
+    vi.mocked(isRetryableRemoteAgentCancelError).mockReturnValue(true);
+
+    await runCommands(
+      [
+        {
+          commands: [{ kind: "cancel" }],
+          kind: "send",
+          record: createTaskRecord({ child: remoteChild }),
+        },
+      ],
+      contextWithBundle(),
+    );
+
+    expect(cancelRemoteAgentTurn).toHaveBeenCalledTimes(2);
   });
 
   it("logs a lost cancel instead of failing the owner step", async () => {
@@ -426,6 +453,24 @@ describe("sendAgentMessage", () => {
     error.mockRestore();
   });
 
+  it("reports a remote agent on another task protocol version as AGENT_UNREACHABLE", async () => {
+    const mismatch = new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 });
+    vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(mismatch);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const failure = await sendAgentMessage({
+      callbackAlias: "eve:task-callback:alias",
+      command,
+      ctx: contextWithBundle(),
+      ownerSessionId: "owner-session",
+      record: createTaskRecord({ child: remoteChild }),
+    });
+
+    expect(failure).toEqual({ code: "AGENT_UNREACHABLE", message: mismatch.message });
+    expect(mismatch.message).toContain("uses task protocol version 2");
+    error.mockRestore();
+  });
+
   it("leaves held messages to flushHeldCommands and runs only cancels", async () => {
     await runCommands(
       [{ commands: [command], kind: "send", record: createTaskRecord({ child: localChild }) }],
@@ -438,24 +483,27 @@ describe("sendAgentMessage", () => {
 });
 
 describe("answerRemoteTask", () => {
-  it("answers a remote agent's input request where it runs, as the answering user", async () => {
-    const BOB = {
-      attributes: {},
-      authenticator: "slack",
-      principalId: "U-bob",
-      principalType: "user",
-    } as const;
-    const inputResponses = [{ optionId: "approve", requestId: "req-1" }];
+  const ALICE = {
+    attributes: {},
+    authenticator: "slack",
+    principalId: "U-alice",
+    principalType: "user",
+  } as const;
+  const inputResponses = [{ optionId: "approve", requestId: "req-1" }];
+  const BOB = { ...ALICE, principalId: "U-bob" } as const;
+  const answer = () =>
+    answerRemoteTask({
+      auth: BOB,
+      ctx: contextWithBundle(),
+      inputResponses,
+      record: createTaskRecord({ child: remoteChild, creator: encodeTaskCreator({ auth: ALICE }) }),
+    });
 
-    await expect(
-      answerRemoteTask({
-        auth: BOB,
-        ctx: contextWithBundle(),
-        inputResponses,
-        record: createTaskRecord({ child: remoteChild }),
-      }),
-    ).resolves.toBe(true);
+  it("answers where the agent runs, attributed to the principal that answered", async () => {
+    await expect(answer()).resolves.toEqual({ kind: "answered" });
 
+    // Bob answers Alice's agent: an approval policy there checks Bob, while the
+    // agent, a delegated session, keeps acting as Alice.
     expect(answerRemoteAgentSession).toHaveBeenCalledExactlyOnceWith({
       auth: BOB,
       inputResponses,
@@ -468,14 +516,36 @@ describe("answerRemoteTask", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
 
-    await expect(
-      answerRemoteTask({
-        auth: null,
-        ctx: contextWithBundle(),
-        inputResponses: [{ optionId: "approve", requestId: "req-1" }],
-        record: createTaskRecord({ child: remoteChild }),
-      }),
-    ).resolves.toBe(false);
+    await expect(answer()).resolves.toEqual({ kind: "retry" });
+    error.mockRestore();
+  });
+
+  it("fails the task AGENT_SESSION_ENDED when the agent's session is gone", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 404"));
+    vi.mocked(isRetryableRemoteAgentContinueError).mockReturnValue(false);
+
+    await expect(answer()).resolves.toEqual({
+      childEnded: true,
+      error: {
+        code: "AGENT_SESSION_ENDED",
+        message: "The agent's session ended before it replied.",
+      },
+      kind: "failed",
+    });
+    error.mockRestore();
+  });
+
+  it("fails the task AGENT_UNREACHABLE when the agent speaks another task protocol", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mismatch = new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 });
+    vi.mocked(answerRemoteAgentSession).mockRejectedValueOnce(mismatch);
+
+    await expect(answer()).resolves.toEqual({
+      childEnded: false,
+      error: { code: "AGENT_UNREACHABLE", message: mismatch.message },
+      kind: "failed",
+    });
     error.mockRestore();
   });
 });
@@ -501,10 +571,13 @@ describe("readRemoteTaskReport", () => {
     const result = await readRemoteTaskReport(
       createTaskRecord({ child: remoteChild }),
       contextWithBundle(),
+      "callback-token",
     );
 
+    // The child shows a report only to the holder of the callback it was sent to.
     expect(readRemoteAgentReport).toHaveBeenCalledExactlyOnceWith({
       callId: "call-1",
+      callbackToken: "callback-token",
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
     });
@@ -524,7 +597,11 @@ describe("readRemoteTaskReport", () => {
     vi.mocked(readRemoteAgentReport).mockResolvedValueOnce(value);
 
     await expect(
-      readRemoteTaskReport(createTaskRecord({ child: remoteChild }), contextWithBundle()),
+      readRemoteTaskReport(
+        createTaskRecord({ child: remoteChild }),
+        contextWithBundle(),
+        "callback-token",
+      ),
     ).resolves.toBeUndefined();
   });
 });

@@ -10,9 +10,15 @@ import {
   resolveRemoteAgentStreamHeaders,
   startRemoteAgentSession,
 } from "#subagents/remote-dispatch.js";
-import { RemoteTaskProtocolError } from "#subagents/remote-protocol.js";
+import { RemoteTaskProtocolError, requireRemoteTaskProtocol } from "#subagents/remote-protocol.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
+
+// The health-route version check has its own tests; here it only has to pass or fail.
+vi.mock("#subagents/remote-protocol.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  requireRemoteTaskProtocol: vi.fn(),
+}));
 
 describe("resolveRemoteAgentForAction", () => {
   it("overlays a selected dynamic remote config on the compiled delegation node", async () => {
@@ -327,6 +333,8 @@ describe("startRemoteAgentSession", () => {
         "x-static": "yes",
       },
       method: "POST",
+      redirect: "error",
+      signal: expect.any(AbortSignal),
     });
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       callback: {
@@ -571,8 +579,62 @@ describe("startRemoteAgentSession", () => {
 
     expect(error).toBeInstanceOf(RemoteTaskProtocolError);
     expect((error as Error).message).toBe(
-      'Remote agent "research" cannot be called: its deployment uses task protocol version 2, and this deployment uses version 1. Upgrade both deployments to the same eve version.',
+      'Remote agent "research" cannot be called: its deployment uses task protocol version 2, and this deployment uses version 1. Upgrade so both deployments use the same task protocol version.',
     );
+  });
+
+  it("checks the remote's task protocol before it creates anything there", async () => {
+    vi.mocked(requireRemoteTaskProtocol).mockClear();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(requireRemoteTaskProtocol).mockRejectedValueOnce(
+      new RemoteTaskProtocolError({ name: "research", remoteVersion: undefined }),
+    );
+
+    const error = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: createParentSession(),
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(RemoteTaskProtocolError);
+    expect(requireRemoteTaskProtocol).toHaveBeenCalledExactlyOnceWith({
+      headers: expect.objectContaining({ authorization: "Bearer remote-token" }),
+      name: "research",
+      url: "https://remote.example.com",
+    });
+    // No session was created, so no model or tool ran on the remote.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails a create-session request the remote never answers with a timeout", async () => {
+    const timer = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timer.signal);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            if (init.signal?.aborted === true) reject(init.signal.reason);
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+      ),
+    );
+
+    const pending = startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: createParentSession(),
+    }).catch((cause: unknown) => cause);
+    timer.abort(new DOMException("The operation timed out.", "TimeoutError"));
+
+    await expect(pending).resolves.toMatchObject({
+      message: 'Remote agent "research" did not answer the create-session request within 30 s.',
+    });
+    expect(timeout).toHaveBeenCalledWith(30_000);
+    timeout.mockRestore();
   });
 
   it("rejects an older remote that accepts without a version and retires its session", async () => {
@@ -1046,6 +1108,8 @@ describe("cancelRemoteAgentTurn", () => {
           "x-static": "yes",
         },
         method: "POST",
+        redirect: "error",
+        signal: expect.any(AbortSignal),
       },
     );
     expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual({
@@ -1184,6 +1248,8 @@ describe("resetRemoteAgentSession", () => {
           "x-static": "yes",
         },
         method: "POST",
+        redirect: "error",
+        signal: expect.any(AbortSignal),
       },
     );
   });

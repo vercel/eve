@@ -919,7 +919,7 @@ describe("steering a working agent", () => {
         kind: "tool-result",
         output: {
           code: "AGENT_OTHER_PRINCIPAL",
-          message: `Agent "${alices.id}" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.`,
+          message: `Agent "${alices.id}" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.`,
         },
         toolName: "research",
       },
@@ -959,7 +959,7 @@ describe("steering a working agent", () => {
         isError: true,
         output: {
           code: "AGENT_OTHER_PRINCIPAL",
-          message: `Agent "${idle.id}" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.`,
+          message: `Agent "${idle.id}" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.`,
         },
       }),
     ]);

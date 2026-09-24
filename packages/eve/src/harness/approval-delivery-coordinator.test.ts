@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
+import {
+  getApprovalAuditState,
+  settleDirectApprovalResponse,
+} from "#harness/approval-candidates.js";
 import {
   coordinateApprovalDelivery,
   shouldPrepareApprovalReplayTools,
@@ -149,6 +152,30 @@ describe("coordinateApprovalDelivery", () => {
         batch.requests.map((pending) => pending.requestId),
       ),
     ).toEqual([request.requestId]);
+  });
+});
+
+describe("attributed approval responses", () => {
+  it("checks the responder an answer is attributed to, not its unattributed copy", async () => {
+    const answer = { optionId: "approve", requestId: request.requestId };
+    const answerer: SessionAuthContext = { ...responder, principalId: "user-2" };
+
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedSession(),
+      stepInput: {
+        attributedInputResponses: [{ auth: answerer, response: answer }],
+        inputResponses: [answer],
+      },
+      tools: new Map(),
+    });
+
+    // One candidate, bound to the answerer; the copy never creates a second one.
+    expect(
+      getApprovalAuditState(result.session.state).activeCandidates.map(
+        (candidate) => candidate.responder.principalId,
+      ),
+    ).toEqual(["user-2"]);
   });
 });
 

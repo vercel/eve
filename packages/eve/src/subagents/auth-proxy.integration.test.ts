@@ -255,7 +255,7 @@ describe("subagent authorization proxy", () => {
     expect(decodeEvent(chunks[5]!).type).toBe("session.waiting");
   });
 
-  it("attributes authorization events to the owner's task and leaves approvals unchanged", async () => {
+  it("attributes authorization and approval events to the owner's task", async () => {
     const parentSessionId = "parent-task-session";
     const session = createSession(parentSessionId);
     const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
@@ -301,7 +301,9 @@ describe("subagent authorization proxy", () => {
       type: "authorization.required",
     });
     const approval = published.find((event) => event.type === "approval.settled");
-    expect(approval).toMatchObject(settledEvent);
-    expect(approval?.data).not.toHaveProperty("taskId");
+    expect(approval).toMatchObject({
+      data: { ...settledEvent.data, taskId: "researcher-abc234" },
+      type: "approval.settled",
+    });
   });
 });

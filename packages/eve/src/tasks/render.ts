@@ -298,17 +298,19 @@ export function renderAgentUnreachable(
 }
 
 /**
- * `AGENT_OTHER_PRINCIPAL` error for a call that names an agent another user
- * started. The agent acts with its starter's credentials and keeps their
- * conversation, so only that user may give it more work or redirect it.
+ * `AGENT_OTHER_PRINCIPAL` error for a call that names an agent a different
+ * caller started: another user, a schedule, or an app principal. The agent
+ * acts with its starter's credentials and keeps their conversation, so only
+ * that caller may give it more work or redirect it.
  */
 export function renderAgentOtherPrincipal(agentId: string): string {
-  return `Agent "${agentId}" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.`;
+  return `Agent "${agentId}" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.`;
 }
 
 /**
- * `START_FAILED` message for a remote agent whose deployment speaks another
- * task protocol version, or reports none because it runs an older eve.
+ * Message for a remote agent whose deployment speaks another task protocol
+ * version, or reports none because it runs an older eve: `START_FAILED` at
+ * start, `AGENT_UNREACHABLE` for a message to a working agent.
  */
 export function renderTaskProtocolMismatch(input: {
   readonly name: string;
@@ -319,7 +321,22 @@ export function renderTaskProtocolMismatch(input: {
     input.remoteVersion === undefined
       ? "reports no task protocol version (it runs an older eve)"
       : `uses task protocol version ${String(input.remoteVersion)}`;
-  return `Remote agent "${input.name}" cannot be called: its deployment ${remote}, and this deployment uses version ${String(input.localVersion)}. Upgrade both deployments to the same eve version.`;
+  return `Remote agent "${input.name}" cannot be called: its deployment ${remote}, and this deployment uses version ${String(input.localVersion)}. Upgrade so both deployments use the same task protocol version.`;
+}
+
+/** Message for a request to a remote agent that got no response within its time limit. */
+export function renderRemoteAgentRequestTimedOut(input: {
+  readonly name: string;
+  /** What the request asked for, such as "create-session". */
+  readonly request: string;
+  readonly timeoutMs: number;
+}): string {
+  return `Remote agent "${input.name}" did not answer the ${input.request} request within ${formatDuration(input.timeoutMs)}.`;
+}
+
+/** `EMPTY_RESULT` error for an agent whose answer has no text. */
+export function renderEmptyResult(name: string): string {
+  return `Agent "${name}" finished without a reply. If you still need its answer, give it more work with its agentId.`;
 }
 
 /** Error for a `ctx.agent` call whose child closed its reply channel without answering. */

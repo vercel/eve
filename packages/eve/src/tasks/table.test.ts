@@ -261,6 +261,49 @@ describe("steerTask", () => {
     expect(done.table.records[0]).toMatchObject({ generation: 2, status: "completed" });
   });
 
+  it("never settles the next generation with a repeat of the answer that opened it", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher" });
+    const running = applyTaskMessage(
+      agent.table,
+      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
+      NOW,
+    ).table;
+    const steered = steerTask(steerTask(running, agent.record.id, message).table, agent.record.id, {
+      ...message,
+      key: "k2",
+    }).table;
+    // Two messages were sent and the answer accounts for one: the call's next
+    // generation waits on the other.
+    const first = {
+      answer: 2,
+      generation: 1,
+      kind: "task.settled",
+      outcome: { output: "draft", status: "completed" },
+      steers: 1,
+      taskId: agent.record.id,
+    } as const;
+    const answered = applyTaskMessage(steered, first, NOW);
+    expect(answered.table.records[0]).toMatchObject({ answerSeq: 2, generation: 2, steers: 1 });
+
+    // A retried callback repeats that answer. Its steering count matches what the
+    // new generation waits on, but it is the same answer, so nothing settles.
+    const repeated = applyTaskMessage(answered.table, { ...first, generation: 2 }, NOW);
+    expect(repeated.effects).toEqual([]);
+    expect(repeated.table.records[0]).toMatchObject({ generation: 2, status: "working" });
+
+    const next = applyTaskMessage(
+      answered.table,
+      { ...first, answer: 4, generation: 2, outcome: { output: "draft 2", status: "completed" } },
+      NOW,
+    );
+    expect(next.effects.map(({ kind }) => kind)).toEqual(["settled"]);
+    expect(next.table.records[0]).toMatchObject({
+      answerSeq: 4,
+      generation: 2,
+      status: "completed",
+    });
+  });
+
   it("settles normally when every message reached the answer or the agent's session ended", () => {
     const agent = started(undefined, { kind: "agent", name: "researcher" });
     const running = applyTaskMessage(

@@ -57,6 +57,7 @@ describe("fireSessionCallbackStep", () => {
         output: "done",
         sessionId: "remote-session",
         subagentName: "research",
+        taskProtocol: 1,
       }),
       headers: {
         "content-type": "application/json",
@@ -84,6 +85,7 @@ describe("fireSessionCallbackStep", () => {
         output: "",
         sessionId: "remote-session",
         subagentName: "research",
+        taskProtocol: 1,
       }),
       headers: {
         "content-type": "application/json",
@@ -112,6 +114,7 @@ describe("fireSessionCallbackStep", () => {
         output: "done",
         sessionId: "remote-session",
         subagentName: "research",
+        taskProtocol: 1,
         usage: USAGE,
       }),
       headers: {
@@ -172,6 +175,7 @@ describe("fireSessionCallbackStep", () => {
         kind: "session.failed",
         sessionId: "remote-session",
         subagentName: "research",
+        taskProtocol: 1,
       }),
       headers: {
         "content-type": "application/json",

@@ -270,7 +270,8 @@ export interface DeliverHookPayload {
   readonly scheduleId?: string;
   /**
    * Replay-stable identity of this delivery. The session admits each
-   * `operationId` once, so a retried send is not delivered twice. A steering
+   * `operationId` once per principal, so a retried send is not delivered
+   * twice; it remembers its most recent 256, across handoff. A steering
    * delivery with a `caller` is a steering message for that caller's call:
    * the session reports how many it admitted when it answers that call, so
    * the owner knows whether the message reached the answer.

@@ -23,9 +23,12 @@ import { findTask, type TaskTable } from "#tasks/table.js";
 // How the owner resolves one agent call and the child report that settles it.
 
 /**
- * Rejects a call that names an agent another principal started. The agent
- * acts with its starter's credentials and keeps their conversation, so
- * neither new work nor a steering message from anyone else may reach it.
+ * Rejects a call that names an agent a different principal started: another
+ * user, a schedule, or an app. The agent acts with its starter's credentials
+ * and keeps their conversation, so neither new work nor a steering message
+ * from anyone else may reach it. Every unauthenticated caller is the same
+ * anonymous principal, so this separates no two of them. Cancelling is not
+ * checked: any caller with access to the session may stop any of its tasks.
  */
 export function rejectOtherPrincipal(input: {
   readonly agentId: string | undefined;

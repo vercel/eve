@@ -18,6 +18,7 @@ import { cancelTasks } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { flushUnsentCallerEvents } from "#subagents/unsent-caller-events.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
 
@@ -75,6 +76,8 @@ export async function admitSessionInboxPayload(
           taskId: task.id,
         }),
       );
+      // A descendant's question this session passes up must not wait for its next input.
+      await flushUnsentCallerEvents(input.cursor);
     }
     return { kind: "consumed" };
   }

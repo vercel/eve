@@ -203,6 +203,8 @@ export type StepNext = StepDone | StepFn | null;
 export interface SettledTurn {
   readonly output: unknown;
   readonly isError?: boolean;
+  /** Task error code for a failed turn, such as `OUTPUT_SCHEMA_NOT_FULFILLED`. */
+  readonly errorCode?: string;
   /**
    * Usage this turn added to the child's session subtree. The harness never
    * sets it; the durable turn step fills it with the per-turn delta before

@@ -3,7 +3,8 @@ import type { UserContent } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
+import { EVE_TASK_PROTOCOL_HEADER, type MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelCors } from "#public/definitions/channel.js";
 import {
   defaultEveAuth,
@@ -17,12 +18,20 @@ import {
 
 const log = createLogger("eve.channel");
 
+/**
+ * The health route's response. A calling eve deployment reads the task
+ * protocol header before it starts a remote agent; it is a header, not a body
+ * field, so clients that parse the body strictly keep working.
+ */
 export function healthResponse(): Response {
-  return Response.json({
-    ok: true,
-    status: "ready",
-    workflowId: workflowEntryReference.workflowId,
-  });
+  return Response.json(
+    {
+      ok: true,
+      status: "ready",
+      workflowId: workflowEntryReference.workflowId,
+    },
+    { headers: { [EVE_TASK_PROTOCOL_HEADER]: String(TASK_PROTOCOL_VERSION) } },
+  );
 }
 
 /** A remote child the parent announced, with the coordinates its stream proxy needs. */

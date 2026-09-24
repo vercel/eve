@@ -21,7 +21,9 @@ describe("session report route", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, report, taskProtocol: 1 });
+    // The report is kept for its callback; only the holder of that token can read it.
     expect(readLatestTaskReport).toHaveBeenCalledExactlyOnceWith({
+      callbackToken: "callback-token",
       callId: "call-1",
       sessionId: "remote-1",
     });
@@ -35,6 +37,24 @@ describe("session report route", () => {
     await expect(response.json()).resolves.toEqual({ ok: true, report: null, taskProtocol: 1 });
   });
 
+  it("answers a failed read like a missing report, without saying why", async () => {
+    vi.mocked(readLatestTaskReport).mockRejectedValueOnce(new Error("run not found"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await fetchReport({ auth: none() });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, report: null, taskProtocol: 1 });
+    error.mockRestore();
+  });
+
+  it("refuses a read without the callback token the report was sent to", async () => {
+    const response = await fetchReport({ auth: none() }, {});
+
+    expect(response.status).toBe(400);
+    expect(readLatestTaskReport).not.toHaveBeenCalled();
+  });
+
   it("requires the channel's auth, like the session's stream", async () => {
     const response = await fetchReport({ auth: () => null });
 
@@ -43,7 +63,10 @@ describe("session report route", () => {
   });
 });
 
-async function fetchReport(input: Parameters<typeof eveChannel>[0]): Promise<Response> {
+async function fetchReport(
+  input: Parameters<typeof eveChannel>[0],
+  headers: Record<string, string> = { "x-eve-callback-token": "callback-token" },
+): Promise<Response> {
   const route = eveChannel(input).routes.find(
     (candidate) =>
       candidate.method === "GET" && candidate.path === "/eve/v1/session/:sessionId/reports/:callId",
@@ -59,5 +82,8 @@ async function fetchReport(input: Parameters<typeof eveChannel>[0]): Promise<Res
   };
   return await (
     route as { handler: (req: Request, args: RouteHandlerArgs) => Promise<Response> }
-  ).handler(new Request("https://remote.example/eve/v1/session/remote-1/reports/call-1"), args);
+  ).handler(
+    new Request("https://remote.example/eve/v1/session/remote-1/reports/call-1", { headers }),
+    args,
+  );
 }

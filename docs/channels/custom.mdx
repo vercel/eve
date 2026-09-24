@@ -157,6 +157,16 @@ export default defineChannel({
 
 The same override is available on fixed `Session.send(...)` and cross-channel `to(...).send(...)`. `respond(...)` never steers: it delivers only addressed input responses. Use `cancel()` when you need to stop work without a replacement message.
 
+Pass `operationId` to `Session.send(...)` when your route may retry a send, such as a webhook the platform redelivers. The session admits one message per `operationId` for each principal, so a redelivered request does not reach the agent twice, and two principals that happen to use the same ID do not drop each other's messages. The session remembers the last 256 operation IDs it admitted, including after it moves to another deployment; a retry of an older ID is delivered again.
+
+```ts
+await attachSession(sessionId).send(event.text, {
+  auth,
+  // The platform's delivery ID stays the same when it redelivers the event.
+  operationId: event.deliveryId,
+});
+```
+
 Attaching does no lookup. The first operation reports whether the ID is active.
 Call `resolveSession(address)` only when you explicitly need to snapshot an
 address's current owner as a fixed handle.

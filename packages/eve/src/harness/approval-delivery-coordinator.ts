@@ -197,9 +197,14 @@ export async function coordinateApprovalDelivery(input: {
   let didCommit = false;
   const candidatesAtStart = getApprovalAuditState(session.state).activeCandidates;
 
+  const attributed = stepInput?.attributedInputResponses ?? [];
+  const attributedIds = new Set(attributed.map(({ response }) => response.requestId));
+  // A response attributed to its responder replaces its unattributed copy.
   const deliveredResponses = [
-    ...(stepInput?.attributedInputResponses ?? []),
-    ...(stepInput?.inputResponses ?? []).map((response) => ({ auth: undefined, response })),
+    ...attributed,
+    ...(stepInput?.inputResponses ?? [])
+      .filter((response) => !attributedIds.has(response.requestId))
+      .map((response) => ({ auth: undefined, response })),
   ];
   for (const { auth: attributedResponder, response } of deliveredResponses) {
     const request = requests.get(response.requestId);
@@ -544,7 +549,13 @@ function removeConsumedResponses(
   const plain = (stepInput.inputResponses ?? []).filter(
     (response) => !consumed.has(response.requestId),
   );
-  const inputResponses = [...plain, ...attributed.map(({ response }) => response)];
+  const plainIds = new Set(plain.map((response) => response.requestId));
+  const inputResponses = [
+    ...plain,
+    ...attributed
+      .filter(({ response }) => !plainIds.has(response.requestId))
+      .map(({ response }) => response),
+  ];
   return {
     ...stepInput,
     attributedInputResponses: undefined,

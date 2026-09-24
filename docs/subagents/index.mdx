@@ -329,11 +329,13 @@ Sent your message to agent researcher-7k2m9q, which is still working. Its result
 
 The child still delivers exactly one result for its current call, through that call: a background child's result arrives in a `task.result` message, and a waited call's result stays that call's tool result. The child receives the message as a steering message: in its current turn, or in its next turn for the same call when it is waiting on its own background tasks. A child that has not started yet receives the message when it starts; if eve cannot deliver it then, eve logs the failure, and the child's result does not reflect the message. The message does not change the output schema of the child's current call.
 
-A child acts as the principal whose call started its current work, and its session holds that principal's conversation, so only that principal can give it more work or send it a message. A call from another principal, such as another user in a shared thread, fails with `AGENT_OTHER_PRINCIPAL`, whether the child is working or idle:
+A child acts as the principal whose call started its current work, and its session holds that principal's conversation, so only that principal can give it more work or send it a message. A call from any other caller, such as another user in a shared thread, a schedule, or an app principal, fails with `AGENT_OTHER_PRINCIPAL`, whether the child is working or idle:
 
 ```text
-Agent "researcher-7k2m9q" belongs to another user, so it cannot take your message. Omit agentId to start a new agent.
+Agent "researcher-7k2m9q" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.
 ```
+
+Principals match by authenticator, principal type, and principal ID. Every unauthenticated caller is the same anonymous principal, so the check does not separate two anonymous callers. Stopping a child is not limited this way: any caller with access to the session can cancel it, as described in [Cancel tasks](./concepts/tasks#cancel-tasks). Anyone who can send to the session can also answer a child's question or approval; the child attributes the answer to whoever gave it and keeps acting as the principal that started it.
 
 The `[Tasks]` note still lists every idle child in the session, including children another principal started. A model call that names a child whose current work a workflow body started with `ctx.agent` fails with `AGENT_BUSY`. Omit `agentId` to start a new child instead.
 
@@ -343,7 +345,7 @@ Delivery failures are reported to the caller as `AGENT_UNREACHABLE`; eve does no
 
 Whenever the set of parked (idle) children changes, eve appends a framework-injected note labeled `[Tasks]` to the conversation. Its `<idle_agents>` block lists each child's id, name, and a one-line summary of its last answer, most recent first, up to 10 children. Its `<tasks>` block lists each background task whose result has not reached history yet, with its status. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), and the most recent note is authoritative. A child working in the background appears in `<tasks>`; a child working on a waited call does not appear until it parks again. See [The `[Tasks]` note](./concepts/tasks#the-tasks-note).
 
-The parent keeps its children only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. A [remote agent](./guides/remote-agents#upgrading-remote-agents) and the agent that calls it must run the same eve version.
+The parent keeps its children only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. A [remote agent](./guides/remote-agents#upgrading-remote-agents) and the agent that calls it must use the same task protocol version.
 
 ## When to split
 

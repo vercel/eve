@@ -29,6 +29,7 @@ describe("session callback route", () => {
   ])("refuses %s without reading the body or resuming a hook", async (_name, token) => {
     const request = new Request("https://app.example.com/eve/v1/callback/x", {
       body: JSON.stringify({
+        taskProtocol: 1,
         callId: "call-1",
         kind: "session.completed",
         output: "done",
@@ -54,6 +55,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           kind: "session.completed",
           output: "done",
@@ -80,6 +82,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           kind: "session.completed",
           output: "done",
@@ -117,6 +120,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           event,
           kind: "input.requested",
@@ -150,6 +154,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           event,
           kind: "authorization.event",
@@ -193,7 +198,12 @@ describe("session callback route", () => {
   ])("rejects an input callback %s", async (_label, body) => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
-        body: JSON.stringify({ callId: "call-1", subagentName: "research", ...body }),
+        body: JSON.stringify({
+          callId: "call-1",
+          subagentName: "research",
+          taskProtocol: 1,
+          ...body,
+        }),
         method: "POST",
       }),
       createRouteContext({ token: CALLBACK_TOKEN }),
@@ -209,6 +219,7 @@ describe("session callback route", () => {
       const response = await handleSessionCallbackRequest(
         new Request(CALLBACK_URL, {
           body: JSON.stringify({
+            taskProtocol: 1,
             callId: "update-call",
             kind,
             sessionId: "child-session",
@@ -236,6 +247,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           kind: "session.completed",
           output: "done",
@@ -273,9 +285,10 @@ describe("session callback route", () => {
     });
   });
 
-  it("accepts a sessionId-less callback from an older eve deployment", async () => {
-    resumeHookMock.mockResolvedValue(undefined);
-
+  it.each([
+    ["no version, as an older eve sends", {}, "sent no task protocol version"],
+    ["another version", { taskProtocol: 2 }, "sent task protocol version 2"],
+  ])("refuses a callback with %s, which this owner cannot apply", async (_label, version, sent) => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
@@ -283,36 +296,20 @@ describe("session callback route", () => {
           kind: "session.completed",
           output: "done",
           subagentName: "research",
+          ...version,
         }),
         method: "POST",
       }),
       createRouteContext({ token: CALLBACK_TOKEN }),
     );
 
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
-      kind: "runtime-action-result",
-      source: { kind: "remote" },
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
-          output: "done",
-          subagentName: "research",
-        },
-      ],
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "TASK_PROTOCOL_MISMATCH",
+      error: expect.stringContaining(`the remote agent ${sent}`),
+      taskProtocol: 1,
     });
+    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
   it("synthesizes a terminal failed outcome for session.failed", async () => {
@@ -322,6 +319,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           error,
           kind: "session.failed",
@@ -367,6 +365,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           kind: "session.completed",
           output: "done",
@@ -407,6 +406,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           kind: "session.completed",
           output: "done",
@@ -443,6 +443,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-1",
           kind: "session.completed",
           output: "done",
@@ -497,6 +498,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          answer: 6,
           callId: "call-2",
           kind: "turn.completed",
           outcome,
@@ -504,6 +506,7 @@ describe("session callback route", () => {
           sessionId: "remote-session",
           steers: 2,
           subagentName: "research",
+          taskProtocol: 1,
         }),
         method: "POST",
       }),
@@ -511,12 +514,14 @@ describe("session callback route", () => {
     );
 
     expect(response.status).toBe(202);
-    // The steering messages the child received for the call travel with its answer.
+    // The steering messages the child received for the call, and the answer's
+    // place among its answers, travel with its answer.
     expect(resumeHookMock).toHaveBeenCalledWith(CALLBACK_TOKEN, {
       kind: "runtime-action-result",
       source: { kind: "remote", sessionId: "remote-session" },
       results: [
         {
+          answer: 6,
           callId: "call-2",
           kind: "subagent-result",
           origin: "child",
@@ -534,6 +539,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-2",
           kind: "turn.completed",
           output: "next result",
@@ -564,6 +570,7 @@ describe("session callback route", () => {
     const response = await handleSessionCallbackRequest(
       new Request(CALLBACK_URL, {
         body: JSON.stringify({
+          taskProtocol: 1,
           callId: "call-2",
           error,
           kind: "turn.failed",

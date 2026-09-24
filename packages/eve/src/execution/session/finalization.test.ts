@@ -15,7 +15,8 @@ vi.mock("#execution/terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn(),
 }));
 vi.mock("#subagents/callback-step.js", () => ({ fireSessionCallbackStep: vi.fn() }));
-vi.mock("#subagents/parent-notification.js", () => ({
+vi.mock("#subagents/parent-notification.js", async (importOriginal) => ({
+  ...(await importOriginal()),
   notifyDelegatedParentStep: vi.fn(),
   notifyTurnCallerStep: vi.fn(),
 }));
@@ -84,6 +85,8 @@ describe("session finalization with an unsettled caller", () => {
         sessionId: "detector",
         settled: {
           ...code,
+          // A terminal report sorts after the parked answer at the same turn sequence.
+          answer: 1,
           isError: true,
           output: result.output,
           usage: expect.objectContaining({ inputTokens: 150 }),

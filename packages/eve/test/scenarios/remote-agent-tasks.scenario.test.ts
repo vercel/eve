@@ -32,8 +32,8 @@ interface Relay {
   readonly callbacks: RecordedRequest[];
   /** Messages the parent sent existing remote sessions, in order. */
   readonly continues: RecordedRequest[];
-  /** Resets the parent sent the impersonated older remote. */
-  readonly legacyResets: string[];
+  /** Requests the parent sent the impersonated older remote, as `METHOD path`. */
+  readonly legacyRequests: string[];
   /** Drop the next result callback from this agent while answering the remote 202. */
   dropNextResultFrom: string | undefined;
   parentUrl: string;
@@ -337,6 +337,25 @@ export default defineTool({
         // Nothing arrived until the deadline's reconciliation read the remote.
         expect(elapsed).toBeGreaterThanOrEqual(LEDGER_TIMEOUT_MS);
         expect(elapsed).toBeLessThan(LEDGER_TIMEOUT_MS + 60_000);
+
+        // The remote shows a report only to the holder of the callback it was sent to.
+        const dropped = relay.callbacks.findLast((entry) => entry.body.includes('"ledger"'));
+        const callbackToken = decodeURIComponent(dropped!.path.split("/").pop()!);
+        const { callId, sessionId } = JSON.parse(dropped!.body) as {
+          callId: string;
+          sessionId: string;
+        };
+        const readReport = (headers: Record<string, string>) =>
+          fetch(new URL(`/eve/v1/session/${sessionId}/reports/${callId}`, remote.url), {
+            headers: { authorization: `Bearer ${REMOTE_TOKEN}`, ...headers },
+          });
+        const owned = await readReport({ "x-eve-callback-token": callbackToken });
+        await expect(owned.json()).resolves.toMatchObject({
+          report: { callId, kind: "turn.completed", output: "Ledger balanced at 1,204 entries." },
+        });
+        const foreign = await readReport({ "x-eve-callback-token": "eve:inbox:v1:someone-else" });
+        await expect(foreign.json()).resolves.toMatchObject({ ok: true, report: null });
+        expect((await readReport({})).status).toBe(400);
       }),
     SCENARIO_TIMEOUT_MS,
   );
@@ -363,11 +382,12 @@ export default defineTool({
           status: "failed",
         });
         expect(lastReply(result.events)).toContain(
-          "Upgrade both deployments to the same eve version.",
+          "Upgrade so both deployments use the same task protocol version.",
         );
         expect(Date.now() - startedAt).toBeLessThan(30_000);
-        // The session the older remote started is retired.
-        expect(relay.legacyResets).toEqual(["legacy-session"]);
+        // The parent read the version from the older remote's health route and
+        // never created a session there, so none of its model or tools ran.
+        expect(relay.legacyRequests).toEqual(["GET /legacy/eve/v1/health"]);
 
         // An older parent, which sends a callback without a version, is refused by this remote.
         const refused = await fetch(new URL("/eve/v1/session", remote.url), {
@@ -444,7 +464,7 @@ async function startRelay(): Promise<Relay> {
     callbacks: [],
     continues: [],
     dropNextResultFrom: undefined,
-    legacyResets: [],
+    legacyRequests: [],
     parentUrl: "",
     remoteUrl: "",
   };
@@ -459,7 +479,7 @@ async function startRelay(): Promise<Relay> {
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await readBody(req);
     const path = req.url ?? "/";
-    if (path.startsWith("/legacy/")) return answerAsOlderEve(path, res);
+    if (path.startsWith("/legacy/")) return answerAsOlderEve(req.method ?? "GET", path, res);
     if (path.startsWith("/parent/")) {
       const target = path.slice("/parent".length);
       relay.callbacks.push({ body, path: target });
@@ -487,21 +507,18 @@ async function startRelay(): Promise<Relay> {
     await forward(req, res, new URL(path, relay.remoteUrl).href, forwarded);
   }
 
-  function answerAsOlderEve(path: string, res: ServerResponse): void {
+  function answerAsOlderEve(method: string, path: string, res: ServerResponse): void {
+    relay.legacyRequests.push(`${method} ${path}`);
+    // An older eve's health route reports no task protocol version.
+    if (path === "/legacy/eve/v1/health") {
+      return send(res, 200, JSON.stringify({ ok: true, status: "ready", workflowId: "legacy" }));
+    }
+    // It would accept a create without a version and start the turn at once.
     if (path === "/legacy/eve/v1/session") {
       return send(
         res,
         202,
         JSON.stringify({ ok: true, sessionId: "legacy-session", status: "accepted" }),
-      );
-    }
-    const reset = /^\/legacy\/eve\/v1\/session\/([^/]+)\/reset$/u.exec(path);
-    if (reset !== null) {
-      relay.legacyResets.push(reset[1]!);
-      return send(
-        res,
-        200,
-        JSON.stringify({ ok: true, previousSessionId: reset[1], status: "reset" }),
       );
     }
     send(res, 404, JSON.stringify({ ok: false }));
@@ -535,8 +552,10 @@ async function forward(
   });
   const text = await upstream.text();
   res.statusCode = upstream.status;
-  const type = upstream.headers.get("content-type");
-  if (type !== null) res.setHeader("content-type", type);
+  for (const name of ["content-type", "x-eve-task-protocol"]) {
+    const value = upstream.headers.get(name);
+    if (value !== null) res.setHeader(name, value);
+  }
   res.end(text);
 }
 

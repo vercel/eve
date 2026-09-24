@@ -125,12 +125,17 @@ const scheduledRemoteModel = mockModel({
   },
 });
 
-/** Reads a continuable child's id from the framework-injected `[Tasks]` note. */
+/**
+ * Reads the oldest continuable child's id from the latest framework-injected
+ * `[Tasks]` note, which lists idle agents most recent first. Every caller
+ * then names the first user's agent, so a later caller's refusal proves it
+ * could not reach that agent.
+ */
 function listedAgentId(messages: readonly MockModelMessage[], name: string): string | undefined {
-  const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`, "u");
+  const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`, "gu");
   for (const message of [...messages].reverse()) {
     if (message.role !== "user" || !message.text.startsWith("[Tasks]")) continue;
-    return pattern.exec(message.text)?.[1];
+    return [...message.text.matchAll(pattern)].at(-1)?.[1];
   }
   return undefined;
 }

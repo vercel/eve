@@ -9,10 +9,29 @@ import type { JsonValue } from "#shared/json.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import type { TaskError, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { AGENT_CALL_CANCELLED_MESSAGE } from "#tasks/render.js";
+import { AGENT_CALL_CANCELLED_MESSAGE, renderEmptyResult } from "#tasks/render.js";
 
 // Conversions between the child's settled turn, the kernel's outcome, and
 // the tool result the owner's model reads.
+
+/**
+ * An agent answer with no text fails with `EMPTY_RESULT`, so the model reads
+ * a reason instead of an empty tool result. A requested output schema's
+ * result is always a structured value, never text, so it is never empty.
+ */
+export function failEmptyResult(result: RuntimeSubagentChildResult): RuntimeSubagentChildResult {
+  const turn = result.outcome.result;
+  if (turn.kind !== "succeeded" || typeof turn.output !== "string" || turn.output.trim() !== "") {
+    return result;
+  }
+  const error = { code: "EMPTY_RESULT", message: renderEmptyResult(result.subagentName) };
+  return {
+    ...result,
+    isError: true,
+    outcome: { ...result.outcome, result: { error, kind: "failed" } },
+    output: error,
+  };
+}
 
 export function toTaskOutcome(result: RuntimeSubagentChildResult): TaskOutcome {
   const turn = result.outcome.result;

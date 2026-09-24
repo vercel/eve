@@ -171,6 +171,21 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
  */
 export const DelegatedSessionKey = new ContextKey<true>("eve.delegatedSession");
 
+/** A callback body a remotely called session still owes its caller, with the caller's URL. */
+export interface UnsentCallerEvent {
+  readonly body: { readonly callId: string; readonly kind: string } & Record<string, unknown>;
+  readonly url: string;
+}
+
+/**
+ * Input requests and authorization events a remotely called session could
+ * not forward to its caller when they happened, in order. The session sends
+ * them again in a retried step before it waits for input.
+ */
+export const UnsentCallerEventsKey = new ContextKey<readonly UnsentCallerEvent[]>(
+  "eve.unsentCallerEvents",
+);
+
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.
 // ---------------------------------------------------------------------------

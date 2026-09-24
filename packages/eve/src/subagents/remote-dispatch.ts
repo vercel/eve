@@ -34,10 +34,13 @@ import { expectFunction, expectObjectRecord } from "#internal/authored-module.js
 import { createLogger, logError } from "#internal/logging.js";
 import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
 import {
+  fetchRemoteAgent,
   readJsonBody,
   readTaskProtocolRejection,
+  requireRemoteTaskProtocol,
   requireTaskProtocol,
 } from "#subagents/remote-protocol.js";
+import { toErrorMessage } from "#shared/errors.js";
 import {
   writeForwardedAudienceBaggage,
   writeForwardedParentSessionBaggage,
@@ -165,16 +168,23 @@ export async function startRemoteAgentSession(input: {
     "baggage",
     writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
   );
-  const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
-    body: JSON.stringify(requestBody),
-    headers: {
-      "content-type": "application/json",
-      ...headers,
-    },
-    method: "POST",
-  });
-
   const name = input.action.remoteAgentName;
+  // Nothing may run on a remote that speaks another protocol: its model and
+  // tools would act before the version on the create response is checked.
+  await requireRemoteTaskProtocol({ headers, name, url: input.remote.url });
+  const response = await fetchRemoteAgent(
+    createRemoteAgentSessionUrl(input.remote),
+    {
+      body: JSON.stringify(requestBody),
+      headers: {
+        "content-type": "application/json",
+        ...headers,
+      },
+      method: "POST",
+    },
+    { name, request: "create-session" },
+  );
+
   const body = await readJsonBody(response);
   if (!response.ok) {
     throw (
@@ -264,11 +274,20 @@ export async function cancelRemoteAgentTurn(input: {
   readonly turnId?: string;
 }): Promise<CancelTurnResult> {
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
-  const response = await fetch(createRemoteAgentCancelTurnUrl(input.remote, input.sessionId), {
-    body: input.turnId === undefined ? undefined : JSON.stringify({ turnId: input.turnId }),
-    headers,
-    method: "POST",
-  });
+  let response: Response;
+  try {
+    response = await fetchRemoteAgent(
+      createRemoteAgentCancelTurnUrl(input.remote, input.sessionId),
+      {
+        body: input.turnId === undefined ? undefined : JSON.stringify({ turnId: input.turnId }),
+        headers,
+        method: "POST",
+      },
+      { name: input.remote.name, request: "cancel-turn" },
+    );
+  } catch (error) {
+    throw new RemoteAgentCancelRequestError(toErrorMessage(error), { retryable: true });
+  }
 
   if (!response.ok) {
     throw new RemoteAgentCancelRequestError(
@@ -322,13 +341,14 @@ export async function resetRemoteAgentSession(input: {
   readonly sessionId: string;
 }): Promise<ResetResponse> {
   const headers = input.headers ?? (await resolveRemoteAgentRequestHeaders(input.remote));
-  const response = await fetch(
+  const response = await fetchRemoteAgent(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
     {
       body: JSON.stringify({ reason: "Parent session ended" }),
       headers: { "content-type": "application/json", ...headers },
       method: "POST",
     },
+    { name: input.remote.name, request: "reset-session" },
   );
   if (!response.ok) {
     throw new Error(

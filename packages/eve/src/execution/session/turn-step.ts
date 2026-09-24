@@ -70,6 +70,7 @@ import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { attributeAnswer, readDelegatedAnswerer } from "#execution/session/delegated-answer.js";
 import { createSessionEventSink, type SessionEventSink } from "#execution/session/event-sink.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
@@ -174,9 +175,11 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
   const previousAuth = ctx.get(AuthKey);
 
+  const answerer = readDelegatedAnswerer(ctx, delivery);
+
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
   // input has no auth; it was seeded by buildRunContext).
-  if (delivery?.auth !== undefined) {
+  if (delivery?.auth !== undefined && answerer === undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
@@ -301,7 +304,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         await failChannelDeliveries(error);
         throw error;
       }
-      resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
+      resolved = attributeAnswer(
+        results.length === 0 ? undefined : results.reduce(coalesceTurnInputs),
+        answerer,
+      );
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);

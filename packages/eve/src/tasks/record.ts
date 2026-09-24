@@ -49,6 +49,12 @@ export interface TaskRecord {
    * start its next generation.
    */
   readonly steers?: number;
+  /**
+   * The place of the last child answer applied to this agent. The child's
+   * answers only grow, so a report at or below it repeats an answer already
+   * applied, such as an earlier generation's, and settles nothing.
+   */
+  readonly answerSeq?: number;
   /** Set when a workflow tool body started the current generation; its result goes to this reply hook. */
   readonly workflowCaller?: { readonly runId: string; readonly replyTo: string };
   /** The current generation's result reached history. */
@@ -191,6 +197,13 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
     (typeof value.steers !== "number" || !Number.isSafeInteger(value.steers) || value.steers < 0)
   )
     return fail("invalid steers");
+  if (
+    value.answerSeq !== undefined &&
+    (typeof value.answerSeq !== "number" ||
+      !Number.isSafeInteger(value.answerSeq) ||
+      value.answerSeq < 0)
+  )
+    return fail("invalid answerSeq");
   if (
     value.workflowCaller !== undefined &&
     (!isRecordObject(value.workflowCaller) ||

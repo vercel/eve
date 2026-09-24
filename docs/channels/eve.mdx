@@ -92,9 +92,9 @@ Follow-up messages use `turnPolicy: "steer"` by default. Before assistant answer
 
 Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` answer their addressed requests.
 
-A follow-up can carry its own `operationId`, a string of up to 256 characters. The session admits one message per `operationId`, so a retried request is not delivered twice.
+A follow-up can carry its own `operationId`, a string of up to 256 characters. The session admits one message per `operationId` for each principal, so a retried request is not delivered twice, and two callers that happen to use the same ID do not drop each other's messages. The session remembers the last 256 operation IDs it admitted, including after it moves to another deployment; a retry of an older ID is delivered again.
 
-Accepted create and follow-up responses report `taskProtocol`, the task protocol version this deployment uses when another eve deployment calls it as a [remote agent](../guides/remote-agents#upgrading-remote-agents). A request that carries a `callback` or a `taskProtocol` must send this deployment's version, or the route answers `409` with `"code": "TASK_PROTOCOL_MISMATCH"`. A calling eve deployment reads `GET /eve/v1/session/:sessionId/reports/:callId`, with the channel's auth, once at a call's deadline to recover a result whose callback never arrived.
+Accepted create and follow-up responses report `taskProtocol`, the task protocol version this deployment uses when another eve deployment calls it as a [remote agent](../guides/remote-agents#upgrading-remote-agents), and `GET /eve/v1/health` reports the same version in its `x-eve-task-protocol` response header. A request that carries a `callback` or a `taskProtocol` must send this deployment's version, or the route answers `409` with `"code": "TASK_PROTOCOL_MISMATCH"`. A calling eve deployment reads `GET /eve/v1/session/:sessionId/reports/:callId` once at a call's deadline to recover a result whose callback never arrived. The read needs the channel's auth and the callback token the result was sent to, in the `x-eve-callback-token` header; a read without that token's report gets `"report": null`.
 
 Sending a message to an unknown or terminal session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.

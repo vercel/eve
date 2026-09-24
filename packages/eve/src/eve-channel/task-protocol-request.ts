@@ -17,14 +17,26 @@ export const TASK_PROTOCOL_RESPONSE_FIELD = { taskProtocol: TASK_PROTOCOL_VERSIO
 export function rejectTaskProtocolMismatch(payload: Record<string, unknown>): Response | undefined {
   if (payload.callback === undefined && payload.taskProtocol === undefined) return undefined;
   if (payload.taskProtocol === TASK_PROTOCOL_VERSION) return undefined;
+  return taskProtocolMismatchResponse({
+    sender: "calling deployment",
+    sent: payload.taskProtocol,
+  });
+}
+
+/** The 409 a deployment answers a task protocol message from another version with. */
+export function taskProtocolMismatchResponse(input: {
+  /** Who sent the message, as the error names it. */
+  readonly sender: string;
+  readonly sent: unknown;
+}): Response {
   const sent =
-    typeof payload.taskProtocol === "number"
-      ? `task protocol version ${String(payload.taskProtocol)}`
+    typeof input.sent === "number"
+      ? `task protocol version ${String(input.sent)}`
       : "no task protocol version (it runs an older eve)";
   return Response.json(
     {
       code: TASK_PROTOCOL_MISMATCH,
-      error: `This deployment uses eve task protocol version ${String(TASK_PROTOCOL_VERSION)}, and the calling deployment sent ${sent}. Upgrade both deployments to the same eve version.`,
+      error: `This deployment uses eve task protocol version ${String(TASK_PROTOCOL_VERSION)}, and the ${input.sender} sent ${sent}. Upgrade so both deployments use the same task protocol version.`,
       ok: false,
       ...TASK_PROTOCOL_RESPONSE_FIELD,
     },

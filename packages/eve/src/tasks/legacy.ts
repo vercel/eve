@@ -6,6 +6,8 @@ import type { RecoveredTaskFields } from "#tasks/record.js";
 // from an earlier release may still hold background runs in the workflow
 // tool run registry that release wrote; each working one is reported once as
 // `STATE_LOST`, and the registry is removed with the other unreadable records.
+// Delete this module, and its uses in `table.ts`, one release after the
+// rewrite ships: by then every session that ran has dropped the registry.
 
 /** Session state key of the workflow tool run registry releases before the task table wrote. */
 export const LEGACY_WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.workflowTool";

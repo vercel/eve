@@ -187,7 +187,7 @@ widen capture and use metadata-only tracing.
 
 A remote subagent runs in its own deployment, and the parent turn waits for its answer:
 
-1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL, the parent session's capabilities, and its task protocol version.
+1. The parent reads the remote's task protocol version from `GET /eve/v1/health`, then starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL, the parent session's capabilities, and its task protocol version.
 2. The remote child runs its turn. Questions, approvals, and sign-in prompts it raises travel back through the same callback URL.
 3. The child posts its answer to the callback URL, and the answer becomes the tool result for the parent's call.
 
@@ -211,39 +211,42 @@ export default defineRemoteAgent({
 });
 ```
 
-Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an unreachable remote is logged but cannot turn the parent's cancellation into a failure.
+Cancelling the parent turn cancels the remote child's current turn. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream. eve sends a cancel that failed in a way that may clear, such as a timeout, once more; an unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-A failed _start_ fails the call with `START_FAILED`, including a start refused because the two deployments run different eve versions (see [Upgrading remote agents](#upgrading-remote-agents)). After a remote starts, a terminal failure callback fails the call with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
+A failed _start_ fails the call with `START_FAILED`, including a start refused because the two deployments use different task protocol versions (see [Upgrading remote agents](#upgrading-remote-agents)). Each request the parent sends a remote has a 30-second limit and does not follow redirects. A create request with no answer in time fails the call with `START_FAILED`, and a message to a working child with no answer in time fails that message with `AGENT_UNREACHABLE` while the child's current call continues. After a remote starts, a terminal failure callback fails the call with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
 
 ### Questions, approvals, and sign-in
 
-A remote child inherits the parent session's capabilities, as a local child does. When the parent session can reach a person, a tool approval, a `ctx.ask()` question, or a connection sign-in prompt in the remote child surfaces on the parent's stream as `input.requested` or `authorization.*` with the `taskId` of the call that asked. Answer it on the parent session with `inputResponses`, exactly as for a local child; eve forwards the answer to the remote session, as the answering principal when the definition forwards the caller identity. A sign-in completes on the remote deployment, whose connection callback the prompt links to. When the parent session cannot request input, such as a session a schedule started, the remote child's `ctx.ask()` questions resolve as `unavailable`.
+A remote child inherits the parent session's capabilities, as a local child does. When the parent session can reach a person, a tool approval, a `ctx.ask()` question, or a connection sign-in prompt in the remote child surfaces on the parent's stream as `input.requested`, `approval.*`, or `authorization.*` with the `taskId` of the call that asked. Answer it on the parent session with `inputResponses`, exactly as for a local child. eve forwards the answer to the remote session as the answering principal when the definition forwards the caller identity. The remote child attributes the answer to that principal, the `responder` its [approval response policy](../human-in-the-loop#authorizing-approval-responses) checks, and keeps acting as the principal that started it. A sign-in completes on the remote deployment, whose connection callback the prompt links to. When the parent session cannot request input, such as a session a schedule started, the remote child's `ctx.ask()` questions resolve as `unavailable`.
 
-A request the remote child could not deliver to the parent is not retried; the call's time limit bounds the wait.
+When the remote child cannot deliver a question or approval to the parent, for example while the parent session moves to another deployment and its callback route answers `503`, the child sends it again, in order, in a retried step before it waits for the answer. A request the parent refuses outright, such as one from another task protocol version, is dropped, and the call's time limit bounds the wait.
+
+An answer that fails for a reason that may clear, such as a timeout, stays answerable on the parent. An answer that can never reach the remote child fails the call: with `AGENT_SESSION_ENDED` when the remote session no longer exists, and with `AGENT_UNREACHABLE` when the remote deployment now uses another task protocol version.
 
 ### Retries and lost callbacks
 
 Retries on either side do not apply a call's work or its result twice:
 
 - Every continue or steering request eve sends a remote child carries an `operationId` derived from the call, so the remote admits a retried request once.
-- The parent applies the first result reported for each call, so a repeated callback changes nothing. A callback that arrives after the parent session ended is answered `200` with `{"ok":true,"duplicate":true}`, so the remote child neither fails nor keeps retrying it. While the parent session moves to another deployment, the callback route answers `503` and the child retries.
-- A lost callback is recovered at the call's deadline. Before a remote call fails with `TIMED_OUT`, eve reads the remote session's latest result for that call once, from `GET /eve/v1/session/:childSessionId/reports/:callId` with the definition's `auth` and `headers`. If the child already answered, the call settles with that answer. Otherwise it fails with `TIMED_OUT`, and eve cancels the child's turn.
+- The parent applies each result the child reports once. The child numbers its answers, and the parent ignores an answer it already applied, even one that arrives after the call moved on to the child's next answer. A repeated callback is acknowledged with `202`, like the first. A callback that arrives after the parent session ended is answered `200` with `{"ok":true,"duplicate":true}`. The child treats any `2xx` as delivered, so it neither fails nor keeps retrying. While the parent session moves to another deployment, the callback route answers `503` and the child retries.
+- A lost callback is recovered at the call's deadline. Before a remote call fails with `TIMED_OUT`, eve reads the remote session's latest result for that call once, from `GET /eve/v1/session/:childSessionId/reports/:callId`, with the definition's `auth` and `headers` and the parent's callback token in the `x-eve-callback-token` header. The remote keeps each result for the callback it was sent to and returns it only to a reader that presents that token; any other read, like a read for a call the child has not answered, gets `"report": null`. If the child's latest answer is one the parent has not applied, the call settles with it. Otherwise it fails with `TIMED_OUT`, and eve cancels the child's turn.
 
 ## Upgrading remote agents
 
-A remote agent and the agent that calls it must run the same eve version. The child side of a call keeps the call open until its own work finishes, forwards its questions and approvals, counts steering messages, and records its results for the parent's deadline read. Every delegated request carries the parent's task protocol version as `taskProtocol`, and every accepted response reports the remote's version. Upgrade the calling deployment and each remote agent it calls together.
+A remote agent and the agent that calls it must use the same task protocol version. The child side of a call keeps the call open until its own work finishes, forwards its questions and approvals, counts steering messages, and records its results for the parent's deadline read, so both sides must agree on the protocol. The version is currently `1`. A deployment reports it in the `x-eve-task-protocol` header of `GET /eve/v1/health` and as `taskProtocol` on accepted create and message responses. Create, message, and answer requests and every callback carry the sender's version as `taskProtocol`. Cancel and reset requests carry none, so a parent can always stop a child. Upgrade the calling deployment and each remote agent it calls together.
 
-A start across mixed versions fails at once, in either direction, instead of waiting for the call's time limit:
+A call across mixed versions fails at once, in either direction, instead of waiting for the call's time limit:
 
-- A remote agent on an older eve accepts the call without reporting a version. The parent resets the session the remote started and fails the call with `START_FAILED`:
+- A remote agent on an older eve reports no version on its health route. The parent fails the call with `START_FAILED` before it creates a session there, so none of the remote's model or tools run:
 
   ```text
-  Remote agent "billing" cannot be called: its deployment reports no task protocol version (it runs an older eve), and this deployment uses version 1. Upgrade both deployments to the same eve version.
+  Remote agent "billing" cannot be called: its deployment reports no task protocol version (it runs an older eve), and this deployment uses version 1. Upgrade so both deployments use the same task protocol version.
   ```
 
 - A remote agent on the current eve refuses a call from an older parent, which sends a callback without a version, with `409` and `"code": "TASK_PROTOCOL_MISMATCH"`, so the older parent's call fails at start.
+- A parent refuses a callback from another version with the same `409`. The child stops retrying it, and the call's time limit ends the parent's wait.
 
 Sessions are not migrated across versions. When a session from an earlier release next runs, each background task that release left working fails with `STATE_LOST`, the model receives that result in a `task.result` message, and the session continues. Start the work again if it is still needed.
 

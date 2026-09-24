@@ -15,17 +15,25 @@ import {
 } from "#execution/workflow-runtime.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
+import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { applyTaskDeadlines } from "#tasks/deadlines.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { STATE_LOST_MESSAGE } from "#tasks/render.js";
 import { readPendingTaskResults } from "#tasks/results.js";
-import { getTaskTable, planTaskTimer, readTaskTimer, TASK_TIMER_STATE_KEY } from "#tasks/state.js";
+import {
+  getTaskTable,
+  planTaskTimer,
+  readTaskTimer,
+  TASK_CALLBACK_ALIAS_STATE_KEY,
+  TASK_TIMER_STATE_KEY,
+} from "#tasks/state.js";
+import { applyTaskMessage } from "#tasks/table.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { recordNestedAgentInvocationTerminal } from "#tracing/agent-invocation-terminal.js";
 import { readRemoteTaskReport } from "#tasks/transport.js";
-import type { ChildTaskReport } from "#tasks/protocol.js";
+import { reportOrdering, type ChildTaskReport } from "#tasks/protocol.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
@@ -442,13 +450,16 @@ describe("applyTaskDeadlines", () => {
   });
 
   describe("reconciling a remote task at its deadline", () => {
+    const ALIAS = "eve:task-callback:owner-alias";
+    const withAlias = { [TASK_CALLBACK_ALIAS_STATE_KEY]: ALIAS };
     const remote = createTaskRecord({
       child: REMOTE_CHILD,
       deadlineAt: DEADLINE,
       name: "billing",
       startedAt: STARTED,
     });
-    const report = (): ChildTaskReport => ({
+    const report = (answer: number | undefined, steers?: number): ChildTaskReport => ({
+      ...reportOrdering(steers, answer),
       callId: "call-1",
       kind: "subagent-result",
       origin: "child",
@@ -462,11 +473,18 @@ describe("applyTaskDeadlines", () => {
     });
 
     it("settles the task with the answer whose callback never arrived, instead of timing out", async () => {
-      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report());
+      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report(2));
 
-      const update = await applyTaskDeadlines(input([remote], { now: AFTER_DEADLINE }));
+      const update = await applyTaskDeadlines(
+        input([remote], { now: AFTER_DEADLINE, state: withAlias }),
+      );
 
-      expect(readRemoteTaskReport).toHaveBeenCalledExactlyOnceWith(remote, expect.anything());
+      // The child shows the report only to the holder of the owner's callback token.
+      expect(readRemoteTaskReport).toHaveBeenCalledExactlyOnceWith(
+        remote,
+        expect.anything(),
+        sessionInboxHookToken(ALIAS),
+      );
       expect(update.results).toEqual([
         { callId: "call-1", kind: "tool-result", output: "Refund approved.", toolName: "billing" },
       ]);
@@ -477,14 +495,21 @@ describe("applyTaskDeadlines", () => {
         }),
       ]);
       expect(records(update.sessionState)).toEqual([
-        expect.objectContaining({ child: REMOTE_CHILD, delivered: true, status: "completed" }),
+        expect.objectContaining({
+          answerSeq: 2,
+          child: REMOTE_CHILD,
+          delivered: true,
+          status: "completed",
+        }),
       ]);
     });
 
     it("times out a remote task whose child has not answered", async () => {
       vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(undefined);
 
-      const update = await applyTaskDeadlines(input([remote], { now: AFTER_DEADLINE }));
+      const update = await applyTaskDeadlines(
+        input([remote], { now: AFTER_DEADLINE, state: withAlias }),
+      );
 
       expect(update.results).toEqual([
         expect.objectContaining({
@@ -495,16 +520,51 @@ describe("applyTaskDeadlines", () => {
       expect(records(update.sessionState)).toEqual([expect.objectContaining({ status: "failed" })]);
     });
 
-    it("times out a remote task whose latest answer predates a steering message it was sent", async () => {
-      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report());
+    it("never settles the next generation of a call with the answer to the one before", async () => {
+      // Two steering messages were sent; the agent answered after the first,
+      // so the owner applied that answer and started the call's next
+      // generation for the second message.
+      const table = applyTaskMessage(
+        taskTable([{ ...remote, mode: "background" as const, steers: 2 }]),
+        {
+          answer: 2,
+          generation: 1,
+          kind: "task.settled",
+          outcome: { output: "Refund approved.", status: "completed" },
+          steers: 1,
+          taskId: remote.id,
+        },
+        STARTED,
+      ).table;
+      const next = table.records[0]!;
+      expect(next).toMatchObject({ answerSeq: 2, generation: 2, status: "working", steers: 1 });
+      // At the new generation's deadline the latest report is still that answer,
+      // which accounts for as many steering messages as the generation waits on.
+      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report(2, 1));
 
       const update = await applyTaskDeadlines(
-        input([{ ...remote, steers: 1 }], { now: AFTER_DEADLINE }),
+        input([next], { now: "2026-09-24T16:00:05.000Z", state: withAlias }),
       );
 
-      expect(update.results).toEqual([
-        expect.objectContaining({ output: expect.objectContaining({ code: "TIMED_OUT" }) }),
+      expect(update.events).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            error: expect.objectContaining({ code: "TIMED_OUT" }),
+            status: "failed",
+          }),
+          type: "task.settled",
+        }),
       ]);
+    });
+
+    it("ignores a report that cannot say which answer it is", async () => {
+      vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report(undefined));
+
+      const update = await applyTaskDeadlines(
+        input([remote], { now: AFTER_DEADLINE, state: withAlias }),
+      );
+
+      expect(records(update.sessionState)).toEqual([expect.objectContaining({ status: "failed" })]);
     });
 
     it("reads nothing for a remote task that is not due or waits on a human", async () => {
@@ -514,7 +574,7 @@ describe("applyTaskDeadlines", () => {
             { ...remote, deadlineAt: "2026-09-24T15:00:00.000Z" },
             { ...remote, clockStoppedAt: STARTED, id: "billing-def567", status: "input_required" },
           ],
-          { now: AFTER_DEADLINE },
+          { now: AFTER_DEADLINE, state: withAlias },
         ),
       );
 

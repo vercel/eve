@@ -58,6 +58,9 @@ export function resolveSessionStepResult(
         settled: {
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
+          ...(stepResult.settledTurn.errorCode === undefined
+            ? {}
+            : { errorCode: stepResult.settledTurn.errorCode }),
           usage: delta,
         },
       };

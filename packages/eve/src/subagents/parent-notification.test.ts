@@ -372,7 +372,7 @@ describe("turn caller notification", () => {
       caller,
       lifecycle: "parked",
       sessionId: "remote-session",
-      settled: { output: "remote answer" },
+      settled: { answer: 4, output: "remote answer" },
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -381,6 +381,7 @@ describe("turn caller notification", () => {
     );
     const body: unknown = JSON.parse((fetchMock.mock.calls[0]![1] as { body: string }).body);
     expect(body).toEqual({
+      answer: 4,
       callId: "call-remote",
       kind: "turn.completed",
       outcome: {
@@ -391,10 +392,13 @@ describe("turn caller notification", () => {
       output: "remote answer",
       sessionId: "remote-session",
       subagentName: "remote",
+      taskProtocol: 1,
     });
     expect(resumeHookMock).not.toHaveBeenCalled();
-    // Recorded before it is sent, so a caller whose callback is lost can read it at its deadline.
+    // Recorded before it is sent, so a caller whose callback is lost can read it at its
+    // deadline, and only with the callback token it was sent to.
     expect(recordTaskReport).toHaveBeenCalledExactlyOnceWith({
+      callbackToken: "parent-turn",
       report: body,
       sessionId: "remote-session",
     });
@@ -454,7 +458,36 @@ describe("turn caller notification", () => {
       },
       sessionId: "remote-session",
       subagentName: "remote",
+      taskProtocol: 1,
     });
+  });
+
+  it("stops retrying a result the caller refuses for its task protocol version", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { code: "TASK_PROTOCOL_MISMATCH", ok: false, taskProtocol: 2 },
+        { status: 409 },
+      ),
+    );
+
+    await expect(
+      notifyTurnCallerStep({
+        caller: {
+          callId: "call-remote",
+          replyTo: {
+            kind: "callback",
+            token: "parent-turn",
+            url: "https://caller.example/eve/v1/callback/parent-turn",
+          },
+          subagentName: "remote",
+        },
+        lifecycle: "parked",
+        sessionId: "remote-session",
+        settled: { answer: 4, output: "remote answer" },
+      }),
+    ).resolves.toBeUndefined();
+    errorSpy.mockRestore();
   });
 
   it("warns and returns when the caller hook no longer exists", async () => {

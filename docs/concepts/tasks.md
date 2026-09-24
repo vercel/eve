@@ -127,7 +127,13 @@ Pass the `agentId` of an agent that is still working to send it a message, such 
 Sent your message to agent researcher-7k2m9q, which is still working. Its result will arrive in a later message.
 ```
 
-The agent still delivers exactly one result for its current call. Only the principal whose call started the agent's current work can message it; other callers get `AGENT_OTHER_PRINCIPAL`. A model call that names an agent whose current work a workflow body started with `ctx.agent` fails with `AGENT_BUSY`. See [Agent messaging](../subagents#agent-messaging) for continuing idle agents and every `agentId` error.
+The agent still delivers exactly one result for its current call. Only the principal whose call started the agent's current work can message it or give it new work; a call from any other caller, such as another user, a schedule, or an app principal, fails with `AGENT_OTHER_PRINCIPAL`. Principals match by authenticator, principal type, and principal ID, and every unauthenticated caller is the same anonymous principal, so this check does not separate two anonymous callers. A model call that names an agent whose current work a workflow body started with `ctx.agent` fails with `AGENT_BUSY`. See [Agent messaging](../subagents#agent-messaging) for continuing idle agents and every `agentId` error.
+
+## Answer an agent's questions and approvals
+
+A question or approval from an agent, local or remote, reaches the root session's stream as `input.requested` with the agent's `taskId`, and you answer it on the root session with `inputResponses`, as for the root agent's own requests. Anyone who can send to the root session can answer. The answer is attributed to the principal that gave it, which is the `responder` an [approval response policy](../human-in-the-loop#authorizing-approval-responses) checks, while the agent keeps acting as the principal that started it.
+
+An answer that can never reach a remote agent fails its task: with `AGENT_SESSION_ENDED` when the agent's session is gone, and with `AGENT_UNREACHABLE` when the agent's deployment now uses another task protocol version. An answer that fails for a reason that may clear, such as a timeout, stays answerable.
 
 ## Cancel tasks
 
@@ -141,7 +147,7 @@ Application code cancels through `session.cancel()` on a [client session](../gui
 | `session.cancel({ taskId })`      | One background task. The active turn keeps running.                       |
 | `session.cancel({ tasks: true })` | The active turn and every working task, including background tasks.       |
 
-`taskId` cannot be combined with `tasks` or `turnId`. Any caller with access to a session can cancel any of its tasks, and the model can stop any background task in any principal's turn. See [Cancel the in-flight turn](./sessions-runs-and-streaming#cancel-the-in-flight-turn) for the route's statuses and race behavior.
+`taskId` cannot be combined with `tasks` or `turnId`. Any caller with access to a session can cancel any of its tasks, and the model can stop any background task in any principal's turn. Cancelling is deliberately not limited to the principal that started the work, unlike [messaging a working agent](#give-a-working-agent-more-to-do), so anyone in a shared session can stop a task. See [Cancel the in-flight turn](./sessions-runs-and-streaming#cancel-the-in-flight-turn) for the route's statuses and race behavior.
 
 eve also cancels tasks on its own. Ending a session cancels every working task, and eve delivers nothing afterward. When a workflow tool run ends, eve cancels the agent tasks that the run still owns.
 
@@ -167,7 +173,11 @@ A session holds at most 10 working background tasks. Detached calls count toward
 
 ## Remote agents
 
-A call to a [remote agent](../guides/remote-agents) is a task like a local call, with the same receipts, detach, results, cancellation, and events. `task.started` carries the remote target in `child.remote.url`. Because the child side of the protocol runs in the remote deployment, the calling deployment and every remote agent it calls must run the same eve version. Delegated requests carry task protocol version `1` as `taskProtocol`. A start across mixed versions fails at once with `START_FAILED`, and a remote on the current eve refuses a call from an older caller with `409` and `"code": "TASK_PROTOCOL_MISMATCH"`. See [Upgrading remote agents](../guides/remote-agents#upgrading-remote-agents).
+A call to a [remote agent](../guides/remote-agents) is a task like a local call, with the same receipts, detach, results, cancellation, and events. `task.started` carries the remote target in `child.remote.url`.
+
+The child side of the task protocol runs in the remote deployment, so the calling deployment and every remote agent it calls must use the same task protocol version, currently `1`. Before it creates a remote session, the caller reads the remote's version from the `x-eve-task-protocol` header of its `GET /eve/v1/health` response. A remote on another version, or on an older eve that reports none, fails the call at once with `START_FAILED`, before its model or tools run. Create, message, and answer requests, result and input callbacks, and accepted create and message responses carry the version as `taskProtocol`, and a deployment refuses a mismatch with `409` and `"code": "TASK_PROTOCOL_MISMATCH"`. Cancel and reset requests carry no version, so a caller can always stop a remote child. See [Upgrading remote agents](../guides/remote-agents#upgrading-remote-agents).
+
+The caller applies each result a remote child reports once. It acknowledges a repeated result callback with `202`, like the first, and one that arrives after the caller's session ended with `200` and `{"ok":true,"duplicate":true}`; the child treats any `2xx` as delivered. See [Retries and lost callbacks](../guides/remote-agents#retries-and-lost-callbacks).
 
 ## Task stream events
 
@@ -187,7 +197,7 @@ Consumers can rely on these rules:
 - A detached call keeps the `mode` of its `task.started`; `task.detached` marks the switch. `task.detached` belongs to the turn that made the call, so read it from the session stream, not from the steering message's `MessageResponse`.
 - Continuing an idle agent emits another `task.started` and `task.settled` pair with the same `taskId` and a new `callId`. A message that joins a working agent's call emits nothing new, unless the agent had already answered: it then runs the message as its next turn, reported as another `task.started` with the same `taskId` and `mode: "background"`.
 - A `sleep` that a steering message ends early settles with `status: "cancelled"`, while its `action.result` carries `{ waitedSeconds }`.
-- When the root session proxies a child's `input.requested`, `authorization.required`, or `authorization.completed` event, the event carries the child's `taskId`. An `input.requested` event for a workflow tool call's own question or approval carries that call's `taskId`.
+- When the root session proxies a child's `input.requested`, `approval.candidate`, `approval.settled`, `authorization.required`, or `authorization.completed` event, the event carries the child's `taskId`. An `input.requested` event for a workflow tool call's own question or approval carries that call's `taskId`.
 
 Follow an agent's own progress by passing its `task.started` event to [`session.streamSubagent()`](../guides/client/streaming#follow-a-subagent), which reads `child.streamPath`.
 
@@ -195,16 +205,19 @@ Follow an agent's own progress by passing its `task.started` event to [`session.
 
 `task.settled` for a failed task, the waited call's tool result, and a failed `<task_result>` block carry the same `error.code`. Handle unknown codes, because an agent's own failure passes its code through.
 
-| Code                        | Meaning                                                                                                                    |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `START_FAILED`              | A workflow tool run or a remote agent could not start, including across task protocol versions.                            |
-| `SUBAGENT_START_FAILED`     | A local agent's session could not start.                                                                                   |
-| `TIMED_OUT`                 | The call was still working at its `timeout`.                                                                               |
-| `AGENT_SESSION_ENDED`       | The agent's session expired, reset, or closed before it replied.                                                           |
-| `SUBAGENT_EXECUTION_FAILED` | A local agent's turn failed; the message says why.                                                                         |
-| `REMOTE_AGENT_FAILED`       | A remote agent reported a failure without a code of its own.                                                               |
-| `STATE_LOST`                | eve could not read the task's saved state, such as a task that an earlier eve release left working. The session continues. |
-| `EXECUTION_FAILED`          | The task failed with an error that carried no code of its own.                                                             |
+| Code                          | Meaning                                                                                                                                                   |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `START_FAILED`                | A workflow tool run or a remote agent could not start, including across task protocol versions.                                                           |
+| `SUBAGENT_START_FAILED`       | A local agent's session could not start.                                                                                                                  |
+| `TIMED_OUT`                   | The call was still working at its `timeout`.                                                                                                              |
+| `AGENT_SESSION_ENDED`         | The agent's session expired, reset, or closed before it replied.                                                                                          |
+| `AGENT_UNREACHABLE`           | An idle agent could not be given its next call, or a remote agent could not take an answer because its deployment now uses another task protocol version. |
+| `OUTPUT_SCHEMA_NOT_FULFILLED` | The agent could not produce a result matching the call's `outputSchema`.                                                                                  |
+| `EMPTY_RESULT`                | The agent finished without a reply. A call with an `outputSchema` never fails this way, because its result is structured.                                 |
+| `SUBAGENT_EXECUTION_FAILED`   | A local agent's turn failed; the message says why.                                                                                                        |
+| `REMOTE_AGENT_FAILED`         | A remote agent reported a failure without a code of its own.                                                                                              |
+| `STATE_LOST`                  | eve could not read the task's saved state, such as a task that an earlier eve release left working. The session continues.                                |
+| `EXECUTION_FAILED`            | The task failed with an error that carried no code of its own.                                                                                            |
 
 ### Test a consumer against recorded streams
 

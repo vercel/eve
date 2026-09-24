@@ -7,7 +7,8 @@ import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { isSessionHandoffPending } from "#execution/session-inbox/resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { TASK_CALLBACK_ALIAS_PREFIX } from "#tasks/state.js";
-import type { ChildTaskReport } from "#tasks/protocol.js";
+import { reportOrdering, TASK_PROTOCOL_VERSION, type ChildTaskReport } from "#tasks/protocol.js";
+import { taskProtocolMismatchResponse } from "#eve-channel/task-protocol-request.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
@@ -27,9 +28,13 @@ const ZERO_TOKEN_USAGE: TokenUsage = {
 // task by callId and agent name. The self-reported `sessionId` narrows which
 // remote task a result may settle. Input requests and authorization events
 // travel the same route, so a remote child's HITL reaches the owner's client.
+// Every body carries the child's task protocol version.
 
 /** Steering messages a child reports receiving for the call; absent means none. */
 const steersSchema = z.number().int().nonnegative().optional();
+
+/** The answer's place among the child's answers; the owner applies each place once. */
+const answerSchema = z.number().int().nonnegative().optional();
 
 /**
  * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
@@ -56,6 +61,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     usage: z.unknown().optional(),
   }),
   z.object({
+    answer: answerSchema,
     callId: z.string().min(1),
     kind: z.literal("turn.completed"),
     outcome: agentTurnOutcomeWithCostSchema,
@@ -64,6 +70,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     subagentName: z.string().min(1),
   }),
   z.object({
+    answer: answerSchema,
     callId: z.string().min(1),
     error: jsonValueSchema,
     kind: z.literal("turn.failed"),
@@ -92,6 +99,14 @@ export async function handleSessionCallbackRequest(
     body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
+  }
+  if (body !== null && typeof body === "object") {
+    // A child on another task protocol version reports in a shape this owner
+    // cannot apply; it treats the refusal as final and stops retrying.
+    const taskProtocol: unknown = Reflect.get(body, "taskProtocol");
+    if (taskProtocol !== TASK_PROTOCOL_VERSION) {
+      return taskProtocolMismatchResponse({ sender: "remote agent", sent: taskProtocol });
+    }
   }
 
   const payload = projectCallbackHookPayload(body);
@@ -208,8 +223,7 @@ export function projectSessionCallbackResult(
     };
   }
 
-  const steers =
-    payload.steers === undefined || payload.steers === 0 ? {} : { steers: payload.steers };
+  const steers = reportOrdering(payload.steers, payload.answer);
   if (payload.kind === "turn.completed") {
     const report: ChildTaskReport = {
       callId: payload.callId,

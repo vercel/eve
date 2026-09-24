@@ -234,9 +234,18 @@ describe("multi-agent callback routing", () => {
     });
     deploymentOrigin = await listen(deploymentServer);
 
-    // Remote subagent: records the create-session body and returns the eve
-    // channel's canonical accepted response.
+    // Remote subagent: reports its task protocol on the health route, records
+    // the create-session body, and returns the eve channel's canonical
+    // accepted response.
     remoteAgentServer = createServer((request, response) => {
+      if (request.method === "GET" && request.url?.endsWith("/eve/v1/health") === true) {
+        response.writeHead(200, {
+          "content-type": "application/json",
+          "x-eve-task-protocol": "1",
+        });
+        response.end(JSON.stringify({ ok: true, status: "ready", workflowId: "remote" }));
+        return;
+      }
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {

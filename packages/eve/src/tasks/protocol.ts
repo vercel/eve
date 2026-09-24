@@ -94,6 +94,11 @@ export type TaskMessage =
       readonly childEnded?: boolean;
       /** Steering messages the child received for this generation before it answered. */
       readonly steers?: number;
+      /**
+       * Where this answer falls among the child's answers, which only grows.
+       * An answer at or below the last one applied is a repeat of it.
+       */
+      readonly answer?: number;
     }
   | {
       /** Signals that a deadline or cancellation confirmation window may have passed. */
@@ -127,16 +132,51 @@ export type TaskCommand =
 
 /**
  * A child's report that settles a delegated call, with the steering messages
- * the child received for the call since it last answered it. The count
- * travels with the report but stays out of the public result type.
+ * the child received for the call since it last answered it, and the
+ * answer's place among the child's answers. Both travel with the report but
+ * stay out of the public result type.
  */
-export type ChildTaskReport = RuntimeSubagentChildResult & { readonly steers?: number };
+export type ChildTaskReport = RuntimeSubagentChildResult & {
+  readonly steers?: number;
+  readonly answer?: number;
+};
 
 /** The steering messages a child reported receiving, when its report carries a valid count. */
 export function reportedSteers(result: RuntimeSubagentChildResult): number | undefined {
   const steers = (result as ChildTaskReport).steers;
   return typeof steers === "number" && Number.isSafeInteger(steers) && steers > 0
     ? steers
+    : undefined;
+}
+
+/**
+ * Orders a delegated session's answers to its callers, so a caller applies
+ * each answer once and never mistakes an earlier one for a later one. The
+ * session's turn sequence only grows, survives handoff, and advances with
+ * every turn, so two parked answers never share it; a terminal report can
+ * follow the last parked answer with no completed turn in between, so it
+ * sorts after it.
+ */
+export function answerOrder(turnSequence: number, lifecycle: "parked" | "terminal"): number {
+  return turnSequence * 2 + (lifecycle === "terminal" ? 1 : 0);
+}
+
+/** The ordering fields a child stamps on a report; zero steers are left out. */
+export function reportOrdering(
+  steers: number | undefined,
+  answer: number | undefined,
+): { answer?: number; steers?: number } {
+  const ordering: { answer?: number; steers?: number } = {};
+  if (steers !== undefined && steers !== 0) ordering.steers = steers;
+  if (answer !== undefined) ordering.answer = answer;
+  return ordering;
+}
+
+/** The place of a child's answer among its answers, when its report carries a valid one. */
+export function reportedAnswer(result: RuntimeSubagentChildResult): number | undefined {
+  const answer = (result as ChildTaskReport).answer;
+  return typeof answer === "number" && Number.isSafeInteger(answer) && answer >= 0
+    ? answer
     : undefined;
 }
 
