@@ -15,12 +15,7 @@ import {
   nextTurnDelivery,
   type NextTurnInstruction,
 } from "#execution/session/next-input.js";
-import {
-  cancelTasks,
-  cancelTurnDescendants,
-  closeTaskOwnerInbox,
-  syncTaskTimer,
-} from "#tasks/owner-body.js";
+import { cancelTasks, closeTaskOwnerInbox, syncTaskTimer } from "#tasks/owner-body.js";
 import { hasPendingDetachedWork } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
@@ -28,7 +23,7 @@ import {
   SessionInputQueue,
   withAdmittedOperations,
 } from "#execution/session/input-queue.js";
-import { SessionExecution } from "#execution/session/turn.js";
+import { SessionExecution, sessionPrincipal } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -139,7 +134,7 @@ export async function runPreparedSession(
     // Closed before anything else runs: nothing below may reopen an address.
     await closeTaskOwnerInbox(cursor, inbox);
     // Session end cancels every working task; nothing is delivered afterwards.
-    if (loop.outcome.kind === "expired") await cancelTasks(cursor, { kind: "all" });
+    await cancelTasks(cursor, { kind: "all" });
     result = await finalizeSession(loop.outcome, {
       caller: progress.caller,
       cursor,
@@ -308,7 +303,6 @@ async function runSessionLoop(
       sessionState: cursor.sessionState,
     });
     await cursor.apply(settled);
-    progress.caller = undefined;
     return settled;
   };
   const runResultTurn = async (
@@ -365,13 +359,13 @@ async function runSessionLoop(
       }
 
       if (action.cancelled === true) {
+        // The turn already cancelled every working task.
         const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
-        // A cancelled agent also stops its own background tasks.
-        if (progress.caller !== undefined) {
-          queue.discardSteering(progress.caller.callId);
-          await cancelTasks(cursor, { kind: "all" });
-        }
+        if (progress.caller !== undefined) queue.discardSteering(progress.caller.callId);
         const settled = await settleCancelledTurn();
+        // An expired session ends now, and its caller learns the session ended.
+        if (action.expired === true) return { kind: "terminal", outcome: { kind: "expired" } };
+        progress.caller = undefined;
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
             ? cancelledCaller
@@ -385,7 +379,13 @@ async function runSessionLoop(
         // A message the owner sent this working agent as its turn ended joins
         // the same call, so the reply that settles it has seen the message.
         // One that arrives after the reply starts the call's next turn.
-        !(progress.caller !== undefined && queue.hasSteeringMessage(progress.caller.callId))
+        !(
+          progress.caller !== undefined &&
+          queue.hasSteeringMessage({
+            callerCallId: progress.caller.callId,
+            principal: sessionPrincipal(cursor.serializedContext),
+          })
+        )
       ) {
         if (progress.caller !== undefined) {
           const steers = queue.takeSteerCount(progress.caller.callId);
@@ -438,12 +438,8 @@ async function runSessionLoop(
           const turnOpen =
             next.kind === "cancel-turn" ||
             hasOpenTurnWork(cursor.sessionState.snapshot.session.state);
-          await cancelTurnDescendants(cursor);
+          await cancelTasks(cursor, { kind: "all" });
           if (caller !== undefined) queue.discardSteering(caller.callId);
-          // A cancelled agent, or task-mode run, also stops its own background tasks.
-          if (caller !== undefined || (next.kind === "cancel-parked" && boot.mode === "task")) {
-            await cancelTasks(cursor, { kind: "all" });
-          }
           const usage = turnOpen ? (await settleCancelledTurn()).usage : action.settled?.usage;
           progress.caller = undefined;
           // The caller learns the call was cancelled; the prior turn is never reported.

@@ -194,8 +194,6 @@ export function parseSessionMessageBody(
 }
 
 interface ParsedCancelTurnBody {
-  taskId?: string;
-  tasks?: boolean;
   turnId?: string;
 }
 
@@ -207,12 +205,8 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
 
   const invalid = describeInvalidCancelOptions(payload);
   if (invalid !== undefined) return Response.json({ error: invalid, ok: false }, { status: 400 });
-  const { taskId, tasks, turnId } = payload;
-  const result: ParsedCancelTurnBody = {};
-  if (typeof taskId === "string") result.taskId = taskId;
-  if (typeof tasks === "boolean") result.tasks = tasks;
-  if (typeof turnId === "string") result.turnId = turnId;
-  return result;
+  const { turnId } = payload;
+  return typeof turnId === "string" ? { turnId } : {};
 }
 
 export async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {

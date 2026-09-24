@@ -1,6 +1,6 @@
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
-import { MAX_TASK_ID_LENGTH } from "#shared/session-cancel.js";
+import { MAX_TASK_ID_LENGTH } from "#tasks/ids.js";
 import type { TaskOutcome } from "#tasks/protocol.js";
 
 // The model's tool for waiting on one detached task. The harness reads this

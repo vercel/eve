@@ -34,20 +34,16 @@ import { endTaskWaits, takeLiveWait } from "#tasks/wait.js";
 // confirm in time. A `task_wait` on a cancelled task gets the cancellation as
 // its result; cancelled work otherwise never reaches the model.
 
-/** Which working tasks {@link cancelTasksStep} cancels. */
+/**
+ * Which working tasks {@link cancelTasksStep} cancels. Idle tasks are not
+ * working, so every selector leaves them available.
+ */
 export type TaskCancelSelector =
-  /** The attached calls of the turn the session is running or parked in. */
-  | { readonly kind: "active-turn" }
-  /** Every working task: the session ends, or its delegated caller cancels it. */
+  /** Every working task: `session.cancel()`, a cancelled turn, or the session's end. */
   | { readonly kind: "all" }
-  /**
-   * Every working detached task. The attached calls a turn holds are
-   * cancelled with that turn, so a turn that keeps running never waits on a
-   * cancelled call.
-   */
-  | { readonly kind: "detached" }
-  /** One detached task. An attached call is cancelled with its turn. */
-  | { readonly kind: "task"; readonly taskId: string }
+  /** The working tasks one turn started: that turn failed, or a cancel named it after it ended. */
+  | { readonly kind: "turn"; readonly turnId: string }
+  /** The agent calls a workflow run awaits, once that run ends. */
   | { readonly kind: "workflow-run"; readonly runId: string };
 
 /** The owner's table after cancelling tasks, and what it must send and publish. */
@@ -73,15 +69,7 @@ export async function cancelTasksStep(input: {
 
   const durable = readDurableSession(input.sessionState);
   const initial = getTaskTable(durable);
-  const selected = initial.records.filter(
-    selectTasks(
-      input.selector,
-      initial,
-      () =>
-        getPendingCoordinationBatch(durable.state)?.event.turnId ??
-        activeTurnId(input.sessionState.emissionState),
-    ),
-  );
+  const selected = initial.records.filter(selectTasks(input.selector));
   const cancelled = cancelRecords(initial, selected, new Date().toISOString());
   if (cancelled.table === initial) {
     return {
@@ -281,41 +269,15 @@ function applyCancelled<T extends Session>(
   return { results, session: next };
 }
 
-function selectTasks(
-  selector: TaskCancelSelector,
-  table: TaskTable,
-  turnId: () => string,
-): (record: TaskRecord) => boolean {
+function selectTasks(selector: TaskCancelSelector): (record: TaskRecord) => boolean {
   switch (selector.kind) {
     case "all":
       return () => true;
-    case "detached":
-      return isDetachedWork;
-    case "task":
-      return (record) => record.id === selector.taskId && isDetachedWork(record);
+    case "turn":
+      return (record) => record.turnId === selector.turnId;
     case "workflow-run":
       return (record) => record.workflowCaller?.runId === selector.runId;
-    case "active-turn": {
-      const activeTurn = turnId();
-      // A detached run's own agent calls belong to that run, not to any turn.
-      const detachedRuns = new Set(
-        table.records.flatMap((record) =>
-          record.mode === "detached" && record.child?.kind === "workflow"
-            ? [record.child.runId]
-            : [],
-        ),
-      );
-      return (record) =>
-        record.turnId === activeTurn &&
-        record.mode === "attached" &&
-        !detachedRuns.has(record.workflowCaller?.runId ?? "");
-    }
   }
-}
-
-/** A task no turn or workflow body awaits. */
-function isDetachedWork(record: TaskRecord): boolean {
-  return record.mode === "detached" && record.workflowCaller === undefined;
 }
 
 function cancelRecords(

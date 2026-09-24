@@ -1522,7 +1522,7 @@ describe("applyTaskReport", () => {
 });
 
 describe("cancelTasksStep", () => {
-  it("cancels the turn's working tasks and signals the started children", async () => {
+  it("cancels one turn's working tasks and signals the started children", async () => {
     const started = createTaskRecord({ child: LOCAL_CHILD, id: "research-aaaaaa" });
     const starting = createTaskRecord({ callId: "call-2", id: "research-bbbbbb" });
     const otherTurn = createTaskRecord({
@@ -1538,7 +1538,7 @@ describe("cancelTasksStep", () => {
     });
 
     const { events, sessionState } = await cancelTasksStep({
-      selector: { kind: "active-turn" },
+      selector: { kind: "turn", turnId: "turn-1" },
       serializedContext: {},
       sessionState: ownerState([started, starting, otherTurn, finished]),
     });
@@ -1569,36 +1569,30 @@ describe("cancelTasksStep", () => {
     ]);
   });
 
-  it("leaves detached tasks and a detached run's agent calls out of a turn cancel", async () => {
+  it("cancels every working task, a detached run's own agent calls included", async () => {
     const reminder = createTaskRecord({
       child: { commandToken: "control-hook", kind: "workflow", runId: "run-remind" },
       id: "remind-aaaaaa",
       kind: "workflow",
       mode: "detached",
       name: "remind",
+      turnId: "turn-0",
     });
     const reminderAgent = createTaskRecord({
       callId: "call-2",
       id: "research-bbbbbb",
+      turnId: "turn-0",
       workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
     });
     const waited = createTaskRecord({ callId: "call-3", id: "research-cccccc" });
 
-    const turn = await cancelTasksStep({
-      selector: { kind: "active-turn" },
+    const all = await cancelTasksStep({
+      selector: { kind: "all" },
       serializedContext: {},
       sessionState: ownerState([reminder, reminderAgent, waited]),
     });
 
-    expect(settledTaskIds(turn.events)).toEqual([waited.id]);
-
-    const all = await cancelTasksStep({
-      selector: { kind: "all" },
-      serializedContext: {},
-      sessionState: turn.sessionState,
-    });
-
-    expect(settledTaskIds(all.events)).toEqual([reminder.id, reminderAgent.id]);
+    expect(settledTaskIds(all.events)).toEqual([reminder.id, reminderAgent.id, waited.id]);
     expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
       { hookToken: "control-hook", runId: "run-remind" },
       expect.any(String),
@@ -1614,7 +1608,7 @@ describe("cancelTasksStep", () => {
     });
 
     const { events, sessionState } = await cancelTasksStep({
-      selector: { kind: "active-turn" },
+      selector: { kind: "turn", turnId: "turn-1" },
       serializedContext: {},
       sessionState: ownerState([workflowCall]),
     });
@@ -1676,7 +1670,7 @@ describe("cancelTasksStep", () => {
     const state = ownerState([createTaskRecord({ turnId: "turn-0" })]);
 
     const cancelled = await cancelTasksStep({
-      selector: { kind: "active-turn" },
+      selector: { kind: "turn", turnId: "turn-1" },
       serializedContext: {},
       sessionState: state,
     });
@@ -1690,12 +1684,12 @@ describe("cancelTasksStep", () => {
     const working = createTaskRecord({ child: LOCAL_CHILD });
 
     const cancelled = await cancelTasksStep({
-      selector: { kind: "active-turn" },
+      selector: { kind: "all" },
       serializedContext: {},
       sessionState: ownerState([working]),
     });
     const repeated = await cancelTasksStep({
-      selector: { kind: "active-turn" },
+      selector: { kind: "all" },
       serializedContext: {},
       sessionState: cancelled.sessionState,
     });

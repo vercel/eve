@@ -2,6 +2,12 @@ const BASE32 = "0123456789abcdefghjkmnpqrstvwxyz";
 const SUFFIX_LENGTH = 6;
 
 /**
+ * Longest task ID a caller may name. Task IDs eve derives are
+ * `<name>-<6 base32>`, at most 55 characters.
+ */
+export const MAX_TASK_ID_LENGTH = 128;
+
+/**
  * Derives a task ID as `<name>-<6 base32>` from the owner, turn, and call.
  *
  * The derivation is pure so a replayed step assigns the same ID. `taken`

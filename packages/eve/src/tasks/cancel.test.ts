@@ -337,31 +337,79 @@ describe("applyTaskCancelCall", () => {
   });
 });
 
-describe("cancelTasksStep with the task selector", () => {
-  it("cancels one background task and leaves the turn's calls and other tasks working", async () => {
-    const waited = createTaskRecord({ child: LOCAL_CHILD, id: "research-7k2m9q" });
-    const other = { ...REMINDER, callId: "call-other", child: undefined, id: "remind-3fq8wd" };
-
-    const { events, sessionState } = await cancelTasksStep({
-      selector: { kind: "task", taskId: "remind-q4x1ze" },
-      serializedContext: {},
-      sessionState: ownerState([REMINDER, waited, other]),
+describe("cancelTasksStep with the all selector", () => {
+  it("cancels every working task, whichever turn started it, and leaves idle agents available", async () => {
+    const waited = createTaskRecord({
+      child: LOCAL_CHILD,
+      id: "research-7k2m9q",
+      turnId: "turn-1",
+    });
+    const nested = createTaskRecord({
+      callId: "call-nested",
+      id: "research-b81d0c",
+      workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
+    });
+    const idle = createTaskRecord({
+      callId: "call-idle",
+      child: { ...LOCAL_CHILD, sessionId: "idle-child" },
+      delivered: true,
+      id: "research-3fq8wd",
+      mode: "detached",
+      status: "completed",
     });
 
+    const { events, sessionState } = await cancelTasksStep({
+      selector: { kind: "all" },
+      serializedContext: {},
+      sessionState: ownerState([REMINDER, waited, nested, idle]),
+    });
+
+    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
+      "remind-q4x1ze",
+      "research-7k2m9q",
+      "research-b81d0c",
+    ]);
     expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
       { hookToken: "control-hook", runId: "run-remind" },
       expect.any(String),
     );
-    expect(events).toEqual([
-      {
-        data: { callId: "call-remind", status: "cancelled", taskId: "remind-q4x1ze" },
-        type: "task.settled",
-      },
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
+      sessionId: "child-session",
+    });
+    expect(records(sessionState).map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: "remind-q4x1ze", status: "cancelled" },
+      { id: "research-7k2m9q", status: "cancelled" },
+      { id: "research-b81d0c", status: "cancelled" },
+      { id: "research-3fq8wd", status: "completed" },
     ]);
+  });
+});
+
+describe("cancelTasksStep with the turn selector", () => {
+  it("cancels the working tasks one turn started and leaves other turns' tasks working", async () => {
+    const other = createTaskRecord({ child: LOCAL_CHILD, id: "research-7k2m9q", turnId: "turn-1" });
+    const nested = createTaskRecord({
+      callId: "call-nested",
+      id: "research-b81d0c",
+      turnId: "turn-0",
+      workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
+    });
+
+    const { events, sessionState } = await cancelTasksStep({
+      selector: { kind: "turn", turnId: "turn-0" },
+      serializedContext: {},
+      sessionState: ownerState([REMINDER, other, nested]),
+    });
+
+    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
+      "remind-q4x1ze",
+      "research-b81d0c",
+    ]);
+    expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(records(sessionState).map(({ id, status }) => ({ id, status }))).toEqual([
       { id: "remind-q4x1ze", status: "cancelled" },
       { id: "research-7k2m9q", status: "working" },
-      { id: "remind-3fq8wd", status: "working" },
+      { id: "research-b81d0c", status: "cancelled" },
     ]);
   });
 
@@ -379,7 +427,7 @@ describe("cancelTasksStep with the task selector", () => {
     };
 
     const update = await cancelTasksStep({
-      selector: { kind: "task", taskId: "remind-q4x1ze" },
+      selector: { kind: "turn", turnId: "turn-0" },
       serializedContext: {},
       sessionState,
     });
@@ -393,53 +441,17 @@ describe("cancelTasksStep with the task selector", () => {
     expect(records(update.sessionState)[0]?.wait).toBeUndefined();
   });
 
-  it.each([["research-7k2m9q"], ["nobody-000000"]])(
-    "ignores %s, a waited call or an unknown ID",
-    async (taskId) => {
-      const sessionState = ownerState([
-        createTaskRecord({ child: LOCAL_CHILD, id: "research-7k2m9q" }),
-      ]);
+  it("changes nothing for a turn that started no working task", async () => {
+    const sessionState = ownerState([REMINDER]);
 
-      const update = await cancelTasksStep({
-        selector: { kind: "task", taskId },
-        serializedContext: {},
-        sessionState,
-      });
-
-      expect(update.events).toEqual([]);
-      expect(update.sessionState).toBe(sessionState);
-    },
-  );
-});
-
-describe("cancelTasksStep with the detached selector", () => {
-  it("cancels every detached task and leaves calls a caller waits on", async () => {
-    const waited = createTaskRecord({ child: LOCAL_CHILD, id: "research-7k2m9q" });
-    const nested = createTaskRecord({
-      callId: "call-nested",
-      id: "research-b81d0c",
-      workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
-    });
-    const detachedAgent = createTaskRecord({
-      callId: "call-detached",
-      child: { ...LOCAL_CHILD, sessionId: "detached-child" },
-      id: "research-3fq8wd",
-      mode: "detached",
-    });
-
-    const { events } = await cancelTasksStep({
-      selector: { kind: "detached" },
+    const update = await cancelTasksStep({
+      selector: { kind: "turn", turnId: "turn-9" },
       serializedContext: {},
-      sessionState: ownerState([REMINDER, waited, nested, detachedAgent]),
+      sessionState,
     });
 
-    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
-      "remind-q4x1ze",
-      "research-3fq8wd",
-    ]);
-    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
-      sessionId: "detached-child",
-    });
+    expect(update.events).toEqual([]);
+    expect(update.sessionState).toBe(sessionState);
   });
 });
 

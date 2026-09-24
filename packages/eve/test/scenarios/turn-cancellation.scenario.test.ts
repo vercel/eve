@@ -224,14 +224,11 @@ describe("turn cancellation descendant cascade", () => {
             }),
           ]);
 
-          // The turn waits on the detached program, so the cancel names detached tasks too.
+          // A plain cancel stops the turn and every working task: the detached program and
+          // the agent calls it awaits.
           const cancelResponse = await parentClient.fetch(
             createEveSessionCancelRoutePath(response.sessionId),
-            {
-              body: JSON.stringify({ tasks: true }),
-              headers: { "content-type": "application/json" },
-              method: "POST",
-            },
+            { method: "POST" },
           );
           expect(cancelResponse.status).toBe(202);
           await expect(cancelResponse.json()).resolves.toMatchObject({
@@ -258,36 +255,29 @@ describe("turn cancellation descendant cascade", () => {
           expectCancellationBoundary(localEvents);
           expectCancellationBoundary(remoteEvents);
           expectCancellationBoundary(parentEvents);
-          // The owner reports each cancelled task, including the workflow tool call, once; the
-          // children's confirmations add nothing. The program's own agent calls stop when its
-          // cancelled run unwinds, which can be after the turn's boundary.
-          const settledTasks = async () => {
-            const all: MessageStreamEvent[] = [];
-            for await (const event of parentSession.stream({ follow: false, startIndex: 0 })) {
-              all.push(event);
-            }
-            return all
+          // The owner cancels the workflow tool call and its agent calls before the turn ends,
+          // and reports each once; the children's confirmations and the cancelled run's
+          // unwinding add nothing later.
+          const cancelledTasks = [
+            `${localChild.taskId}:cancelled`,
+            `${remoteChild.taskId}:cancelled`,
+            `${workflowCall.taskId}:cancelled`,
+          ].sort();
+          const settled = (events: readonly MessageStreamEvent[]) =>
+            events
               .flatMap((event) =>
                 event.type === "task.settled" ? [`${event.data.taskId}:${event.data.status}`] : [],
               )
               .sort();
-          };
-          await withinEventDeadline(
-            (async () => {
-              while ((await settledTasks()).length < 3) {
-                await new Promise((resolve) => setTimeout(resolve, 500));
-              }
-            })(),
-            "the program's agent calls to settle",
-          );
+          expect(settled(parentEvents)).toEqual(cancelledTasks);
+          const boundary = parentEvents.findIndex((event) => event.type === "turn.cancelled");
+          expect(settled(parentEvents.slice(boundary))).toEqual([]);
           await new Promise((resolve) => setTimeout(resolve, 1_500));
-          expect(await settledTasks()).toEqual(
-            [
-              `${localChild.taskId}:cancelled`,
-              `${remoteChild.taskId}:cancelled`,
-              `${workflowCall.taskId}:cancelled`,
-            ].sort(),
-          );
+          const all: MessageStreamEvent[] = [];
+          for await (const event of parentSession.stream({ follow: false, startIndex: 0 })) {
+            all.push(event);
+          }
+          expect(settled(all)).toEqual(cancelledTasks);
 
           const followUp = await (
             await parentSession.send("Reply with the exact string `still-alive` and nothing else.")

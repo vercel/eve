@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { SessionAuthContext } from "#channel/types.js";
+import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import {
+  isSteeringDelivery,
   MAX_ADMITTED_OPERATIONS,
   readAdmittedOperations,
   SessionInputQueue,
@@ -14,13 +15,15 @@ const caller = {
   replyTo: { kind: "hook" as const, token: "owner-inbox" },
   subagentName: "writer",
 };
+/** A turn answering call-1 for the session's anonymous principal. */
+const CALL_1 = { callerCallId: "call-1", principal: null } as const;
 
 describe("SessionInputQueue.hasSteeringMessage", () => {
   it("finds a callerless or same-caller message that steers", () => {
     const queue = new SessionInputQueue();
     queue.enqueueDelivery({ kind: "deliver", payloads: [{ message: "Add pricing." }] });
 
-    expect(queue.hasSteeringMessage("call-1")).toBe(true);
+    expect(queue.hasSteeringMessage(CALL_1)).toBe(true);
   });
 
   it("ignores queued messages, answers, and another caller's message", () => {
@@ -40,7 +43,68 @@ describe("SessionInputQueue.hasSteeringMessage", () => {
       payloads: [{ message: "Next task." }],
     });
 
-    expect(queue.hasSteeringMessage("call-1")).toBe(false);
+    expect(queue.hasSteeringMessage(CALL_1)).toBe(false);
+  });
+});
+
+describe("the principal check", () => {
+  const ALICE: SessionAuthContext = {
+    attributes: {},
+    authenticator: "slack",
+    principalId: "U-alice",
+    principalType: "user",
+  };
+  const BOB: SessionAuthContext = { ...ALICE, principalId: "U-bob" };
+  const aliceTurn = { callerCallId: undefined, principal: ALICE };
+  const message = (auth: SessionAuthContext | null | undefined, text: string) => {
+    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: text }] };
+    return auth === undefined ? delivery : { ...delivery, auth };
+  };
+
+  it("lets the turn's own principal steer it, with fresher attributes too", () => {
+    const refreshed = { ...ALICE, attributes: { team: "support" } };
+
+    expect(isSteeringDelivery(message(ALICE, "Add the invoice."), aliceTurn)).toBe(true);
+    expect(isSteeringDelivery(message(refreshed, "Add the invoice."), aliceTurn)).toBe(true);
+    // A delivery without auth keeps the session's principal, as an owner's message does.
+    expect(isSteeringDelivery(message(undefined, "Add the invoice."), aliceTurn)).toBe(true);
+  });
+
+  it("never lets another principal steer, whatever the turn policy", () => {
+    expect(isSteeringDelivery(message(BOB, "Hi, I need help too."), aliceTurn)).toBe(false);
+    expect(isSteeringDelivery(message(null, "Hi."), aliceTurn)).toBe(false);
+    expect(isSteeringDelivery({ ...message(BOB, "Later."), turnPolicy: "steer" }, aliceTurn)).toBe(
+      false,
+    );
+  });
+
+  it("lets anonymous callers steer each other's turns", () => {
+    const anonymousTurn = { callerCallId: undefined, principal: null };
+
+    expect(isSteeringDelivery(message(null, "Also this."), anonymousTurn)).toBe(true);
+    expect(isSteeringDelivery(message(ALICE, "Also this."), anonymousTurn)).toBe(false);
+  });
+
+  it("takes only the turn's own principal's messages and keeps the rest queued in order", () => {
+    const queue = new SessionInputQueue();
+    queue.enqueueDelivery(message(BOB, "Bob: can you check my order?"));
+    queue.enqueueDelivery(message(ALICE, "Alice: include the refund."));
+    queue.enqueueDelivery(message(BOB, "Bob: order 42."));
+
+    expect(queue.hasSteeringMessage(aliceTurn)).toBe(true);
+    expect(queue.takeSteering(new Set([0, 1, 2]), aliceTurn)?.delivery).toEqual(
+      message(ALICE, "Alice: include the refund."),
+    );
+    expect(queue.hasSteeringMessage(aliceTurn)).toBe(false);
+
+    // Once Alice's turn ends, Bob's messages start one turn of his own.
+    expect(queue.takeNext()).toMatchObject({
+      delivery: {
+        auth: BOB,
+        payloads: [{ message: "Bob: can you check my order?" }, { message: "Bob: order 42." }],
+      },
+      kind: "turn",
+    });
   });
 });
 
@@ -65,7 +129,7 @@ describe("an owner's steering messages", () => {
     // The writer answered call-1 and reported the one message it had.
     const queue = new SessionInputQueue();
     queue.enqueueDelivery(steer("turn-1:call-2"));
-    queue.takeSteering(new Set([0]), "call-1");
+    queue.takeSteering(new Set([0]), CALL_1);
     expect(queue.takeSteerCount("call-1")).toBe(1);
 
     // A message sent just before the owner applied that answer arrives now:
@@ -85,7 +149,7 @@ describe("an owner's steering messages", () => {
     queue.enqueueDelivery(steer("turn-1:call-2"));
     queue.enqueueDelivery(steer("turn-1:call-3", "Mention the date."));
 
-    const steering = queue.takeSteering(new Set([0, 1]), "call-1");
+    const steering = queue.takeSteering(new Set([0, 1]), CALL_1);
     expect(steering?.delivery).toMatchObject({
       caller,
       payloads: [{ message: "Mention the price." }, { message: "Mention the date." }],
@@ -116,7 +180,7 @@ describe("an owner's steering messages", () => {
     queue.discardSteering("call-1");
 
     expect(queue.pendingCount).toBe(1);
-    expect(queue.hasSteeringMessage("call-1")).toBe(true);
+    expect(queue.hasSteeringMessage(CALL_1)).toBe(true);
     expect(queue.takeSteerCount("call-1")).toBe(0);
     // A resent copy of the dropped message stays dropped.
     expect(queue.enqueueDelivery(steer("turn-1:call-2"))).toBeUndefined();

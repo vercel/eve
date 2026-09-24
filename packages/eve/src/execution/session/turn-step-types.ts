@@ -72,6 +72,8 @@ export type TurnOutcome =
   | {
       readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
+      /** The session expired during the cancelled turn, and ends next. */
+      readonly expired?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;
     };

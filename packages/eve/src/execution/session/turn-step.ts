@@ -178,7 +178,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   const answerer = readDelegatedAnswerer(ctx, delivery);
 
   // Apply deliver-time auth ferried via `resumeHook` (initial-turn
-  // input has no auth; it was seeded by buildRunContext).
+  // input has no auth; it was seeded by buildRunContext). Only the turn's own
+  // principal steers it (`isSteeringDelivery`), so a steering message never
+  // changes who the turn acts for.
   if (delivery?.auth !== undefined && answerer === undefined) {
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);

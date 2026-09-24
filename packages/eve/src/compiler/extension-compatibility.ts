@@ -108,8 +108,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   channel: {
-    current: 38,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 34, 35, 36, 38],
+    current: 39,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 34, 35, 36, 39],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -127,17 +127,19 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       32: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
       33: "Workflow tools accept detach, and background task results arrive as task.result messages.",
       37: "P6 stage 2: task.started mode is attached | detached and task.detached is removed; stage 6 consolidates branch-only epochs",
+      38: "P6 stage 3: Session.cancel takes no task options and cancels the turn and every working task; stage 6 consolidates branch-only epochs",
     },
   },
   schedule: {
-    current: 22,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 22],
+    current: 23,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 18, 19, 20, 23],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       15: "Background task execution was removed: tool calls, including subagent calls and workflow tools, resolve inside their turn.",
       16: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
       17: "Workflow tools accept detach, and background task results arrive as task.result messages.",
       21: "P6 stage 2: task.started mode is attached | detached and task.detached is removed; stage 6 consolidates branch-only epochs",
+      22: "P6 stage 3: Session.cancel takes no task options and cancels the turn and every working task; stage 6 consolidates branch-only epochs",
     },
   },
   subagent: {

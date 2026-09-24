@@ -317,7 +317,11 @@ describe("admitTaskInputEvent", () => {
 });
 
 function plan(records: readonly TaskRecord[], delivery: Omit<DeliverHookPayload, "kind">) {
-  return planTaskAnswers({ delivery: { kind: "deliver", ...delivery }, table: taskTable(records) });
+  return planTaskAnswers({
+    delivery: { kind: "deliver", ...delivery },
+    steers: true,
+    table: taskTable(records),
+  });
 }
 
 function routed(answers: readonly TaskAnswers[]) {
@@ -365,12 +369,12 @@ describe("sentAnswerResolutions", () => {
       kind: "deliver",
       payloads: [{ message: "Also check the logs." }],
     };
-    expect(planTaskAnswers({ delivery: message, table }).remainder).toEqual(message);
+    expect(planTaskAnswers({ delivery: message, steers: true, table }).remainder).toEqual(message);
     const repeat: DeliverHookPayload = {
       kind: "deliver",
       payloads: [{ inputResponses: [{ requestId: "r-1", text: "us-east" }] }],
     };
-    expect(planTaskAnswers({ delivery: repeat, table }).remainder).toEqual(repeat);
+    expect(planTaskAnswers({ delivery: repeat, steers: true, table }).remainder).toEqual(repeat);
   });
 
   it("keeps an approval until the child resolves it, since its policy may refuse the responder", () => {
@@ -514,6 +518,32 @@ describe("planTaskAnswers", () => {
     ]);
   });
 
+  it("sends a waiting message's explicit answers, and leaves its text for its own turn", () => {
+    // Bob writes while Alice's turn runs: his button answer goes through, his text waits.
+    const tasks = [
+      waiting("deploy-bbbbbb", [request("d-1", { dismissible: true })], WORKFLOW),
+      waiting("research-aaaaaa", [request("r-1")], LOCAL),
+    ];
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [
+        { inputResponses: [{ requestId: "r-1", text: "eu-west" }] },
+        { message: "Never mind the deploy." },
+      ],
+    };
+
+    const result = planTaskAnswers({ delivery, steers: false, table: taskTable(tasks) });
+
+    expect(routed(result.answers)).toEqual([
+      {
+        dismissed: [],
+        responses: [{ requestId: "r-1", text: "eu-west" }],
+        taskId: "research-aaaaaa",
+      },
+    ]);
+    expect(result.remainder?.payloads).toEqual([{ message: "Never mind the deploy." }]);
+  });
+
   it("never resolves a delegating caller's message against a question", () => {
     const tasks = [waiting("deploy-bbbbbb", [request("d-1", { dismissible: true })], WORKFLOW)];
     const delivery = {
@@ -533,7 +563,7 @@ describe("planTaskAnswers", () => {
     const research = [waiting("research-aaaaaa", [request("r-1")], LOCAL)];
     const deploy = [waiting("deploy-bbbbbb", [request("d-1", { dismissible: true })], WORKFLOW)];
     const withOwn = (records: readonly TaskRecord[]) =>
-      planTaskAnswers({ delivery, sessionAsks: true, table: taskTable(records) });
+      planTaskAnswers({ delivery, sessionAsks: true, steers: true, table: taskTable(records) });
 
     expect(plan(research, delivery).answers).toHaveLength(1);
     expect(withOwn(research)).toEqual({ answers: [], cancelTurn: false, remainder: delivery });
@@ -602,6 +632,7 @@ describe("planTaskAnswers", () => {
     expect(
       planTaskAnswers({
         delivery,
+        steers: true,
         table: taskTable([waiting("research-aaaaaa", [request("r-1")], LOCAL)]),
       }),
     ).toEqual({ answers: [], cancelTurn: false, remainder: delivery });

@@ -1,4 +1,5 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -17,7 +18,7 @@ import { flushUnsentCallerEventsStep } from "#subagents/remote/unsent-caller-eve
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  getWorkflowMetadata: () => ({ url: "https://parent.example" }),
+  getWorkflowMetadata: () => ({ url: "https://parent.example", workflowRunId: "owner-1" }),
 }));
 vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinationStep: vi.fn() }));
 
@@ -400,7 +401,7 @@ describe("SessionExecution turn checkpoints", () => {
     },
   );
   it("cancels an admitted workflow action when cancellation already arrived at the step boundary", async () => {
-    const sessionState = state("");
+    const sessionState = withWorkingTask(state(""));
     const inbox: SessionInbox = {
       claimedTokens: [],
       claimSessionHook: vi.fn(),
@@ -436,7 +437,7 @@ describe("SessionExecution turn checkpoints", () => {
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
     expect(cancelTasksStep).toHaveBeenCalledWith({
-      selector: { kind: "active-turn" },
+      selector: { kind: "all" },
       serializedContext: {},
       sessionState,
     });
@@ -746,8 +747,8 @@ describe("SessionExecution turn checkpoints", () => {
     });
   });
 
-  it("cancels one task during a wait and keeps the turn running", async () => {
-    const sessionState = state("");
+  it("keeps the turn and its tasks running for a cancel that names an older turn", async () => {
+    const sessionState = withWorkingTask(state(""));
     const signal = {
       kind: "task.deadline" as const,
       ownerRunId: "owner-1",
@@ -759,19 +760,25 @@ describe("SessionExecution turn checkpoints", () => {
       output: "Sources found.",
       toolName: "research",
     };
-    const runtimePayloads: SessionInboxPayload[] = [
-      { kind: "cancel", taskId: "remind-q4x1ze" },
-      signal,
-    ];
+    const stale = { kind: "cancel", turnId: "turn_older" } as const;
+    const runtimePayloads: SessionInboxPayload[] = [stale, signal];
+    let interrupt: (payload: SessionInboxPayload) => void = () => {};
     const inbox: SessionInbox = {
       claimedTokens: [],
       claimSessionHook: vi.fn(),
       claimSessionHooks: vi.fn(),
       drain: vi.fn(() => []),
       hasPending: vi.fn(() => false),
-      next: vi.fn(async () => runtimePayloads.shift()),
+      next: vi.fn(async () => {
+        const payload = runtimePayloads.shift();
+        if (payload?.kind === "cancel") interrupt(payload);
+        return payload;
+      }),
       onDelivery: vi.fn(() => () => {}),
-      onInterrupt: vi.fn(() => () => {}),
+      onInterrupt: vi.fn((handler) => {
+        interrupt = handler;
+        return () => {};
+      }),
       restore: vi.fn(),
     };
     const execution = createExecution({ inbox, sessionState });
@@ -801,77 +808,15 @@ describe("SessionExecution turn checkpoints", () => {
       }),
     ).resolves.toMatchObject({ kind: "done" });
 
-    expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ selector: { kind: "task", taskId: "remind-q4x1ze" } }),
-    );
+    expect(cancelTasksStep).not.toHaveBeenCalled();
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toMatchObject({
       runtimeResults: { results: [waited] },
     });
   });
 
-  it("keeps a newer turn waiting on its calls when tasks: true names an older turn", async () => {
-    const sessionState = state("");
-    const signal = {
-      kind: "task.deadline" as const,
-      ownerRunId: "owner-1",
-      wakeAt: "2026-09-24T14:00:00.000Z",
-    };
-    const waited = {
-      callId: "agent-call",
-      kind: "tool-result" as const,
-      output: "Sources found.",
-      toolName: "research",
-    };
-    const runtimePayloads: SessionInboxPayload[] = [
-      { kind: "cancel", tasks: true, turnId: "turn_older" },
-      signal,
-    ];
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: vi.fn(() => []),
-      hasPending: vi.fn(() => false),
-      next: vi.fn(async () => runtimePayloads.shift()),
-      onDelivery: vi.fn(() => () => {}),
-      onInterrupt: vi.fn(() => () => {}),
-      restore: vi.fn(),
-    };
-    const execution = createExecution({ inbox, sessionState });
-    vi.mocked(cancelTasksStep).mockClear();
-    vi.mocked(turnStep)
-      .mockReset()
-      .mockResolvedValueOnce({
-        action: "park",
-        hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
-        pendingCoordinationCallIds: ["agent-call"],
-        serializedContext: {},
-        sessionState,
-      })
-      .mockResolvedValueOnce({
-        action: "done",
-        output: "done",
-        serializedContext: {},
-        sessionState,
-      });
-    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue(ownerUpdate(sessionState));
-    vi.mocked(applyTaskDeadlinesStep).mockResolvedValue(ownerUpdate(sessionState, [waited]));
-
-    await expect(
-      execution.runTurn({
-        delivery: { kind: "deliver", payloads: [{ message: "Ask the researcher." }] },
-      }),
-    ).resolves.toMatchObject({ kind: "done" });
-
-    expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
-      { kind: "detached" },
-    ]);
-  });
-
-  it("cancels the turn and every task for tasks: true", async () => {
-    const sessionState = state("");
-    const cancel = { kind: "cancel", tasks: true } as const;
+  it("cancels the turn and every working task, then ends the turn", async () => {
+    const sessionState = withWorkingTask(state(""));
+    const cancel = { kind: "cancel", turnId: "turn_0" } as const;
     let interrupt: (payload: SessionInboxPayload) => void = () => {};
     const inbox: SessionInbox = {
       claimedTokens: [],
@@ -904,9 +849,116 @@ describe("SessionExecution turn checkpoints", () => {
     await expect(execution.runTurn(undefined)).resolves.toEqual({ cancelled: true, kind: "park" });
 
     expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
-      { kind: "detached" },
-      { kind: "active-turn" },
+      { kind: "all" },
     ]);
+  });
+
+  it("treats this owner's session expiry during a wait as a cancel of the turn", async () => {
+    const sessionState = withWorkingTask(state(""));
+    const expiry = { kind: "session-timeout", ownerRunId: "owner-1" } as const;
+    const queue = new SessionInputQueue();
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      next: vi.fn().mockResolvedValueOnce(expiry),
+      onDelivery: vi.fn(() => () => {}),
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    const execution = createExecution({ inbox, queue, sessionState });
+    vi.mocked(cancelTasksStep).mockClear();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["wait-call"],
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue(ownerUpdate(sessionState));
+
+    await expect(
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Wait for the research." }] },
+      }),
+    ).resolves.toEqual({ cancelled: true, expired: true, kind: "park" });
+
+    expect(vi.mocked(cancelTasksStep).mock.calls.map(([input]) => input.selector)).toEqual([
+      { kind: "all" },
+    ]);
+    expect(turnStep).toHaveBeenCalledTimes(1);
+    expect(queue.takeNext()).toEqual({ control: "expired", kind: "control" });
+  });
+
+  it("ignores a previous owner's session expiry", async () => {
+    let interrupt: (payload: SessionInboxPayload) => void = () => {};
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: (handler) => {
+        interrupt = handler;
+        return () => {};
+      },
+    };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(async (input) => {
+        interrupt({ kind: "session-timeout", ownerRunId: "previous-owner" });
+        expect(input.abortSignal?.aborted).toBe(false);
+        return {
+          action: "done",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        };
+      });
+
+    await expect(
+      createExecution({ inbox, sessionState: state("") }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+  });
+
+  it("cancels the working tasks a failed turn started before it reports", async () => {
+    const sessionState = withWorkingTask(state(""));
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    const settled = { errorCode: "OUTPUT_SCHEMA_NOT_FULFILLED", isError: true, output: "No." };
+    vi.mocked(cancelTasksStep).mockClear();
+    vi.mocked(turnStep).mockReset().mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: {},
+      sessionState,
+      settled,
+    });
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "park", settled });
+
+    expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ selector: { kind: "turn", turnId: "turn_0" } }),
+    );
   });
 
   it("never resolves a waited call from a raw tool result read from the inbox", async () => {
@@ -1015,7 +1067,7 @@ describe("SessionExecution turn checkpoints", () => {
       }),
     ).resolves.toEqual({ cancelled: true, kind: "park" });
 
-    expect(answerTaskInput).toHaveBeenCalledWith(expect.anything(), childAnswer);
+    expect(answerTaskInput).toHaveBeenCalledWith(expect.anything(), childAnswer, { steers: true });
     expect(queue.pendingCount).toBe(0);
   });
 });
@@ -1049,6 +1101,23 @@ function state(continuationToken: string): DurableSessionState {
     sessionId: "session-1",
     version: 1,
   });
+}
+
+/** Adds a working detached task, so a cancel has work to stop. */
+function withWorkingTask(sessionState: DurableSessionState): DurableSessionState {
+  const { session } = sessionState.snapshot;
+  return {
+    ...sessionState,
+    snapshot: {
+      session: {
+        ...session,
+        state: {
+          ...session.state,
+          ...taskTableState([createTaskRecord({ mode: "detached", turnId: "turn_0" })]),
+        },
+      },
+    },
+  };
 }
 
 function ownerUpdate(

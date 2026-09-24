@@ -168,10 +168,9 @@ export class ClientSession {
   }
 
   /**
-   * Requests cooperative cancellation without waiting for it. With no options,
-   * cancels the active turn and the tasks it waits on; `taskId` cancels one
-   * background task and leaves the turn running; `tasks: true` cancels the
-   * active turn and every working task.
+   * Requests cooperative cancellation without waiting for it: cancels the
+   * active turn, its attached calls, and every working task, then ends the
+   * turn. Idle tasks stay available.
    */
   async cancel(options?: CancelSessionOptions): Promise<CancelSessionResult> {
     return await cancelClientSession({

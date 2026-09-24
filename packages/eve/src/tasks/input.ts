@@ -249,11 +249,15 @@ interface TaskAnswersDraft extends TaskAnswers {
  * own pending requests; otherwise it dismisses every dismissible question and
  * stays with this session. While this session waits on its own approval or
  * session-limit prompt (`sessionAsks`), the text is left to those. A
- * delegating caller's message never answers.
+ * delegating caller's message never answers. Only a delivery that `steers`
+ * or starts a turn uses its text: another principal's message, or a `queue`
+ * message, waits for the running turn to end, and only its explicit
+ * responses go to their requests meanwhile.
  */
 export function planTaskAnswers(input: {
   readonly delivery: DeliverHookPayload;
   readonly sessionAsks?: boolean;
+  readonly steers: boolean;
   readonly table: TaskTable;
 }): TaskAnswerPlan {
   const { delivery } = input;
@@ -280,7 +284,12 @@ export function planTaskAnswers(input: {
   for (const [index, payload] of delivery.payloads.entries()) {
     const responses = [...(payload.inputResponses ?? [])];
     let message = payload.message;
-    if (delivery.caller === undefined && responses.length === 0 && message !== undefined) {
+    if (
+      input.steers &&
+      delivery.caller === undefined &&
+      responses.length === 0 &&
+      message !== undefined
+    ) {
       const questions = [...pending.values()].filter(({ request }) => request.kind === "question");
       const [only] = questions;
       const answer =

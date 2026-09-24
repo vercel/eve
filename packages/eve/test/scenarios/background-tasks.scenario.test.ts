@@ -50,7 +50,7 @@ async function collectFor(
 
 describe("detached tasks", () => {
   it(
-    "stops detached tasks through task_cancel and session.cancel({ taskId }) without a later result",
+    "stops detached tasks through task_cancel and an idle session.cancel() without a later result",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -132,7 +132,8 @@ export default defineAgent({
           "Cancel result:",
         );
 
-        await expect(session.cancel({ taskId: remainingId })).resolves.toEqual({
+        // No turn runs, so the cancel stops the working task that remains.
+        await expect(session.cancel()).resolves.toEqual({
           sessionId: session.state.sessionId,
           status: "accepted",
         });

@@ -15,7 +15,6 @@ import {
   applyTaskOwnerUpdate,
   applyTaskReport,
   cancelTasks,
-  cancelTurnDescendants,
   closeTaskOwnerInbox,
   settleWorkflowTask,
   startAgentTasks,
@@ -185,7 +184,7 @@ describe("applyTaskOwnerUpdate", () => {
 describe("cancelTasks", () => {
   it("publishes the task.settled event of each task it cancels", async () => {
     const cursor = createCursor(
-      createTestSessionState(),
+      stateWith(taskTableState([createTaskRecord()])),
       vi.fn(async () => {}),
     );
     const event: UnstampedMessageStreamEvent = {
@@ -213,27 +212,15 @@ describe("cancelTasks", () => {
       expect.objectContaining({ event }),
     );
   });
-});
 
-describe("cancelTurnDescendants", () => {
-  it("cancels the active turn's tasks and returns without waiting on any child", async () => {
+  it("takes no step while every task is finished or idle", async () => {
     const cursor = createCursor(
-      createTestSessionState(),
+      stateWith(taskTableState([createTaskRecord({ status: "completed" })])),
       vi.fn(async () => {}),
     );
-    vi.mocked(cancelTasksStep).mockResolvedValue({
-      events: [],
-      replies: [],
-      results: [],
-      serializedContext: {},
-      sessionState: cursor.sessionState,
-    });
 
-    await cancelTurnDescendants(cursor);
-
-    expect(cancelTasksStep).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ selector: { kind: "active-turn" } }),
-    );
+    await expect(cancelTasks(cursor, { kind: "all" })).resolves.toEqual([]);
+    expect(cancelTasksStep).not.toHaveBeenCalled();
   });
 });
 
@@ -265,7 +252,7 @@ describe("answerTaskInput", () => {
   it("passes a delivery through without a step while no task waits on input", async () => {
     const cursor = createCursor(stateWith(taskTableState([createTaskRecord()])), vi.fn());
 
-    await expect(answerTaskInput(cursor, answer)).resolves.toEqual({
+    await expect(answerTaskInput(cursor, answer, { steers: true })).resolves.toEqual({
       kind: "continue",
       remainder: answer,
     });
@@ -296,7 +283,7 @@ describe("answerTaskInput", () => {
       payloads: [{ inputResponses: [{ requestId: "q-1" }, { requestId: "b-1", text: "eu" }] }],
     };
 
-    await expect(answerTaskInput(cursor, both)).resolves.toEqual({
+    await expect(answerTaskInput(cursor, both, { steers: true })).resolves.toEqual({
       dismissedCallIds: [],
       kind: "continue",
       remainder: undefined,
@@ -324,7 +311,9 @@ describe("answerTaskInput", () => {
     vi.mocked(answerTaskStep).mockResolvedValue([resolved]);
     vi.mocked(publishTaskInputStep).mockRejectedValue(new Error("caller inbox unavailable"));
 
-    await expect(answerTaskInput(cursor, answer)).rejects.toThrow("caller inbox unavailable");
+    await expect(answerTaskInput(cursor, answer, { steers: true })).rejects.toThrow(
+      "caller inbox unavailable",
+    );
     // The send is its own step: a retried publish replays its recorded result.
     expect(answerTaskStep).toHaveBeenCalledOnce();
     expect(vi.mocked(answerTaskStep).mock.calls[0]![0]).not.toHaveProperty("sessionWritable");
@@ -341,7 +330,7 @@ describe("answerTaskInput", () => {
     );
     const text = { kind: "deliver" as const, payloads: [{ message: "approve" }] };
 
-    await expect(answerTaskInput(cursor, text)).resolves.toEqual({
+    await expect(answerTaskInput(cursor, text, { steers: true })).resolves.toEqual({
       dismissedCallIds: [],
       kind: "continue",
       remainder: text,
@@ -357,7 +346,9 @@ describe("answerTaskInput", () => {
       payloads: [{ inputResponses: [{ optionId: "stop", requestId: "q-1" }] }],
     };
 
-    await expect(answerTaskInput(cursor, stop)).resolves.toEqual({ kind: "cancel-turn" });
+    await expect(answerTaskInput(cursor, stop, { steers: true })).resolves.toEqual({
+      kind: "cancel-turn",
+    });
     expect(answerTaskStep).toHaveBeenCalledOnce();
     expect(publishTaskInputStep).not.toHaveBeenCalled();
   });

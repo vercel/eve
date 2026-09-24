@@ -196,11 +196,9 @@ export type SessionCommand =
       readonly turnPolicy?: TurnPolicy;
     }
   | {
+      /** Cancels the active turn, its attached calls, and every working task. */
       readonly kind: "cancel";
-      /** Cancels this one background task instead of the turn. */
-      readonly taskId?: string;
-      /** Also cancels every working task, not only those the turn waits on. */
-      readonly tasks?: boolean;
+      /** Stale-request guard: a cancel naming a turn that is no longer active changes nothing. */
       readonly turnId?: string;
     }
   | { readonly kind: "compact" }

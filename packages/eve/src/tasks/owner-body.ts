@@ -23,7 +23,11 @@ import {
   type TaskInputPublication,
 } from "#tasks/input.js";
 import { answerTaskStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
-import type { TaskDeadlineSignal, TaskInputEvent } from "#tasks/protocol.js";
+import {
+  isTerminalTaskStatus,
+  type TaskDeadlineSignal,
+  type TaskInputEvent,
+} from "#tasks/protocol.js";
 import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import {
@@ -185,21 +189,17 @@ export async function settleWorkflowTask(
 }
 
 /**
- * Cancels the attached calls the active turn holds, and the agent tasks their
- * workflow bodies await, without waiting for their children to stop.
- */
-export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<void> {
-  await cancelTasks(cursor, { kind: "active-turn" });
-}
-
-/**
- * Cancels the selected working tasks and publishes their `task.settled`
- * events. Returns the results of `task_wait` calls on the cancelled tasks.
+ * Cancels the selected working tasks, without waiting for their children to
+ * stop, and publishes their `task.settled` events. Returns the results of
+ * `task_wait` calls on the cancelled tasks. With no working task it takes no
+ * step.
  */
 export async function cancelTasks(
   cursor: SessionStateCursor,
   selector: TaskCancelSelector,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
+  const table = getTaskTable(cursor.sessionState.snapshot.session);
+  if (table.records.every((record) => isTerminalTaskStatus(record.status))) return [];
   return await applyTaskOwnerUpdate(
     cursor,
     await cancelTasksStep({
@@ -326,17 +326,20 @@ export type TaskAnswerRouting =
  * Sends the answers a delivery holds for tasks to the children that asked
  * (see `planTaskAnswers`), then publishes the requests the sent answers
  * resolved (see `sentAnswerResolutions`), which no later delivery can
- * answer. Without pending task input it takes no step.
+ * answer. Without pending task input it takes no step. `steers` says whether
+ * the delivery steers or starts a turn (see `planTaskAnswers`).
  */
 export async function answerTaskInput(
   cursor: SessionStateCursor,
   delivery: DeliverHookPayload,
+  options: { readonly steers: boolean },
 ): Promise<TaskAnswerRouting> {
   const session = cursor.sessionState.snapshot.session;
   if (!hasPendingTaskInput(session)) return { kind: "continue", remainder: delivery };
   const plan = planTaskAnswers({
     delivery,
     sessionAsks: hasOwnPendingInput(session.state),
+    steers: options.steers,
     table: getTaskTable(session),
   });
   if (plan.answers.length > 0) {

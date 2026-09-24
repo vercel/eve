@@ -57,20 +57,14 @@ describe("session inbox payloads", () => {
     );
   });
 
-  it("accepts task cancellation and rejects malformed cancel options", () => {
-    expect(decodeSessionInboxPayload({ kind: "cancel", taskId: "remind-q4x1ze" })).toEqual({
+  it("accepts a cancel with a turn guard and rejects a malformed one", () => {
+    expect(decodeSessionInboxPayload({ kind: "cancel", turnId: "turn_2" })).toEqual({
       kind: "cancel",
-      taskId: "remind-q4x1ze",
-    });
-    expect(decodeSessionInboxPayload({ kind: "cancel", tasks: true })).toEqual({
-      kind: "cancel",
-      tasks: true,
+      turnId: "turn_2",
     });
     for (const invalid of [
-      { kind: "cancel", taskId: "" },
-      { kind: "cancel", taskId: "x".repeat(129) },
-      { kind: "cancel", tasks: "yes" },
-      { kind: "cancel", taskId: "remind-q4x1ze", tasks: true },
+      { kind: "cancel", turnId: "" },
+      { kind: "cancel", turnId: 2 },
     ]) {
       expect(() => decodeSessionInboxPayload(invalid)).toThrowError(SessionInboxPayloadError);
     }

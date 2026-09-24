@@ -12,7 +12,7 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 import { hasOwnPendingInput } from "#tasks/input.js";
-import { applyTaskDeadline, applyTaskReport } from "#tasks/owner-body.js";
+import { applyTaskDeadline, applyTaskReport, cancelTasks } from "#tasks/owner-body.js";
 import { nextTaskResultTurn } from "#tasks/results.js";
 
 export type NextTurnInstruction =
@@ -22,6 +22,7 @@ export type NextTurnInstruction =
   | { readonly kind: "task-results"; readonly creator?: JsonObject }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
+  /** A descendant's declined session-limit prompt stops this session's parked turn. */
   | { readonly kind: "cancel-turn" }
   /** A cancel reached a parked session that still owes a result for its last turn. */
   | { readonly kind: "cancel-parked" }
@@ -38,9 +39,11 @@ export type NextTurnInstruction =
  * handled and no turn is open, each creator's held results start their own
  * result turn.
  *
- * A cancel is dropped while parked unless `ownsParkedWork` holds: the session
- * still owes its delegated caller, or a task-mode run its result, so the
- * cancel stops that work instead.
+ * No turn runs while parked, so a cancel stops the working tasks it names:
+ * every one, or with a `turnId`, only those that turn started, so a cancel
+ * sent for an older turn never stops newer work. When `ownsParkedWork` holds,
+ * the session still owes its delegated caller, or a task-mode run its result,
+ * and the owner cancels that work and settles the caller instead.
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
@@ -115,15 +118,16 @@ export async function nextTurnDelivery(input: {
         break;
       }
       case "cancel":
-        // A reset also admits as a cancel; the session ends through its control instead.
-        if (payload.kind === "cancel" && input.ownsParkedWork?.() === true) {
-          return { kind: "cancel-parked" };
-        }
+        // A reset or expiry also admits as a cancel; the session ends through its control instead.
+        if (payload.kind !== "cancel") break;
+        if (input.ownsParkedWork?.() === true) return { kind: "cancel-parked" };
+        await cancelTasks(
+          cursor,
+          payload.turnId === undefined ? { kind: "all" } : { kind: "turn", turnId: payload.turnId },
+        );
         break;
       case "delivery":
       case "consumed":
-      // Waits exist only inside a turn.
-      case "wait-results":
         break;
     }
   }

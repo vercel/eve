@@ -164,24 +164,21 @@ describe("ClientSession", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ turnId: "turn_1" });
   });
 
-  it.each([
-    [{ taskId: "remind-q4x1ze" }, { taskId: "remind-q4x1ze" }],
-    [{ tasks: true }, { tasks: true }],
-  ])("sends the task options %o in the cancel body", async (options, body) => {
+  it("sends an empty cancel body without options", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
         Response.json({ ok: true, sessionId: "session_1", status: "accepted" }, { status: 202 }),
       );
 
-    await expect(createSession().cancel(options)).resolves.toEqual({
+    await expect(createSession().cancel()).resolves.toEqual({
       sessionId: "session_1",
       status: "accepted",
     });
 
     const [request, init] = fetchMock.mock.calls[0] ?? [];
     expect(String(request)).toMatch(/\/eve\/v1\/session\/session_1\/cancel$/u);
-    expect(JSON.parse(String(init?.body))).toEqual(body);
+    expect(JSON.parse(String(init?.body))).toEqual({});
   });
 
   it("snapshots the session from the start through one pinned durable tail", async () => {

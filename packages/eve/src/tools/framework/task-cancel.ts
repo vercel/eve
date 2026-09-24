@@ -1,4 +1,4 @@
-import { MAX_TASK_ID_LENGTH } from "#shared/session-cancel.js";
+import { MAX_TASK_ID_LENGTH } from "#tasks/ids.js";
 import {
   TASK_CANCEL_DESCRIPTION,
   TASK_ID_PARAMETER_DESCRIPTION,

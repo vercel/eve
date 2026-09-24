@@ -53,21 +53,16 @@ export interface Session {
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
   /**
-   * Requests cancellation without waiting for it. With no options, cancels
-   * the active turn and the tasks it waits on. `taskId` cancels one
-   * background task and leaves the turn running; an unknown or finished task
-   * is ignored. `tasks: true` cancels the active turn and every working task.
-   * `turnId` limits turn cancellation to the turn the caller observed;
-   * background tasks are cancelled either way.
+   * Requests cancellation without waiting for it: cancels the active turn,
+   * its attached calls, and every working task, then ends the turn. Idle
+   * tasks stay available, and a session with no active turn still cancels
+   * its working tasks. `turnId` limits the cancel to the turn the caller
+   * observed: while another turn is active nothing is cancelled, and while no
+   * turn is active only the tasks that turn started are.
    *
-   * @throws {TypeError} When an option is malformed, or `taskId` is combined
-   * with `tasks: true` or `turnId`.
+   * @throws {TypeError} When `turnId` is malformed.
    */
-  cancel(options?: {
-    taskId?: string;
-    tasks?: boolean;
-    turnId?: string;
-  }): Promise<CancelTurnResult>;
+  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -181,14 +176,10 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
+    async cancel(options?: { turnId?: string }) {
       const invalid = describeInvalidCancelOptions(options ?? {});
       if (invalid !== undefined) throw new TypeError(`Session.cancel(): ${invalid}`);
-      const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
-        kind: "cancel",
-      };
-      if (options?.taskId !== undefined) command.taskId = options.taskId;
-      if (options?.tasks !== undefined) command.tasks = options.tasks;
+      const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
       if (options?.turnId !== undefined) command.turnId = options.turnId;
       return await runtime.dispatchSession({ command, sessionId: id });
     },

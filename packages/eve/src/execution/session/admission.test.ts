@@ -6,11 +6,15 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
-import { cancelTasks, surfaceTaskInput } from "#tasks/owner-body.js";
+import { surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskInputHookPayload } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 
-vi.mock("#tasks/owner-body.js", () => ({ cancelTasks: vi.fn(), surfaceTaskInput: vi.fn() }));
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
+}));
+vi.mock("#tasks/owner-body.js", () => ({ surfaceTaskInput: vi.fn() }));
 
 const CHILD = { continuationToken: "child-token", kind: "local" as const, sessionId: "child-1" };
 
@@ -103,65 +107,36 @@ it("admits the owner timer's signal for the deadline step", async () => {
   ).resolves.toEqual({ kind: "task-deadline", signal });
 });
 
-it("cancels one task on admission and leaves the turn running", async () => {
-  const cursor = createCursor([]);
-  vi.mocked(cancelTasks).mockResolvedValue([]);
-
-  await expect(
-    admitSessionInboxPayload(
-      { kind: "cancel", taskId: "remind-q4x1ze" },
-      { cursor, queue: new SessionInputQueue() },
-    ),
-  ).resolves.toEqual({ kind: "consumed" });
-
-  expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(cursor, {
-    kind: "task",
-    taskId: "remind-q4x1ze",
-  });
-});
-
-it("passes the results of task_wait calls the cancel ended to the turn", async () => {
-  const cursor = createCursor([]);
-  const waited = {
-    callId: "call-wait",
-    kind: "tool-result" as const,
-    output: {
-      name: "remind",
-      outcome: { status: "cancelled" },
-      status: "settled",
-      taskId: "remind-q4x1ze",
-    },
-    toolName: "task_wait",
-  };
-  vi.mocked(cancelTasks).mockResolvedValue([waited]);
-
-  await expect(
-    admitSessionInboxPayload(
-      { kind: "cancel", taskId: "remind-q4x1ze" },
-      { cursor, queue: new SessionInputQueue() },
-    ),
-  ).resolves.toEqual({ kind: "wait-results", results: [waited] });
-});
-
-it("cancels background tasks and leaves the turn's calls to turn cancellation for tasks: true", async () => {
-  const cursor = createCursor([]);
-  const command = { kind: "cancel" as const, tasks: true };
-
-  await expect(
-    admitSessionInboxPayload(command, { cursor, queue: new SessionInputQueue() }),
-  ).resolves.toEqual({ command, kind: "cancel" });
-
-  expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(cursor, { kind: "detached" });
-});
-
-it("leaves tasks alone for a plain turn cancel", async () => {
-  const command = { kind: "cancel" as const };
+it("admits a cancel and leaves its tasks to the turn, or the idle owner, that applies it", async () => {
+  const command = { kind: "cancel" as const, turnId: "turn_3" };
 
   await expect(
     admitSessionInboxPayload(command, { cursor: createCursor([]), queue: new SessionInputQueue() }),
   ).resolves.toEqual({ command, kind: "cancel" });
+});
 
-  expect(cancelTasks).not.toHaveBeenCalled();
+it("admits this owner's session expiry as a cancel and queues the session's end", async () => {
+  const queue = new SessionInputQueue();
+
+  await expect(
+    admitSessionInboxPayload(
+      { kind: "session-timeout", ownerRunId: "owner-1" },
+      { cursor: createCursor([]), queue },
+    ),
+  ).resolves.toEqual({ command: { kind: "cancel" }, kind: "cancel" });
+  expect(queue.takeNext()).toEqual({ control: "expired", kind: "control" });
+});
+
+it("ignores a previous owner's session expiry", async () => {
+  const queue = new SessionInputQueue();
+
+  await expect(
+    admitSessionInboxPayload(
+      { kind: "session-timeout", ownerRunId: "previous-owner" },
+      { cursor: createCursor([]), queue },
+    ),
+  ).resolves.toEqual({ kind: "consumed" });
+  expect(queue.pendingCount).toBe(0);
 });
 
 function createCursor(records: readonly TaskRecord[]): SessionStateCursor {

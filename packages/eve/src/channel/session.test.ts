@@ -78,30 +78,12 @@ describe("createSession#cancel", () => {
     });
   });
 
-  it.each([
-    [{ taskId: "remind-q4x1ze" }, { kind: "cancel", taskId: "remind-q4x1ze" }],
-    [{ tasks: true }, { kind: "cancel", tasks: true }],
-    [
-      { tasks: true, turnId: "turn_2" },
-      { kind: "cancel", tasks: true, turnId: "turn_2" },
-    ],
-  ])("forwards the task options %o", async (options, command) => {
+  it("rejects an empty turn guard before dispatching", async () => {
     const runtime = createRuntime();
 
-    await createSession("sess_1", runtime).cancel(options);
-
-    expect(runtime.dispatchSession).toHaveBeenCalledWith({ command, sessionId: "sess_1" });
-  });
-
-  it.each([
-    [{ taskId: "" }, "Expected 'taskId' to be a non-empty string"],
-    [{ taskId: "x".repeat(129) }, "at most 128 characters"],
-    [{ taskId: "remind-q4x1ze", tasks: true }, "cannot be combined with 'tasks' or 'turnId'"],
-    [{ taskId: "remind-q4x1ze", turnId: "turn_2" }, "cannot be combined with 'tasks' or 'turnId'"],
-  ])("rejects %o before dispatching", async (options, message) => {
-    const runtime = createRuntime();
-
-    await expect(createSession("sess_1", runtime).cancel(options)).rejects.toThrow(message);
+    await expect(createSession("sess_1", runtime).cancel({ turnId: "" })).rejects.toThrow(
+      "Expected 'turnId' to be a non-empty string",
+    );
     expect(runtime.dispatchSession).not.toHaveBeenCalled();
   });
 

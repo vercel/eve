@@ -1,6 +1,6 @@
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
-import { MAX_TASK_ID_LENGTH } from "#shared/session-cancel.js";
+import { MAX_TASK_ID_LENGTH } from "#tasks/ids.js";
 
 // The model's tool for stopping a detached task. The harness reads this
 // module, so it must stay free of Node.js built-ins.

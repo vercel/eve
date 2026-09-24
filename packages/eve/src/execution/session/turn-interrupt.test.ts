@@ -1,7 +1,7 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -48,6 +48,13 @@ const STEERING: DeliverHookPayload = {
   kind: "deliver",
   payloads: [{ message: "Also check Plain." }],
 };
+const ALICE: SessionAuthContext = {
+  attributes: {},
+  authenticator: "slack",
+  principalId: "U-alice",
+  principalType: "user",
+};
+const BOB: SessionAuthContext = { ...ALICE, principalId: "U-bob" };
 
 beforeEach(() => {
   vi.mocked(sleep).mockReset();
@@ -189,6 +196,67 @@ describe("the interrupt rule", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
+  it("keeps waiting for another principal's message and leaves it queued for its own turn", async () => {
+    const fromBob: DeliverHookPayload = { ...STEERING, auth: BOB };
+    const { execution, queue, steps } = setup({
+      auth: ALICE,
+      calls: ["call-deploy"],
+      script: [fromBob, outcome("call-deploy")],
+    });
+
+    await execution.runTurn(undefined);
+
+    expect(interruptAttachedCalls).not.toHaveBeenCalled();
+    expect(answerTaskInput).toHaveBeenCalledWith(expect.anything(), fromBob, { steers: false });
+    expect(steps()[1]).toEqual({
+      delivery: undefined,
+      runtimeResults: expect.objectContaining({ results: [result("call-deploy")] }),
+    });
+    expect(queue.takeNext()).toMatchObject({ delivery: fromBob, kind: "turn" });
+  });
+
+  it("lets the turn's own principal steer it", async () => {
+    const fromAlice: DeliverHookPayload = { ...STEERING, auth: ALICE };
+    const { execution, steps } = setup({
+      auth: ALICE,
+      calls: ["call-deploy"],
+      script: [fromAlice],
+    });
+
+    await execution.runTurn(undefined);
+
+    expect(interruptAttachedCalls).toHaveBeenCalledExactlyOnceWith(expect.anything(), [
+      "call-deploy",
+    ]);
+    expect(steps()[1]).toMatchObject({ delivery: fromAlice });
+  });
+
+  it("sends another principal's answer to its request during the wait", async () => {
+    const answer: DeliverHookPayload = {
+      auth: BOB,
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "refund-1" }] }],
+    };
+    vi.mocked(answerTaskInput).mockResolvedValueOnce({ kind: "continue", remainder: undefined });
+    const { execution, queue, steps } = setup({
+      auth: ALICE,
+      calls: ["call-refund"],
+      script: [answer, outcome("call-refund")],
+    });
+
+    await execution.runTurn(undefined);
+
+    expect(answerTaskInput).toHaveBeenCalledExactlyOnceWith(expect.anything(), answer, {
+      steers: false,
+    });
+    expect(interruptAttachedCalls).not.toHaveBeenCalled();
+    expect(steps()[1]).toEqual({
+      delivery: undefined,
+      runtimeResults: expect.objectContaining({ results: [result("call-refund")] }),
+    });
+    expect(queue.pendingCount).toBe(0);
+  });
+
   it("interrupts the wait once per steering message", async () => {
     vi.mocked(interruptAttachedCalls).mockResolvedValue([]);
     const { execution } = setup({
@@ -242,6 +310,8 @@ function dismissAsk(): void {
 }
 
 function setup(input: {
+  /** The session's principal, which the turn acts for. */
+  readonly auth?: SessionAuthContext;
   readonly calls: readonly string[];
   readonly mode?: "conversation" | "task";
   readonly script: ScriptItem[];
@@ -288,7 +358,7 @@ function setup(input: {
   });
   const cursor = new SessionStateCursor({
     inbox,
-    serializedContext: {},
+    serializedContext: input.auth === undefined ? {} : { "eve.auth": input.auth },
     sessionState,
     sessionWritable: new WritableStream<Uint8Array>(),
   });

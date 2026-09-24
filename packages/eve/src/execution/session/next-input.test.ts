@@ -7,7 +7,7 @@ import { SessionInputQueue } from "#execution/session/input-queue.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
-import { answerTaskInput } from "#tasks/owner-body.js";
+import { answerTaskInput, cancelTasks } from "#tasks/owner-body.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   getWorkflowMetadata: () => ({ workflowRunId: "owner-1" }),
@@ -15,10 +15,12 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
 vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
   ...(await importOriginal()),
   answerTaskInput: vi.fn(),
+  cancelTasks: vi.fn(async () => []),
 }));
 vi.mock("#tasks/deadlines.js", () => ({ applyTaskDeadlinesStep: vi.fn() }));
 beforeEach(() => {
   vi.mocked(answerTaskInput).mockReset();
+  vi.mocked(cancelTasks).mockClear();
 });
 
 interface ScriptedRead {
@@ -298,14 +300,33 @@ describe("nextTurnDelivery", () => {
 
     expect(next).toEqual({ kind: "cancel-parked" });
     expect(owed).toHaveBeenCalledTimes(1);
+    expect(cancelTasks).not.toHaveBeenCalled();
   });
 
-  it("drops a cancel while parked when nothing is owed, and never surfaces a reset", async () => {
-    const idle = createMockInbox([cancelRead(), authorizationRead()]);
+  it("cancels every working task on a cancel with no turn running, and keeps waiting", async () => {
+    const input = waitInput(createMockInbox([cancelRead(), authorizationRead()]));
+
     await expect(
-      nextTurnDelivery({ ...waitInput(idle), ownsParkedWork: () => false }),
+      nextTurnDelivery({ ...input, ownsParkedWork: () => false }),
     ).resolves.toMatchObject({ kind: "authorization-resume" });
 
+    expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(input.cursor, { kind: "all" });
+  });
+
+  it("cancels only the named turn's tasks once that turn has ended", async () => {
+    const input = waitInput(
+      createMockInbox([cancelRead({ turnId: "turn_4" }), authorizationRead()]),
+    );
+
+    await nextTurnDelivery(input);
+
+    expect(cancelTasks).toHaveBeenCalledExactlyOnceWith(input.cursor, {
+      kind: "turn",
+      turnId: "turn_4",
+    });
+  });
+
+  it("never surfaces a reset as a cancel", async () => {
     const queue = new SessionInputQueue();
     const reset = createMockInbox([{ result: { done: false, value: { kind: "reset" } } }]);
     await expect(

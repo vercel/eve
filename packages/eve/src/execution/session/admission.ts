@@ -14,8 +14,7 @@ import {
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
-import { cancelTasks, surfaceTaskInput } from "#tasks/owner-body.js";
+import { surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
 
@@ -24,13 +23,15 @@ export type SessionCancellation = Extract<SessionCommand, { readonly kind: "canc
 /** One canonical admission result, after wire decoding but before turn policy. */
 export type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
+  /**
+   * A cancel, or a reset or this owner's session expiry, each of which also
+   * stops the active turn; a reset or expiry queued its control as well.
+   */
   | { readonly command: SessionCancellation; readonly kind: "cancel" }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
   | { readonly kind: "task-report"; readonly payload: TaskStartedHookPayload }
   | { readonly kind: "task-deadline"; readonly signal: TaskDeadlineSignal }
-  /** Results of `task_wait` calls that a cancelled task ended. */
-  | { readonly kind: "wait-results"; readonly results: readonly RuntimeToolResultActionResult[] }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
 /**
@@ -93,22 +94,13 @@ export async function admitSessionInboxPayload(
       return { kind: "consumed" };
     case "session-timeout":
       // A previous owner's timer may fire after handoff; only this owner's deadline counts.
-      if (command.ownerRunId === getWorkflowMetadata().workflowRunId) {
-        input.queue.enqueueControl("expired");
-      }
-      return { kind: "consumed" };
+      if (command.ownerRunId !== getWorkflowMetadata().workflowRunId) return { kind: "consumed" };
+      input.queue.enqueueControl("expired");
+      return { command: { kind: "cancel" }, kind: "cancel" };
     case "reset":
       input.queue.enqueueControl("reset");
       return { command: { kind: "cancel" }, kind: "cancel" };
     case "cancel":
-      // Task cancellation applies on admission, whether a turn is running,
-      // parked, or the session is idle, and never waits for a child to stop.
-      if (command.taskId !== undefined) {
-        const results = await cancelTasks(input.cursor, { kind: "task", taskId: command.taskId });
-        return results.length === 0 ? { kind: "consumed" } : { kind: "wait-results", results };
-      }
-      // The turn's own calls are cancelled with the turn, when the turn guard matches.
-      if (command.tasks === true) await cancelTasks(input.cursor, { kind: "detached" });
       return { command, kind: "cancel" };
   }
 }

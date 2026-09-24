@@ -1,8 +1,9 @@
-import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { jsonValuesEqual } from "#shared/json.js";
+import { sameTaskPrincipal } from "#tasks/results.js";
 
 /** How many admitted operations a session remembers; a resend older than that is admitted again. */
 export const MAX_ADMITTED_OPERATIONS = 256;
@@ -83,6 +84,14 @@ export type SessionInputSelection =
   | TurnSelection
   | { readonly control: SessionControl; readonly kind: "control" }
   | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] };
+
+/** Whose deliveries may steer a turn. */
+export interface SteerableTurn {
+  /** The delegated call the session is answering, whose owner's messages steer it. */
+  readonly callerCallId: string | undefined;
+  /** The principal the turn acts for. */
+  readonly principal: SessionAuthContext | null;
+}
 
 /**
  * Ordered, admitted session input. Entries are private; callers receive typed
@@ -202,27 +211,29 @@ export class SessionInputQueue {
   }
 
   /**
-   * Whether a steering message waits in the queue. A delegated session that
-   * finds one as its turn ends runs it for the same caller before replying.
+   * Whether a steering message for `turn` waits in the queue. A delegated
+   * session that finds one as its turn ends runs it for the same caller
+   * before replying.
    */
-  hasSteeringMessage(callerCallId: string | undefined): boolean {
+  hasSteeringMessage(turn: SteerableTurn): boolean {
     return this.entries.some(
       (entry) =>
         entry.kind === "delivery" &&
-        isSteeringDelivery(entry.delivery, callerCallId) &&
+        isSteeringDelivery(entry.delivery, turn) &&
         entry.delivery.payloads.some((payload) => payload.message !== undefined),
     );
   }
 
-  takeSteering(
-    admitted: ReadonlySet<number>,
-    callerCallId: string | undefined,
-  ): TurnSelection | undefined {
+  /**
+   * Takes the admitted deliveries that steer `turn`, in order. Every other
+   * delivery stays queued, in order, until the turn ends.
+   */
+  takeSteering(admitted: ReadonlySet<number>, turn: SteerableTurn): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, callerCallId),
+        isSteeringDelivery(entry.delivery, turn),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -282,6 +293,9 @@ export class SessionInputQueue {
     let caller = first.delivery.caller;
     while (this.entries.length > index) {
       const next = this.entries[index];
+      // A turn runs with its principal's auth (G4), so only one principal's
+      // deliveries may share it, and only an authenticated one: anonymous
+      // callers cannot be told apart.
       if (
         next?.kind !== "delivery" ||
         !authenticated ||
@@ -314,13 +328,18 @@ export class SessionInputQueue {
   }
 }
 
-export function isSteeringDelivery(
-  delivery: DeliverHookPayload,
-  callerCallId: string | undefined,
-): boolean {
+/**
+ * Whether a delivery steers `turn` rather than waiting for it to end. Only
+ * the turn's own principal can steer it: a turn runs with its principal's
+ * auth, and would otherwise act for the wrong person (G4). Anonymous callers
+ * share one principal. A delivery without `auth` keeps the session's
+ * principal, as an owner's message to its delegated call does.
+ */
+export function isSteeringDelivery(delivery: DeliverHookPayload, turn: SteerableTurn): boolean {
   return (
     (delivery.turnPolicy ?? "steer") === "steer" &&
-    (delivery.caller === undefined || delivery.caller.callId === callerCallId)
+    (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
+    (delivery.auth === undefined || sameTaskPrincipal(delivery.auth, turn.principal))
   );
 }
 
