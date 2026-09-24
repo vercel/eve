@@ -1,4 +1,5 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
@@ -69,7 +70,9 @@ export async function routeProxiedDeliverStep(input: {
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
   // Only a person's own message may answer or skip a pending question.
   const resolveMessage =
-    sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
+    !hasDelegatedSessionContext(input.serializedContext ?? {}) &&
+    sourceDelivery.caller === undefined &&
+    sourceDelivery.taskDeliveryId === undefined;
   // Every payload routes against the same state, so an answer-hook request
   // resolved by an earlier payload is hidden from later ones; its hook accepts
   // one answer, and later messages must reach the parent instead.
