@@ -181,3 +181,32 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
     });
   });
 });
+
+describe.each([
+  ["generation", createGenerationPackageBoundaryPlugin],
+  ["runtime loader", createRuntimeLoaderPackageBoundaryPlugin],
+])("%s package boundary", (_name, createPlugin) => {
+  it("loads server-only as an empty module without the react-server condition", async () => {
+    const plugin = createPlugin({ externalDependencies: [], packageRoot: PACKAGE_ROOT });
+    const resolveId = plugin.resolveId as (
+      this: RolldownResolveContext,
+      source: string,
+      importer: string | undefined,
+      options: { kind: string },
+    ) => Promise<unknown>;
+    const load = plugin.load as (id: string) => unknown;
+    const context: RolldownResolveContext = {
+      async resolve() {
+        throw new Error("server-only should resolve before delegating");
+      },
+    };
+
+    const id = await resolveId.call(
+      context,
+      "server-only",
+      join(PACKAGE_ROOT, "agent/tools/probe.ts"),
+      { kind: "import-statement" },
+    );
+    expect(load(id as string)).toEqual({ code: "", moduleType: "js" });
+  });
+});

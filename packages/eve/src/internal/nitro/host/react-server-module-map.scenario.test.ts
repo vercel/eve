@@ -11,18 +11,24 @@ const execFileAsync = promisify(execFile);
 describe("react-server module maps", () => {
   const scenarioApp = useScenarioApp();
 
-  it.each(["argument", "NODE_OPTIONS"])(
-    "builds and loads server-only channels with conditions from %s",
+  it.each(["none", "argument", "NODE_OPTIONS"])(
+    "builds and loads server-only channels (conditions: %s)",
     async (conditionSource) => {
       const app = await scenarioApp({
         name: "react-server-module-map",
         installDependencies: true,
-        dependencies: { "server-only": "0.0.1" },
+        dependencies: { "@acme/shared": "link:./shared", "server-only": "0.0.1" },
         files: {
+          "shared/package.json": JSON.stringify({
+            name: "@acme/shared",
+            type: "module",
+            exports: "./index.ts",
+          }),
+          "shared/index.ts": 'import "server-only"; export const message = "server-only-ready";',
           "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
           "agent/instructions.md": "Reply concisely.",
           "agent/channels/probe.ts":
-            'import "server-only"; import { defineChannel, GET } from "eve/channels"; export default defineChannel({ routes: [GET("/probe", () => new Response("server-only-ready"))] });',
+            'import "server-only"; import { message } from "@acme/shared"; import { defineChannel, GET } from "eve/channels"; export default defineChannel({ routes: [GET("/probe", () => new Response(message))] });',
           "check.mjs": [
             'import { createServer } from "node:net";',
             'import { spawn } from "node:child_process";',
