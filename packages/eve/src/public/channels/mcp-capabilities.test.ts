@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { z } from "#compiled/zod/index.js";
@@ -11,7 +13,12 @@ import type { ResolvedSkillDefinition, ResolvedToolDefinition } from "#runtime/t
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { ToolContext } from "#tools/definition.js";
 import { toInputSchema } from "#tools/schema.js";
-import { mcpCapabilitiesChannel } from "#public/channels/mcp.js";
+import {
+  encodeForwardedPrincipalHeader,
+  FORWARDED_PRINCIPAL_HEADER,
+  mcpCapabilitiesChannel,
+  type TrustedForwarders,
+} from "#public/channels/mcp.js";
 import type { AuthFn } from "#public/channels/auth.js";
 
 const principal: SessionAuthContext = {
@@ -67,6 +74,7 @@ describe("mcpCapabilitiesChannel", () => {
       "deploy",
       "summarize",
       "needs_sign_in",
+      "whoami",
     ]);
     expect(tools[2]).toMatchObject({
       _meta: { "eve.dev/approval": true, "eve.dev/owner": "d0" },
@@ -96,6 +104,18 @@ describe("mcpCapabilitiesChannel", () => {
     expect(
       (other.result as { structuredContent: { sessionId: string } }).structuredContent.sessionId,
     ).not.toBe(sessionId);
+  });
+
+  it("runs as the route-auth caller when no forwarded principal is sent", async () => {
+    const harness = createHarness({ trustedForwarders: () => true });
+    const direct = await harness.callTool("whoami", {}, "v2:parent-1");
+    expect(direct.status).toBe(200);
+    expect(direct.result).toMatchObject({
+      structuredContent: { current: principal, initiator: principal },
+    });
+    const { current } = (direct.result as { structuredContent: { current: SessionAuthContext } })
+      .structuredContent;
+    expect(current.attributes).not.toHaveProperty("eve:forwarded-by");
   });
 
   it("deletes ephemeral sandboxes when no session key is sent", async () => {
@@ -239,11 +259,152 @@ describe("mcpCapabilitiesChannel", () => {
   });
 });
 
+describe("mcpCapabilitiesChannel forwarded principal", () => {
+  const alice: SessionAuthContext = {
+    attributes: { "eve:forwarded-by": "mallory", team_id: "T1" },
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "U_ALICE",
+    principalType: "user",
+  };
+  const bob: SessionAuthContext = {
+    attributes: {},
+    authenticator: "slack-webhook",
+    issuer: "slack",
+    principalId: "U_BOB",
+    principalType: "user",
+  };
+  const carol: SessionAuthContext = { ...bob, principalId: "U_CAROL" };
+  const trustUser1: TrustedForwarders = (forwarder) => forwarder.principalId === "user-1";
+  const forwarding = (current: SessionAuthContext, initiator?: SessionAuthContext) => ({
+    headers: {
+      [FORWARDED_PRINCIPAL_HEADER]: encodeForwardedPrincipalHeader(
+        initiator === undefined ? { current } : { current, initiator },
+      ),
+    },
+  });
+
+  it("runs a trusted forwarder's call as the stamped forwarded principals", async () => {
+    const harness = createHarness({ trustedForwarders: trustUser1 });
+    const forwarded = await harness.callTool("whoami", {}, "v2:p", forwarding(alice, carol));
+    expect(forwarded.status).toBe(200);
+    expect(forwarded.result).toMatchObject({
+      structuredContent: {
+        // The sender-supplied eve:forwarded-by is overwritten with the verified forwarder.
+        current: { ...alice, attributes: { "eve:forwarded-by": "user-1", team_id: "T1" } },
+        initiator: { ...carol, attributes: { "eve:forwarded-by": "user-1" } },
+      },
+    });
+
+    const currentOnly = await harness.callTool("whoami", {}, "v2:p", forwarding(bob));
+    expect(currentOnly.result).toMatchObject({
+      structuredContent: {
+        current: { principalId: "U_BOB", attributes: { "eve:forwarded-by": "user-1" } },
+        initiator: { principalId: "U_BOB", attributes: { "eve:forwarded-by": "user-1" } },
+      },
+    });
+  });
+
+  it("rejects forwarding by an untrusted caller or on a channel without trustedForwarders", async () => {
+    const refused = createHarness({ trustedForwarders: () => false });
+    const untrusted = await refused.callTool("whoami", {}, "v2:p", forwarding(alice));
+    expect(untrusted).toMatchObject({
+      error: "Caller is not authorized to assert a forwarded principal.",
+      status: 403,
+    });
+    expect(untrusted.result).toBeUndefined();
+
+    const unconfigured = createHarness();
+    const rejected = await unconfigured.callTool("whoami", {}, "v2:p", forwarding(alice));
+    expect(rejected).toMatchObject({
+      error: "This deployment does not accept a forwarded principal.",
+      status: 403,
+    });
+  });
+
+  it("rejects a malformed forwarded principal header with 400", async () => {
+    const harness = createHarness({ trustedForwarders: trustUser1 });
+    const cases: Array<[string, string]> = [
+      ["not base64url!", "must be base64url-encoded JSON"],
+      [Buffer.from("{not json").toString("base64url"), "must decode to UTF-8 JSON"],
+      [
+        encodeForwardedPrincipalHeader({ current: { ...alice, principalId: "" } }),
+        "forwardedPrincipal.current.principalId",
+      ],
+      [
+        Buffer.from(JSON.stringify({ current: alice, token: "secret" })).toString("base64url"),
+        "Invalid forwardedPrincipal metadata",
+      ],
+    ];
+    for (const [header, message] of cases) {
+      const response = await harness.callTool("whoami", {}, "v2:p", {
+        headers: { [FORWARDED_PRINCIPAL_HEADER]: header },
+      });
+      expect(response.status, header).toBe(400);
+      expect(response.error, header).toEqual(
+        expect.stringContaining(`Invalid ${FORWARDED_PRINCIPAL_HEADER} header: `),
+      );
+      expect(response.error, header).toEqual(expect.stringContaining(message));
+    }
+  });
+
+  it("separates sessions and sandboxes per forwarded user behind one forwarder", async () => {
+    const harness = createHarness({ trustedForwarders: trustUser1 });
+    const aliceFirst = await harness.callTool(
+      "sandbox_note",
+      { text: "alice" },
+      "v2:shared",
+      forwarding(alice),
+    );
+    const bobFirst = await harness.callTool(
+      "sandbox_note",
+      { text: "bob" },
+      "v2:shared",
+      forwarding(bob),
+    );
+    const aliceAgain = await harness.callTool(
+      "sandbox_note",
+      { text: "alice-2" },
+      "v2:shared",
+      forwarding(alice),
+    );
+    const direct = await harness.callTool("sandbox_note", { text: "direct" }, "v2:shared");
+    const read = (response: { result?: unknown }) =>
+      (response.result as { structuredContent: { previous: string | null; sessionId: string } })
+        .structuredContent;
+
+    expect(read(bobFirst).previous).toBeNull();
+    expect(read(aliceAgain).previous).toBe("alice");
+    expect(read(direct).previous).toBeNull();
+    expect(
+      new Set([read(aliceFirst).sessionId, read(bobFirst).sessionId, read(direct).sessionId]).size,
+    ).toBe(3);
+
+    const key = (auth: SessionAuthContext) =>
+      JSON.stringify([
+        auth.authenticator,
+        auth.issuer ?? null,
+        auth.principalType,
+        auth.principalId,
+      ]);
+    expect(read(aliceFirst).sessionId).toBe(
+      createHash("sha256")
+        .update(`${key(principal)}\n${key(alice)}\n${harness.sessionKey("v2:shared")}`)
+        .digest("hex"),
+    );
+    expect(read(direct).sessionId).toBe(
+      createHash("sha256")
+        .update(`${key(principal)}\n${harness.sessionKey("v2:shared")}`)
+        .digest("hex"),
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Harness
 // ---------------------------------------------------------------------------
 
-function createHarness() {
+function createHarness(options: { readonly trustedForwarders?: TrustedForwarders } = {}) {
   const files = new Map<string, Map<string, string>>();
   let opens = 0;
   let deletes = 0;
@@ -346,6 +507,15 @@ function createHarness() {
       inputSchema: z.object({}),
       name: "needs_sign_in",
     }),
+    tool({
+      execute: async (_input: unknown, ctx: ToolContext) => ({
+        current: ctx.session.auth.current,
+        initiator: ctx.session.auth.initiator,
+        sessionId: ctx.session.id,
+      }),
+      inputSchema: z.object({}),
+      name: "whoami",
+    }),
   ];
 
   const skills: ResolvedSkillDefinition[] = [
@@ -374,7 +544,10 @@ function createHarness() {
     tools,
   };
 
-  const channel = mcpCapabilitiesChannel({ auth: allowPrincipal });
+  const channel = mcpCapabilitiesChannel({
+    auth: allowPrincipal,
+    trustedForwarders: options.trustedForwarders,
+  });
   const postRoute = channel.routes[0]!;
   if (postRoute.transport === "websocket") throw new Error("expected HTTP route");
   const handlePost = postRoute.handler;
@@ -403,8 +576,12 @@ function createHarness() {
   async function call(
     method: string,
     params: Record<string, unknown>,
-    options: { readonly name?: string; readonly session?: string } = {},
-  ): Promise<{ error?: unknown; result?: unknown }> {
+    options: {
+      readonly headers?: Readonly<Record<string, string>>;
+      readonly name?: string;
+      readonly session?: string;
+    } = {},
+  ): Promise<{ error?: unknown; result?: unknown; status: number }> {
     const headers: Record<string, string> = {
       accept: "application/json, text/event-stream",
       "content-type": "application/json",
@@ -415,8 +592,9 @@ function createHarness() {
     if (options.name !== undefined) headers["mcp-name"] = options.name;
     // The sandbox cache is process-wide; keep each harness's sessions distinct.
     if (options.session !== undefined) {
-      headers["eve-capability-session"] = `${sessionPrefix}:${options.session}`;
+      headers["eve-capability-session"] = sessionKey(options.session);
     }
+    Object.assign(headers, options.headers);
     const response = await handlePost(
       new Request("https://agent.example/eve/v1/mcp-capabilities", {
         body: JSON.stringify({
@@ -439,7 +617,12 @@ function createHarness() {
       }),
       routeArgs(),
     );
-    return (await response.json()) as { error?: unknown; result?: unknown };
+    if (!(response instanceof Response)) throw new Error("expected an HTTP response");
+    const body = (await response.json()) as { error?: unknown; result?: unknown };
+    return { ...body, status: response.status };
+  }
+  function sessionKey(session: string): string {
+    return `${sessionPrefix}:${session}`;
   }
 
   return {
@@ -448,9 +631,18 @@ function createHarness() {
       name: string,
       args: Record<string, unknown>,
       session?: string,
-      retry: { inputResponses?: Record<string, unknown>; requestState?: string } = {},
+      retry: {
+        headers?: Record<string, string>;
+        inputResponses?: Record<string, unknown>;
+        requestState?: string;
+      } = {},
     ) {
-      return await call("tools/call", { arguments: args, name, ...retry }, { name, session });
+      const { headers, ...params } = retry;
+      return await call(
+        "tools/call",
+        { arguments: args, name, ...params },
+        { headers, name, session },
+      );
     },
     channel,
     deployed,
@@ -461,6 +653,7 @@ function createHarness() {
     routeArgs,
     sandboxDeletes: () => deletes,
     sandboxOpens: () => opens,
+    sessionKey,
     waitUntil,
   };
 }

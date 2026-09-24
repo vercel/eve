@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { ResourceNotFoundError, Server } from "#compiled/@modelcontextprotocol/server/index.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import {
   authorizeCapabilityApprovalResponse,
@@ -17,6 +17,7 @@ import {
   takeCapabilityAuthorizationResults,
   warmCapabilitySandbox,
   withCapabilitySession,
+  type CapabilityPrincipals,
   type CapabilityRuntime,
   type CapabilitySessionScope,
   type CapabilityToolOutcome,
@@ -25,6 +26,7 @@ import { projectAuthorizationCallback } from "#execution/connections/callback-ro
 import type { AuthorizationSignal } from "#harness/authorization.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { resolveCapabilityPrincipals } from "#internal/mcp/forwarded-principal-header.js";
 import { validateMcpHttpRequest } from "#internal/mcp/http-security.js";
 import {
   addResourceChallenge,
@@ -59,11 +61,29 @@ const SESSION_HEADER = "eve-capability-session";
 const SESSION_META_KEY = "eve.dev/session";
 const APPROVAL_INPUT_KEY = "approval";
 
+export {
+  encodeForwardedPrincipalHeader,
+  FORWARDED_PRINCIPAL_HEADER,
+  type ForwardedPrincipal,
+  type TrustedForwarders,
+} from "#internal/mcp/forwarded-principal-header.js";
+
 export interface McpCapabilitiesChannelInput {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /** Override the default route path (`/eve/v1/mcp-capabilities`). */
   readonly route?: string;
+  /**
+   * Decides which route-authenticated callers may run tools on behalf of
+   * another principal via the `eve-forwarded-principal` header. Receives the
+   * verified route-auth principal (the forwarder), never the forwarded
+   * identity. When accepted, the forwarded contexts become
+   * `ctx.session.auth.current` and `ctx.session.auth.initiator`, stamped with
+   * the forwarder in the `eve:forwarded-by` attribute, the same way
+   * `eveChannel` treats `forwardedPrincipal`. Omit to reject the header with
+   * 403.
+   */
+  readonly trustedForwarders?: TrustedForwarders;
 }
 
 /** Public MCP channel exposing this agent's own tools and skills. */
@@ -95,7 +115,7 @@ export function mcpCapabilitiesChannel(input: McpCapabilitiesChannelInput): McpC
     POST(
       path,
       async (request, args) =>
-        await authenticateCapabilitiesRequest(request, args, input.auth, oauth, path),
+        await authenticateCapabilitiesRequest(request, args, input, oauth, path),
     ),
     GET(callbackPath, handleAuthorizationCallback),
     POST(callbackPath, handleAuthorizationCallback),
@@ -107,16 +127,18 @@ export function mcpCapabilitiesChannel(input: McpCapabilitiesChannelInput): McpC
 async function authenticateCapabilitiesRequest(
   request: Request,
   args: RouteHandlerArgs,
-  policy: AuthFn<Request> | readonly AuthFn<Request>[],
+  input: McpCapabilitiesChannelInput,
   oauth: OAuthResourceOptions | undefined,
   path: string,
 ): Promise<Response> {
   const securityFailure = validateMcpHttpRequest(request);
   if (securityFailure !== undefined) return securityFailure;
-  const auth = await routeAuth(request, policy);
+  const auth = await routeAuth(request, input.auth);
   if (auth instanceof Response) {
     return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
   }
+  const principals = await resolveCapabilityPrincipals(request, auth, input.trustedForwarders);
+  if (principals instanceof Response) return principals;
   const resolveRuntime = readRouteCapabilityRuntime(args);
   if (resolveRuntime === undefined) {
     return Response.json(
@@ -126,8 +148,8 @@ async function authenticateCapabilitiesRequest(
   }
   return await handleCapabilitiesRequest({
     args,
-    auth,
     callbackBase: new URL(path, new URL(request.url).origin).toString(),
+    principals,
     request,
     runtime: await resolveRuntime(),
   });
@@ -135,8 +157,8 @@ async function authenticateCapabilitiesRequest(
 
 interface CapabilitiesRequest {
   readonly args: RouteHandlerArgs;
-  readonly auth: SessionAuthContext;
   readonly callbackBase: string;
+  readonly principals: CapabilityPrincipals;
   readonly request: Request;
   readonly runtime: CapabilityRuntime;
 }
@@ -146,7 +168,7 @@ async function handleCapabilitiesRequest(input: CapabilitiesRequest): Promise<Re
   let scope: CapabilitySessionScope | undefined;
   const response = await serveMcpHttpRequest(input.request, (body) => {
     method = readRecord(body)?.method;
-    scope = resolveCapabilitySessionScope(input.auth, readSessionKey(input.request, body));
+    scope = resolveCapabilitySessionScope(input.principals, readSessionKey(input.request, body));
     return createCapabilitiesServer(input, scope);
   });
   if (method !== "server/discover" || scope === undefined || !response.ok) return response;
@@ -166,7 +188,7 @@ async function annotateDiscover(
   const status = readCapabilitySandboxStatus(input.runtime, scope);
   if (status === "warming") {
     input.args.waitUntil(
-      warmCapabilitySandbox({ auth: input.auth, runtime: input.runtime, scope }),
+      warmCapabilitySandbox({ principals: input.principals, runtime: input.runtime, scope }),
     );
   }
   const body = readRecord(await response.json());
@@ -301,7 +323,7 @@ async function readSkillFile(
   if (fromDisk !== undefined) return fromDisk;
   if (!input.runtime.hasSandbox) return undefined;
   return await withCapabilitySession(
-    { auth: input.auth, defer: input.args.waitUntil, runtime: input.runtime, scope },
+    { defer: input.args.waitUntil, principals: input.principals, runtime: input.runtime, scope },
     async () => await buildCallbackContext().getSkill(skillName).file(path).bytes(),
   ).catch((error: unknown) => {
     logError(log, "skill file read failed", error, { path, skillName });
@@ -343,7 +365,6 @@ async function callTool(input: ToolCallInput) {
   try {
     return await withCapabilitySession(
       {
-        auth: request.auth,
         authorizationResults:
           state?.k === "authorization"
             ? takeCapabilityAuthorizationResults(scope.id, state.a ?? [])
@@ -351,6 +372,7 @@ async function callTool(input: ToolCallInput) {
         callbackUrl: (name, attemptId) =>
           `${request.callbackBase}/authorize/${encodeURIComponent(name)}/${encodeURIComponent(attemptId)}`,
         defer: request.args.waitUntil,
+        principals: request.principals,
         runtime: request.runtime,
         scope,
       },
@@ -362,7 +384,7 @@ async function callTool(input: ToolCallInput) {
           }
           const response = await authorizeCapabilityApprovalResponse({
             args,
-            auth: request.auth,
+            principals: request.principals,
             callId,
             tool,
           });

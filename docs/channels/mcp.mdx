@@ -246,6 +246,26 @@ Requests without a key get a one-off session, and eve deletes its sandbox after 
 
 On an instance that has not seen the session yet, eve runs your `defineSandbox()` function again against the existing sandbox, so keep sandbox setup idempotent.
 
+### Forwarded principals
+
+A calling agent can run tools on behalf of its user, the same way remote agents forward principals to `eveChannel`. Set `trustedForwarders` to decide which route-authenticated callers may do this:
+
+```ts title="agent/channels/mcp-capabilities.ts"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { mcpCapabilitiesChannel } from "eve/channels/mcp";
+
+const orchestrator = vercelSubject({ teamSlug: "acme", projectName: "orchestrator" });
+
+export default mcpCapabilitiesChannel({
+  auth: vercelOidc({ subjects: [orchestrator] }),
+  trustedForwarders: (forwarder) => forwarder.subject === orchestrator,
+});
+```
+
+The caller sends `eve-forwarded-principal: <value>`, where the value is base64url-encoded JSON `{ current, initiator? }` of session auth contexts. `encodeForwardedPrincipalHeader()` from `eve/channels/mcp` builds it. When the forwarder is trusted, the tool sees the forwarded contexts as `ctx.session.auth.current` and `ctx.session.auth.initiator` (initiator defaults to current), each stamped with the forwarder's `principalId` in the `eve:forwarded-by` attribute. An untrusted forwarder, or a channel without `trustedForwarders`, gets `403`; a malformed header gets `400`. Without the header, tools run as the route-authenticated caller.
+
+A forwarded call's session ID includes both identities, `sha256(forwarder + "\n" + forwarded current + "\n" + key)`, so users behind the same forwarder never share a session or sandbox.
+
 ### Approvals and sign-in
 
 A tool that needs approval, or a `ctx.getToken()` call that needs the user to sign in, returns an MCP input-required result instead of running. Approval is a form elicitation with a boolean `approved` field. Sign-in is a URL elicitation. Retry `tools/call` with the same arguments, the `inputResponses`, and the returned `requestState`. eve rejects a `requestState` from a different session, tool, or argument set. Clients must declare `elicitation` (`form` and `url`) in their client capabilities to receive these requests.

@@ -154,22 +154,51 @@ export interface CapabilitySessionScope {
 
 export const MAX_CAPABILITY_SESSION_KEY_LENGTH = 512;
 
-/** Scopes a caller-supplied session key to the authenticated principal. */
+/**
+ * Who a capability call runs as. `current` and `initiator` become
+ * `ctx.session.auth`; `forwarder` is the route-auth principal when it asserted
+ * a forwarded principal on the caller's behalf.
+ */
+export interface CapabilityPrincipals {
+  readonly current: SessionAuthContext | null;
+  readonly forwarder?: SessionAuthContext;
+  readonly initiator: SessionAuthContext | null;
+}
+
+/** Principals for a caller acting as itself. */
+export function directCapabilityPrincipals(auth: SessionAuthContext | null): CapabilityPrincipals {
+  return { current: auth, initiator: auth };
+}
+
+/**
+ * Scopes a caller-supplied session key to the authenticated principal. A
+ * forwarded call includes both the forwarder and the forwarded user, so two
+ * users behind the same forwarder never share a session or sandbox.
+ */
 export function resolveCapabilitySessionScope(
-  auth: SessionAuthContext | null,
+  principals: CapabilityPrincipals,
   sessionKey: string | undefined,
 ): CapabilitySessionScope {
-  const principal = JSON.stringify(
-    auth === null
-      ? ["anonymous"]
-      : [auth.authenticator, auth.issuer ?? null, auth.principalType, auth.principalId],
-  );
+  const identities =
+    principals.forwarder === undefined
+      ? [capabilityPrincipalKey(principals.current)]
+      : [capabilityPrincipalKey(principals.forwarder), capabilityPrincipalKey(principals.current)];
   const ephemeral = sessionKey === undefined;
   const key = sessionKey ?? `ephemeral:${randomUUID()}`;
   return {
     ephemeral,
-    id: createHash("sha256").update(`${principal}\n${key}`).digest("hex"),
+    id: createHash("sha256")
+      .update([...identities, key].join("\n"))
+      .digest("hex"),
   };
+}
+
+function capabilityPrincipalKey(auth: SessionAuthContext | null): string {
+  return JSON.stringify(
+    auth === null
+      ? ["anonymous"]
+      : [auth.authenticator, auth.issuer ?? null, auth.principalType, auth.principalId],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -258,7 +287,7 @@ export function readCapabilitySandboxStatus(
  * (or failed); callers hand the promise to `waitUntil`.
  */
 export async function warmCapabilitySandbox(input: {
-  readonly auth: SessionAuthContext | null;
+  readonly principals: CapabilityPrincipals;
   readonly runtime: CapabilityRuntime;
   readonly scope: CapabilitySessionScope;
 }): Promise<void> {
@@ -266,7 +295,12 @@ export async function warmCapabilitySandbox(input: {
   const entry = await acquireSandbox(input.runtime, input.scope);
   if (entry === undefined || entry.ready) return;
   entry.warming ??= runInCapabilityContext(
-    { auth: input.auth, runtime: input.runtime, sandbox: entry.access, sessionId: input.scope.id },
+    {
+      principals: input.principals,
+      runtime: input.runtime,
+      sandbox: entry.access,
+      sessionId: input.scope.id,
+    },
     async () => {
       await entry.access.get();
     },
@@ -290,7 +324,7 @@ export async function warmCapabilitySandbox(input: {
 export type CapabilityAuthorizationResult = AuthorizationResult & { readonly name: string };
 
 interface CapabilityContextInput {
-  readonly auth: SessionAuthContext | null;
+  readonly principals: CapabilityPrincipals;
   readonly authorizationResults?: readonly CapabilityAuthorizationResult[];
   readonly callbackUrl?: (name: string, attemptId: string) => string;
   readonly runtime: CapabilityRuntime;
@@ -305,11 +339,11 @@ async function runInCapabilityContext<T>(
 ): Promise<T> {
   const ctx = new ContextContainer();
   if (input.runtime.bundle !== undefined) ctx.set(BundleKey, input.runtime.bundle);
-  ctx.set(AuthKey, input.auth);
-  ctx.set(InitiatorAuthKey, input.auth);
+  ctx.set(AuthKey, input.principals.current);
+  ctx.set(InitiatorAuthKey, input.principals.initiator);
   ctx.set(SessionIdKey, input.sessionId);
   const session: Session = {
-    auth: { current: input.auth, initiator: input.auth },
+    auth: { current: input.principals.current, initiator: input.principals.initiator },
     sessionId: input.sessionId,
     turn: { id: `capability_${createUlid()}`, sequence: 0 },
   };
@@ -406,23 +440,25 @@ export async function evaluateCapabilityApproval(input: {
 }
 
 /**
- * Applies the tool's response policy to an approval answered by the same
- * authenticated caller. Must run in a capability session.
+ * Applies the tool's response policy to an approval answered by the call's
+ * current principal (the forwarded user when forwarded). Must run in a
+ * capability session.
  */
 export async function authorizeCapabilityApprovalResponse(input: {
   readonly args: Readonly<Record<string, unknown>>;
-  readonly auth: SessionAuthContext | null;
+  readonly principals: CapabilityPrincipals;
   readonly callId: string;
   readonly tool: ResolvedToolDefinition;
 }): Promise<CapabilityApprovalDecision> {
   const response = readApprovalResponsePolicy(input.tool.approval);
   if (response === undefined) return { kind: "allowed" };
-  if (input.auth === null) {
+  const responder = input.principals.current;
+  if (responder === null) {
     return { kind: "denied", reason: "Approving this tool requires an authenticated caller." };
   }
   const session = buildCallbackContext().session;
   const decision = await response({
-    auth: buildApprovalResponseAuth({ responder: input.auth, scope: input.tool.name }),
+    auth: buildApprovalResponseAuth({ responder, scope: input.tool.name }),
     request: {
       callId: input.callId,
       requestId: input.callId,
@@ -430,8 +466,8 @@ export async function authorizeCapabilityApprovalResponse(input: {
       toolName: input.tool.name,
     },
     response: { decision: "approve" },
-    responder: input.auth,
-    session: { id: session.id, initiator: input.auth, turn: session.turn },
+    responder,
+    session: { id: session.id, initiator: input.principals.initiator, turn: session.turn },
   });
   return decision.status === "allowed"
     ? { kind: "allowed" }

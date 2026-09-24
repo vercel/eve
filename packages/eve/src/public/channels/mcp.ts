@@ -33,9 +33,13 @@ import {
   readRouteSessionCreator,
 } from "#internal/nitro/routes/channel-route-context.js";
 export {
+  encodeForwardedPrincipalHeader,
+  FORWARDED_PRINCIPAL_HEADER,
   mcpCapabilitiesChannel,
+  type ForwardedPrincipal,
   type McpCapabilitiesChannel,
   type McpCapabilitiesChannelInput,
+  type TrustedForwarders,
 } from "#public/channels/mcp-capabilities.js";
 
 export interface McpChannelInput {
