@@ -21,6 +21,15 @@ export async function recordSubagentHook(
   ctx: HookContext,
 ): Promise<void> {
   if (event.type !== "task.started" && event.type !== "task.settled") return;
+  // Workflow tool calls are tasks too; this audit follows agent delegation only.
+  if (event.type === "task.started" && event.data.kind !== "agent") return;
+  if (
+    event.type === "task.settled" &&
+    !subagentHookAudit
+      .get()
+      .some((record) => record.type === "task.started" && record.callId === event.data.callId)
+  )
+    return;
   const sandbox = await ctx.getSandbox();
   await sandbox.writeTextFile({
     path: `subagent-hook-${event.meta.id}-${subscriber}.txt`,

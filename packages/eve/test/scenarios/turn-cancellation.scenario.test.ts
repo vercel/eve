@@ -179,10 +179,15 @@ describe("turn cancellation descendant cascade", () => {
             iterator: parentIterator,
             label: "local and remote subagent dispatch",
           });
-          const localChild = started.find((event) => event.data.child?.remote === undefined)?.data;
-          const remoteChild = started.find((event) => event.data.child?.remote !== undefined)?.data;
+          const agents = started.filter((event) => event.data.kind === "agent");
+          const localChild = agents.find((event) => event.data.child?.remote === undefined)?.data;
+          const remoteChild = agents.find((event) => event.data.child?.remote !== undefined)?.data;
           if (localChild?.child === undefined || remoteChild?.child === undefined) {
             throw new Error("Expected one local and one remote task.started event.");
+          }
+          const workflowCall = started.find((event) => event.data.kind === "workflow")?.data;
+          if (workflowCall === undefined) {
+            throw new Error("Expected a task.started event for the workflow tool call.");
           }
           expect(remoteChild.child.remote?.url).toBe(remoteServer.url);
 
@@ -241,14 +246,21 @@ describe("turn cancellation descendant cascade", () => {
           expectCancellationBoundary(localEvents);
           expectCancellationBoundary(remoteEvents);
           expectCancellationBoundary(parentEvents);
-          // The owner reports each cancelled task once; the children's confirmations add nothing.
+          // The owner reports each cancelled task, including the workflow tool call, once; the
+          // children's confirmations add nothing.
           expect(
             parentEvents
               .flatMap((event) =>
                 event.type === "task.settled" ? [`${event.data.taskId}:${event.data.status}`] : [],
               )
               .sort(),
-          ).toEqual([`${localChild.taskId}:cancelled`, `${remoteChild.taskId}:cancelled`].sort());
+          ).toEqual(
+            [
+              `${localChild.taskId}:cancelled`,
+              `${remoteChild.taskId}:cancelled`,
+              `${workflowCall.taskId}:cancelled`,
+            ].sort(),
+          );
 
           const followUp = await (
             await parentSession.send("Reply with the exact string `still-alive` and nothing else.")
@@ -297,7 +309,9 @@ describe("turn cancellation descendant cascade", () => {
           iterator: response[Symbol.asyncIterator](),
           label: "root session-limit prompt",
         });
-        const calls = events.filter((event) => event.type === "task.started");
+        const calls = events.filter(
+          (event) => event.type === "task.started" && event.data.kind === "agent",
+        );
         const requests = events.flatMap((event) =>
           event.type === "input.requested" ? event.data.requests : [],
         );
@@ -337,7 +351,8 @@ async function readTaskStarts(input: {
   return await withinEventDeadline(
     (async () => {
       const events: TaskStartedEvent[] = [];
-      while (events.length < input.count) {
+      // The `workflow` tool call is a task too; only its agent calls are counted.
+      while (events.filter((event) => event.data.kind === "agent").length < input.count) {
         const next = await input.iterator.next();
         if (next.done) throw new Error(`Stream ended before ${input.label}.`);
         if (next.value.type === "task.started") events.push(next.value);

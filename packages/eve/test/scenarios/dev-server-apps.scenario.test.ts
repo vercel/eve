@@ -291,6 +291,23 @@ describe("eve dev server app layouts", () => {
           ].join("\n\n"),
         ).toBe(true);
         expect(outputs.some((output) => output.includes('"tool":"deploy_service"'))).toBe(true);
+        // The workflow tool call is a task: announced once its run starts, settled once.
+        const started = messageResult.events.filter(
+          (event) =>
+            event.type === "task.started" &&
+            event.data.kind === "workflow" &&
+            event.data.name === "deploy_service",
+        );
+        expect(started).toHaveLength(1);
+        expect(
+          messageResult.events.filter(
+            (event) =>
+              event.type === "task.settled" &&
+              started[0]?.type === "task.started" &&
+              event.data.taskId === started[0].data.taskId &&
+              event.data.status === "completed",
+          ),
+        ).toHaveLength(1);
         expect(messageResult.events.some((event) => event.type === "message.completed")).toBe(true);
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {

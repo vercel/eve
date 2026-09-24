@@ -32,7 +32,7 @@ import {
 } from "#harness/coordination.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
-import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
+import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { SessionParent } from "#channel/types.js";
 import {
   createDurableSessionState,
@@ -54,12 +54,6 @@ export interface CoordinationDispatchInput {
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
-/** Owner-side results and the updated session. */
-export interface CoordinationDispatchResult {
-  readonly results: readonly RuntimeActionResult[];
   readonly sessionState: DurableSessionState;
 }
 

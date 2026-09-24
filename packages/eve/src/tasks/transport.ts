@@ -1,5 +1,6 @@
 import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   createWorkflowRuntime,
@@ -27,9 +28,14 @@ import type { TaskEffect } from "#tasks/table.js";
 
 const log = createLogger("tasks.transport");
 
+const WORKFLOW_TASK_CANCEL_REASON = "The tool call was cancelled.";
+
 export type CommandEffect = Extract<TaskEffect, { kind: "send" }>;
 
-/** Sends owner commands to started children. Only `cancel` is issued before P2. */
+/**
+ * Sends owner commands to started children without waiting for them to act.
+ * Only `cancel` is issued before P2.
+ */
 export async function runCommands(
   effects: readonly CommandEffect[],
   ctx: ContextContainer | undefined,
@@ -68,7 +74,12 @@ async function runCommand(
     }
     if (child.kind === "local") {
       await requestWorkflowTurnCancellation({ sessionId: child.sessionId });
+      return;
     }
+    await cancelWorkflowToolRun(
+      { hookToken: child.commandToken, runId: child.runId },
+      WORKFLOW_TASK_CANCEL_REASON,
+    );
   } catch (error) {
     // The owner already recorded the cancellation; a lost request leaves the
     // child to finish on its own, and its report only confirms the stop.

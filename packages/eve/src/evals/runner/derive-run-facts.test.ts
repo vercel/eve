@@ -420,6 +420,39 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
+  it("records a workflow tool call as a tool call, not a subagent call", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      actionsRequested([{ callId: "c1", toolName: "deploy" }]),
+      {
+        type: "task.started",
+        data: {
+          callId: "c1",
+          kind: "workflow",
+          mode: "foreground",
+          name: "deploy",
+          taskId: "deploy-c1",
+          turnId: "t1",
+        },
+      },
+      {
+        type: "task.settled",
+        data: {
+          callId: "c1",
+          output: { deployed: true },
+          status: "completed",
+          taskId: "deploy-c1",
+        },
+      },
+      actionResult({ callId: "c1", output: { deployed: true }, toolName: "deploy" }),
+    ]);
+
+    expect(facts.subagentCalls).toEqual([]);
+    expect(facts.toolCalls).toEqual([
+      expect.objectContaining({ name: "deploy", output: { deployed: true }, status: "completed" }),
+    ]);
+  });
+
   it("records no delegation for a task that never started or runs a workflow", () => {
     const facts = derive([
       turnStarted("t1", 0),

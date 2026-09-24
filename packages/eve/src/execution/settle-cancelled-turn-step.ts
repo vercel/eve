@@ -1,4 +1,3 @@
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
@@ -28,7 +27,6 @@ import {
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
-import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import {
@@ -134,17 +132,12 @@ export async function settleCancelledTurnStep(input: {
   // discarded turn state). The pre-model gate re-raises the prompt while the
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
-  const owningTurnId =
-    getPendingCoordinationBatch(session.state)?.event.turnId ??
-    input.sessionState.emissionState.turnId;
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
-          clearPendingCoordinationBatch(
-            removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
-          ),
+          clearPendingCoordinationBatch({ ...session, outputSchema: undefined }),
         ),
       ),
       emissionState,

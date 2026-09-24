@@ -9,10 +9,6 @@ import {
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import {
-  getBlockingWorkflowToolRuns,
-  registerWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
 
 import { toolOutput } from "#tools/model-output.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
@@ -308,7 +304,7 @@ describe("coordination batch identity", () => {
 });
 
 describe("resolvePendingCoordination", () => {
-  it("forgets a finished workflow tool run and withdraws only its unanswered requests", async () => {
+  it("resolves a workflow tool call and leaves proxy routes to the task owner", async () => {
     const parked = setPendingCoordinationBatch({
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
@@ -322,13 +318,6 @@ describe("resolvePendingCoordination", () => {
           workflowId: "workflow//./agent/tools/deploy//execute",
         },
       ],
-    });
-    const withRun = registerWorkflowToolRun(parked, {
-      callId: "call-1",
-      toolName: "deploy",
-      lifetime: "turn" as const,
-      origin: { turnId: "turn_0", stepIndex: 0 },
-      address: { runId: "run-1", hookToken: "eve:workflow-tool-run:op-1" },
     });
     const answerToken = "eve:workflow-tool-run-answer:run-1:0";
     const session = upsertProxyInputRequests({
@@ -348,7 +337,7 @@ describe("resolvePendingCoordination", () => {
           ],
         ],
         forChildContinuationToken: answerToken,
-        session: withRun,
+        session: parked,
       }),
     });
 
@@ -362,8 +351,12 @@ describe("resolvePendingCoordination", () => {
     });
 
     expect(resolved.outcome).toBe("resolved");
-    expect(getBlockingWorkflowToolRuns(resolved.session.state)).toEqual([]);
-    expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
+    expect(getPendingCoordinationBatch(resolved.session.state)).toBeUndefined();
+    // Settling the workflow task withdraws its run's requests; resolution does not.
+    expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual([
+      answerToken,
+      "other-request",
+    ]);
   });
 
   it("projects a workflow tool's result through its toModelOutput", async () => {

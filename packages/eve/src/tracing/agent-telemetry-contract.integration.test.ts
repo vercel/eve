@@ -51,6 +51,7 @@ import { summarizeLocalTrace } from "#tracing/local-trace-summary.js";
 import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 
 const traceContext = (agentName: string, audience: "public" | "private") => ({
   agentName,
@@ -358,20 +359,15 @@ describe("exported agent telemetry contract", () => {
           serializedContext: serializeContext(parent),
           sessionId: "parent",
           turnId: "turn_0",
-          sessionState: {
-            "eve.workflowTool": {
-              version: 3,
-              runs: [
-                {
-                  callId: "workflow",
-                  toolName: "coordinate",
-                  lifetime: "turn" as const,
-                  origin: { turnId: "turn-1", stepIndex: 0 },
-                  address: { runId: "workflow-run", hookToken: "hook" },
-                },
-              ],
-            },
-          },
+          sessionState: taskTableState([
+            createTaskRecord({
+              callId: "workflow",
+              child: { commandToken: "hook", kind: "workflow", runId: "workflow-run" },
+              kind: "workflow",
+              name: "coordinate",
+              turnId: "turn-1",
+            }),
+          ]),
         });
       });
       parent = await deserializeContext(dispatch!.serializedContext);

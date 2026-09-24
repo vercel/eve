@@ -7,16 +7,10 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyAgentRequest } from "#execution/tools/subagent/agent-requests.js";
-import { cancelTasks } from "#tasks/owner-body.js";
+import { cancelTasks, settleWorkflowTask } from "#tasks/owner-body.js";
+import { isWorkingWorkflowTask } from "#tasks/state.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import {
-  workflowToolRunOutcomeToToolResult,
-  workflowToolRunRequestToInputRequestPayload,
-} from "#execution/tools/workflow/owner-inbox.js";
-import {
-  findBlockingWorkflowToolRun,
-  isInboxToolResultFromRecordedWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { workflowToolRunRequestToInputRequestPayload } from "#execution/tools/workflow/owner-inbox.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -47,32 +41,19 @@ export async function handleWorkflowToolRunMessage(
 }
 
 /**
- * Settles a workflow tool run outcome against the turn's recorded runs and
- * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns.
+ * Settles the workflow task a run's outcome reports and returns the tool
+ * result the waiting turn accepts, or `undefined` when the outcome settles
+ * no working task.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
-  const recorded = findBlockingWorkflowToolRun(
-    cursor.sessionState.snapshot.session.state,
-    message.from.callId,
-    message.from.turnId,
-  );
   // A workflow run that ends cancels the agent tasks it still owns, even
-  // when the turn no longer records it.
+  // when the owner no longer waits on the run.
   await cancelTasks(cursor, { kind: "workflow-run", runId: message.from.runId });
-  if (recorded?.address.runId !== message.from.runId) return undefined;
-
-  const result = workflowToolRunOutcomeToToolResult(message);
-
-  return isInboxToolResultFromRecordedWorkflowToolRun(
-    cursor.sessionState.snapshot.session.state,
-    result,
-  )
-    ? result
-    : undefined;
+  const [result] = await settleWorkflowTask(cursor, message);
+  return result;
 }
 
 async function handleWorkflowToolRunRequest(
@@ -80,12 +61,7 @@ async function handleWorkflowToolRunRequest(
 ): Promise<void> {
   const { cursor, message } = input;
   if (message.request.kind === "agent-invoke") {
-    const recorded = findBlockingWorkflowToolRun(
-      cursor.sessionState.snapshot.session.state,
-      message.from.callId,
-      message.from.turnId,
-    );
-    if (recorded?.address.runId !== message.from.runId) {
+    if (!isWorkingWorkflowTask(cursor.sessionState.snapshot.session, message.from)) {
       await resumeHookStep(message.replyTo, {
         kind: "runtime-action-result",
         results: [

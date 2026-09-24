@@ -9,11 +9,6 @@ import type {
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
-import {
-  findBlockingWorkflowToolRun,
-  removeBlockingWorkflowToolRuns,
-} from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type {
@@ -210,32 +205,7 @@ export async function resolvePendingCoordination(input: {
     };
   }
 
-  let nextSession: HarnessSession = input.session;
-  // Drop a finished run's unanswered requests so a late click cannot reach it.
-  for (const result of readyResults) {
-    if (result.kind !== "tool-result") continue;
-    const record = findBlockingWorkflowToolRun(
-      nextSession.state,
-      result.callId,
-      batch.event.turnId,
-    );
-    if (record === undefined) continue;
-    nextSession = removeBlockingWorkflowToolRuns(
-      clearProxyInputRequestsWhere(
-        nextSession,
-        (route) => route.answerHook?.runId === record.address.runId,
-      ),
-      batch.event.turnId,
-      record.callId,
-    );
-  }
-
-  const state = { ...nextSession.state };
-  delete state[PENDING_COORDINATION_BATCH_KEY];
-  nextSession = {
-    ...nextSession,
-    state: Object.keys(state).length > 0 ? state : undefined,
-  };
+  const nextSession = clearPendingCoordinationBatch(input.session);
 
   if (input.emit !== undefined) {
     for (const result of readyResults) {

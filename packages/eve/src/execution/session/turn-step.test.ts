@@ -49,6 +49,7 @@ import { defineState } from "#public/definitions/state.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { getTaskTable } from "#tasks/state.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep as runTurnStep } from "#execution/session/turn-step.js";
@@ -186,6 +187,13 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   getRun: (...args: unknown[]) => getRunMock(...args),
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
+}));
+
+vi.mock("#execution/tools/workflow/start.js", () => ({
+  startWorkflowToolRun: async (input: unknown) => {
+    const run = (await startMock(input)) as { readonly runId: string };
+    return { hookToken: "control-hook", runId: run.runId };
+  },
 }));
 
 const ThreadKey = new ContextKey<string>("test.workflow.thread");
@@ -541,7 +549,7 @@ function currentSessionHook(token: string) {
 }
 
 describe("dispatchCoordinationStep", () => {
-  it("repairs an empty pending turn id from the active session turn", async () => {
+  function mockWorkflowToolBundle(): void {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -557,8 +565,10 @@ describe("dispatchCoordinationStep", () => {
       toolRegistry: {},
       turnAgent: TestTurnAgent,
     } as never);
-    startMock.mockResolvedValue({ runId: "workflow-run" });
-    const session = setPendingCoordinationBatch({
+  }
+
+  function workflowToolBatch(turnId: string) {
+    return setPendingCoordinationBatch({
       tasks: [
         {
           callId: "call-1",
@@ -568,26 +578,116 @@ describe("dispatchCoordinationStep", () => {
           workflowId: "workflow//test//research",
         },
       ],
-      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      event: { sequence: 3, stepIndex: 2, turnId },
       responseMessages: [],
       session: createStubSession(),
     });
-    installSessionStoreMocks([session]);
-    const sessionState = createStubSessionState({
-      emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
-    });
+  }
 
-    const result = await dispatchCoordinationStep({
+  async function dispatchWorkflowTools(sessionState = createStubSessionState()) {
+    return await dispatchCoordinationStep({
       action: "park",
       workflowToolRunOwner: { inbox: "generated-owner-token" },
       sessionWritable: createTestWritable(),
       serializedContext: createSerializedContext(),
       sessionState,
     });
+  }
+
+  it("repairs an empty pending turn id from the active session turn", async () => {
+    mockWorkflowToolBundle();
+    startMock.mockResolvedValue({ runId: "workflow-run" });
+    installSessionStoreMocks([workflowToolBatch("")]);
+    const sessionState = createStubSessionState({
+      emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+    });
+
+    const result = await dispatchWorkflowTools(sessionState);
 
     const persisted = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(result.sessionState).not.toBe(sessionState);
     expect(getPendingCoordinationBatch(persisted?.state)?.event.turnId).toBe("turn_3");
+    expect(getTaskTable({ state: persisted?.state }).records).toEqual([
+      expect.objectContaining({ callId: "call-1", kind: "workflow", turnId: "turn_3" }),
+    ]);
+  });
+
+  it("starts each workflow tool call as a task and announces it", async () => {
+    mockWorkflowToolBundle();
+    startMock.mockResolvedValue({ runId: "workflow-run" });
+    installSessionStoreMocks([workflowToolBatch("turn_0")]);
+
+    const result = await dispatchWorkflowTools();
+
+    const persisted = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
+    const [record] = getTaskTable({ state: persisted?.state }).records;
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(record).toMatchObject({
+      callId: "call-1",
+      child: { commandToken: expect.any(String), kind: "workflow", runId: "workflow-run" },
+      kind: "workflow",
+      mode: "foreground",
+      name: "research",
+      status: "working",
+      turnId: "turn_0",
+    });
+    expect(result.results).toEqual([]);
+    expect(result.events).toEqual([
+      {
+        data: {
+          callId: "call-1",
+          kind: "workflow",
+          mode: "foreground",
+          name: "research",
+          taskId: record!.id,
+          turnId: "turn_0",
+        },
+        type: "task.started",
+      },
+    ]);
+  });
+
+  it("starts no second run when the same batch is dispatched again", async () => {
+    mockWorkflowToolBundle();
+    startMock.mockResolvedValue({ runId: "workflow-run" });
+    installSessionStoreMocks([workflowToolBatch("turn_0")]);
+    await dispatchWorkflowTools();
+    const persisted = vi.mocked(createDurableSessionState).mock.calls.at(-1)![0].session;
+    installSessionStoreMocks([persisted as never]);
+
+    const replayed = await dispatchWorkflowTools();
+
+    expect(startMock).toHaveBeenCalledOnce();
+    expect(replayed.events).toEqual([]);
+    expect(replayed.results).toEqual([]);
+  });
+
+  it("returns a start failure as the call's error and settles its task START_FAILED", async () => {
+    mockWorkflowToolBundle();
+    startMock.mockRejectedValue(new Error("Workflow queue unavailable"));
+    installSessionStoreMocks([workflowToolBatch("turn_0")]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await dispatchWorkflowTools();
+
+    expect(result.results).toEqual([
+      {
+        callId: "call-1",
+        isError: true,
+        kind: "tool-result",
+        output: "Workflow queue unavailable",
+        toolName: "research",
+      },
+    ]);
+    expect(result.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: { code: "START_FAILED", message: "Workflow queue unavailable" },
+          status: "failed",
+        }),
+        type: "task.settled",
+      }),
+    ]);
   });
 
   it("rejects direct agent actions outside a workflow-tool execute", async () => {

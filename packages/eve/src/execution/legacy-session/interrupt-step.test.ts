@@ -3,7 +3,7 @@ import { EntityConflictError } from "#compiled/@workflow/errors/index.js";
 import { interruptLegacySessionStep } from "./interrupt-step.js";
 import { importConversation } from "./snapshot.js";
 import type { PreparedLegacySession } from "./prepare-step.js";
-import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { isWorkflowTaskResult } from "#tasks/state.js";
 const mocks = vi.hoisted(() => ({ cancel: vi.fn(), children: vi.fn(), settle: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: mocks.cancel,
@@ -59,11 +59,9 @@ describe("legacy pending work", () => {
       "eve.runtime.workflowToolRuns",
     );
     expect(
-      isInboxToolResultFromRecordedWorkflowToolRun(result.sessionState.snapshot.session.state, {
-        kind: "tool-result",
+      isWorkflowTaskResult(result.sessionState.snapshot.session, {
         callId: "call",
         toolName: "tool",
-        output: "late",
       }),
     ).toBe(false);
     expect(mocks.settle).not.toHaveBeenCalled();

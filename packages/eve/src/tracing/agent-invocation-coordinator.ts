@@ -3,7 +3,7 @@ import { ConversationIdKey } from "#context/keys.js";
 import { readConversationId } from "#tracing/conversation-context.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { SessionStateMap } from "#harness/types.js";
-import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { getTaskTable } from "#tasks/state.js";
 import { type ChannelAudience } from "#shared/channel-audience.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import {
@@ -47,8 +47,8 @@ export function prepareAgentInvocationTrace(input: {
   readonly serializedContext: Record<string, unknown>;
 } {
   const conversationId = readConversationId(input.serializedContext[ConversationIdKey.name]);
-  const parentActionCallId = getBlockingWorkflowToolRuns(input.sessionState).find(
-    (run) => run.address.runId === input.ownerId,
+  const parentActionCallId = getTaskTable({ state: input.sessionState }).records.find(
+    (record) => record.child?.kind === "workflow" && record.child.runId === input.ownerId,
   )?.callId;
   const turnId = input.turnId;
   const parentTurnContext = readTurnTraceContext(input.serializedContext, input.sessionId, turnId);

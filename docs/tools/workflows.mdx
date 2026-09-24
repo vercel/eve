@@ -483,8 +483,9 @@ as cancelled whether or not it did. A body parked on a hook or a `sleep` does no
 it is abandoned when the grace period ends. Steps that received the signal are how you clean up
 first.
 
-The caller waits up to 35 seconds for a cooperatively cancelled run to settle before forcing it
-to stop. This includes time for the run to publish its outcome after body cleanup.
+The caller does not wait for that cleanup. Cancelling the turn records the call as cancelled at
+once and signals the run, which unwinds on its own. A run that cannot receive the signal yet, for
+example because it has only just started, is stopped immediately.
 
 ## Workflow tool examples
 
@@ -579,6 +580,14 @@ the tool result.
 
 One call, one result. A workflow tool's call resolves once, with the return value, the error, or a
 cancellation.
+
+Every workflow tool call is a task. When its run starts, the session stream emits `task.started`
+with `kind: "workflow"`, the tool `name`, and no `child`. The call's first outcome emits one
+`task.settled`, and a run that fails to start settles with `error.code` `START_FAILED`. Progress
+stays on `action.partial` and the result on `action.result`. Agent calls emit the same events with
+`kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
+[Sessions, runs and streaming](/docs/concepts/sessions-runs-and-streaming#stream-a-session) for the
+event fields.
 
 While a workflow tool runs, the turn waits for it. A message with `turnPolicy: "queue"` waits until
 the turn settles. A message with `turnPolicy: "steer"` (the default) is applied after the tool call

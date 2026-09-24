@@ -3,6 +3,8 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import type { TaskRecord } from "#tasks/record.js";
 import { pruneTaskTable, readTaskTable, writeTaskTable, type TaskTable } from "#tasks/table.js";
 
 // Read by the session workflow body, so it must not import Node.js built-ins.
@@ -51,4 +53,60 @@ export function hasWorkingTasks(session: { readonly state?: SessionStateMap }): 
   return getTaskTable(session).records.some(
     (record) => record.status === "working" || record.status === "input_required",
   );
+}
+
+/** The identity a workflow tool run reports with. */
+export interface WorkflowRunReference {
+  readonly callId: string;
+  readonly runId: string;
+  readonly toolName: string;
+  readonly turnId: string;
+}
+
+/**
+ * The workflow task a run reports for: the task its call started in its turn,
+ * whose child is that run. A task the owner cancelled still matches until
+ * the run confirms it stopped.
+ */
+export function findWorkflowTask(
+  table: TaskTable,
+  from: WorkflowRunReference,
+): TaskRecord | undefined {
+  return table.records.find(
+    (record) =>
+      record.kind === "workflow" &&
+      record.callId === from.callId &&
+      record.turnId === from.turnId &&
+      record.name === from.toolName &&
+      record.child?.kind === "workflow" &&
+      record.child.runId === from.runId &&
+      (!isTerminalTaskStatus(record.status) || record.cancelConfirmBy !== undefined),
+  );
+}
+
+/** Whether the owner still waits on the workflow task this run reports for. */
+export function isWorkingWorkflowTask(
+  session: { readonly state?: SessionStateMap },
+  from: WorkflowRunReference,
+): boolean {
+  const record = findWorkflowTask(getTaskTable(session), from);
+  return record !== undefined && !isTerminalTaskStatus(record.status);
+}
+
+/**
+ * Whether a tool result read from the shared inbox answers a workflow tool
+ * call the owner still waits on: exactly one working workflow task has that
+ * call, and its name matches.
+ */
+export function isWorkflowTaskResult(
+  session: { readonly state?: SessionStateMap },
+  result: { readonly callId: string; readonly toolName: string },
+): boolean {
+  const matches = getTaskTable(session).records.filter(
+    (record) =>
+      record.kind === "workflow" &&
+      record.callId === result.callId &&
+      !isTerminalTaskStatus(record.status),
+  );
+  return matches.length === 1 && matches[0]!.name === result.toolName;
 }

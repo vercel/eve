@@ -272,7 +272,11 @@ async function runScriptedParentSession(input: {
     await parentSession.send("Continue the same child and report its recalled codeword.")
   ).result();
   const parentEvents = [...firstTurnEvents, ...secondTurn.events];
-  const calls = filterEventsByType(parentEvents, "task.started");
+  // Each `run-program` call is a workflow task; only the agent calls it makes are counted.
+  const calls = filterEventsByType(parentEvents, "task.started").filter(
+    (call) => call.data.kind === "agent",
+  );
+  const agentTaskIds = new Set(calls.map((call) => call.data.taskId));
 
   if (calls.length !== 2) {
     throw new Error(`Expected two agent tasks. Parent events: ${JSON.stringify(parentEvents)}`);
@@ -291,7 +295,9 @@ async function runScriptedParentSession(input: {
     ]);
   }
   expect(
-    filterEventsByType(parentEvents, "task.settled").map(({ data }) => [data.callId, data.status]),
+    filterEventsByType(parentEvents, "task.settled")
+      .filter(({ data }) => agentTaskIds.has(data.taskId))
+      .map(({ data }) => [data.callId, data.status]),
   ).toEqual(calls.map(({ data }) => [data.callId, "completed"]));
   expect(secondTurn.status).toBe("waiting");
   expect(secondTurn.message).toBe(PARENT_RESULT);

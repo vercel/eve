@@ -5,11 +5,11 @@ import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { cancelTasksStep } from "#tasks/owner.js";
 
@@ -21,9 +21,6 @@ vi.mock("#execution/coordination-dispatch-step.js", () => ({ dispatchCoordinatio
 
 vi.mock("#execution/session/turn-step.js", () => ({
   turnStep: vi.fn(),
-}));
-vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
-  cancelDescendantTurnsStep: vi.fn(),
 }));
 vi.mock("#execution/route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
@@ -287,7 +284,7 @@ describe("SessionExecution turn checkpoints", () => {
         return () => {};
       },
     };
-    vi.mocked(cancelDescendantTurnsStep).mockClear();
+    vi.mocked(cancelTasksStep).mockClear();
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(async (input) => {
@@ -321,7 +318,7 @@ describe("SessionExecution turn checkpoints", () => {
     await expect(
       execution.runTurn({ delivery: { kind: "deliver", payloads: [{ message: "2026?" }] } }),
     ).resolves.toMatchObject({ kind: "done", output: "Corrected" });
-    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+    expect(cancelTasksStep).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -390,10 +387,7 @@ describe("SessionExecution turn checkpoints", () => {
         serializedContext: {},
         sessionState,
       });
-    vi.mocked(dispatchCoordinationStep).mockResolvedValue({
-      results: [],
-      sessionState,
-    });
+    vi.mocked(dispatchCoordinationStep).mockResolvedValue(ownerUpdate(sessionState));
 
     await expect(
       execution.runTurn({
@@ -407,7 +401,6 @@ describe("SessionExecution turn checkpoints", () => {
       serializedContext: {},
       sessionState,
     });
-    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ sessionState });
   });
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {
@@ -546,10 +539,7 @@ describe("SessionExecution turn checkpoints", () => {
       });
     vi.mocked(dispatchCoordinationStep)
       .mockReset()
-      .mockResolvedValue({
-        results: [actionResult],
-        sessionState,
-      });
+      .mockResolvedValue(ownerUpdate(sessionState, [actionResult]));
 
     await expect(
       execution.runTurn({
@@ -633,7 +623,7 @@ describe("SessionExecution turn checkpoints", () => {
     };
     const completedState = state("http:completed");
     const execution = createExecution({ inbox, queue, sessionState: state("") });
-    vi.mocked(cancelDescendantTurnsStep).mockClear();
+    vi.mocked(cancelTasksStep).mockClear();
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(async (input) => {
@@ -653,7 +643,7 @@ describe("SessionExecution turn checkpoints", () => {
       settled,
     });
     expect(execution.cursor.sessionState).toBe(completedState);
-    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+    expect(cancelTasksStep).not.toHaveBeenCalled();
     expect(queue.pendingCount).toBe(1);
   });
 
@@ -685,10 +675,7 @@ describe("SessionExecution turn checkpoints", () => {
       serializedContext: {},
       sessionState,
     });
-    vi.mocked(dispatchCoordinationStep).mockResolvedValue({
-      results: [],
-      sessionState,
-    });
+    vi.mocked(dispatchCoordinationStep).mockResolvedValue(ownerUpdate(sessionState));
     vi.mocked(routeDeliverToChildren).mockResolvedValue({
       kind: "continue",
       remainder: undefined,
@@ -739,4 +726,11 @@ function state(continuationToken: string): DurableSessionState {
     sessionId: "session-1",
     version: 1,
   });
+}
+
+function ownerUpdate(
+  sessionState: DurableSessionState,
+  results: readonly RuntimeToolResultActionResult[] = [],
+) {
+  return { events: [], replies: [], results, serializedContext: {}, sessionState };
 }

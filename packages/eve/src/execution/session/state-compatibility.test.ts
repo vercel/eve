@@ -40,19 +40,27 @@ describe("handoff state inspection", () => {
       ),
     ).toBe(true);
   });
-  it("refuses a waiting turn-owned workflow tool run", () => {
+  it.each([
+    ["a waiting run", turnRun],
+    ["a background run", backgroundRun],
+  ])("ignores %s in the workflow tool run registry earlier releases wrote", (_label, run) => {
+    expect(
+      isSessionStateIdleForHandoff(checkpoint({ "eve.workflowTool": { version: 3, runs: [run] } })),
+    ).toBe(true);
+  });
+  it("refuses a working workflow tool call", () => {
     expect(
       isSessionStateIdleForHandoff(
-        checkpoint({ "eve.workflowTool": { version: 3, runs: [turnRun] } }),
+        checkpoint(
+          taskTableState([
+            createTaskRecord({
+              child: { commandToken: "control", kind: "workflow", runId: "run" },
+              kind: "workflow",
+            }),
+          ]),
+        ),
       ),
     ).toBe(false);
-  });
-  it("ignores runs recorded by releases with background workflow tools", () => {
-    expect(
-      isSessionStateIdleForHandoff(
-        checkpoint({ "eve.workflowTool": { version: 3, runs: [backgroundRun] } }),
-      ),
-    ).toBe(true);
   });
   it.each(["completed", "failed", "cancelled"] as const)(
     "allows an idle agent whose last task %s to cross a handoff",

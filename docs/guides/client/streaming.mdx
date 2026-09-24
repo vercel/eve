@@ -243,14 +243,16 @@ stream index after the captured prefix.
 
 ## Follow a subagent
 
-A delegated subagent reports its progress on its own child session. The parent stream announces each started child with a `task.started` event. Pass that event to `streamSubagent()` on the parent's session handle to follow the child:
+A delegated subagent reports its progress on its own child session. The parent stream announces each started child with a `task.started` event whose `kind` is `agent`. Workflow tool calls also emit `task.started`, with `kind: "workflow"` and no child session, so select agent tasks by `kind` and `name`. Pass the event to `streamSubagent()` on the parent's session handle to follow the child:
 
 ```ts
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
 const session = client.sessions.attach(parentSessionId);
 const { events } = await session.snapshot();
-const started = events.find((event) => event.type === "task.started");
+const started = events.find(
+  (event) => event.type === "task.started" && event.data.kind === "agent",
+);
 
 if (started?.type === "task.started") {
   for await (const event of session.streamSubagent(started)) {

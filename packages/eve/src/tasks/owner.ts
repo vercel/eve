@@ -263,7 +263,8 @@ export async function startAgentTasks(input: {
     const tracing = prepareAgentInvocationTrace({
       conversation: prepared.inheritedConversation,
       invocation: action,
-      ownerId: session.sessionId,
+      // A `ctx.agent` call nests under the workflow tool call whose run made it.
+      ownerId: call.workflowCaller?.runId ?? session.sessionId,
       serializedContext,
       sessionId: session.sessionId,
       sessionState: session.state,
@@ -616,7 +617,7 @@ function readAgentId(action: RuntimeAgentDispatchRequest): string | undefined {
 }
 
 /** Reads the task table and logs records that could not be decoded. */
-function readTasks(session: Pick<HarnessSession, "state">): TaskTable {
+export function readTasks(session: Pick<HarnessSession, "state">): TaskTable {
   const { lost, table } = readTaskTable(session.state);
   for (const task of lost) {
     log.warn("dropped an unreadable task record", {

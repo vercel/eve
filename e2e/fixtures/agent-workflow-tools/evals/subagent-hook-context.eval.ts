@@ -33,7 +33,13 @@ export default (["direct", "waiting"] as const).map((mode) =>
         "both hook subscriptions receive the parent's exact child result once",
         (events) => {
           if (!Array.isArray(observations) || observations.length !== 4) return false;
-          const completion = events.find((event) => event.type === "task.settled");
+          const started = events.find(
+            (event) => event.type === "task.started" && event.data.kind === "agent",
+          );
+          if (started?.type !== "task.started") return false;
+          const completion = events.find(
+            (event) => event.type === "task.settled" && event.data.taskId === started.data.taskId,
+          );
           if (completion?.type !== "task.settled") return false;
           const output = completion.data.output;
           if (typeof output !== "string" || !output.startsWith("WORKFLOW-CHILD:")) return false;
@@ -77,7 +83,15 @@ export default (["direct", "waiting"] as const).map((mode) =>
           ),
       );
       t.event("task.started", { data: { name: "workflow-marker" }, count: 1 });
-      t.event("task.settled", { data: { status: "completed" }, count: 1 });
+      // In waiting mode, the blocking_agent workflow tool call is a task too.
+      t.event("task.started", {
+        data: { kind: "workflow", name: "blocking_agent" },
+        count: mode === "waiting" ? 1 : 0,
+      });
+      t.event("task.settled", {
+        data: { status: "completed" },
+        count: mode === "waiting" ? 2 : 1,
+      });
       t.notEvent("session.failed");
       t.noFailedActions();
       t.succeeded();

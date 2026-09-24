@@ -1,4 +1,3 @@
-import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
@@ -38,7 +37,7 @@ export function isSessionStateIdleForHandoff(sessionState: DurableSessionState):
     return false;
   // An unreadable task record may be a working task this deployment cannot see.
   if (readTaskTable(state).lost.length > 0) return false;
-  return !hasWorkingTasks({ state }) && getBlockingWorkflowToolRuns(state).length === 0;
+  return !hasWorkingTasks({ state });
 }
 
 /** Reads durable work using the source deployment's handoff contract. */

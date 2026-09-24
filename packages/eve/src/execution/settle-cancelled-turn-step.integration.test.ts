@@ -5,12 +5,6 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
-import { setPendingCoordinationBatch } from "#harness/coordination.js";
-import {
-  getBlockingWorkflowToolRuns,
-  registerWorkflowToolRun,
-  type BlockingWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
@@ -66,65 +60,34 @@ describe("settleCancelledTurnStep", () => {
       delivered: true,
       status: "cancelled",
     });
+    const cancelledWorkflowCall = createTaskRecord({
+      callId: "call-2",
+      cancelConfirmBy: "2026-09-24T14:00:30.000Z",
+      child: { commandToken: "control-hook", kind: "workflow", runId: "workflow-run" },
+      delivered: true,
+      id: "deploy-abc234",
+      kind: "workflow",
+      name: "deploy",
+      status: "cancelled",
+    });
 
     await runtime.run(async () => {
       const result = await settleCancelledTurnStep({
         sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
         serializedContext: buildSerializedContext(),
         sessionState: createDurableSessionState({
-          session: createCancelledTurnSession([cancelled]),
+          session: createCancelledTurnSession([cancelled, cancelledWorkflowCall]),
         }),
       });
 
-      expect(getTaskTable(result.sessionState.snapshot.session).records).toEqual([cancelled]);
+      expect(getTaskTable(result.sessionState.snapshot.session).records).toEqual([
+        cancelled,
+        cancelledWorkflowCall,
+      ]);
       expect(result.sessionState.snapshot.session.outputSchema).toBeUndefined();
       expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
         expect.objectContaining({ agentName: "settle-cancel-handles" }),
       );
     });
   });
-
-  it.each([false, true])(
-    "removes only the cancelled turn's workflow runs (paused=%s)",
-    async (paused) => {
-      const runtime = await createTestRuntime({ agent: { name: "settle-turn-invocations" } });
-      await runtime.run(async () => {
-        const earlier: BlockingWorkflowToolRun = {
-          callId: "earlier-call",
-          lifetime: "turn",
-          toolName: "research",
-          origin: { turnId: "turn-0", stepIndex: 0 },
-          address: { runId: "earlier-run", hookToken: "earlier-hook" },
-        };
-        let session = registerWorkflowToolRun(createCancelledTurnSession(), earlier);
-        session = registerWorkflowToolRun(session, {
-          callId: "waiting-call",
-          toolName: "research",
-          lifetime: "turn",
-          origin: { turnId: "turn-1", stepIndex: 0 },
-          address: { runId: "waiting-run", hookToken: "waiting-hook" },
-        });
-        if (paused)
-          session = setPendingCoordinationBatch({
-            event: { sequence: 3, stepIndex: 1, turnId: "turn-1" },
-            responseMessages: [],
-            tasks: [],
-            session: setHarnessEmissionState(session, {
-              sequence: 4,
-              stepIndex: 0,
-              sessionStarted: true,
-              turnId: "",
-            }),
-          });
-        const result = await settleCancelledTurnStep({
-          sessionWritable: new WritableStream<Uint8Array>({ write() {} }),
-          serializedContext: buildSerializedContext(),
-          sessionState: createDurableSessionState({ session }),
-        });
-        expect(getBlockingWorkflowToolRuns(result.sessionState.snapshot.session.state)).toEqual([
-          earlier,
-        ]);
-      });
-    },
-  );
 });

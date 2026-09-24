@@ -1,7 +1,7 @@
 import type { RuntimeActionResultHookPayload, TaskStartedHookPayload } from "#channel/types.js";
-import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
+import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { hasPendingAgentTaskCalls } from "#tasks/agent-tool.js";
@@ -15,6 +15,7 @@ import {
   type TaskCancelSelector,
   type TaskOwnerUpdate,
 } from "#tasks/owner.js";
+import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 
 // Owner-side helpers that run in the session workflow body. They only
 // sequence steps, and must not import Node.js built-ins.
@@ -90,10 +91,27 @@ export async function applyTaskReport(
   );
 }
 
-/** Cancels the agent tasks and workflow tool runs the active turn is waiting on. */
+/** Applies a workflow tool run's outcome and returns the tool result of the call it settled. */
+export async function settleWorkflowTask(
+  cursor: SessionStateCursor,
+  message: WorkflowToolRunOutcomeMessage,
+): Promise<readonly RuntimeToolResultActionResult[]> {
+  return await applyTaskOwnerUpdate(
+    cursor,
+    await settleWorkflowTaskStep({
+      message,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    }),
+  );
+}
+
+/**
+ * Cancels the agent tasks and workflow tool calls the active turn is waiting
+ * on, without waiting for their children to stop.
+ */
 export async function cancelTurnDescendants(cursor: SessionStateCursor): Promise<void> {
   await cancelTasks(cursor, { kind: "active-turn" });
-  await cancelDescendantTurnsStep({ sessionState: cursor.sessionState });
 }
 
 /** Cancels the selected working tasks and publishes their `task.settled` events. */

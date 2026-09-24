@@ -7,6 +7,7 @@ import {
 } from "#tracing/agent-trace-context-store.js";
 import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
 import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
+import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 
 const anchor = {
   attemptIndex: 0,
@@ -39,25 +40,27 @@ describe("trace retention by live work", () => {
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
   });
 
-  it("keeps an anchor while its workflow tool run is waiting", () => {
+  it("keeps an anchor while its workflow tool call is working", () => {
     const context = new ContextContainer();
     contextStorage.run(context, () =>
       new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
     );
-    const run = {
+    const task = createTaskRecord({
       callId: "call",
-      toolName: "workflow",
-      lifetime: "turn" as const,
-      origin: { turnId: "turn", stepIndex: 0 },
-      address: { runId: "workflow-run", hookToken: "workflow-token" },
-    };
-    pruneAgentTraceState(context, "session", {
-      "eve.workflowTool": { version: 3, runs: [run] },
+      child: { commandToken: "workflow-token", kind: "workflow", runId: "workflow-run" },
+      kind: "workflow",
+      name: "workflow",
+      turnId: "turn",
     });
+    pruneAgentTraceState(context, "session", taskTableState([task]));
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
       actionAnchors: { key: anchor },
     });
-    pruneAgentTraceState(context, "session", undefined);
+    pruneAgentTraceState(
+      context,
+      "session",
+      taskTableState([{ ...task, delivered: true, status: "completed" }]),
+    );
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
   });
 

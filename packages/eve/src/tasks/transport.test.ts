@@ -7,6 +7,7 @@ import {
   requestWorkflowTurnCancellation,
 } from "#execution/workflow-runtime.js";
 import { createTaskRecord } from "#internal/testing/task-records.js";
+import { cancelRun, getRun, resumeHook } from "#internal/workflow/runtime.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   cancelRemoteAgentTurn,
@@ -18,6 +19,13 @@ import { deliverToChild, runCommands } from "#tasks/transport.js";
 vi.mock("#execution/workflow-runtime.js", () => ({
   createWorkflowRuntime: vi.fn(),
   requestWorkflowTurnCancellation: vi.fn(),
+}));
+vi.mock("#internal/workflow/runtime.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  cancelRun: vi.fn(),
+  getRun: vi.fn(),
+  getWorld: vi.fn(async () => ({})),
+  resumeHook: vi.fn(),
 }));
 vi.mock("#subagents/remote-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
@@ -177,6 +185,30 @@ describe("runCommands", () => {
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
     });
+  });
+
+  it("asks a workflow tool run to cancel through its control hook without waiting for it", async () => {
+    await runCommands(
+      [
+        {
+          commands: [{ kind: "cancel" }],
+          kind: "send",
+          record: createTaskRecord({
+            child: { commandToken: "control-hook", kind: "workflow", runId: "run-1" },
+            kind: "workflow",
+            name: "deploy",
+          }),
+        },
+      ],
+      contextWithBundle(),
+    );
+
+    expect(resumeHook).toHaveBeenCalledExactlyOnceWith("control-hook", {
+      kind: "cancel",
+      reason: expect.any(String),
+    });
+    expect(getRun).not.toHaveBeenCalled();
+    expect(cancelRun).not.toHaveBeenCalled();
   });
 
   it("cancels a dynamic remote agent with its selected configuration, where it runs", async () => {

@@ -26,12 +26,13 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
-import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
+  applyTaskOwnerUpdate,
   applyTaskReport,
   cancelTurnDescendants,
   startPendingAgentTasks,
 } from "#tasks/owner-body.js";
+import { isWorkflowTaskResult } from "#tasks/state.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -116,19 +117,20 @@ export class SessionExecution {
       }
 
       if (pendingCallIds !== undefined && result.action === "park") {
-        const dispatchResult = await dispatchCoordinationStep({
-          action: result.action,
-          callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-          workflowToolRunOwner: {
-            inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
-          },
-          sessionWritable: cursor.sessionWritable,
-          serializedContext: cursor.serializedContext,
-          sessionState: cursor.sessionState,
-        });
-        await cursor.apply(dispatchResult);
         const initialResults = [
-          ...dispatchResult.results,
+          ...(await applyTaskOwnerUpdate(
+            cursor,
+            await dispatchCoordinationStep({
+              action: result.action,
+              callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
+              workflowToolRunOwner: {
+                inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+              },
+              sessionWritable: cursor.sessionWritable,
+              serializedContext: cursor.serializedContext,
+              sessionState: cursor.sessionState,
+            }),
+          )),
           ...(await startPendingAgentTasks(cursor)),
         ];
         const initialAcceptedAtMs = initialResults.length === 0 ? undefined : Date.now();
@@ -217,13 +219,11 @@ export class SessionExecution {
       const next = await input.turn.nextRuntimeEvent();
       if (next === "cancelled") return next;
       if (next.kind === "runtime-action-result") {
-        const snapshot = this.input.cursor.sessionState.snapshot.session.state;
+        const snapshot = this.input.cursor.sessionState.snapshot.session;
         const accepted = next.trusted
           ? next.results
           : next.results.filter(
-              (result) =>
-                result.kind === "tool-result" &&
-                isInboxToolResultFromRecordedWorkflowToolRun(snapshot, result),
+              (result) => result.kind === "tool-result" && isWorkflowTaskResult(snapshot, result),
             );
         if (accepted.length > 0) {
           const acceptedAtMs = Date.now();

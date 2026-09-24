@@ -11,6 +11,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import {
   createWorkflowRuntime,
   requestWorkflowTurnCancellation,
@@ -41,6 +42,7 @@ import { cancelTask } from "#tasks/table.js";
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
 vi.mock("#execution/coordination-dispatch-shared.js", () => ({ prepareActionDispatch: vi.fn() }));
 vi.mock("#execution/tools/subagent/start.js", () => ({ startSubagent: vi.fn() }));
+vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   ...(await importOriginal()),
   createWorkflowRuntime: vi.fn(),
@@ -841,6 +843,41 @@ describe("cancelTasksStep", () => {
       }),
       otherTurn,
       finished,
+    ]);
+  });
+
+  it("cancels the turn's workflow tool calls through each run's control hook", async () => {
+    const workflowCall = createTaskRecord({
+      child: { commandToken: "control-hook", kind: "workflow", runId: "run-1" },
+      id: "deploy-aaaaaa",
+      kind: "workflow",
+      name: "deploy",
+    });
+
+    const { events, sessionState } = await cancelTasksStep({
+      selector: { kind: "active-turn" },
+      serializedContext: {},
+      sessionState: ownerState([workflowCall]),
+    });
+
+    expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
+      { hookToken: "control-hook", runId: "run-1" },
+      expect.any(String),
+    );
+    expect(events).toEqual([
+      {
+        data: { callId: "call-1", status: "cancelled", taskId: workflowCall.id },
+        type: "task.settled",
+      },
+    ]);
+    // Kept until the run confirms it stopped.
+    expect(records(sessionState)).toEqual([
+      expect.objectContaining({
+        cancelConfirmBy: expect.any(String),
+        delivered: true,
+        id: workflowCall.id,
+        status: "cancelled",
+      }),
     ]);
   });
 

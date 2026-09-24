@@ -155,10 +155,10 @@ export function deriveRunFacts(
       }
 
       case "task.settled": {
-        // A call that failed before its child started has no `task.started`;
-        // its failure is still on the tool call.
+        // Only agent tasks recorded by `task.started` join here; workflow
+        // tasks and calls that failed before their child started stay tool calls.
         const call = subagentCallsByCallId.get(event.data.callId);
-        if (call?.status !== "working") break;
+        if (call?.status !== "working" || call.taskId !== event.data.taskId) break;
         call.output = event.data.status === "failed" ? event.data.error : event.data.output;
         call.status = event.data.status;
         break;
