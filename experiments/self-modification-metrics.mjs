@@ -10,17 +10,19 @@ import {
 } from "../scripts/eval-experiments/measurements/lifecycle.mjs";
 import {
   elapsedTime,
+  totalModelCost,
   totalToolCalls,
   totalTurnDuration,
 } from "../scripts/eval-experiments/measurements/metrics.mjs";
 
 /** @satisfies {import('../scripts/eval-experiments/types.ts').MeasurementBundle} */
 export const selfModificationMetrics = {
-  version: 3,
+  version: 4,
   metrics: {
     parentTurnToFinalChildCompletion: { unit: "ms", direction: "lower" },
     totalChildDuration: { unit: "ms", direction: "lower" },
     toolCalls: { unit: "count", direction: "neutral" },
+    childCost: { unit: "USD", direction: "lower" },
   },
   derive(captured) {
     const capture = captureSessions(captured.result.sessions);
@@ -55,6 +57,7 @@ export const selfModificationMetrics = {
     return {
       parentTurnToFinalChildCompletion,
       totalChildDuration,
+      childCost: totalModelCost(capture, childTurns.turns),
       // Only count calls when the child turns have valid duration evidence.
       toolCalls:
         totalChildDuration.status === "measured"

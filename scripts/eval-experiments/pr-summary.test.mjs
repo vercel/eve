@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { compareExperiment } from "./compare.mjs";
+import { compareExperiment, renderMarkdown } from "./compare.mjs";
 import { renderPrSummary } from "./pr-summary.mjs";
 
 const plan = {
@@ -66,6 +66,25 @@ test("configuration overview uses model settings, medians, units, coverage and z
   assert.match(output, /13\.0s \(4\/4\)/);
   assert.match(output, /0 \(4\/4\)/);
   assert.match(output, /Archived evidence \(14 days\)/);
+});
+
+test("USD metrics preserve sub-cent precision in summaries and paired deltas", () => {
+  const costPlan = {
+    ...plan,
+    measurementBundles: { cost: { metrics: { child: { unit: "USD", direction: "lower" } } } },
+    analysis: { ...plan.analysis, primaryMetric: "cost.child" },
+  };
+  const rows = plan.schedule.map((cell) => ({
+    ...row(cell),
+    measurements: {
+      "cost.child": { status: "measured", value: cell.configuration === "base" ? 0.0058 : 0 },
+    },
+  }));
+  const report = compareExperiment(costPlan, rows);
+  const output = renderPrSummary(costPlan, report, { runUrl: url });
+  assert.match(output, /\$0\.0058 \(4\/4\)/);
+  assert.match(output, /\$0\.0000 \(4\/4\)/);
+  assert.match(renderMarkdown(report), /-0\.0058/);
 });
 
 test("missing evidence and failed correctness are not treated as measured zero", () => {

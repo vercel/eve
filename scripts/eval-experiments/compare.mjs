@@ -187,7 +187,7 @@ export function renderMarkdown(report) {
   for (const row of report.comparisons)
     for (const [name, metric] of Object.entries(row.metrics)) {
       lines.push(
-        `| ${row.fixture} / ${row.eval} | ${row.axis} | ${row.fixed} | ${row.candidate} | ${name} | ${metric.unit} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${metric.paired} | ${format(metric.medianPairedDelta)} |`,
+        `| ${row.fixture} / ${row.eval} | ${row.axis} | ${row.fixed} | ${row.candidate} | ${name} | ${metric.unit} | ${row.candidateCorrect}/${row.planned} (baseline ${row.baselineCorrect}/${row.planned}) | ${metric.paired} | ${format(metric.medianPairedDelta, metric.unit)} |`,
       );
     }
   lines.push(
@@ -245,8 +245,8 @@ function median(values) {
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
-function format(value) {
-  return value === null ? "—" : Number(value).toFixed(2);
+function format(value, unit) {
+  return value === null ? "—" : Number(value).toFixed(unit === "USD" ? 4 : 2);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

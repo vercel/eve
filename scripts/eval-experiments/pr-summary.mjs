@@ -30,6 +30,7 @@ function median(values) {
 function display(value, unit) {
   if (value === null || !Number.isFinite(value)) return "—";
   if (unit === "ms") return `${(value / 1000).toFixed(1)}s`;
+  if (unit === "USD") return `$${value.toFixed(4)}`;
   return `${Number(value.toFixed(1))}${unit === "count" ? "" : ` ${escapeCell(unit)}`}`;
 }
 

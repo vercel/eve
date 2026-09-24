@@ -75,6 +75,94 @@ function captures() {
 }
 const evalId = "self-modification/create-shipping-quote";
 
+function modelStep(sessionId, turnId, index, cost) {
+  return [
+    event(
+      "step.started",
+      `${sessionId}-${turnId}-${index}-start`,
+      "2026-01-01T00:00:03Z",
+      { turnId, stepIndex: index },
+      sessionId,
+    ),
+    event(
+      "step.completed",
+      `${sessionId}-${turnId}-${index}-end`,
+      "2026-01-01T00:00:04Z",
+      { turnId, stepIndex: index, usage: { costUsd: cost } },
+      sessionId,
+    ),
+  ];
+}
+
+test("sums only child model costs, deduplicating repeated captures and delegations", () => {
+  const sessions = captures();
+  sessions[0].events.push(...modelStep("parent", "parent-turn", 0, 100));
+  sessions[0].events.push({
+    ...sessions[0].events[1],
+    meta: { ...sessions[0].events[1].meta, id: "second-delegation" },
+  });
+  sessions[1].events.push(
+    ...modelStep("child", "child-turn", 0, 0.002),
+    ...modelStep("child", "child-turn", 1, 0.004),
+  );
+  sessions.push(sessions[1]);
+  const cost = derive(sessions).childCost;
+  assert.equal(cost.status, "measured");
+  assert.equal(cost.value, 0.006);
+  assert.equal(cost.evidence.length, 4);
+  assert.ok(cost.evidence.every((ref) => ref.sessionId === "child"));
+});
+
+test("child cost preserves zero and is independent of timestamps and correctness", () => {
+  const sessions = captures();
+  sessions[1].events.push(...modelStep("child", "child-turn", 0, 0));
+  sessions[1].events[1].meta.at = "invalid";
+  const result = selfModificationMetrics.derive({ verdict: "failed", result: { sessions } });
+  assert.equal(result.totalChildDuration.status, "unavailable");
+  assert.equal(result.childCost.value, 0);
+});
+
+test("child cost is unavailable for missing, invalid, ambiguous or incomplete step evidence", () => {
+  assert.equal(derive(captures()).childCost.reason, "missing-model-steps");
+  for (const cost of [undefined, null, "0.01", NaN, Infinity, -1]) {
+    const sessions = captures();
+    sessions[1].events.push(...modelStep("child", "child-turn", 0, cost));
+    assert.equal(derive(sessions).childCost.reason, "missing-or-invalid-model-cost");
+  }
+  for (const [mutate, reason] of [
+    [(steps) => steps.pop(), "incomplete-model-steps"],
+    [(steps) => steps.shift(), "incomplete-model-steps"],
+    [
+      (steps) => {
+        steps[1].data.stepIndex = 1;
+      },
+      "incomplete-model-steps",
+    ],
+    [
+      (steps) => {
+        steps[0].data.stepIndex = -1;
+      },
+      "missing-model-step-identity",
+    ],
+    [
+      (steps) => {
+        steps[1].type = "step.failed";
+      },
+      "failed-model-step",
+    ],
+    [
+      (steps) => steps.push({ ...steps[1], meta: { ...steps[1].meta, id: "duplicate-step" } }),
+      "ambiguous-model-step",
+    ],
+  ]) {
+    const sessions = captures();
+    const steps = modelStep("child", "child-turn", 0, 0.002);
+    mutate(steps);
+    sessions[1].events.push(...steps);
+    assert.equal(derive(sessions).childCost.reason, reason);
+  }
+});
+
 test("derives independently evidenced durations and a zero-valid tool count", () => {
   const result = selfModificationMetrics.derive({
     id: evalId,
@@ -193,7 +281,11 @@ test("sums child turn durations across approval pauses and later delegations", (
       "later-child",
     ),
   ]);
+  firstChild.events.push(...modelStep("child", "child-turn", 0, 0.001));
+  firstChild.events.push(...modelStep("child", "resumed-child-turn", 0, 0.002));
+  laterChild.events.push(...modelStep("later-child", "later-child-turn", 0, 0.003));
   const result = derive([...sessions, laterChild]);
+  assert.equal(result.childCost.value, 0.006);
   assert.equal(result.parentTurnToFinalChildCompletion.value, 14_000);
   assert.equal(result.totalChildDuration.value, 8_000);
   assert.equal(result.toolCalls.value, 1);
