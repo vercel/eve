@@ -23,6 +23,13 @@ function dependencies(): NonInteractiveLinkDependencies {
     isEveProject: vi.fn(async () => true),
     runVercel: vi.fn(async () => true),
     runVercelEnvPull: vi.fn(async () => true),
+    readProjectLink: vi.fn(async () => ({
+      orgId: "team_a",
+      projectId: "prj_new",
+      projectName: "wayfinder",
+    })),
+    resolveTeam: vi.fn(async () => "acme"),
+    resolveProjectByNameOrId: vi.fn(async () => null),
   };
 }
 
@@ -66,5 +73,67 @@ describe("runNonInteractiveLink", () => {
     );
     expect(deps.runVercelEnvPull).toHaveBeenCalledWith("/agent", undefined, undefined, true);
     expect(logger.logs).toEqual(["Project linked."]);
+    expect(deps.resolveProjectByNameOrId).not.toHaveBeenCalled();
+  });
+  test("reports a newly created project after checking the link scope", async () => {
+    const deps = dependencies();
+    const onCreatedProject = vi.fn(async () => {});
+
+    await runNonInteractiveLink({
+      logger: new TestLogger(),
+      appRoot: "/agent",
+      options: { nonInteractive: true, project: "wayfinder", team: "acme" },
+      dependencies: deps,
+      onCreatedProject,
+    });
+
+    expect(deps.resolveTeam).toHaveBeenCalledWith("/agent", "acme");
+    expect(deps.resolveProjectByNameOrId).toHaveBeenCalledWith("/agent", "acme", "wayfinder");
+    expect(vi.mocked(deps.resolveProjectByNameOrId).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(deps.runVercel).mock.invocationCallOrder[0]!,
+    );
+    expect(onCreatedProject).toHaveBeenCalledWith({
+      orgId: "team_a",
+      projectId: "prj_new",
+      projectName: "wayfinder",
+    });
+  });
+  test("does not report an existing project as created", async () => {
+    const deps = dependencies();
+    vi.mocked(deps.resolveProjectByNameOrId).mockResolvedValue({
+      projectId: "prj_existing",
+      projectName: "wayfinder",
+    });
+    const onCreatedProject = vi.fn(async () => {});
+
+    await runNonInteractiveLink({
+      logger: new TestLogger(),
+      appRoot: "/agent",
+      options: { nonInteractive: true, project: "wayfinder" },
+      dependencies: deps,
+      onCreatedProject,
+    });
+
+    expect(onCreatedProject).not.toHaveBeenCalled();
+    expect(deps.readProjectLink).not.toHaveBeenCalled();
+  });
+
+  test("does not link if the scoped existence check fails", async () => {
+    const deps = dependencies();
+    vi.mocked(deps.resolveProjectByNameOrId).mockRejectedValue(new Error("Access denied"));
+    const onCreatedProject = vi.fn(async () => {});
+
+    await expect(
+      runNonInteractiveLink({
+        logger: new TestLogger(),
+        appRoot: "/agent",
+        options: { nonInteractive: true, project: "wayfinder" },
+        dependencies: deps,
+        onCreatedProject,
+      }),
+    ).rejects.toThrow("Access denied");
+
+    expect(deps.runVercel).not.toHaveBeenCalled();
+    expect(onCreatedProject).not.toHaveBeenCalled();
   });
 });

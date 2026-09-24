@@ -56,7 +56,7 @@ export interface PickTeamOptions extends VercelProjectOperationOptions {
 }
 
 export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {
-  /** Skip the default 100% trace sampling rule when creating a Vercel project. */
+  /** Configure 100% trace sampling when creating a Vercel project. */
   traceSampling?: boolean;
 }
 
@@ -663,7 +663,7 @@ export async function linkProject(
     if (!linked) return undefined;
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
-    if (options.traceSampling !== false)
+    if (options.traceSampling === true)
       await configureTraceSampling(link, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,

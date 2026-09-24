@@ -26,7 +26,7 @@ export interface LinkProjectOptions {
   prompter: Prompter;
   /** Headless runs must not ask follow-up questions after the plan is fixed. */
   headless?: boolean;
-  /** Skip default 100% trace sampling for a newly created project. */
+  /** Configure 100% trace sampling for a newly created project. */
   traceSampling?: boolean;
   deps?: LinkProjectDeps;
 }
@@ -72,7 +72,7 @@ export function linkVercelProject(
       const onOutput = createPromptCommandOutput(options.prompter.log);
       const linkOptions: LinkProjectOperationOptions = { signal };
       if (options.headless) linkOptions.headless = true;
-      if (options.traceSampling === false) linkOptions.traceSampling = false;
+      if (options.traceSampling !== undefined) linkOptions.traceSampling = options.traceSampling;
       const linked = await deps.linkProject(
         options.prompter,
         projectRoot,

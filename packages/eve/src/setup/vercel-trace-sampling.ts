@@ -1,5 +1,4 @@
-import { readVercelCliConnection } from "#internal/model-auth/vercel-cli.js";
-import { vercelApiJson } from "#internal/model-auth/vercel.js";
+import { readVercelCliToken } from "#internal/model-auth/vercel-cli.js";
 
 import type { VercelProjectReference } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
@@ -12,13 +11,13 @@ export async function configureTraceSampling(
   signal?: AbortSignal,
 ): Promise<void> {
   try {
-    const connection = await readVercelCliConnection();
-    if (connection === undefined) throw new Error("Vercel CLI credentials are unavailable.");
+    const token = await readVercelCliToken();
+    if (token === undefined) throw new Error("Vercel CLI credentials are unavailable.");
     const tracingQuery = new URLSearchParams({
       projectId: link.projectId,
       teamId: link.orgId,
     });
-    const response = await vercelApiJson(
+    const response = await fetch(
       `https://api.vercel.com/v1/drains/tracing/config?${tracingQuery.toString()}`,
       {
         body: JSON.stringify({
@@ -26,14 +25,17 @@ export async function configureTraceSampling(
           sampling: AGENT_PROJECT_TRACING_SAMPLING,
         }),
         headers: {
-          authorization: `Bearer ${connection.token}`,
+          authorization: `Bearer ${token}`,
           "content-type": "application/json",
         },
         method: "PUT",
-        signal,
+        redirect: "error",
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+          : AbortSignal.timeout(15_000),
       },
     );
-    if (response.error !== undefined) {
+    if (!response.ok) {
       throw new Error("Vercel rejected the trace sampling configuration.");
     }
   } catch {
