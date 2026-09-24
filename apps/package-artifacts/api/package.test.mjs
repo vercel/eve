@@ -7,10 +7,14 @@ vi.mock("@vercel/blob", () => ({ get }));
 
 const { default: handler } = await import("./package.js");
 const sha = "a".repeat(40);
+const tarball = `https://pkg.eve.dev/${sha}/eve.tgz`;
+const integrity = `sha512-${"YQ==".padStart(88, "Y")}`;
 const manifest = {
   sourceSha: sha,
   version: `0.33.0+main.${sha}`,
-  tarball: `https://pkg.eve.dev/${sha}/eve.tgz`,
+  tarball,
+  dependency: `${tarball}#${integrity}`,
+  integrity,
   sha256: "b".repeat(64),
 };
 
@@ -75,11 +79,13 @@ describe("package route", () => {
     expect(latest.status).toHaveBeenCalledWith(404);
   });
 
-  test("rejects pointers that redirect outside the package host", async () => {
+  test.each([
+    { ...manifest, tarball: "https://example.com/eve.tgz" },
+    { ...manifest, integrity: "sha512-invalid" },
+    { ...manifest, dependency: manifest.tarball },
+  ])("rejects invalid package pointers", async (invalidManifest) => {
     get.mockResolvedValueOnce({
-      stream: new Blob([
-        JSON.stringify({ ...manifest, tarball: "https://example.com/eve.tgz" }),
-      ]).stream(),
+      stream: new Blob([JSON.stringify(invalidManifest)]).stream(),
     });
     const res = response();
     await handler({ query: { ref: "main" } }, res);

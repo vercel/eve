@@ -23,6 +23,10 @@ export function packageDependencyUrl(baseUrl, sourceSha) {
   return url.toString();
 }
 
+export function packageDependencySpecifier(tarball, integrity) {
+  return `${tarball}#${integrity}`;
+}
+
 export function packageVersion(stableVersion, sourceSha, channel = "main") {
   const match = stableVersion.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
   if (match === null) throw new Error(`Expected a stable eve version, received ${stableVersion}.`);
