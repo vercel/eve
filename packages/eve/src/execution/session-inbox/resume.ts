@@ -20,9 +20,9 @@ import {
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
-/** Longest a delivery waits for a legacy mid-handoff successor to claim its hooks. */
-const LEGACY_HANDOFF_RETRY_WINDOW_MS = 5_000;
-const LEGACY_HANDOFF_RETRY_INTERVAL_MS = 20;
+/** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
+const HANDOFF_RETRY_WINDOW_MS = 5_000;
+const HANDOFF_RETRY_INTERVAL_MS = 20;
 
 export interface ResumedSessionInboxHook {
   readonly ownerRunId: string;
@@ -31,25 +31,24 @@ export interface ResumedSessionInboxHook {
 }
 
 /**
- * Resumes the current owner with the current command shape. A takeover
- * handoff moves every address atomically. An owner on the legacy release-first
- * path leaves its addresses briefly unowned, marked for that interval, so
- * delivery retries instead of reporting the session gone and letting a
- * channel start a replacement.
+ * Resumes the current owner with the current command shape. During a
+ * deployment handoff the address is briefly unowned; the releasing owner
+ * leaves a marker for that interval, so delivery retries instead of
+ * reporting the session gone and letting a channel start a replacement.
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): Promise<ResumedSessionInboxHook> {
   const token = logicalToken(address);
-  const deadline = Date.now() + LEGACY_HANDOFF_RETRY_WINDOW_MS;
+  const deadline = Date.now() + HANDOFF_RETRY_WINDOW_MS;
   while (true) {
     let hook;
     try {
       hook = await resumeHook(sessionInboxHookToken(token), command);
     } catch (error) {
       if (!HookNotFoundError.is(error)) throw error;
-      if (await isLegacyHandoffInProgress(token, deadline)) continue;
+      if (await isHandoffInProgress(token, deadline)) continue;
       return await resumeLegacyInbox(token, command).catch(rethrowUnsupportedAsNotFound);
     }
     let identity: Promise<string> | undefined;
@@ -109,11 +108,8 @@ function logicalToken(address: string | SessionInboxAddress): string {
   return sessionCommandHookToken(address.sessionId);
 }
 
-/**
- * Waits one retry interval when a legacy handoff marker exists; false once the
- * window closes or no marker exists. See `session/legacy-handoff.ts`.
- */
-async function isLegacyHandoffInProgress(token: string, deadline: number): Promise<boolean> {
+/** Waits one retry interval when a handoff marker exists; false once the window closes or no marker exists. */
+async function isHandoffInProgress(token: string, deadline: number): Promise<boolean> {
   if (Date.now() >= deadline) return false;
   try {
     await getHookByToken(sessionHandoffMarkerToken(token));
@@ -121,6 +117,6 @@ async function isLegacyHandoffInProgress(token: string, deadline: number): Promi
     if (HookNotFoundError.is(error)) return false;
     throw error;
   }
-  await new Promise<void>((resolve) => setTimeout(resolve, LEGACY_HANDOFF_RETRY_INTERVAL_MS));
+  await new Promise<void>((resolve) => setTimeout(resolve, HANDOFF_RETRY_INTERVAL_MS));
   return true;
 }

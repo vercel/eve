@@ -20,8 +20,8 @@ import {
   sessionCommandHookToken,
 } from "#execution/session-inbox/address.js";
 import { signalSessionOwnerActivationStep } from "#execution/session/handoff-steps.js";
-import { takeOverSession } from "#execution/session/handoff.js";
 import { adoptReleasedSession, isLegacyHandoff } from "#execution/session/legacy-handoff.js";
+import { takeOverSession } from "#execution/session/takeover-handoff.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
@@ -167,8 +167,7 @@ async function bootInitialOwner(
 /**
  * Validates, owns the exact hook set, then tells the previous owner it may
  * exit. A version 1 source released its hooks and started this run on a spec
- * that cannot be taken from, so both its claim and this owner's own later
- * handoffs stay on the legacy release-first path.
+ * that cannot be taken from, so this owner stays on the release-first path.
  */
 async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
@@ -179,25 +178,16 @@ async function bootHandoffOwner(
   const tokens = sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState });
   const legacy = isLegacyHandoff(input);
   try {
-    if (legacy) {
-      await adoptReleasedSession(input, inbox, tokens);
-    } else if (!(await takeOverSession(input, inbox, tokens))) {
-      return undefined;
-    }
+    if (legacy) await adoptReleasedSession(input, inbox, tokens);
+    else if (!(await takeOverSession(input, inbox, tokens))) return undefined;
     await signalSessionOwnerActivationStep({
       activation: { kind: "active" },
       token: input.activationToken,
     });
   } catch (error) {
-    const releasedTokens = inbox.claimedTokens;
     const payloads = await inbox.release();
     await signalSessionOwnerActivationStep({
-      activation: {
-        error: normalizeSerializableError(error),
-        kind: "failed",
-        payloads,
-        releasedTokens,
-      },
+      activation: { error: normalizeSerializableError(error), kind: "failed", payloads },
       token: input.activationToken,
     });
     return undefined;

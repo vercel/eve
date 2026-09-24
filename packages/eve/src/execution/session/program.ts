@@ -19,10 +19,12 @@ import { finalizeSession, type SessionTerminalOutcome } from "#execution/session
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import {
-  SessionHandoff,
   sessionAnchorToken,
+  type SessionHandoff,
   type SessionHandoffProtocol,
 } from "#execution/session/handoff.js";
+import { LegacySessionHandoff } from "#execution/session/legacy-handoff.js";
+import { TakeoverSessionHandoff } from "#execution/session/takeover-handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -94,7 +96,7 @@ export async function runPreparedSession(
     sessionState: boot.sessionState,
   });
   const progress: SessionProgress = { caller: boot.caller, terminalEmitted: false };
-  const handoff = new SessionHandoff({
+  const handoffInput = {
     checkpoint: {
       capabilities: boot.capabilities,
       mode: boot.mode,
@@ -104,9 +106,12 @@ export async function runPreparedSession(
     deploymentId: boot.deploymentId,
     inbox,
     isInitialOwner: boot.anchor.kind === "self",
-    protocol: boot.handoffProtocol,
     sessionId: boot.sessionId,
-  });
+  };
+  const handoff: SessionHandoff =
+    boot.handoffProtocol === "takeover"
+      ? new TakeoverSessionHandoff(handoffInput)
+      : new LegacySessionHandoff(handoffInput);
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
   try {

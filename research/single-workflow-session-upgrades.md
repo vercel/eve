@@ -203,28 +203,31 @@ every address always resolves to a live owner.
 2. Start a candidate on the triggering delivery's deployment with the checkpoint, the stable
    session identity, and the original stream. The checkpoint names the stable inbox and every
    continuation hook claimed during the session.
-3. The candidate claims a fence unique to this attempt (the activation token plus the trigger's
-   delivery id) while it validates the checkpoint. Forced claims cannot tell two starts of one
-   attempt apart, so a duplicate start that loses the fence exits without touching the session.
-4. The candidate force-claims that exact hook set and activates. It performs no model or tool work
-   until it owns every hook, and processes the triggering delivery before any later arrival.
+3. The candidate validates the checkpoint, then confirms a plain claim on a fence unique to this
+   attempt (the activation token plus the trigger's delivery id). A start step can run twice, and
+   forced claims would let the second start take the session from the first; the start that loses
+   the fence exits without touching the session. The fence registers alongside validation and is
+   read after it, so validation still runs inline.
+4. The candidate force-claims that exact hook set and waits for the claims to register before it
+   activates. A World refuses to take hooks from a run started below spec 8, and that refusal must
+   surface before the old owner is told to leave. The candidate performs no model or tool work until
+   it owns every hook, and processes the triggering delivery before any later arrival.
 5. On activation the old owner's readers have already delivered everything their hooks accepted
    before the takeover. The old owner forwards those commands to the successor in acceptance
    order, then exits, or parks as the stream anchor if it is the original run. Forwarded commands
    trail anything that reached the successor directly in the moment between takeover and
    forwarding.
 
-On failure before activation, the candidate releases anything it took and reports those tokens with
-the commands it accepted. The old owner re-takes only those tokens and processes the triggering
-delivery itself, replaying its own queued commands ahead of the candidate's.
+On failure before activation nothing was taken, so the old owner keeps every hook and processes the
+triggering delivery itself.
 
 The handoff version decides which protocol applies. A successor started by a version 2 source (or
 later) runs on a Workflow spec that can be taken from, and uses the takeover above for its own
 handoffs. A successor of a version 1 source, or an imported pre-cutover session, was started by an
-older SDK: the World refuses to take hooks from such a run. Those owners use the isolated
-release-first path in `session/legacy-handoff.ts` (see [The no-owner interval](#the-no-owner-interval)),
-and a version 1 successor claims without force. A takeover source whose successor cannot force-claim,
-such as an older target during a rollback, fails activation and keeps the session.
+older SDK and cannot be taken from. Those owners keep the unchanged release-first path in
+`session/legacy-handoff.ts` (see [The no-owner interval](#the-no-owner-interval)), and a version 1
+successor claims without force. A takeover source whose successor cannot force-claim, such as an
+older target during a rollback, fails activation and keeps the session.
 
 ## Stream lifetime
 
@@ -299,8 +302,9 @@ The owner program lives in `execution/session/`:
 | `next-input.ts`                  | Waits for the next input a parked owner must act on.                                                                                                                                                   |
 | `state-cursor.ts`                | The one mutable context/state pair; claims every hook the state names before publishing a transition.                                                                                                  |
 | `hook-tokens.ts`                 | Derives the full hook claim set from committed state. Used by boot, every transition, handoff, and legacy import.                                                                                      |
-| `handoff.ts`, `handoff-steps.ts` | `SessionHandoff.tryTransfer` as one transaction: start, forced takeover, activate, then forward or recover.                                                                                            |
-| `legacy-handoff.ts`              | The isolated release-first path for owners started by a version 1 source or a pre-cutover driver: markers, release, start, activate, recover.                                                          |
+| `handoff.ts`, `handoff-steps.ts` | The `SessionHandoff` contract shared by both strategies, and the durable steps they call.                                                                                                              |
+| `takeover-handoff.ts`            | The takeover strategy: start the successor, which fences its attempt and force-claims every hook, then forward what arrived before the takeover.                                                       |
+| `legacy-handoff.ts`              | The unchanged release-first strategy for owners started by a version 1 source or a pre-cutover driver: markers, release, start, activate, recover.                                                     |
 | `finalization.ts`                | The single terminal path for done, expired, and failed sessions.                                                                                                                                       |
 | `event-sink.ts`                  | Binds adapter context, dynamic connections, and event fan-out to one step's stream writer.                                                                                                             |
 | `timeout*.ts`                    | The durable deadline timer, stamped with the arming owner so a successor ignores a predecessor's wake.                                                                                                 |
