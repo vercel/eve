@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { formatRegistrySessionResult } from "./registry-result-message.js";
 
 describe("formatRegistrySessionResult", () => {
+  it("renders an unlabeled completion fact as a sentence", () => {
+    expect(
+      formatRegistrySessionResult({
+        items: [
+          {
+            title: "Web Chat",
+            facts: [{ label: "", value: "Start locally with `pnpm dev:services`." }],
+            output: [],
+          },
+        ],
+        failures: [],
+      }),
+    ).toBe("Added Web Chat\n\n  ✓ Web Chat\n    Start locally with `pnpm dev:services`.");
+  });
+
   it("formats installed items and multiline failures in one report", () => {
     expect(
       formatRegistrySessionResult({

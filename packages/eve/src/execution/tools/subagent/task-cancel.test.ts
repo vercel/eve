@@ -70,8 +70,14 @@ it.each(["background", "waiting"])(
       });
     }
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledTimes(2);
-    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({ sessionId: "child-a" });
-    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({ sessionId: "child-b" });
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
+      sessionId: "child-a",
+      tasks: true,
+    });
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
+      sessionId: "child-b",
+      tasks: true,
+    });
     expect(deserializeContext).not.toHaveBeenCalled();
   },
 );
@@ -139,5 +145,6 @@ it("cancels remote children at their recorded address", async () => {
   expect(cancelRemoteAgentTurn).toHaveBeenCalledWith({
     remote: expect.objectContaining({ url: "https://original.example" }),
     sessionId: "remote",
+    tasks: true,
   });
 });

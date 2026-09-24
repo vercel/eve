@@ -6,7 +6,7 @@
  * focused on flow and these stay trivially testable.
  */
 
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 interface VercelConnectListClient {
   uid?: unknown;

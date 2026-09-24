@@ -3,7 +3,7 @@ title: "Terminal UI"
 description: "Use eve locally or connect to a deployed agent from an interactive terminal UI."
 ---
 
-`eve dev` starts a local development server and opens an interactive terminal UI. Use it to talk to your agent, approve tool calls, answer its questions, and configure local development.
+`eve dev` starts a local development server and opens an interactive terminal UI. Use it to talk to your agent, approve tool calls, answer its questions, and configure local development. When `eve dev` starts a local server, self-modification is available by default; see [Self-Modification](./self-modification).
 
 ```bash
 eve dev

@@ -57,9 +57,7 @@ A Next.js-centered project uses [`withEve` in `next.config.ts`](../frontend/next
 
 Use `withEve` from `eve/vercel` when the agents and other applications are peer services. The helper contributes workspace agents to a Vercel service graph; it does not manage or require a particular frontend framework. Unlike `eve/next`, this keeps the project lifecycle separate from Next.js. Both integrations deploy the agent services together in one Vercel project.
 
-`eve/vercel` currently requires an `agents/` workspace, even if it has only one member. It does not support a standalone root `agent/`.
-
-For a workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend uses an ordinary Next.js config without `eve/next`:
+For a standalone agent or workspace with a peer Next.js frontend under `apps/web/`, replace `vercel.json` with a root `vercel.ts`. The frontend uses an ordinary Next.js config without `eve/next`:
 
 ```typescript title="vercel.ts"
 import { withEve } from "eve/vercel";
@@ -82,9 +80,9 @@ export default await withEve({
 
 Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel then builds the frontend and each eve agent separately. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
 
-The Web Chat installer does not support agent workspaces. Create the frontend using the [React chat example](../frontend/overview#basic-chat-react), and configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
+The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
 
-Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials. Run `eve dev` instead when you only need one agent and the eve terminal UI.
+Run Vercel CLI 59.16.0 or newer with `vercel dev` to start the complete service graph locally. A generated Vercel Web Chat project exposes this as `pnpm dev:services`; the first run links the directory when needed and linked projects load their development environment and settings. Use `pnpm dev` or `pnpm dev:eve` when you want one agent and the eve terminal UI, or `pnpm dev:web` when you want the frontend without its agent services. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials.
 
 Generated transport routes are inserted before a filesystem handler or, when no filesystem handler exists, before authored routes. `withEve` throws instead of overwriting an authored service key or exact transport route that belongs to a generated agent. Remove the authored route, and remove or rename the authored service; `withEve` adds both automatically. Names in the array form of `services` must also be unique. Other service names, routes, bindings, and Cron Jobs remain authored in `vercel.ts`.
 
@@ -124,6 +122,8 @@ eve deploy
 
 `eve deploy` installs dependencies, runs `vercel deploy --prod`, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
+When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
+
 For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
 
 ```bash
@@ -154,6 +154,12 @@ eve dev https://your_agent.vercel.app/eve/support
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.
+
+## Inspect agent runs
+
+Use the **Agent Runs** tab under **Observability** to browse sessions and
+inspect conversation traces. See [Agent Runs](../../observability/agent-runs)
+for beta access, pricing, retention, and tracing setup.
 
 ## Continue configuring production
 

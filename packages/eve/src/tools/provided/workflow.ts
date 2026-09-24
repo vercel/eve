@@ -1,5 +1,3 @@
-import { z } from "#compiled/zod/index.js";
-
 import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   parseWorkflowProgramOptions,
@@ -11,6 +9,7 @@ import {
   type BlockingWorkflowToolDefinition,
 } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
+import { defineJsonSchema } from "#tools/schema.js";
 
 export interface WorkflowToolOptions {
   /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
@@ -26,12 +25,16 @@ export type WorkflowTool = BlockingWorkflowToolDefinition<WorkflowToolInput, Jso
 const workflowProgramAgentContract =
   "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
 
-const workflowInputSchema = z.strictObject({
-  js: z
-    .string()
-    .describe(
-      `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
-    ),
+const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
+  type: "object",
+  properties: {
+    js: {
+      type: "string",
+      description: `JavaScript statements executed inside an async function. Supply only the body, without a surrounding function declaration or arrow function. ${workflowProgramAgentContract} Return one JSON-serializable value.`,
+    },
+  },
+  required: ["js"],
+  additionalProperties: false,
 });
 
 /** Defines a model-facing workflow tool backed by isolated runtime JavaScript. */

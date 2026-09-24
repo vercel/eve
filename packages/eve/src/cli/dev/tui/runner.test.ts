@@ -255,7 +255,7 @@ describe("registryHandoffAddress", () => {
     }));
     const client = stubClient();
     const fetchChild = vi
-      .spyOn(client, "fetch")
+      .fn<typeof fetch>()
       .mockResolvedValueOnce(
         messageStreamResponseOf([
           stampTestEvent(
@@ -358,6 +358,7 @@ describe("registryHandoffAddress", () => {
           stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 5),
         ]);
       });
+    vi.stubGlobal("fetch", fetchChild);
     const renderer = fakeRenderer({
       readPrompt: vi
         .fn()
@@ -395,6 +396,7 @@ describe("registryHandoffAddress", () => {
             childStreamPath: "/eve/v1/session/child-session/stream",
             name: "self-modification__agent",
             sequence: 0,
+            sessionId: "parent-session",
             turnId: "parent-turn",
           },
         },
@@ -412,11 +414,9 @@ describe("registryHandoffAddress", () => {
       promptCommandHandler: { handle },
     }).run();
 
-    expect(fetchChild).toHaveBeenNthCalledWith(
-      2,
-      "/eve/v1/session/child-session/stream?startIndex=3",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    const resumed = new URL(String(fetchChild.mock.calls[1]![0]));
+    expect(resumed.pathname).toBe("/eve/v1/session/child-session/stream");
+    expect(resumed.searchParams.get("startIndex")).toBe("3");
     expect(handle).toHaveBeenCalledWith(
       { type: "extension", name: "add", argument: "channel/slack" },
       expect.objectContaining({ title: "Add to your agent" }),
@@ -3534,29 +3534,32 @@ describe("EveTUIRunner renderer teardown", () => {
 
   it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
     const client = stubClient();
-    vi.spyOn(client, "fetch").mockResolvedValue(
-      messageStreamResponseOf([
-        stampTestEvent(
-          {
-            type: "message.completed",
-            data: {
-              finishReason: "stop",
-              message: "final answer",
-              sequence: 0,
-              stepIndex: 0,
-              turnId: "turn-child",
-            },
-          } as UnstampedMessageStreamEvent,
-          0,
-        ),
-        stampTestEvent(
-          {
-            type: "session.waiting",
-            data: { continuationToken: "session-id", wait: "next-user-message" },
-          } as UnstampedMessageStreamEvent,
-          1,
-        ),
-      ]),
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(
+        messageStreamResponseOf([
+          stampTestEvent(
+            {
+              type: "message.completed",
+              data: {
+                finishReason: "stop",
+                message: "final answer",
+                sequence: 0,
+                stepIndex: 0,
+                turnId: "turn-child",
+              },
+            } as UnstampedMessageStreamEvent,
+            0,
+          ),
+          stampTestEvent(
+            {
+              type: "session.waiting",
+              data: { continuationToken: "session-id", wait: "next-user-message" },
+            } as UnstampedMessageStreamEvent,
+            1,
+          ),
+        ]),
+      ),
     );
 
     const completeSubagent = vi.fn();
@@ -3740,8 +3743,8 @@ describe("EveTUIRunner renderer teardown", () => {
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
     const client = stubClient();
     let childSignal: AbortSignal | undefined;
-    vi.spyOn(client, "fetch").mockImplementation(async (_path, init) => {
-      const signal = init?.signal as AbortSignal | undefined;
+    const fetchChild = vi.fn<typeof fetch>(async (_input, init) => {
+      const signal = init?.signal ?? undefined;
       if (signal === undefined) {
         throw new Error("Expected the child stream to receive an abort signal.");
       }
@@ -3749,7 +3752,11 @@ describe("EveTUIRunner renderer teardown", () => {
       return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
-            signal.addEventListener("abort", () => controller.close(), { once: true });
+            signal.addEventListener(
+              "abort",
+              () => controller.error(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
           },
         }),
         {
@@ -3757,6 +3764,7 @@ describe("EveTUIRunner renderer teardown", () => {
         },
       );
     });
+    vi.stubGlobal("fetch", fetchChild);
 
     const runner = new EveTUIRunner({
       client,
@@ -4785,18 +4793,25 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     // A child stream that never ends on its own — it only stops when the
     // pump aborts it (the scoped cancellation path under test).
     const client = stubClient();
-    vi.spyOn(client, "fetch").mockImplementation(
-      async (_path, init) =>
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              init?.signal?.addEventListener("abort", () => controller.close(), { once: true });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async (_input, init) =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                init?.signal?.addEventListener(
+                  "abort",
+                  () => controller.error(new DOMException("Aborted", "AbortError")),
+                  { once: true },
+                );
+              },
+            }),
+            {
+              headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
             },
-          }),
-          {
-            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
-          },
-        ),
+          ),
+      ),
     );
 
     const session = sessionYielding([
@@ -4808,6 +4823,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
           childStreamPath: "/eve/v1/session/child-a/stream",
           name: "researcher",
           sequence: 0,
+          sessionId: "parent-session",
           turnId: "turn-a",
         },
       },
@@ -4819,6 +4835,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
           childStreamPath: "/eve/v1/session/child-1/stream",
           name: "researcher",
           sequence: 1,
+          sessionId: "parent-session",
           turnId: "turn-1",
         },
       },

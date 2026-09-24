@@ -19,9 +19,10 @@ import {
   removeDevelopmentHostWorkspace,
 } from "#internal/nitro/host/dev-host-workspace.js";
 import {
+  buildWorkspaceExtensions,
   prepareDevelopmentWorkspaceExtensions,
-  type DevelopmentWorkspaceExtension,
-} from "#internal/nitro/host/dev-workspace-extensions.js";
+  type WorkspaceExtension,
+} from "#internal/nitro/host/workspace-extensions.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -36,13 +37,13 @@ export async function prepareDevelopmentApplicationHost(
   options: {
     readonly changedPaths?: readonly string[];
     readonly developmentExtensions?: DevelopmentExtensionSelection;
-    readonly previousExtensions?: readonly DevelopmentWorkspaceExtension[];
+    readonly previousExtensions?: readonly WorkspaceExtension[];
   } = {},
 ): Promise<PreparedDevelopmentApplicationHost> {
   const extensionPreparation: {
     appRoot: string;
     changedPaths?: readonly string[];
-    previousExtensions?: readonly DevelopmentWorkspaceExtension[];
+    previousExtensions?: readonly WorkspaceExtension[];
   } = { appRoot };
   if (options.changedPaths !== undefined) {
     extensionPreparation.changedPaths = options.changedPaths;
@@ -103,8 +104,9 @@ export async function prepareDevelopmentApplicationHost(
 }
 
 /**
- * Compiles one authored app into an invocation-owned build workspace and
- * stages the package-owned artifacts the production Nitro build needs.
+ * Builds mounted source-backed workspace extensions, then compiles one
+ * authored app into an invocation-owned build workspace and stages the
+ * package-owned artifacts the production Nitro build needs.
  * Compiler artifacts are written inside the workspace but their recorded
  * locations point at the published output (`<finalDir>/.eve`), where
  * publication later installs them.
@@ -112,6 +114,7 @@ export async function prepareDevelopmentApplicationHost(
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
 ): Promise<PreparedApplicationHost> {
+  await buildWorkspaceExtensions(workspace.appRoot);
   const compileResult = await compileAgentInWorkspace({
     artifactLocations: {
       publishedRoot: join(workspace.publication.output.finalDir, ".eve"),

@@ -74,6 +74,8 @@ describe("discoverSandboxSource (memory)", () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
         "sandbox/workspace/notes.md": "seed",
+        "sandbox/workspace/check.test.ts": "test resource",
+        "sandbox/workspace/__tests__/check.ts": "test resource",
       },
     });
 
@@ -88,7 +90,11 @@ describe("discoverSandboxSource (memory)", () => {
     expect(result.sandbox).toBeNull();
     expect(result.sandboxWorkspace).not.toBeNull();
     expect(result.sandboxWorkspace?.logicalPath).toBe("sandbox/workspace");
-    expect(result.sandboxWorkspace?.rootEntries).toEqual(["notes.md"]);
+    expect(result.sandboxWorkspace?.rootEntries).toEqual([
+      "__tests__/",
+      "check.test.ts",
+      "notes.md",
+    ]);
   });
 
   it("discovers both a sandbox module and a workspace folder", async () => {

@@ -14,7 +14,7 @@
 /** The color primitives the row painter needs; satisfied by both the TUI theme and the CLI palette. */
 export interface RowColors {
   blue(text: string): string;
-  bold?(text: string): string;
+  bold(text: string): string;
   dim(text: string): string;
   green(text: string): string;
   inverse(text: string): string;
@@ -65,6 +65,8 @@ interface OptionRowInput {
   state: OptionRowState;
   /** Whether an un-hovered, selectable row draws the placeholder glyph. */
   placeholder: boolean;
+  /** TUI lists use type weight rather than a caret to show focus. */
+  presentation?: "cursor" | "minimal";
   /** Spaces inserted before the hint's dot so hints tab-align to a shared column. */
   hintPadding?: number;
   /**
@@ -186,7 +188,7 @@ export function renderCursorRow(
   accent?: "warning",
 ): string {
   if (!selected) return ` ${text}`;
-  const color = accent === "warning" ? colors.yellow : (colors.bold ?? ((value: string) => value));
+  const color = accent === "warning" ? colors.yellow : colors.bold;
   return color(` ${text}`);
 }
 
@@ -213,6 +215,19 @@ export function renderOptionRow(input: OptionRowInput): string {
   if (hintText !== undefined) {
     const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1);
     hint = c.dim(`${" ".repeat(separatorWidth)}${glyphs.dot} ${hintText}`);
+  }
+  if (input.presentation === "minimal") {
+    const styledLabel =
+      input.state.kind === "available" ? (selected ? c.bold(label) : c.dim(label)) : label;
+    // Minimal rows reserve the cursor/check cell even when it is blank. This
+    // keeps labels and their tab-aligned hints fixed when a checklist toggles,
+    // while completed or disabled rows retain a dim cursor when focused.
+    const marker =
+      (input.state.kind === "available" && !input.state.checked) ||
+      (input.state.kind === "disabled" && !input.isCursor)
+        ? " "
+        : glyph;
+    return ` ${marker} ${styledLabel}${hint}`;
   }
   const content = `${glyph} ${label}`;
   const row = renderCursorRow(content, selected, c, input.accent);

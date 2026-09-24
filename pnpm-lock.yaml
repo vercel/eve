@@ -252,6 +252,9 @@ catalogs:
       specifier: 4.5.4
       version: 4.5.4
 
+overrides:
+  '@vercel/cli-config>zod': 4.5.4
+
 importers:
 
   .:
@@ -1674,6 +1677,9 @@ importers:
       '@ai-sdk/provider-utils':
         specifier: 'catalog:'
         version: 5.0.43(zod@4.5.4)
+      '@cfworker/json-schema':
+        specifier: 4.1.1
+        version: 4.1.1
       '@chat-adapter/slack':
         specifier: 4.41.0
         version: 4.41.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(debug@4.4.3(supports-color@10.2.2))(supports-color@10.2.2)(zod@4.5.4)
@@ -14927,9 +14933,6 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  zod@4.1.11:
-    resolution: {integrity: sha512-WPsqwxITS2tzx1bzhIKsEs19ABD5vmCVa4xBo2tq/SrV4RNZtfws1EnCWQXM6yh8bD08a1idvkB5MZSBiZsjwg==}
-
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
@@ -20982,17 +20985,17 @@ snapshots:
   '@vercel/cli-config@0.2.0':
     dependencies:
       xdg-app-paths: 5.5.1
-      zod: 4.1.11
+      zod: 4.5.4
 
   '@vercel/cli-config@0.2.1':
     dependencies:
       xdg-app-paths: 5.5.1
-      zod: 4.1.11
+      zod: 4.5.4
 
   '@vercel/cli-config@0.2.7':
     dependencies:
       xdg-app-paths: 5.5.1
-      zod: 4.1.11
+      zod: 4.5.4
 
   '@vercel/cli-exec@1.0.0':
     dependencies:
@@ -30544,8 +30547,6 @@ snapshots:
   zod@3.24.4: {}
 
   zod@3.25.76: {}
-
-  zod@4.1.11: {}
 
   zod@4.4.3: {}
 

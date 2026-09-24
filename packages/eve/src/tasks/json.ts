@@ -1,8 +1,46 @@
-import type { z } from "#compiled/zod/index.js";
+import { z } from "#compiled/zod/index.js";
 
 import type { JsonValue } from "#shared/json.js";
-import { TASK_VIEW_JSON_SCHEMA } from "#tools/framework/task-contract.js";
+import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { TaskView } from "#tasks/types.js";
+
+const taskMetadataJsonSchema = z.object({
+  agentId: z.string().optional(),
+  kind: z.string(),
+  mode: z.enum(["local", "remote"]).optional(),
+  name: z.string(),
+});
+
+const taskOutputJsonSchema = z.object({
+  data: jsonValueSchema,
+  type: z.enum(["result", "error"]),
+});
+
+const taskViewJsonBaseShape = {
+  metadata: taskMetadataJsonSchema,
+  taskId: z.string(),
+};
+
+/** Strict model-visible task projection. */
+const TASK_VIEW_JSON_SCHEMA = z.discriminatedUnion("status", [
+  z.object({ ...taskViewJsonBaseShape, status: z.literal("working") }),
+  z.object({
+    ...taskViewJsonBaseShape,
+    inputRequests: z.array(jsonValueSchema).readonly(),
+    status: z.literal("input_required"),
+  }),
+  z.object({
+    ...taskViewJsonBaseShape,
+    lastOutput: taskOutputJsonSchema.extend({ type: z.literal("result") }),
+    status: z.literal("completed"),
+  }),
+  z.object({
+    ...taskViewJsonBaseShape,
+    lastOutput: taskOutputJsonSchema.extend({ type: z.literal("error") }),
+    status: z.literal("failed"),
+  }),
+  z.object({ ...taskViewJsonBaseShape, status: z.literal("cancelled") }),
+]);
 
 /**
  * Model-visible task view, inferred from {@link TASK_VIEW_JSON_SCHEMA}.

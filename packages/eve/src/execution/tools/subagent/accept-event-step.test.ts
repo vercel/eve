@@ -153,7 +153,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
         metadata: { kind: "tool", name: "export" },
         status: "completed",
         taskId: "task-1",
-      }),
+      }).state,
     });
 
     await expect(

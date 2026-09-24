@@ -82,8 +82,15 @@ export function formatRegistrySessionResult(result: RegistrySessionResult): stri
       lines.push("    Installed.");
       continue;
     }
-    const width = Math.max(0, ...outcome.facts.map((fact) => fact.label.length));
-    for (const fact of outcome.facts) lines.push(`    ${fact.label.padEnd(width)}  ${fact.value}`);
+    const labeledFacts = outcome.facts.filter((fact) => fact.label.length > 0);
+    const width = Math.max(0, ...labeledFacts.map((fact) => fact.label.length));
+    for (const fact of outcome.facts) {
+      lines.push(
+        fact.label.length === 0
+          ? `    ${fact.value}`
+          : `    ${fact.label.padEnd(width)}  ${fact.value}`,
+      );
+    }
     for (const output of outcome.output) lines.push(`    ${output}`);
   }
   if (result.cancelled === true) {

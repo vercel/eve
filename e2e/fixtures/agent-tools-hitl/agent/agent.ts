@@ -102,7 +102,7 @@ export default defineAgent({
   model: defineDynamic({
     events: {
       "session.started": () => ({
-        model: typeof base.model === "string" ? base.model : "openai/gpt-5.6-sol",
+        model: typeof base.model === "string" ? base.model : "openai/gpt-6-sol",
         modelContextWindowTokens: base.modelContextWindowTokens,
       }),
       "step.started": (_event, ctx) =>

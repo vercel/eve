@@ -453,7 +453,7 @@ function typeOnlyFixtures(): void {
       resources: { vcpus: 4 },
     });
     const sessionId: string = session.id;
-    await sandbox.setNetworkPolicy?.("allow-all");
+    await sandbox.setNetworkPolicy("allow-all");
     void sessionId;
     return sandbox;
   });

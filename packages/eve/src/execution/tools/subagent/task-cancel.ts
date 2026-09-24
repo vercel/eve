@@ -11,7 +11,7 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.agent-invocation-cancel");
 
-/** Cancels all child turns still owned by a background task. */
+/** Cancels child turns and their nested tasks still owned by a background task. */
 export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
   if (input.session === undefined || input.serializedContext === undefined) return;
   await cancelAgentInvocationOwner({
@@ -54,7 +54,7 @@ async function cancelAgentInvocationOwner(input: {
   const results = await Promise.allSettled(
     handles.map(async (handle) => {
       if (handle.address.kind !== "agent/remote") {
-        await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
+        await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId, tasks: true });
         return;
       }
       remoteContext ??= deserializeContext(input.serializedContext);
@@ -70,6 +70,7 @@ async function cancelAgentInvocationOwner(input: {
       await cancelRemoteAgentTurn({
         remote: { ...remote, url: handle.address.url },
         sessionId: handle.address.sessionId,
+        tasks: true,
       });
     }),
   );

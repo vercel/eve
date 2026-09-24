@@ -1,5 +1,6 @@
-import { type JSONSchema7, jsonSchema } from "ai";
+import { asSchema, type JSONSchema7, jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
@@ -24,6 +25,8 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { ApprovalContext } from "#approval/definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
+import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#tools/provided/bash.js";
+import { toInputSchema, UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;
@@ -383,6 +386,70 @@ describe("buildToolSet", () => {
     const result = buildToolSet({ tools });
 
     expect(getOutputJsonSchema(result.summarize)).toEqual(outputSchema);
+  });
+
+  it("hands the AI SDK only its own schema type, whatever produced the tool schema", async () => {
+    // The AI SDK converts and parses Zod-vendored schemas with the app's own
+    // Zod copy. Handing it anything but its own `Schema` lets a mismatched
+    // copy crash mid-stream, so every source is lowered first.
+    const remote = {
+      anyOf: [{ required: ["page_id"] }, { required: ["title"] }],
+      patternProperties: { "^x-": { type: "string" } },
+      properties: {
+        page_id: { format: "uuid", type: "string" },
+        target: {
+          allOf: [
+            { properties: { id: { type: "string" } }, type: "object" },
+            { properties: { kind: { enum: ["page", "database"] } }, type: "object" },
+          ],
+        },
+        title: { type: "string" },
+      },
+      type: "object",
+    };
+    const sources: Record<string, HarnessToolDefinition["inputSchema"]> = {
+      authored_zod: z
+        .object({ id: z.string() })
+        .and(z.object({ tags: z.record(z.string(), z.string()) })),
+      framework: BASH_INPUT_SCHEMA,
+      native: jsonSchema({ type: "object" }),
+      remote: toInputSchema(remote),
+      unspecified: UNSPECIFIED_INPUT_SCHEMA,
+    };
+    const tools: HarnessToolMap = new Map(
+      Object.entries(sources).map(([name, inputSchema]) => [
+        name,
+        {
+          description: name,
+          execute: async (input: unknown) => input,
+          inputSchema,
+          name,
+          outputSchema: name === "framework" ? BASH_OUTPUT_SCHEMA : undefined,
+        },
+      ]),
+    );
+
+    const result = buildToolSet({ tools });
+
+    for (const tool of Object.values(result)) {
+      for (const schema of [tool.inputSchema, tool.outputSchema]) {
+        if (schema === undefined) continue;
+        expect(Reflect.get(schema, Symbol.for("vercel.ai.schema"))).toBe(true);
+        expect(asSchema(schema)).toBe(schema);
+        expect("~standard" in schema).toBe(false);
+        expect("_zod" in schema).toBe(false);
+      }
+    }
+    expect(getJsonSchema(result.remote)).toEqual(remote);
+    await expect(
+      asSchema(result.remote!.inputSchema).validate?.({
+        page_id: "1f2e3d4c5b6a79881f2e3d4c5b6a7988",
+        target: { id: "db-1", kind: "database" },
+      }),
+    ).resolves.toMatchObject({ success: true });
+    await expect(asSchema(result.remote!.inputSchema).validate?.({})).resolves.toMatchObject({
+      success: false,
+    });
   });
 
   it("supports client-side tools without server executors", () => {

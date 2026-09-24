@@ -9,7 +9,9 @@ import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
  * firewall so secrets never enter the sandbox process:
  *
  * ```ts
- * const sandbox = await ctx.getSandbox();
+ * import { environment } from "../sandbox";
+ *
+ * const sandbox = await ctx.getSandbox(environment);
  * await sandbox.setNetworkPolicy({
  *   allow: {
  *     "github.com": [{ transform: [{ headers: { authorization: "Basic ..." } }] }],
@@ -19,9 +21,8 @@ import type * as Vercel from "#compiled/@vercel/sandbox/index.js";
  * ```
  *
  * The Docker provider honors only the coarse `"allow-all"` and
- * `"deny-all"` policies; the just-bash provider rejects `setNetworkPolicy`
- * entirely (its network policy is fixed at sandbox creation and it runs
- * no binaries to govern).
+ * `"deny-all"` policies. just-bash environments do not expose
+ * `setNetworkPolicy` because their network policy is fixed at sandbox creation.
  */
 export type SandboxNetworkPolicy = Vercel.NetworkPolicy;
 

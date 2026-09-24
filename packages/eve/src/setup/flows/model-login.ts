@@ -82,6 +82,10 @@ type LoginInput = {
   agentRoot?: string;
   prompter: Prompter;
   automatic?: boolean;
+  /** Connection selected by the TUI's `/login <connection>` completion. */
+  selected?: ModelConnectionSelection;
+  /** TUI callers can omit the redundant picker heading beneath `/login`. */
+  connectionMessage?: string;
   signal?: AbortSignal;
   /** Applies writes under one watcher lease and waits for runtime activation. */
   withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
@@ -289,12 +293,16 @@ export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult
         );
       }
     }
+    let selectedFromCommand = input.selected;
     while (true) {
-      const selected = await prompter.select({
-        message: "Choose a connection",
-        search: true,
-        options: [...CONNECTION_OPTIONS],
-      });
+      const selected =
+        selectedFromCommand ??
+        (await prompter.select({
+          message: input.connectionMessage ?? "Choose a connection",
+          search: true,
+          options: [...CONNECTION_OPTIONS],
+        }));
+      selectedFromCommand = undefined;
       if (!isModelConnection(selected)) throw new Error("Choose a model connection.");
       try {
         const result = await connect(selected, false);

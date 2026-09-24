@@ -1,6 +1,6 @@
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import { isForbiddenApiFailure } from "./vercel-api-failure.js";
 import type { VercelProjectOperationOptions } from "./project-resolution.js";

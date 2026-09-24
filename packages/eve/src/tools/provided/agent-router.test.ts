@@ -29,8 +29,8 @@ describe("agentRouter", () => {
       properties: { outputSchema: { type: "object" } },
     });
     expect(JSON.stringify(serialized)).not.toContain('"propertyNames"');
-    expect(() =>
-      AGENT_ROUTER_INPUT_SCHEMA.parse({
+    expect(
+      AGENT_ROUTER_INPUT_SCHEMA["~standard"].validate({
         message: "Return a structured result",
         outputSchema: {
           $defs: { answer: { type: "string" } },
@@ -38,7 +38,7 @@ describe("agentRouter", () => {
           type: "object",
         },
       }),
-    ).not.toThrow();
+    ).not.toHaveProperty("issues");
   });
 
   it("routes through all workflow agent descriptions", async () => {

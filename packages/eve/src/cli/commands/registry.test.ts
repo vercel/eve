@@ -438,7 +438,27 @@ describe("registry commands", () => {
     },
   );
 
-  it("rejects Web Chat before it can write into an agent workspace member", async () => {
+  it("rejects Web Chat at an unselected workspace root before mutation", async () => {
+    const logger = createLogger();
+    resolveEveProjectContext.mockResolvedValue({
+      environmentRoot: "/project",
+      kind: "workspace",
+      workspace: {
+        root: "/project",
+        members: [{ appRoot: "/project/agents/support", name: "support" }],
+      },
+    });
+
+    await runAddCommand(logger, "/project", "channel/web", {});
+
+    expect(logger.errors).toEqual(["Web Chat setup requires a selected workspace agent."]);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("installs Web Chat at the workspace root and sets up the selected member", async () => {
     const logger = createLogger();
     const appRoot = "/project/agents/support";
     resolveEveProjectContext.mockResolvedValue({
@@ -450,15 +470,40 @@ describe("registry commands", () => {
         members: [{ appRoot, name: "support" }],
       },
     });
-
-    await runAddCommand(logger, appRoot, "channel/web", {});
-
-    expect(logger.errors).toEqual([
-      "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
     ]);
-    expect(getRegistryItems).not.toHaveBeenCalled();
-    expect(addRegistryItems).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+
+    await runAddCommand(
+      logger,
+      appRoot,
+      "channel/web",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/channel/web.json"], {
+      config: expect.any(Object),
+      cwd: "/project",
+      overwrite: undefined,
+      silent: undefined,
+    });
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      appRoot,
+      expect.any(Object),
+      "channel/web",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
+    expect(logger.errors).toEqual([]);
   });
 
   it("surfaces required deployment in non-interactive completion", async () => {

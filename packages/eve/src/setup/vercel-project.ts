@@ -2,7 +2,7 @@ import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
 import pc from "#compiled/picocolors/index.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import {
   assertNoLegacyProjectLinkDirectory,
@@ -32,6 +32,7 @@ import {
   ensureCreatedProjectFramework,
   type CreatedProjectFrameworkOptions,
 } from "./vercel-project-framework.js";
+import { configureTraceSampling } from "./vercel-trace-sampling.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
@@ -54,7 +55,10 @@ export interface PickTeamOptions extends VercelProjectOperationOptions {
   selectMessage?: (currentTeam: string) => string;
 }
 
-export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {}
+export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {
+  /** Configure 100% trace sampling when creating a Vercel project. */
+  traceSampling?: boolean;
+}
 
 /** Effects used to ensure an interactive Vercel project link. */
 export interface EnsureLinkedVercelProjectDeps {
@@ -659,6 +663,8 @@ export async function linkProject(
     if (!linked) return undefined;
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
+    if (options.traceSampling === true)
+      await configureTraceSampling(link, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,
       projectRoot,

@@ -4,6 +4,7 @@ import { initialSelectState } from "#setup/cli/select-state.js";
 import { lineOf } from "./line-editor.js";
 import {
   renderAcknowledgeQuestion,
+  renderFlowDrawer,
   renderFlowPanel,
   renderSelectQuestion,
   renderTextQuestion,
@@ -205,6 +206,66 @@ describe("renderFlowPanel", () => {
   });
 });
 
+describe("renderFlowDrawer", () => {
+  it("frames an active flow while keeping its title out of the body", () => {
+    const rows = renderFlowDrawer(
+      {
+        title: "add to your agent",
+        lines: [],
+        content: {
+          kind: "question",
+          title: "add to your agent",
+          rows: ["  Set up Vercel Connect", "  Use portable credentials"],
+        },
+      },
+      theme,
+      60,
+    );
+
+    expect(rows.rows[0]).toBe("─".repeat(60));
+    expect(rows.rows[1]).toBe("");
+    expect(rows.rows[2]).toBe(" ┃ add to your agent");
+    expect(rows.rows.at(-2)).toBe("");
+    expect(rows.rows.at(-1)).toBe("─".repeat(60));
+    expect(rows.rows.join("\n").split("add to your agent")).toHaveLength(2);
+  });
+
+  it("places question controls below the drawer boundary", () => {
+    const drawer = renderFlowDrawer(
+      {
+        title: "",
+        lines: [],
+        content: {
+          kind: "question",
+          rows: ["  Vercel account", "", "  ↑/↓ move · Enter select · Esc close"],
+        },
+      },
+      theme,
+      60,
+    );
+
+    expect(drawer.rows).toEqual(["─".repeat(60), "", "   Vercel account", "", "─".repeat(60)]);
+    expect(drawer.controls).toEqual(["↑/↓ move · Enter select · Esc close"]);
+  });
+
+  it("omits the drawer header for a titleless flow", () => {
+    const rows = renderFlowDrawer(
+      {
+        title: "",
+        lines: [],
+        content: { kind: "question", rows: ["  Vercel account"] },
+      },
+      theme,
+      60,
+    );
+
+    expect(rows).toEqual({
+      rows: ["─".repeat(60), "", "   Vercel account", "", "─".repeat(60)],
+      controls: [],
+    });
+  });
+});
+
 describe("renderSelectQuestion", () => {
   it.each([32, 100])(
     "filters by capability without displaying search metadata at width %i",
@@ -223,7 +284,8 @@ describe("renderSelectQuestion", () => {
         theme,
         width,
       ).join("\n");
-      expect(text).toContain("› Blooio");
+      expect(text).toContain("Blooio");
+      expect(text).not.toContain("›");
       expect(text).not.toContain("Slack");
       expect(text).not.toContain("Send and receive");
     },
@@ -260,7 +322,7 @@ describe("renderSelectQuestion", () => {
       "  Source: Official eve registry",
       "  Packages: @agent-browser/eve",
       "",
-      "   › Add to project",
+      "     Add to project",
       "     Back",
     ]);
   });
@@ -282,8 +344,9 @@ describe("renderSelectQuestion", () => {
     expect(text).not.toContain("▔".repeat(10));
     // The lone hint sits one space past its own label — the longer hint-less
     // "Link an existing project" no longer pads the column open.
-    expect(text).toContain("   › Create a new project · fastest");
-    expect(text).toContain("    Link an existing project");
+    expect(text).toContain("   Create a new project · fastest");
+    expect(text).toContain("   Link an existing project");
+    expect(text).not.toContain("›");
     expect(text).not.toContain("1.");
     expect(text).toContain("esc to cancel");
   });
@@ -327,7 +390,8 @@ describe("renderSelectQuestion", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("   › Link to another project");
+    expect(text).toContain("   Link to another project");
+    expect(text).not.toContain("›");
     expect(text).not.toContain("1.");
 
     const colored = renderSelectQuestion(
@@ -340,7 +404,7 @@ describe("renderSelectQuestion", () => {
       colorTheme,
       60,
     ).join("\n");
-    expect(colored).toContain("\x1b[1m › Link to another project\x1b[22m");
+    expect(colored).toContain("\x1b[1mLink to another project\x1b[22m");
   });
 
   it("renders completed task rows as focusable but not highlighted actions", () => {
@@ -376,18 +440,17 @@ describe("renderSelectQuestion", () => {
       80,
     );
 
-    // The focused completed row reads as inert: a dim pointer, not a check.
+    // Completed rows retain an inert cursor rather than borrowing the
+    // available-row selection weight; resting rows retain their checks.
     expect(rows).toContain("   › Terminal UI · Already installed");
-    expect(rows).not.toContain("   ✓ Terminal UI");
-    // An unfocused completed row keeps its check.
     expect(rows).toContain("   ✓ Web Chat");
     expect(rows).toContain("     Done");
     const warning = rows.indexOf("  ⚠ Overwrote /tmp/weather-agent");
     const success = rows.indexOf("  ✓ Scaffolded channel: web");
     const done = rows.indexOf("     Done");
-    expect(rows.indexOf("     Slack       · Creates slackbot and deploys to Vercel")).toBeLessThan(
-      warning,
-    );
+    const slack = rows.indexOf("     Slack       · Creates slackbot and deploys to Vercel");
+    expect(slack).toBeGreaterThanOrEqual(0);
+    expect(slack).toBeLessThan(warning);
     expect(warning).toBeLessThan(success);
     expect(success).toBeLessThan(done);
     expect([rows[warning - 1], rows[done - 1]]).toEqual(["", ""]);
@@ -404,11 +467,11 @@ describe("renderSelectQuestion", () => {
       80,
     );
     const coloredRow = coloredRows.find((row) => row.includes("Terminal UI"));
-    // Focused completed row: dim pointer matching the dim label, never green or cyan.
-    expect(coloredRow).toContain("\x1b[2m›\x1b[22m");
+    // Completed rows remain dim and never borrow the selected row's weight.
     expect(coloredRow).toContain("\x1b[2mTerminal UI\x1b[22m");
     expect(coloredRow).toContain("\x1b[2m · Already installed\x1b[22m");
-    expect(coloredRow).not.toContain("\x1b[32m");
+    expect(coloredRow).toContain("\x1b[2m›\x1b[22m");
+    expect(coloredRow).not.toContain("\x1b[32m✓\x1b[39m");
     expect(coloredRow).not.toContain("\x1b[36m");
   });
 
@@ -423,7 +486,8 @@ describe("renderSelectQuestion", () => {
       theme,
       60,
     ).join("\n");
-    expect(multi).toContain("   › Create a new project ");
+    expect(multi).toContain("   Create a new project ");
+    expect(multi).not.toContain("›");
     expect(multi).not.toContain("1.");
 
     const searchable = renderSelectQuestion(
@@ -718,7 +782,8 @@ describe("renderSelectQuestion", () => {
       60,
     ).join("\n");
 
-    expect(text).toContain("› Create a new project");
+    expect(text).toContain("Create a new project");
+    expect(text).not.toContain("›");
     expect(text).toContain("✓ Link an existing project");
     expect(text).toContain("Submit");
     expect(text).toContain("space to toggle");
@@ -769,16 +834,30 @@ describe("renderSelectQuestion", () => {
     );
     const text = rows.join("\n");
 
-    // The filter rail sits in the option rows' glyph column.
-    expect(text).toContain("   type to filter");
-    expect(text).toContain("   › Model 0");
+    // The empty filter is a block-cursor field directly above its first result.
+    expect(text).toContain("   search…\n     Model 0");
+    expect(text).toContain("     Model 0");
     expect(text).toContain("     Model 4");
+    expect(text).not.toContain("›");
     expect(text).not.toContain("Model 5");
     // The list scrolls silently: no count row, Esc is the whole footer.
     expect(text).not.toContain("options, showing");
     expect(text).toContain("Esc back");
     expect(text).not.toContain("type to filter ·");
     expect(text).not.toContain("↑/↓ move");
+
+    const colored = renderSelectQuestion(
+      {
+        kind: "search",
+        message: "Which model?",
+        options: many,
+        placeholder: "type to filter",
+        select: initialSelectState({ options: many }),
+      },
+      colorTheme,
+      60,
+    ).join("\n");
+    expect(colored).toContain(colorTheme.colors.inverse("s"));
   });
 
   it("paints a validation error inside the question", () => {
@@ -949,10 +1028,12 @@ describe("compact menus", () => {
       columns,
     );
     const text = stripAnsi(rows.join("\n"));
-    expect(text).toContain("› Vercel account");
+    expect(text).toContain("Vercel account");
+    expect(text).not.toContain("›");
     expect(text).toContain("OpenAI API key");
     expect(rows.join("\n")).not.toContain("\x1b[7m");
-    expect(rows.join("\n")).toContain("\x1b[1m");
+    expect(rows.join("\n")).toContain("\x1b[1mVercel account\x1b[22m");
+    expect(rows.join("\n")).toContain("\x1b[2mOpenAI API key\x1b[22m");
     expect(text).not.toContain("▔");
     expect(
       rows
@@ -967,7 +1048,8 @@ describe("compact menus", () => {
       colorTheme,
       80,
     );
-    expect(stripAnsi(rows.join("\n"))).toContain("› Reconnect");
+    expect(stripAnsi(rows.join("\n"))).toContain("Reconnect");
+    expect(stripAnsi(rows.join("\n"))).not.toContain("›");
     expect(rows.join("\n")).not.toContain("\x1b[7m");
   });
 });

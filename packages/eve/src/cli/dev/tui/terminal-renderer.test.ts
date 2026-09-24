@@ -4723,7 +4723,7 @@ describe("TerminalRenderer setup flow session", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).not.toContain("/deploy");
+    expect(snapshot).toContain("┃ /deploy");
     expect(snapshot).toContain("This directory is not linked yet.");
     expect(snapshot).toContain("Vercel project");
 
@@ -4792,9 +4792,9 @@ describe("TerminalRenderer setup flow session", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Slack channel was not added");
     expect(snapshot).not.toContain("Scaffolding Web Chat channel files");
-    // Focused completed row reads inert: a dim pointer, not a check.
+    // A focused completed row retains a dim inert cursor; resting completed
+    // rows retain their semantic check without borrowing selection weight.
     expect(snapshot).toContain("› Terminal UI · Already installed");
-    expect(snapshot).not.toContain("✓ Terminal UI");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
     expect(snapshot).toContain("Dependency installation failed.");
@@ -5242,32 +5242,67 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
   });
 
-  it("shows loading before model argument suggestions arrive", async () => {
-    const screen = new MockScreen({ columns: 80, rows: 30 });
-    const input = new MockUserInput();
-    const suggestions = Promise.withResolvers<
-      readonly {
-        value: string;
-        label: string;
-        hint?: string;
-      }[]
-    >();
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: false,
-      unicode: true,
-      argumentSuggestions: async () => suggestions.promise,
-    });
+  it("delays loading until model argument suggestions remain pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const input = new MockUserInput();
+      const suggestions = Promise.withResolvers<
+        readonly {
+          value: string;
+          label: string;
+          hint?: string;
+        }[]
+      >();
+      const renderer = new TerminalRenderer({
+        input,
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        argumentSuggestions: async () => suggestions.promise,
+      });
 
-    const prompt = renderer.readPrompt();
-    input.type("/model ");
-    expect(screen.snapshot()).toContain("Loading models…");
-    suggestions.resolve([{ value: "openai/gpt-5", label: "GPT-5" }]);
-    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
-    input.enter();
-    await prompt;
-    renderer.shutdown();
+      const prompt = renderer.readPrompt();
+      input.type("/model ");
+      expect(screen.snapshot()).not.toContain("Loading models…");
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(screen.snapshot()).toContain("Loading models…");
+
+      suggestions.resolve([{ value: "openai/gpt-5", label: "GPT-5" }]);
+      await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
+      input.enter();
+      await prompt;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not paint loading when argument suggestions resolve within the delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const input = new MockUserInput();
+      const renderer = new TerminalRenderer({
+        input,
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        argumentSuggestions: async () => [{ value: "openai/gpt-5", label: "GPT-5" }],
+      });
+
+      const prompt = renderer.readPrompt();
+      input.type("/model ");
+      await vi.advanceTimersByTimeAsync(499);
+      expect(screen.snapshot()).toContain("openai/gpt-5");
+      expect(screen.snapshot()).not.toContain("Loading models…");
+      input.enter();
+      await prompt;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("advances to reasoning after selecting a model with reasoning choices", async () => {

@@ -86,6 +86,7 @@ import {
   shouldCompact,
 } from "#harness/compaction.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
@@ -224,6 +225,7 @@ import {
   buildToolSetWithProviderTools,
 } from "#harness/tools.js";
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { toModelSchema } from "#tools/schema.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { createHistoryViewPreparer, type HistoryViewProjector } from "#shared/history-view.js";
@@ -1183,7 +1185,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             data: {
               sequence: emissionState.sequence,
               stepIndex: emissionState.stepIndex,
-              turnId: emissionState.turnId,
+              turnId: activeTurnId(emissionState),
             },
             type: "step.started",
           } as UnstampedMessageStreamEvent,
@@ -1429,6 +1431,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
       for (const tool of Object.values(effectiveTools)) {
+        // Whatever produced this tool, the AI SDK must only receive its own
+        // schema type; see toModelSchema.
+        tool.inputSchema = toModelSchema(tool.inputSchema, "input");
+        if (tool.outputSchema !== undefined) {
+          tool.outputSchema = toModelSchema(tool.outputSchema, "output");
+        }
         const execute = tool.execute;
         if (execute !== undefined)
           tool.execute = (...args) => {
@@ -2888,8 +2896,8 @@ async function handleStepResult(input: {
 
   if (
     config.mode === "task" &&
-    contextStorage.getStore()?.get(ScheduleIdKey) !== undefined &&
-    contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true
+    (getBackgroundTasks(nextSession.state).query({ state: "working" }).length > 0 ||
+      contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true)
   ) {
     return deferTaskTurn({
       emissionState,
@@ -2925,7 +2933,7 @@ async function handleStepResult(input: {
   });
 }
 
-/** Keeps a scheduled task session open until its background work settles. */
+/** Keeps a task session open until its background work settles. */
 async function deferTaskTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];

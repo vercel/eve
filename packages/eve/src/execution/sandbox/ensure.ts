@@ -273,7 +273,10 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     return requiring;
   }
 
+  const activeDefinition = registered.inheritance?.definition ?? registered.definition;
+
   return {
+    environment: activeDefinition.kind === "independent" ? activeDefinition.environment : undefined,
     async captureState() {
       if (opening !== undefined) await opening;
       return { session: persisted };

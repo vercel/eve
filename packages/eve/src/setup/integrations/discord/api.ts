@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
 

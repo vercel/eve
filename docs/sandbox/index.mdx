@@ -28,6 +28,17 @@ export default defineTool({
 
 Relative paths resolve under `/workspace`. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
 
+Pass the configured environment to preserve its specific session capabilities in authored runtime code:
+
+```ts
+import { environment } from "../sandbox";
+
+const sandbox = await ctx.getSandbox(environment);
+await sandbox.setNetworkPolicy("deny-all");
+```
+
+For example, a Vercel environment returns a handle with `setNetworkPolicy()`. The common handle from `ctx.getSandbox()` does not expose provider-specific capabilities. The environment must match the one configured for the current sandbox.
+
 ## Define an environment
 
 A sandbox module exports an environment and returns a sandbox from `defineSandbox()`:

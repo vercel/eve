@@ -98,7 +98,6 @@ function commandSandbox(
     async readTextFile({ path }) {
       return path.endsWith("diagnostics.cjs") ? worker : null;
     },
-    async setNetworkPolicy() {},
     async removePath() {},
     async spawn() {
       throw new Error("not used by this test");

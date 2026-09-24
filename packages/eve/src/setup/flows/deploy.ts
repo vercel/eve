@@ -53,6 +53,7 @@ export async function runDeployFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  traceSampling?: boolean;
   /** False when no TTY: an unlinked directory refuses instead of prompting. */
   interactive: boolean;
   deps?: Partial<DeployFlowDeps>;
@@ -117,7 +118,11 @@ export async function runDeployFlow(input: {
           mode: { headless: false },
           deps: deps.resolveProvisioning,
         }),
-        linkVercelProject({ prompter, deps: deps.linkProject }),
+        linkVercelProject({
+          prompter,
+          traceSampling: input.traceSampling,
+          deps: deps.linkProject,
+        }),
         deployProject({ prompter, headless: !interactive, deps: deps.deployProject }),
       ];
 

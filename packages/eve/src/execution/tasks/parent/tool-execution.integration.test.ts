@@ -21,10 +21,7 @@ import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import {
-  getBackgroundWorkflowToolRuns,
-  registerWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 vi.mock("#execution/tools/subagent/steer.js", () => ({ steerBackgroundAgent: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   sendTaskCommand: vi.fn(async () => "delivered"),
@@ -148,7 +145,11 @@ describe("background subagent steering", () => {
     expect(receipt).toEqual({ agentId: identity.id, status: "working", taskId: entry.task.taskId });
     const session = await scope.commit();
     expect(getAgentHandleStore(session.state)?.handles).toEqual([handle]);
-    expect(getBackgroundWorkflowToolRuns(session.state)).toEqual([entry]);
+    expect(
+      getBackgroundTasks(session.state)
+        .query()
+        .map(({ run }) => run),
+    ).toEqual([entry]);
     expect(startTaskRun).not.toHaveBeenCalled();
     expect(waitForTaskCommandOwner).not.toHaveBeenCalled();
     expect(sendTaskCommand).not.toHaveBeenCalled();
@@ -178,9 +179,10 @@ describe("background subagent steering", () => {
 
     await scope.execute("new-call", "");
     const committed = await scope.commit();
-    const task = getBackgroundWorkflowToolRuns(committed.state).find(
-      (candidate) => candidate.task.taskId !== entry.task.taskId,
-    );
+    const task = getBackgroundTasks(committed.state)
+      .query()
+      .map(({ run }) => run)
+      .find((candidate) => candidate.task.taskId !== entry.task.taskId);
 
     expect(task?.task.dispatchContext).toEqual({
       auth: { current: creatorCurrent, initiator: creatorInitiator },
@@ -199,9 +201,10 @@ describe("background subagent steering", () => {
       },
     });
     expect(
-      getBackgroundWorkflowToolRuns(replayed.state).find(
-        (candidate) => candidate.task.taskId === task.task.taskId,
-      )?.task.dispatchContext,
+      getBackgroundTasks(replayed.state)
+        .query()
+        .map(({ run }) => run)
+        .find((candidate) => candidate.task.taskId === task.task.taskId)?.task.dispatchContext,
     ).toEqual({ auth: { current: creatorCurrent, initiator: creatorInitiator } });
   });
 
@@ -220,9 +223,10 @@ describe("background subagent steering", () => {
 
     await scope.execute("new-call", "");
     const committed = await scope.commit();
-    const task = getBackgroundWorkflowToolRuns(committed.state).find(
-      (candidate) => candidate.task.taskId !== entry.task.taskId,
-    );
+    const task = getBackgroundTasks(committed.state)
+      .query()
+      .map(({ run }) => run)
+      .find((candidate) => candidate.task.taskId !== entry.task.taskId);
 
     expect(task?.task.dispatchContext).toEqual({
       auth: { current: null, initiator: sessionInitiator },
@@ -245,9 +249,10 @@ describe("background subagent steering", () => {
 
       await scope.execute("new-call", "", identity.name, kind);
       const committed = await scope.commit();
-      const task = getBackgroundWorkflowToolRuns(committed.state).find(
-        (candidate) => candidate.task.taskId !== entry.task.taskId,
-      );
+      const task = getBackgroundTasks(committed.state)
+        .query()
+        .map(({ run }) => run)
+        .find((candidate) => candidate.task.taskId !== entry.task.taskId);
 
       expect(task).toBeDefined();
       expect(task?.task.activityWorkIdentity).toMatchObject({
@@ -285,9 +290,10 @@ describe("background subagent steering", () => {
       }),
     );
     const committed = await scope.commit();
-    const task = getBackgroundWorkflowToolRuns(committed.state).find(
-      (candidate) => candidate.task.taskId !== entry.task.taskId,
-    );
+    const task = getBackgroundTasks(committed.state)
+      .query()
+      .map(({ run }) => run)
+      .find((candidate) => candidate.task.taskId !== entry.task.taskId);
 
     expect(task).toMatchObject({
       task: {

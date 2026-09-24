@@ -9,6 +9,12 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 - Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
 - Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
+A subagent can finish a model turn while background tasks started in that turn are still running.
+That turn yields; its interim reply does not complete the caller's delegated task. Background work started by an earlier turn does not hold the reply, and a turn that ends with an error always answers the caller. If the child session expires, resets, or closes before replying, the delegated task fails and reports the usage accumulated since its previous settlement.
+After the nested tasks finish, the subagent resumes and returns its final result to
+the caller. This applies to root-agent copies, declared local subagents, and remote
+subagents. The subagent session remains available for later calls.
+
 ## Completion batching
 
 Overlapping background work owned by a session forms a cohort. Tasks launched in
@@ -99,11 +105,11 @@ The parent can alternatively export `disableTool()` from a same-named tool path,
 
 Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
 
-`task_cancel` is available to sessions that own background tasks, including a child that starts nested background work.
+`task_cancel` is available to sessions that own background tasks, including a child that starts nested background work. Cancelling a delegated agent task also requests cancellation of its child's nested background tasks, even after that child's model turn has yielded. The child does not start another model turn for notifications from that cancelled work. This applies to self, local, and remote delegation. The calling model receives the cancellation receipt in the `task_cancel` result; a later report of that same outcome does not start another model turn.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
-Local `eve dev` mounts the bundled self-modification extension by default, which exposes the `self-modification__agent` subagent without adding files to your project. An authored extension mounted as `self-modification` takes its place. Pass `--no-default-extensions` to run without bundled development extensions. Production builds do not include development extensions unless you mount them in your agent.
+Local `eve dev` makes the bundled `self-modification__agent` subagent available by default. Bundled development extensions are not included in production builds. See [Self-Modification](/docs/guides/self-modification) for the local workflow.
 
 ### Vercel workspace peers
 
@@ -253,7 +259,7 @@ By default, a subagent named `researcher` collides with an authored tool named `
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
-Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, pass the `subagent.called` event to [`session.streamSubagent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent. It reads `subagent.called.data.childStreamPath`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
 
 Both blocking and background invocations emit `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. A background working receipt is returned as an `action.result` tool output and does not emit completion. Background completion events do not wait for the cohort report. Failure and cancellation are not successful completion; task notifications retain those outcomes.
 

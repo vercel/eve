@@ -1,3 +1,8 @@
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import { randomUUID } from "node:crypto";
 
 import {
@@ -59,10 +64,7 @@ import {
   type SandboxProviderPrepareContext,
 } from "#shared/sandbox-provider.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
-import type {
-  InternalSandboxSession,
-  MutableNetworkSandboxSession,
-} from "#shared/sandbox-session.js";
+import type { InternalSandboxSession } from "#shared/sandbox-session.js";
 
 type LiveMicrosandboxOptions = ResolvedMicrosandboxOptions & MicrosandboxSandboxRuntimeOptions;
 
@@ -75,7 +77,7 @@ export type MicrosandboxPreparedArtifact = {
 
 const activeMicrosandboxSessionHandles = new Map<
   string,
-  SandboxProviderHandle<MutableNetworkSandboxSession>
+  SandboxProviderHandle<NetworkPolicySandboxSession>
 >();
 
 export async function prewarmMicrosandboxTemplate(input: {
@@ -229,7 +231,7 @@ export async function createMicrosandboxHandle(input: {
   readonly runtimeOptions?: MicrosandboxSandboxRuntimeOptions;
   readonly sessionIdentity?: string;
 }): Promise<{
-  readonly handle: SandboxProviderHandle<MutableNetworkSandboxSession>;
+  readonly handle: SandboxProviderHandle<NetworkPolicySandboxSession>;
   readonly state: {
     readonly optionsHash: string;
     readonly sessionIdentity: string;
@@ -379,7 +381,7 @@ function createHandle(
   sandbox: MicrosandboxVm,
   _optionsHash: string,
   onShutdown?: () => void,
-): SandboxProviderHandle<MutableNetworkSandboxSession> {
+): SandboxProviderHandle<NetworkPolicySandboxSession> {
   const session = buildSandboxSession(
     createMicrosandboxInternalSession(sandbox),
     async (policy) => {
@@ -414,8 +416,8 @@ function createActiveMicrosandboxSessionKey(sessionRootPath: string, optionsHash
 
 function cacheHandle(
   key: string,
-  handle: SandboxProviderHandle<MutableNetworkSandboxSession>,
-): SandboxProviderHandle<MutableNetworkSandboxSession> {
+  handle: SandboxProviderHandle<NetworkPolicySandboxSession>,
+): SandboxProviderHandle<NetworkPolicySandboxSession> {
   activeMicrosandboxSessionHandles.set(key, handle);
   return handle;
 }

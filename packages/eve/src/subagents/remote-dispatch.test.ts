@@ -1174,6 +1174,22 @@ describe("cancelRemoteAgentTurn", () => {
     );
   });
 
+  it("forwards cancellation of a yielded child's background tasks", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ ok: true, sessionId: "child-1", status: "accepted" }, { status: 202 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await cancelRemoteAgentTurn({ remote: createRemoteAgent(), sessionId: "child-1", tasks: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/eve/v1/session/child-1/cancel",
+      expect.objectContaining({ body: JSON.stringify({ tasks: true }), method: "POST" }),
+    );
+  });
+
   it("preserves a prefixed remote base path on cancel-turn requests", async () => {
     const fetchMock = vi
       .fn()

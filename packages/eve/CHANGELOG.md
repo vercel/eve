@@ -1,5 +1,53 @@
 # eve
 
+## 0.66.2
+
+### Patch Changes
+
+- 306f2ce: Configure 100% Vercel trace sampling across all environments when `eve deploy` creates a new project, with `--no-trace-sampling` to opt out.
+- fdf1364: Ignore JavaScript and TypeScript `*.test.*`/`*.spec.*` modules and `__tests__/` directories during agent discovery.
+- 8565550: Fix `auto()` model selection when a turn resumes after a question or tool approval.
+
+## 0.66.1
+
+### Patch Changes
+
+- 055f1d1: `eve build` and `withEve` during `next build` now build mounted, source-backed workspace extensions before compiling the agent, as `eve dev` already does. Production builds no longer fail when a package manager skips the extension's `prepare` script, such as on a no-op install with a restored `node_modules` cache. An extension whose distribution is already current is not rebuilt, and a failed extension build names the package and the command to run.
+- faacecf: Follow a delegated child's activity from a client with `session.streamSubagent(called, options?)`. Pass a `subagent.called` event from that session. The client reads its `childStreamPath` with the session's host and credentials, so a remote child streams through the parent deployment's proxy route, and the child's cursor stays separate from the parent's. Eval sessions expose the same method with the eval client's credentials.
+- a490d88: `eveChannel({ trustedForwarders })` now receives what the forwarder asserts as a second argument. `assertion.principal` holds the stamped `current` and `initiator` contexts the forwarder asserts, so a receiver can limit a trusted forwarder to the identities it may speak for instead of accepting any principal it asserts.
+- 6e568dc: Allow Web Chat to scaffold as a peer application for standalone agents and agent workspaces, with explicit Next.js or Vercel services hosting. `withEve()` from `eve/next` can discover either project layout from an explicit `eveRoot`, so the peer application does not need to repeat agent paths.
+- d8ddf0d: Add bounded, conversation-scoped trace analysis to self-modification, with filtered search, compact timelines, and batched span payload inspection.
+- d6fc658: Keep a delegated agent task open when its model turn yields while background work started in that turn is still running. Deliver the final result after that work finishes, including usage accumulated across the yielded turns, instead of reporting the interim reply as completion.
+  
+  Propagate task cancellation to a yielded child's nested background work for self, local, and remote delegation, without waking the cancelled child on its nested task notifications. Preserve cancellation across replay and session handoff.
+  
+  Fail an unanswered delegated task when its yielded child session ends, and preserve the unreported usage in that terminal result.
+- 650b309: Use a quieter selected-row treatment and temporary drawer for interactive setup flows in the development TUI. `/add`, `/login`, and `/deploy` now emphasize the focused option with type weight instead of a caret, keep controls below the drawer, and `/login` supports inline connection completion such as `/login openai-api-key`.
+- d6fc658: Keep durable MCP invocations open for pending background subagents so clients receive the delegated result.
+
+## 0.66.0
+
+### Minor Changes
+
+- da906b6: Breaking: `ctx.getSkill()` and the `SkillHandle` and `SkillFile` types from `eve/skills` are removed. The model still reads skill supporting files with its sandbox tools; if your own tool or hook code needs that data, import it from a module in `lib/` instead. Existing extension builds keep loading unless they call `ctx.getSkill()`.
+- ee286fe: Pass a configured sandbox environment to `ctx.getSandbox(environment)` to preserve its provider-specific session capabilities in the returned eve sandbox handle. The common `SandboxSession` no longer exposes optional `setNetworkPolicy`; use the configured environment when accessing that capability.
+
+### Patch Changes
+
+- c541dec: Leave temperature at the model provider's default when generating compaction summaries so providers that reject explicit sampling parameters can compact normally.
+- 1b6366f: Tolerate concurrent Docker sandbox template publication when another Eve application publishes the same deterministic image first.
+- d50a774: Add the `eve/extensions/code` built-in extension for coding agents: mount it with `import code from "eve/extensions/code"` to get `apply_patch`, `gh`, `grep`, computer use, coding skills, and a read-only worker subagent. Sandbox, tool, and PR-watch helpers are exported from `eve/extensions/code/sandbox`, `eve/extensions/code/tools`, and `eve/extensions/code/prwatch`.
+- 23dda94: `subagent.called` and `subagent.completed` hooks can now call `ctx.getSandbox()` for the parent session, and sandbox changes they make are kept for the parent's next turn.
+- 5132625: Add inline, keyboard-navigable catalog completions for `/model` and `/add` in the development TUI.
+- 92505dd: Fix `Cannot read properties of undefined (reading 'push')` failures in turns with MCP tools such as Notion, and with the file-memory tools, when an app installs a different Zod version than eve bundles. Tool schemas now reach the AI SDK only as JSON Schema, MCP and other JSON Schema tools are advertised exactly as published and validated with a standard JSON Schema validator, and the `*_INPUT_SCHEMA` and `*_OUTPUT_SCHEMA` constants from `eve/tools/*` are JSON Schema-backed Standard Schemas instead of Zod objects.
+  
+  eve now ships a single private copy of Zod instead of bundling several. `eve/client` no longer exports `AgentInfoResultSchema`, `HealthResultSchema`, `inputOptionSchema`, `inputRequestKindSchema`, `inputRequestSchema`, or `inputResponseSchema`, and `eve/self-modification` no longer exports `selfModificationConfigSchema`; use the exported types together with `isInputRequest`, `isInputResponse`, and `parseInputResponse`.
+- 136d339: Load optional sandbox provider packages consistently from the application during preparation, start, and resume. Providers installed automatically by `eve dev` can now be used immediately without restarting the development server.
+- da906b6: Dynamic skills no longer start a sandbox to announce or load instructions. Skills that return supporting files are written only when their contents or sandbox change, and a changed package replaces its previous files instead of leaving stale ones behind.
+- 09fed04: The Slack channel's `views.open` and answered-card `chat.update` now go through the channel's own Slack API transport. Slack sees the same calls, and a `views.open` that fails after Slack responds is still logged and acknowledged.
+  
+  A failed `views.open` is now logged as `Slack views.open failed` with the error attached, where it was `Slack views.open returned non-2xx` with a `status` field. Alerts or log queries keyed on either need updating.
+
 ## 0.65.0
 
 ### Minor Changes

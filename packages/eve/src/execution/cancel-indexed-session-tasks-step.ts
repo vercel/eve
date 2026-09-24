@@ -9,7 +9,7 @@ import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getBackgroundWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 
 const log = createLogger("execution.cancel-indexed-session-tasks");
 
@@ -30,15 +30,28 @@ export async function cancelAllIndexedSessionTasksStep(input: {
     return { sessionState: input.sessionState };
   }
 
-  let entries;
+  let tasks;
+  let working;
   try {
-    entries = getBackgroundWorkflowToolRuns(durable.state);
+    tasks = getBackgroundTasks(durable.state);
+    working = tasks.query({ state: "working" });
   } catch (error) {
     logError(log, "failed to read the task index", error, {
       parentSessionId: durable.sessionId,
     });
     return { sessionState: input.sessionState };
   }
+  // A cancelled task is retried: its earlier cancellation may have committed before its child
+  // stopped. Reading retained outcomes can fail without blocking cancellation of live work.
+  let retries: typeof working = [];
+  try {
+    retries = tasks.query({ state: "cancelled" });
+  } catch (error) {
+    logError(log, "failed to read cancelled task outcomes", error, {
+      parentSessionId: durable.sessionId,
+    });
+  }
+  const entries = [...working, ...retries].map((task) => task.run);
   if (entries.length === 0) return { sessionState: input.sessionState };
   if (input.serializedContext === undefined) {
     throw new Error("Indexed task cancellation requires serialized runtime context.");

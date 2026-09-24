@@ -80,7 +80,7 @@ export async function notifyDelegatedParentStep(input: {
 export interface SettledTurnNotification {
   readonly output: unknown;
   readonly isError?: boolean;
-  /** Usage this turn added; omitted (zero) on crash and expiry paths. */
+  /** Usage accumulated since the previous caller settlement, including yielded turns. */
   readonly usage?: TokenUsage;
 }
 

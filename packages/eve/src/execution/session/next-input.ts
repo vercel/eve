@@ -14,7 +14,6 @@ import {
 } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { getSessionTaskCohorts } from "#tasks/session-task-cohorts.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
@@ -54,18 +53,15 @@ export async function nextTurnDelivery(input: {
       queue.replaceDelivery(sequence, routed.kind === "cancel-turn" ? undefined : routed.remainder);
       if (routed.kind === "cancel-turn") return routed;
     }
-    const selected = queue.takeNext(
-      getSessionTaskCohorts(cursor.sessionState.snapshot.session.state),
-      {
-        deferDeliveries: input.deferDeliveries,
-        taskDeliveryPolicy:
-          cursor.serializedContext[TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME] === "auto"
-            ? "auto"
-            : "cohort",
-        expectedAttemptIds: input.expectedAttemptIds,
-        freshSequence: inbox.hasPending() ? undefined : freshSequence,
-      },
-    );
+    const selected = queue.takeNext(cursor.sessionState.snapshot.session.state, {
+      deferDeliveries: input.deferDeliveries,
+      taskDeliveryPolicy:
+        cursor.serializedContext[TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME] === "auto"
+          ? "auto"
+          : "cohort",
+      expectedAttemptIds: input.expectedAttemptIds,
+      freshSequence: inbox.hasPending() ? undefined : freshSequence,
+    });
     if (selected?.kind === "control") return { kind: selected.control };
     if (selected?.kind === "authorization-resume") return selected;
     if (selected?.kind === "turn") {

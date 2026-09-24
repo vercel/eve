@@ -51,13 +51,13 @@ describe("buildSandboxSession", () => {
       },
     };
 
-    await session.setNetworkPolicy?.(policy);
+    await session.setNetworkPolicy(policy);
 
     expect(apply).toHaveBeenCalledWith(policy);
   });
 
-  it("omits setNetworkPolicy when no applier is supplied", () => {
-    expect(buildSandboxSession(createTestPrimitives()).setNetworkPolicy).toBeUndefined();
+  it("returns the common session surface when no applier is supplied", () => {
+    expect(buildSandboxSession(createTestPrimitives())).not.toHaveProperty("setNetworkPolicy");
   });
 
   // ---------------------------------------------------------------------------

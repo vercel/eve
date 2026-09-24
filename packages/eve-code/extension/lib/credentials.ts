@@ -1,4 +1,8 @@
-import type { MutableNetworkSandboxSession, SandboxSession } from "eve/sandbox";
+import type { SandboxNetworkPolicy, SandboxSession } from "eve/sandbox";
+
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 
 import { toolingPaths } from "./tooling.ts";
 
@@ -123,8 +127,8 @@ async function writeToolEnvironment(
   }
 }
 
-function hasMutableNetworkPolicy(sandbox: SandboxSession): sandbox is MutableNetworkSandboxSession {
-  return sandbox.setNetworkPolicy !== undefined;
+function hasMutableNetworkPolicy(sandbox: SandboxSession): sandbox is NetworkPolicySandboxSession {
+  return "setNetworkPolicy" in sandbox;
 }
 
 function shellQuote(value: string): string {

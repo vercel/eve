@@ -1,7 +1,7 @@
 import { createPromptCommandOutput, withPhase, type ChannelSetupLog } from "#setup/cli/index.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 export const TEAMS_TRIGGER_PATH = "/eve/v1/teams";
 

@@ -8,7 +8,13 @@ import { readClientContext } from "#internal/client-context.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
-import { eveChannel, defaultEveAuth, type EveChannelInput } from "#public/channels/eve.js";
+import {
+  eveChannel,
+  defaultEveAuth,
+  type EveChannelInput,
+  type ForwardedAssertion,
+  type TrustedForwarders,
+} from "#public/channels/eve.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs, SendPayload } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -2040,8 +2046,33 @@ describe("eveChannel — forwarded principal", () => {
     subject: "U999",
   };
 
+  const PASSPORT_USER: SessionAuthContext = {
+    attributes: {},
+    authenticator: "vercel-passport",
+    issuer: "router",
+    principalId: "user-1",
+    principalType: "user",
+  };
+
   function forwardedRequest(forwardedPrincipal: unknown): Request {
     return createJsonMessageRequest({ forwardedPrincipal, message: "hi", mode: "task" });
+  }
+
+  function stamped(context: SessionAuthContext): SessionAuthContext {
+    return {
+      ...context,
+      attributes: { ...context.attributes, "eve:forwarded-by": ROUTER_CALLER.principalId },
+    };
+  }
+
+  /** The router may forward only its own Passport users, never Slack or other identities. */
+  function routerMayAssert(forwarder: SessionAuthContext, assertion: ForwardedAssertion): boolean {
+    if (forwarder.principalId !== ROUTER_CALLER.principalId) return false;
+    if (assertion.principal === undefined) return false;
+    const { current, initiator } = assertion.principal;
+    return (
+      current.authenticator === "vercel-passport" && initiator.authenticator === "vercel-passport"
+    );
   }
 
   it("rejects a forwarded body when the channel has no trustedForwarders", async () => {
@@ -2058,8 +2089,8 @@ describe("eveChannel — forwarded principal", () => {
   });
 
   it("rejects a caller the predicate refuses", async () => {
-    const trustedForwarders = vi.fn(
-      (caller: SessionAuthContext) => caller.principalId === "someone-else",
+    const trustedForwarders = vi.fn<TrustedForwarders>(
+      (caller) => caller.principalId === "someone-else",
     );
     const handler = createEveCreateHandler({
       trustedForwarders,
@@ -2069,12 +2100,46 @@ describe("eveChannel — forwarded principal", () => {
     const response = await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
 
     expect(response.status).toBe(403);
-    expect(trustedForwarders).toHaveBeenCalledWith(ROUTER_CALLER);
+    expect(trustedForwarders).toHaveBeenCalledWith(ROUTER_CALLER, {
+      principal: { current: stamped(FORWARDED_CURRENT), initiator: stamped(FORWARDED_CURRENT) },
+    });
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: "Caller is not authorized to assert a forwarded principal.",
       ok: false,
     });
+  });
+
+  it.each([
+    { name: "a Slack current principal", forwarded: { current: FORWARDED_CURRENT } },
+    {
+      name: "a Slack initiator",
+      forwarded: { current: PASSPORT_USER, initiator: FORWARDED_INITIATOR },
+    },
+  ])("rejects a trusted forwarder asserting $name it may not assert", async ({ forwarded }) => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: routerMayAssert,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(forwardedRequest(forwarded));
+
+    expect(response.status).toBe(403);
+    expect(handler.send).not.toHaveBeenCalled();
+  });
+
+  it("accepts a trusted forwarder asserting a principal it may assert", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: routerMayAssert,
+      auth: () => ROUTER_CALLER,
+    });
+
+    const response = await handler.fetch(forwardedRequest({ current: PASSPORT_USER }));
+
+    expect(response.status).toBe(202);
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
+    expect(options.auth).toEqual(stamped(PASSPORT_USER));
+    expect(options.initiatorAuth).toEqual(stamped(PASSPORT_USER));
   });
 
   it("rejects a malformed forwarded payload with 400", async () => {
@@ -2317,6 +2382,24 @@ describe("eveChannel — forwarded principal", () => {
     expect(onMessage.mock.calls[0]?.[0].eve.caller?.principalId).toBe(
       FORWARDED_CURRENT.principalId,
     );
+  });
+
+  it("rejects a continuation asserting a principal the forwarder may not assert", async () => {
+    const handler = createEveContinueHandler({
+      auth: () => ROUTER_CALLER,
+      trustedForwarders: routerMayAssert,
+    });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session/test-session-id", {
+        body: JSON.stringify({ forwardedPrincipal: { current: FORWARDED_CURRENT }, message: "hi" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(handler.send).not.toHaveBeenCalled();
   });
 
   it("rejects a forwarded continuation when the channel has no trustedForwarders", async () => {

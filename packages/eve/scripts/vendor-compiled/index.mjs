@@ -12,6 +12,7 @@ import openai from "./@ai-sdk/openai.mjs";
 import otel from "./@ai-sdk/otel.mjs";
 import provider from "./@ai-sdk/provider.mjs";
 import providerUtils from "./@ai-sdk/provider-utils.mjs";
+import cfworkerJsonSchema from "./@cfworker/json-schema.mjs";
 
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
@@ -29,6 +30,7 @@ import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
+import vercelSdk from "./@vercel/sdk.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
 import workflowSerde from "./@workflow/serde.mjs";
@@ -58,6 +60,7 @@ import zodValidationError from "./zod-validation-error.mjs";
 export const MODULES = [
   acpSdk,
   anthropic,
+  cfworkerJsonSchema,
   codeMode,
   chat,
   chatAdapterSlack,
@@ -96,6 +99,7 @@ export const MODULES = [
   vercelOidc,
   vercelOtel,
   vercelSandbox,
+  vercelSdk,
   workflowCore,
   workflowErrors,
   workflowSerde,
