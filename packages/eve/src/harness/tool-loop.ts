@@ -970,11 +970,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         coordinated.kind === "responses-completed" &&
         config.mode === "conversation" &&
         isHarnessBetweenTurns(pending.session) &&
-        getPendingAuthorization(pending.session.state) === undefined &&
-        getBackgroundTasks(pending.session.state).query({ state: "working" }).length === 0 &&
-        store?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() !== true
+        getPendingAuthorization(pending.session.state) === undefined
       ) {
-        // A completed response need not resolve the approval or start a turn.
+        // Like a conversation turn, a completed response may wait while background work continues.
         await emit?.(createSessionWaitingEvent());
       }
       return { next: null, session: pending.session };

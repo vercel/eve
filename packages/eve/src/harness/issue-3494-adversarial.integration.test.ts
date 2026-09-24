@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
+import { getBackgroundTasks, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
@@ -35,6 +36,7 @@ function fixture(
   responseAuthorized: boolean | ApprovalResponsePolicy = false,
   outputLimit?: number,
   outputSchema?: HarnessSession["outputSchema"],
+  executorHasPendingTasks = false,
 ) {
   const script: Reply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -173,6 +175,7 @@ function fixture(
       turn: { id: emission.turnId || `turn_${emission.sequence}`, sequence: emission.sequence },
     });
     ctx.set(BackgroundToolExecutorKey, {
+      hasPendingTasks: () => executorHasPendingTasks,
       async execute({ batch, options }) {
         expect(batch.calls.some((call) => call.callId === options.toolCallId)).toBe(true);
         executions.push("background-admitted");
@@ -603,6 +606,64 @@ it.each(["rejected", "failed", "timed-out"] as const)(
     expect(
       f.events.slice(retryStart).filter((event) => event.type === "session.waiting"),
     ).toHaveLength(1);
+  },
+);
+
+it.each(["persisted", "executor"] as const)(
+  "finishes a refusal while unrelated background work is %s, like an ordinary conversation turn",
+  async (source) => {
+    const f = fixture(
+      `refusal-with-background-${source}`,
+      () => ({ status: "rejected", reason: "Bob must approve Alice's note." }),
+      undefined,
+      undefined,
+      source === "executor",
+    );
+    await f.gate("gateA");
+    if (source === "persisted") {
+      f.updateSession((session) =>
+        registerWorkflowToolRun(session, {
+          callId: "report-call",
+          toolName: "report",
+          lifetime: "session",
+          origin: { turnId: "report-turn", stepIndex: 0 },
+          address: { runId: "report-run", hookToken: "report-hook" },
+          task: {
+            taskId: "report-task",
+            metadata: { kind: "workflow", name: "report" },
+            dispatchContext: { auth: { current: null, initiator: null } },
+          },
+        }),
+      );
+    }
+    const ordinaryStart = f.events.length;
+    f.script.push("The report is still running.");
+    await f.drive({ message: "What is the report's status?" });
+    expect(f.events.slice(ordinaryStart).at(-1)?.type).toBe("session.waiting");
+
+    const responseStart = f.events.length;
+    await f.drive({
+      attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+        response,
+        auth: {
+          attributes: {},
+          authenticator: "test",
+          issuer: "test",
+          principalId: "alice",
+          principalType: "user" as const,
+        },
+      })),
+    });
+    expect(f.events.slice(responseStart).map((event) => event.type)).toEqual([
+      "approval.candidate",
+      "approval.candidate",
+      "session.waiting",
+    ]);
+    expect(f.pending()).toHaveLength(1);
+    expect(f.executions).toEqual([]);
+    if (source === "persisted") {
+      expect(getBackgroundTasks(f.session.state).query({ state: "working" })).toHaveLength(1);
+    }
   },
 );
 
