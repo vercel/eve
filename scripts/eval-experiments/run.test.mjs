@@ -3,7 +3,32 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runSchedule } from "./run.mjs";
+import { runSchedule, selectShard } from "./run.mjs";
+
+test("shards preserve scheduled order for each eval without overlap", () => {
+  const plan = {
+    fixtures: [{ name: "fixture", evals: ["slow", "fast"] }],
+    schedule: [
+      { fixture: "fixture", eval: "slow", repetition: 0, configuration: "a" },
+      { fixture: "fixture", eval: "fast", repetition: 0, configuration: "a" },
+      { fixture: "fixture", eval: "slow", repetition: 0, configuration: "b" },
+      { fixture: "fixture", eval: "fast", repetition: 0, configuration: "b" },
+      { fixture: "fixture", eval: "slow", repetition: 1, configuration: "b" },
+      { fixture: "fixture", eval: "fast", repetition: 1, configuration: "b" },
+    ],
+  };
+  assert.deepEqual(
+    selectShard(plan, 0),
+    plan.schedule.filter((cell) => cell.eval === "slow"),
+  );
+  assert.deepEqual(
+    selectShard(plan, 1),
+    plan.schedule.filter((cell) => cell.eval === "fast"),
+  );
+  assert.throws(() => selectShard(plan, -1), /Invalid eval shard/);
+  assert.throws(() => selectShard(plan, 2), /Invalid eval shard/);
+  assert.throws(() => selectShard(plan, NaN), /Invalid eval shard/);
+});
 
 test("runs scheduled source/configuration cells and records eval exit outcomes", async () => {
   const root = await mkdtemp(join(tmpdir(), "eve-experiment-run-"));
@@ -40,8 +65,16 @@ test("runs scheduled source/configuration cells and records eval exit outcomes",
         { label: "candidate", sha: "b" },
       ],
       configurations: [{ label: "config", settings: { parent: { model: "provider/model" } } }],
-      fixtures: [{ name: "agent-self-modification", evals: ["case"] }],
+      fixtures: [{ name: "agent-self-modification", evals: ["other", "case"] }],
       schedule: [
+        {
+          source: "base",
+          configuration: "config",
+          fixture: "agent-self-modification",
+          eval: "other",
+          repetition: 0,
+          executionOrder: 0,
+        },
         {
           source: "base",
           configuration: "config",
@@ -57,11 +90,14 @@ test("runs scheduled source/configuration cells and records eval exit outcomes",
       plan,
       checkouts,
       outputDir,
+      shard: 1,
       env: {
         PATH: `${join(root, "base/e2e/fixtures/agent-self-modification/node_modules/.bin")}:${process.env.PATH}`,
         EVE_EXPERIMENT_PARENT_MODEL: "leak",
       },
     });
+    assert.equal(records.length, 1);
+    assert.equal(records[0].eval, "case");
     assert.equal(records[0].correctnessOutcome, "passed");
     assert.equal(records[0].requestedSettings.parent.model, "provider/model");
     assert.equal(records[0].scheduleIdentity.case.source, "base");

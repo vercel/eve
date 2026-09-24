@@ -22,10 +22,12 @@ export async function runSchedule({
   env = process.env,
   timeoutMs = 20 * 60_000,
   verifyCheckout,
+  shard,
 }) {
   const records = [];
+  const schedule = shard === undefined ? plan.schedule : selectShard(plan, shard);
   const unsafe = new Set();
-  for (const cell of plan.schedule) {
+  for (const cell of schedule) {
     const source = plan.sources.find((item) => item.label === cell.source);
     const configuration = plan.configurations.find((item) => item.label === cell.configuration);
     const fixture = plan.fixtures.find((item) => item.name === cell.fixture);
@@ -65,6 +67,18 @@ export async function runSchedule({
     await writeFile(join(outputDir, "invocations.json"), `${JSON.stringify(records, null, 2)}\n`);
   }
   return records;
+}
+
+export function selectShard(plan, shard) {
+  const evals = plan.fixtures.flatMap((fixture) =>
+    fixture.evals.map((evalId) => ({ fixture: fixture.name, eval: evalId })),
+  );
+  if (!Number.isInteger(shard) || shard < 0 || shard >= evals.length)
+    throw new Error(`Invalid eval shard: ${shard}`);
+  const selected = evals[shard];
+  return plan.schedule.filter(
+    (cell) => cell.fixture === selected.fixture && cell.eval === selected.eval,
+  );
 }
 
 async function invoke({ checkout, fixture, identity, outputDir, env, timeoutMs, verifyCheckout }) {
@@ -299,13 +313,14 @@ function appendBounded(current, chunk) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [planPath, checkoutsPath, outputDir] = process.argv.slice(2);
+  const [planPath, checkoutsPath, outputDir, shardArg] = process.argv.slice(2);
   if (!planPath || !checkoutsPath || !outputDir)
-    throw new Error("Usage: node run.mjs <plan.json> <checkouts.json> <output-dir>");
+    throw new Error("Usage: node run.mjs <plan.json> <checkouts.json> <output-dir> [shard-index]");
   const plan = JSON.parse(await readFile(planPath, "utf8"));
   const checkouts = JSON.parse(await readFile(checkoutsPath, "utf8"));
   try {
-    await runSchedule({ plan, checkouts, outputDir: resolve(outputDir) });
+    const shard = shardArg === undefined ? undefined : Number(shardArg);
+    await runSchedule({ plan, checkouts, outputDir: resolve(outputDir), shard });
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

@@ -19,16 +19,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  execute:
+  plan:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
        github.event.label.name == 'run-eval-experiment' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
     env:
-      EVE_SANDBOX_IMAGE_TAG: latest
       DEFINITION: ${{ inputs.definition || 'experiments/self-modification.mjs' }}
       EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
@@ -45,15 +45,89 @@ jobs:
         with:
           node-version-file: .nvmrc
       - name: Validate definition and write plan
+        id: plan
         run: |
           case "$DEFINITION" in experiments/*.mjs) ;; *) echo "Definition must be under experiments/"; exit 1 ;; esac
           node scripts/eval-experiments/plan.mjs "$DEFINITION" plan.json
+          echo "shards=$(node -e 'const p=require("./plan.json"); console.log(JSON.stringify(p.fixtures.flatMap(f => f.evals).map((_, i) => i)))')" >> "$GITHUB_OUTPUT"
+      - name: Upload immutable plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eval-experiment-plan-${{ github.run_id }}
+          path: plan.json
+          retention-days: 14
+
+  execute:
+    name: execute (eval ${{ matrix.shard }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      EVE_SANDBOX_IMAGE_TAG: latest
+      EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPERIMENT_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Download immutable plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: eval-experiment-plan-${{ github.run_id }}
       - name: Prepare source checkouts
         run: node scripts/eval-experiments/prepare-checkouts.mjs "$GITHUB_WORKSPACE" plan.json checkouts.json .experiment-worktrees
-      - name: Execute immutable schedule
+      - name: Execute eval shard
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-        run: node scripts/eval-experiments/run.mjs plan.json checkouts.json execution
+        run: node scripts/eval-experiments/run.mjs plan.json checkouts.json execution "${{ matrix.shard }}"
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eval-experiment-shard-${{ github.run_id }}-${{ matrix.shard }}
+          path: execution/raw/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  analyze:
+    needs: [plan, execute]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      DEFINITION: ${{ inputs.definition || 'experiments/self-modification.mjs' }}
+      EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPERIMENT_SHA }}
+          persist-credentials: false
+      - name: Download immutable plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: eval-experiment-plan-${{ github.run_id }}
+      - name: Download shard evidence
+        id: evidence
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: eval-experiment-shard-${{ github.run_id }}-*
+          path: execution/raw
+          merge-multiple: true
       - name: Reanalyze archived evidence
         if: always()
         run: |
@@ -64,7 +138,9 @@ jobs:
           compare_status=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
           if [ "$extract_status" -ne 0 ]; then exit "$extract_status"; fi
-          exit "$compare_status"
+          if [ "$compare_status" -ne 0 ]; then exit "$compare_status"; fi
+          test "${{ needs.execute.result }}" = success
+          test "${{ steps.evidence.outcome }}" = success
       - name: Upload reproducible experiment artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

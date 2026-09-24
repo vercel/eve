@@ -4,7 +4,7 @@ This internal harness compares immutable eve source revisions and named runtime 
 
 ## Define an experiment
 
-Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition. Selections currently support only eval files with a direct `export default defineEval(...)`; array-exported eval files are rejected until the planner can expand their indexed IDs. Runs are serial; parallel execution is not configurable.
+Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition. Selections currently support only eval files with a direct `export default defineEval(...)`; array-exported eval files are rejected until the planner can expand their indexed IDs. GitHub Actions runs each selected eval in an isolated checkout/job (up to four jobs at once). Within an eval, its scheduled configurations and repetitions remain serial; parallel execution within a checkout is not configurable.
 
 Both matrix axes are named maps. Omit `matrix.source` to run against the planner checkout's HEAD: the planner records one source entry named `head` with the full commit SHA. In GitHub Actions, this is the PR head commit or dispatched revision, not a moving branch reference. Uncommitted source changes are not included. Set `analysis.compare.axis` to `"configuration"` and choose a configuration baseline when using this default; the compared axis requires at least two entries. An explicit source map must be non-empty and use full commit SHAs, not `"HEAD"`.
 
@@ -51,7 +51,7 @@ The workflow does not accept arbitrary uploads. GitHub Actions is the live execu
 
 ## Artifacts and offline reanalysis
 
-The Actions run summary contains the Markdown report; the workflow does not post a PR comment. The workflow archives `plan.json`, per-invocation records, raw logs and timestamped eval artifact directories, normalized samples, and JSON/Markdown reports for 14 days. Download with `gh run download <run-id>`. To rederive from the downloaded execution evidence without launching an eval:
+The Actions run summary contains the Markdown report; the workflow does not post a PR comment. The workflow archives the immutable plan and each eval shard separately, then downloads and merges the shard evidence for analysis. The final artifact contains `plan.json`, per-invocation records, raw logs and timestamped eval artifact directories, normalized samples, and JSON/Markdown reports for 14 days. Download the merged artifact with `gh run download <run-id> -n eval-experiment-<run-id>`. To rederive from the downloaded execution evidence without launching an eval:
 
 ```sh
 node scripts/eval-experiments/extract.mjs ./execution ./plan.json ./samples.json ./experiments/self-modification.mjs <analysis-revision>
