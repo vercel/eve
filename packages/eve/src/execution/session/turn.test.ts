@@ -526,11 +526,16 @@ describe("SessionExecution background task checkpoints", () => {
   });
 
   it.each([
-    { capabilities: undefined, parks: false },
-    { capabilities: { requestInput: true }, parks: true },
+    { capabilities: undefined, parks: false, serializedContext: {} },
+    { capabilities: { requestInput: true }, parks: true, serializedContext: {} },
+    {
+      capabilities: undefined,
+      parks: true,
+      serializedContext: { "eve.sessionCallback": { callId: "call_1", token: "parent" } },
+    },
   ])(
-    "parks on pending input only when the session can request input: $capabilities",
-    async ({ capabilities, parks }) => {
+    "parks on pending input only when someone can answer it: %o",
+    async ({ capabilities, parks, serializedContext }) => {
       const inbox: SessionInbox = {
         claimedTokens: [],
         claimSessionHook: vi.fn(),
@@ -542,7 +547,12 @@ describe("SessionExecution background task checkpoints", () => {
         onInterrupt: vi.fn(() => () => {}),
         restore: vi.fn(),
       };
-      const execution = createExecution({ capabilities, inbox, sessionState: state("") });
+      const execution = createExecution({
+        capabilities,
+        inbox,
+        serializedContext,
+        sessionState: state(""),
+      });
       vi.mocked(turnStep)
         .mockReset()
         .mockImplementation(async (input) => ({

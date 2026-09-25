@@ -36,6 +36,15 @@ import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
+/** True when a delegating parent (local or remote) receives this session's input requests. */
+export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
+  if (serializedContext["eve.sessionCallback"] !== undefined) return true;
+  const channel = serializedContext["eve.channel"];
+  return (
+    typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
+  );
+}
+
 const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
   "This session cannot request human input, so it cannot wait for a tool approval or question. " +
   "Sessions started without `capabilities.requestInput`, such as schedules, must not use approval-gated tools.";
@@ -161,7 +170,11 @@ export class SessionExecution {
       }
 
       if (result.action === "park") {
-        if (result.hasPendingInputBatch && this.input.capabilities?.requestInput !== true) {
+        if (
+          result.hasPendingInputBatch &&
+          this.input.capabilities?.requestInput !== true &&
+          !hasDelegatedCallerContext(this.input.cursor.serializedContext)
+        ) {
           throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
         }
         return {

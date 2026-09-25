@@ -1,4 +1,5 @@
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
+import { hasDelegatedCallerContext } from "#execution/session/turn.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
@@ -199,14 +200,6 @@ async function bootHandoffOwner(
       sessionWritable: input.sessionWritable,
     },
   };
-}
-
-function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
-  if (serializedContext["eve.sessionCallback"] !== undefined) return true;
-  const channel = serializedContext["eve.channel"];
-  return (
-    typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
-  );
 }
 
 function createInitialDelivery(

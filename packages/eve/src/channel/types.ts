@@ -451,8 +451,8 @@ export interface SessionCapabilities {
    *
    * 1. `ctx.ask()` resolves as `unavailable` instead of waiting when the
    *    session cannot request input.
-   * 2. The pending-input park guard: sessions without this flag fail fast
-   *    rather than waiting for a response to a tool approval.
+   * 2. The pending-input park guard: sessions without this flag and without a
+   *    delegating parent fail fast rather than waiting for a tool approval.
    */
   readonly requestInput?: boolean;
 }
