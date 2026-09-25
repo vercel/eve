@@ -317,8 +317,8 @@ Other sends fail with a code that tells the model what to do next:
 
 - `UNKNOWN_TASK`: the session has no open task with that ID, for example because the agent's session ended or eve retired it.
 - `TASK_MISMATCH`: the ID belongs to a different agent or tool.
-- `TASK_BUSY`: a workflow body started the agent's current work with `ctx.agent` and awaits it, or the agent already holds 20 messages it has not read.
-- `TASK_UNREACHABLE`: the message could not be delivered, for example because a remote agent's deployment now uses another task protocol version. eve does not start a replacement agent to hide the failure.
+- `TASK_BUSY`: a workflow body started the agent's current work with `ctx.agent` and awaits it, the agent already holds 20 messages it has not read, or eve could not confirm that the agent received the previous message.
+- `TASK_UNREACHABLE`: the message could not be delivered, for example because a remote agent's deployment now uses another task protocol version. eve does not start a replacement agent to hide the failure. A message to a working agent that eve could not confirm either way stays queued instead, and the model is told so (see [Resumable tasks and sends](./concepts/tasks#resumable-tasks-and-sends)).
 - `TOO_MANY_TASKS`: the message would start an idle agent's next turn while 20 tasks are working.
 
 The [`[Tasks]` note](./concepts/tasks#the-tasks-note) lists working agents and up to 10 idle ones, each with its `taskId`, its tool, and a one-line summary of its latest answer, most recent first. eve appends the note only when its listing changes, which preserves the provider prompt cache, and the most recent note is authoritative. A session keeps at most 50 idle tasks; past that, eve ends the idle agents that started least recently.

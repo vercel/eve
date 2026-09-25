@@ -39,7 +39,16 @@ import { cancelTask, MAX_WORKING_TASKS, pruneTaskTable } from "#tasks/table.js";
 import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
 import { MAX_RETAINED_IDLE_TASKS } from "#tasks/owner-calls.js";
 import { armChildHardStop } from "#tasks/timer-steps.js";
-import { renderSendReceipt, renderStartReceipt, renderTaskOtherPrincipal } from "#tasks/render.js";
+import {
+  renderSendReceipt,
+  renderStartReceipt,
+  renderTaskBusy,
+  renderTaskOtherPrincipal,
+  renderUnconfirmedSendReceipt,
+  TASK_INPUT_UNCONFIRMED_MESSAGE,
+} from "#tasks/render.js";
+import { taskEvents } from "#tasks/events.js";
+import { taskLifecycleViolations } from "#internal/testing/task-lifecycle.js";
 import { encodeTaskCreator, readPendingTaskResults } from "#tasks/results.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
@@ -803,6 +812,72 @@ describe("detached agent calls", () => {
   });
 });
 
+describe("sends to an idle agent whose delivery fails", () => {
+  it("withdraws an idle agent's send its agent did not take, announcing nothing", async () => {
+    const idle = createTaskRecord({
+      callId: "call-0",
+      child: LOCAL_CHILD,
+      delivered: true,
+      status: "completed",
+      turnId: "turn-0",
+    });
+    dispatchSession.mockResolvedValue({ retryable: true, status: "session_not_active" });
+
+    const update = await start([modelCall({ taskId: idle.id, message: "Now the FAQ." })], [idle]);
+
+    expect(dispatchSession).toHaveBeenCalledTimes(3);
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: expect.objectContaining({ code: "TASK_UNREACHABLE" }),
+      }),
+    ]);
+    // No generation started, so the stream shows none; the send's number is spent.
+    expect(update.events).toEqual([]);
+    expect(records(update.sessionState)).toEqual([{ ...idle, lastSeq: 1 }]);
+
+    dispatchSession.mockReset();
+    dispatchSession.mockResolvedValue({ status: "accepted" });
+    const retried = await start(
+      [modelCall({ callId: "call-2", message: "Now the FAQ.", taskId: idle.id })],
+      records(update.sessionState),
+    );
+    expect(retried.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ callId: "call-2", generation: 2 }),
+        type: "task.started",
+      }),
+    ]);
+    expect(records(retried.sessionState)[0]).toMatchObject({ generation: 2, startedBy: 2 });
+  });
+
+  it("ends an idle agent whose session is gone for good when a send cannot reach it", async () => {
+    const idle = createTaskRecord({
+      callId: "call-0",
+      child: LOCAL_CHILD,
+      delivered: true,
+      status: "completed",
+      turnId: "turn-0",
+    });
+    dispatchSession.mockResolvedValue({ status: "session_not_active" });
+
+    const update = await start([modelCall({ taskId: idle.id })], [idle]);
+
+    expect(dispatchSession).toHaveBeenCalledOnce();
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        output: expect.objectContaining({
+          code: "TASK_UNREACHABLE",
+          message: expect.stringContaining("its agent session ended"),
+        }),
+      }),
+    ]);
+    expect(update.events).toEqual([{ data: { taskId: idle.id }, type: "task.ended" }]);
+    // Its only result already reached history, so the ended record is pruned.
+    expect(records(update.sessionState)).toEqual([]);
+  });
+});
+
 describe("sends to a working agent", () => {
   const working = createTaskRecord({
     callId: "call-0",
@@ -1058,8 +1133,10 @@ describe("sends to a working agent", () => {
     expect(records(continued.sessionState)[0]?.sends).toBeUndefined();
   });
 
-  it("returns TASK_UNREACHABLE instead of a receipt when the input does not arrive", async () => {
-    dispatchSession.mockResolvedValueOnce({ retryable: true, status: "session_not_active" });
+  it("returns TASK_UNREACHABLE instead of a receipt when the agent refuses the input", async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      dispatchSession.mockResolvedValueOnce({ retryable: true, status: "session_not_active" });
+    }
 
     const update = await start([modelCall({ taskId: working.id })], [working]);
 
@@ -1083,6 +1160,169 @@ describe("sends to a working agent", () => {
     expect(records(retried.sessionState)[0]?.sends).toEqual([
       { callId: "call-2", seq: 2, turnId: "turn-1" },
     ]);
+  });
+
+  describe("when a delivery attempt gets no answer", () => {
+    const timeout = () => new Error("The request timed out.");
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    /** Runs owner steps in order, collecting every event they publish. */
+    function owner(records: readonly TaskRecord[]) {
+      const events: UnstampedMessageStreamEvent[] = taskEvents(
+        records.map((record) => ({ kind: "started" as const, record })),
+        "parent",
+      );
+      let state = ownerState(records);
+      return {
+        events,
+        async report(payload: RuntimeActionResultHookPayload) {
+          const update = await applyTaskReport({
+            now: NOW,
+            payload,
+            serializedContext: {},
+            sessionState: state,
+          });
+          state = update.sessionState;
+          events.push(...update.events);
+          return update;
+        },
+        record: () => records_(state)[0]!,
+        async send(callId: string, message: string) {
+          const update = await startAgentTasks({
+            callbackBaseUrl: "https://parent.example",
+            calls: [modelCall({ callId, message, taskId: working.id })],
+            now: NOW,
+            serializedContext: {},
+            sessionState: state,
+          });
+          state = update.sessionState;
+          events.push(...update.events);
+          return update.results;
+        },
+        state: () => state,
+      };
+    }
+    const records_ = records;
+
+    it("retries with the send's key, so the agent that took the first attempt keeps the count aligned", async () => {
+      // Alice's correction reaches the writer, but the first request times out.
+      dispatchSession.mockRejectedValueOnce(timeout());
+      const task = owner([working]);
+
+      expect(await task.send("call-x", "Also cover pricing.")).toEqual([
+        expect.objectContaining({ modelOutput: renderSendReceipt(working, false) }),
+      ]);
+      expect(dispatchSession.mock.calls).toEqual([
+        [steer("Also cover pricing.")],
+        [steer("Also cover pricing.")],
+      ]);
+      expect(await task.send("call-z", "And the launch date.")).toEqual([
+        expect.objectContaining({ modelOutput: renderSendReceipt(working, false) }),
+      ]);
+
+      // The writer read the correction in its turn; the second message starts its next one.
+      await task.report(answer("Draft with pricing.", 1));
+      expect(task.record()).toMatchObject({ callId: "call-z", generation: 2, status: "working" });
+      await task.report(answer("Draft with pricing and date.", 1));
+
+      expect(task.record()).toMatchObject({ generation: 2, status: "completed" });
+      expect(task.record().sends).toBeUndefined();
+      expect(readPendingTaskResults(readDurableSession(task.state()).state)).toEqual([
+        expect.objectContaining({ generation: 1 }),
+        expect.objectContaining({
+          generation: 2,
+          outcome: { output: "Draft with pricing and date.", status: "completed" },
+        }),
+      ]);
+      expect(taskLifecycleViolations(task.events)).toEqual([]);
+    });
+
+    it("keeps a send no attempt confirmed, and refuses more until the agent's answer settles it", async () => {
+      dispatchSession.mockRejectedValue(timeout());
+      const task = owner([working]);
+
+      expect(await task.send("call-x", "Also cover pricing.")).toEqual([
+        expect.objectContaining({
+          modelOutput: renderUnconfirmedSendReceipt(working),
+          output: { status: "working", taskId: working.id },
+        }),
+      ]);
+      expect(dispatchSession).toHaveBeenCalledTimes(3);
+      expect(task.record().sends).toEqual([
+        { callId: "call-x", seq: 1, turnId: "turn-1", unconfirmed: true },
+      ]);
+
+      // A retry by the model would be counted out of order, so it waits for the answer.
+      dispatchSession.mockReset();
+      dispatchSession.mockResolvedValue({ status: "accepted" });
+      expect(await task.send("call-y", "Also cover pricing.")).toEqual([
+        expect.objectContaining({
+          isError: true,
+          output: {
+            code: "TASK_BUSY",
+            message: renderTaskBusy(working.id, "research", "unconfirmed"),
+          },
+        }),
+      ]);
+      expect(dispatchSession).not.toHaveBeenCalled();
+
+      // The writer had it: its answer counts it, and the task goes idle.
+      await task.report(answer("Draft with pricing.", 1));
+      expect(task.record()).toMatchObject({ generation: 1, status: "completed" });
+      expect(task.record().sends).toBeUndefined();
+
+      // Bob's next message starts the idle writer's next turn and gets its own result.
+      const results = await task.send("call-z", "Now the launch date.");
+      expect(results).toEqual([
+        expect.objectContaining({ modelOutput: renderSendReceipt(working, true) }),
+      ]);
+      await task.report(
+        resultPayload({
+          ...childResult({
+            kind: "parked",
+            result: { kind: "succeeded", output: "Launch date added." },
+            usageDelta: ZERO_USAGE,
+          }),
+          callId: "call-z",
+        }),
+      );
+      expect(readPendingTaskResults(readDurableSession(task.state()).state)).toEqual([
+        expect.objectContaining({ generation: 1 }),
+        expect.objectContaining({
+          generation: 2,
+          outcome: { output: "Launch date added.", status: "completed" },
+        }),
+      ]);
+      expect(taskLifecycleViolations(task.events)).toEqual([]);
+    });
+
+    it("fails an unconfirmed send at once when the agent answers without it", async () => {
+      dispatchSession.mockRejectedValue(timeout());
+      const task = owner([working]);
+      await task.send("call-x", "Also cover pricing.");
+
+      await task.report(answer("Draft without pricing.", 0));
+
+      expect(task.events.slice(1).map((event) => event.type)).toEqual([
+        "task.settled",
+        "task.started",
+        "task.settled",
+      ]);
+      expect(task.events.at(-1)).toMatchObject({
+        data: {
+          callId: "call-x",
+          error: { code: "TASK_UNREACHABLE", message: TASK_INPUT_UNCONFIRMED_MESSAGE },
+          generation: 2,
+          status: "failed",
+        },
+      });
+      expect(task.record()).toMatchObject({ generation: 2, status: "failed" });
+      expect(task.record().sends).toBeUndefined();
+      expect(readPendingTaskResults(readDurableSession(task.state()).state)).toHaveLength(2);
+      expect(taskLifecycleViolations(task.events)).toEqual([]);
+    });
   });
 
   it("ends a working agent whose session is gone for good", async () => {

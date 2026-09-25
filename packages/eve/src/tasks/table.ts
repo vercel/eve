@@ -54,7 +54,9 @@ export const MAX_WORKING_TASKS = 20;
 /**
  * Sends one task may hold unread, queued in its child or held for a child
  * still starting. A send past the cap fails `TASK_BUSY`, so neither the
- * record nor the child's queue grows without bound.
+ * record nor the child's queue grows without bound. Sends a cancel stopped
+ * do not count: the child drops them, and they leave the record once it
+ * confirms the cancel or is stopped.
  */
 export const MAX_UNREAD_SENDS = 20;
 
@@ -83,19 +85,11 @@ export type LostTask = RecoveredTaskFields & {
   readonly duplicate?: true;
 };
 
-/**
- * Whether a lost record stands for a result someone still waits on. A
- * record whose result already reached history is dropped silently.
- */
-export function isReportedLoss(
+/** Whether a lost record still names its task; a second record with a readable task's ID does not. */
+export function isNamedLoss(
   lost: LostTask,
 ): lost is LostTask & { readonly id: string; readonly name: string } {
-  return (
-    lost.id !== undefined &&
-    lost.name !== undefined &&
-    lost.duplicate !== true &&
-    lost.delivered !== true
-  );
+  return lost.id !== undefined && lost.name !== undefined && lost.duplicate !== true;
 }
 
 /**
@@ -562,8 +556,7 @@ export function settleGeneration(
   return settled;
 }
 
-/** For `tasks/table*.ts` only. */
-export function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
+function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
   return withoutUndefined({
     ...record,
     clockStoppedAt: undefined,

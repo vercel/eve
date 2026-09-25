@@ -192,7 +192,7 @@ async function postSessionMessage(input: {
     `Remote agent "${input.remote.name}" continue-session request failed${
       permanent ? " permanently" : ""
     } with HTTP ${response.status}.${compatibilityHint}`,
-    { retryable: !permanent },
+    { retryable: !permanent, status: response.status },
   );
 }
 
@@ -203,11 +203,14 @@ async function postSessionMessage(input: {
  */
 export class RemoteAgentContinueRequestError extends Error {
   readonly retryable: boolean;
+  /** The remote's HTTP status; absent when the request got no response. */
+  readonly status?: number;
 
-  constructor(message: string, options: { readonly retryable: boolean }) {
+  constructor(message: string, options: { readonly retryable: boolean; readonly status?: number }) {
     super(message);
     this.name = "RemoteAgentContinueRequestError";
     this.retryable = options.retryable;
+    if (options.status !== undefined) this.status = options.status;
   }
 }
 
@@ -221,4 +224,18 @@ export class RemoteAgentContinueRequestError extends Error {
 export function isRetryableRemoteAgentContinueError(error: unknown): boolean {
   if (error instanceof RemoteTaskProtocolError) return false;
   return !(error instanceof RemoteAgentContinueRequestError) || error.retryable;
+}
+
+/**
+ * Returns true when the remote answered a continue request without taking
+ * its message. A request that got no response, or a server error, may have
+ * been taken: the remote admits a message once per operation ID, so the
+ * owner sends it again with the same ID rather than assume either way.
+ */
+export function isRemoteAgentContinueRefusal(error: unknown): boolean {
+  return (
+    error instanceof RemoteAgentContinueRequestError &&
+    error.status !== undefined &&
+    error.status < 500
+  );
 }

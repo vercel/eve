@@ -43,6 +43,15 @@ export function renderSendReceipt(record: Pick<TaskRecord, "id">, started: boole
     : `Sent to task ${record.id}, which is still working. It uses your input in its current work or starts on it right after; use task_wait for its next result.`;
 }
 
+/**
+ * Receipt text for a send to a working agent that eve could not confirm
+ * arrived. It stays queued, so it gets a result like any send: the one of
+ * the work that read it, or {@link TASK_INPUT_UNCONFIRMED_MESSAGE}.
+ */
+export function renderUnconfirmedSendReceipt(record: Pick<TaskRecord, "id">): string {
+  return `Sent to task ${record.id}, but eve could not confirm that it arrived. If it did, the task uses it in its current work or starts on it right after; if not, a result for this call says so. Use task_wait for its next result before you send it more input.`;
+}
+
 /** Sentence eve appends to the description of every resumable tool. */
 export const RESUMABLE_TOOL_DESCRIPTION =
   "To correct or continue a task this tool started, call it again with that task's taskId; without taskId, each call starts a new task.";
@@ -64,6 +73,13 @@ export const TASK_ENDED_BEFORE_READ_MESSAGE = "The task ended before it read thi
 
 /** Result of a generation still working when its task ended. */
 export const TASK_ENDED_BEFORE_REPLY_MESSAGE = "The task ended before it replied.";
+
+/**
+ * Result of the generation a send starts when eve could not confirm that the
+ * agent received it and the agent answered without reading it.
+ */
+export const TASK_INPUT_UNCONFIRMED_MESSAGE =
+  "eve could not confirm that this input reached the task, and the task finished its work without reading it. If it is still needed, send it again with the task's taskId.";
 
 /** Result of a generation whose run replied and moved on, when the reply never arrived. */
 export const TASK_RESULT_LOST_MESSAGE =
@@ -279,16 +295,19 @@ export function renderTaskMismatch(record: Pick<TaskRecord, "id" | "name">): str
 
 /**
  * `TASK_BUSY` error for a send a task cannot take: a model's send to an agent
- * whose current work a workflow body awaits (`workflow-owned`), or a
- * workflow body's send to an agent that is still working (`workflow-caller`).
- * A workflow body awaits the result of the work it started.
+ * whose current work a workflow body awaits (`workflow-owned`), a workflow
+ * body's send to an agent that is still working (`workflow-caller`), since a
+ * workflow body awaits the result of the work it started, or a send after
+ * one eve could not confirm the agent received (`unconfirmed`).
  */
 export function renderTaskBusy(
   taskId: string,
   toolName: string,
-  reason: "workflow-caller" | "workflow-owned",
+  reason: "unconfirmed" | "workflow-caller" | "workflow-owned",
 ): string {
   switch (reason) {
+    case "unconfirmed":
+      return `Task "${taskId}" may not have received your last input, so it can't take more yet. Wait for its next result with task_wait, then call ${toolName} with its taskId again.`;
     case "workflow-caller":
       return `Task "${taskId}" is still working on another call, so a workflow can't give it more input until it answers. Omit taskId to start a new one.`;
     case "workflow-owned":
@@ -413,7 +432,7 @@ export function renderTimedOut(kind: TaskKind, timeoutMs: number | undefined): s
 /**
  * Message for a remote agent whose deployment speaks another task protocol
  * version, or reports none because it runs an older eve: `START_FAILED` at
- * start, `TASK_UNREACHABLE` for a send to a working agent.
+ * start, `TASK_UNREACHABLE` for a send.
  */
 export function renderTaskProtocolMismatch(input: {
   readonly name: string;

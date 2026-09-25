@@ -10,7 +10,7 @@ Each result is applied once: children number their answers, so a repeated or lat
 
 A remote child whose question or approval cannot reach the caller now sends it again before waiting for an answer. An answer that can never reach the child fails the call with `AGENT_SESSION_ENDED` or `TASK_UNREACHABLE` instead of leaving it waiting.
 
-Every request to a remote agent now has a 30-second limit and refuses redirects. A remote agent that fails to start, including one whose create request times out, fails the call with `START_FAILED`, and a send that times out fails with `TASK_UNREACHABLE`.
+Every request to a remote agent now has a 30-second limit and refuses redirects. A remote agent that fails to start, including one whose create request times out, fails the call with `START_FAILED`. A message to a remote agent that fails in a way that may clear, such as a timeout, is sent up to three times with the same `operationId`. A send the agent refused every time fails with `TASK_UNREACHABLE`; one that no attempt confirmed stays queued, and the model is told eve could not confirm it arrived.
 
 Follow-up messages on `POST /eve/v1/session/:sessionId` and `Session.send()` accept an `operationId`. The session admits one message per `operationId` for each principal and remembers its most recent 256, including after it moves to another deployment.
 

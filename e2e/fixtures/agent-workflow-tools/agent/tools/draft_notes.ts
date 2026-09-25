@@ -1,5 +1,4 @@
 import { defineWorkflowTool } from "eve/tools";
-import { sleep } from "workflow";
 import { z } from "zod";
 
 /**
@@ -17,9 +16,6 @@ export default defineWorkflowTool({
     let revision = 0;
     let { request } = input;
     for (;;) {
-      // Each piece of work takes a moment, so a task_wait the model calls
-      // right after the receipt receives its result.
-      await sleep("2s");
       if (request === "done") return "Closed the notes.";
       revision += 1;
       ctx.reply(`Draft ${revision}: ${request}`);

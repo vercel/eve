@@ -5,6 +5,7 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
+  isRemoteAgentContinueRefusal,
   isRetryableRemoteAgentContinueError,
   readRemoteAgentReport,
 } from "#subagents/remote/continue.js";
@@ -207,6 +208,11 @@ describe("continueRemoteAgentSession", () => {
     expect(isRetryableRemoteAgentContinueError(missing)).toBe(false);
     expect(isRetryableRemoteAgentContinueError(ended)).toBe(false);
     expect(isRetryableRemoteAgentContinueError(new TypeError("network unavailable"))).toBe(true);
+    // The remote answered every one but the server error without taking the message.
+    expect(isRemoteAgentContinueRefusal(transient)).toBe(false);
+    expect(isRemoteAgentContinueRefusal(rejected)).toBe(true);
+    expect(isRemoteAgentContinueRefusal(ended)).toBe(true);
+    expect(isRemoteAgentContinueRefusal(new TypeError("network unavailable"))).toBe(false);
   });
 });
 
@@ -267,6 +273,7 @@ describe("continueRemoteAgentSession — task protocol and time limits", () => {
       message: 'Remote agent "research" did not answer the continue-session request within 30 s.',
     });
     expect(isRetryableRemoteAgentContinueError(error)).toBe(true);
+    expect(isRemoteAgentContinueRefusal(error)).toBe(false);
   });
 
   it("surfaces a remote's protocol rejection as a permanent version error", async () => {

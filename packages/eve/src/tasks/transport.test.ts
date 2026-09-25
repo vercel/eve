@@ -19,6 +19,7 @@ import {
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
+  isRemoteAgentContinueRefusal,
   isRetryableRemoteAgentContinueError,
   readRemoteAgentReport,
 } from "#subagents/remote/continue.js";
@@ -53,6 +54,7 @@ vi.mock("#subagents/remote/dispatch.js", () => ({
 vi.mock("#subagents/remote/continue.js", () => ({
   answerRemoteAgentSession: vi.fn(),
   continueRemoteAgentSession: vi.fn(),
+  isRemoteAgentContinueRefusal: vi.fn(),
   isRetryableRemoteAgentContinueError: vi.fn(),
   readRemoteAgentReport: vi.fn(),
 }));
@@ -131,10 +133,10 @@ describe("deliverToChild", () => {
   });
 
   it.each([
-    [{ status: "session_not_active" }, "can no longer take input"],
-    [{ retryable: true, status: "busy" }, "is temporarily unreachable"],
-  ])("reports an undelivered message as TASK_UNREACHABLE (%j)", async (result, message) => {
-    dispatchSession.mockResolvedValueOnce(result);
+    [{ status: "session_not_active" }, "can no longer take input", 1],
+    [{ retryable: true, status: "busy" }, "is temporarily unreachable", 3],
+  ])("reports an undelivered message as TASK_UNREACHABLE (%j)", async (result, message, calls) => {
+    dispatchSession.mockResolvedValue(result);
 
     const failure = await deliverToChild({
       action,
@@ -145,10 +147,12 @@ describe("deliverToChild", () => {
       replyToken: "owner-inbox",
     });
 
-    expect(failure).toMatchObject({
+    // A refusal is certain, so the message is not unconfirmed; one that may clear is tried again.
+    expect(failure).toEqual({
       output: { code: "TASK_UNREACHABLE", message: expect.stringContaining(message) },
+      permanent: calls === 1,
     });
-    expect(dispatchSession).toHaveBeenCalledOnce();
+    expect(dispatchSession).toHaveBeenCalledTimes(calls);
   });
 
   it("continues a remote agent where it runs, with a callback to the reply token", async () => {
@@ -182,7 +186,7 @@ describe("deliverToChild", () => {
     expect(dispatchSession).not.toHaveBeenCalled();
   });
 
-  it("fails a continuation START_FAILED when the remote runs another task protocol", async () => {
+  it("reports a remote on another task protocol as TASK_UNREACHABLE for good", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(
       new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 }),
@@ -199,7 +203,7 @@ describe("deliverToChild", () => {
 
     expect(failure).toEqual({
       output: {
-        code: "START_FAILED",
+        code: "TASK_UNREACHABLE",
         message: expect.stringContaining(
           "Upgrade so both deployments use the same task protocol version.",
         ),
@@ -440,8 +444,9 @@ describe("sendTaskInput", () => {
     ["a local session that ended", localChild, "can no longer take input"],
     ["a remote session that is unavailable", remoteChild, "is temporarily unreachable"],
   ])("reports %s as TASK_UNREACHABLE", async (_label, child, message) => {
-    dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
-    vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
+    dispatchSession.mockResolvedValue({ status: "session_not_active" });
+    vi.mocked(continueRemoteAgentSession).mockRejectedValue(new Error("HTTP 409"));
+    vi.mocked(isRemoteAgentContinueRefusal).mockReturnValue(true);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const failure = await sendTaskInput({
@@ -477,6 +482,85 @@ describe("sendTaskInput", () => {
     });
     expect(mismatch.message).toContain("uses task protocol version 2");
     error.mockRestore();
+  });
+
+  describe("when an attempt fails in a way that may clear", () => {
+    const send = (record: TaskRecord = createTaskRecord({ child: localChild })) =>
+      sendTaskInput({
+        callbackAlias: "eve:task-callback:alias",
+        command,
+        ctx: contextWithBundle(),
+        ownerSessionId: "owner-session",
+        record,
+      });
+    const operationIds = () =>
+      dispatchSession.mock.calls.map(
+        ([call]) => (call as { command: { operationId: string } }).command.operationId,
+      );
+
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    it("tries again with the same key, so an agent that took the first attempt admits it once", async () => {
+      // A timeout after the agent accepted the message, then its answer to the retry.
+      dispatchSession.mockRejectedValueOnce(new Error("socket hang up"));
+
+      await expect(send()).resolves.toBeUndefined();
+
+      expect(operationIds()).toEqual(["research-abc234:2", "research-abc234:2"]);
+    });
+
+    it("reports a message no attempt confirmed as unconfirmed after three attempts", async () => {
+      dispatchSession.mockRejectedValue(new Error("socket hang up"));
+
+      await expect(send()).resolves.toEqual({
+        output: {
+          code: "TASK_UNREACHABLE",
+          message: expect.stringContaining("is temporarily unreachable"),
+        },
+        permanent: false,
+        unconfirmed: true,
+      });
+      expect(operationIds()).toEqual([
+        "research-abc234:2",
+        "research-abc234:2",
+        "research-abc234:2",
+      ]);
+    });
+
+    it("keeps a message unconfirmed when a later attempt is refused", async () => {
+      dispatchSession
+        .mockRejectedValueOnce(new Error("socket hang up"))
+        .mockResolvedValue({ retryable: true, status: "session_not_active" });
+
+      await expect(send()).resolves.toMatchObject({ permanent: false, unconfirmed: true });
+    });
+
+    it("reports a remote agent that refused every attempt as not having the message", async () => {
+      vi.mocked(continueRemoteAgentSession).mockRejectedValue(new Error("HTTP 409"));
+      vi.mocked(isRemoteAgentContinueRefusal).mockReturnValue(true);
+
+      const failure = await send(createTaskRecord({ child: remoteChild }));
+
+      expect(failure).toEqual({
+        output: expect.objectContaining({ code: "TASK_UNREACHABLE" }),
+        permanent: false,
+      });
+      expect(continueRemoteAgentSession).toHaveBeenCalledTimes(3);
+    });
+
+    it("stops at once when the agent turns out to be gone for good", async () => {
+      dispatchSession
+        .mockRejectedValueOnce(new Error("socket hang up"))
+        .mockResolvedValue({ status: "session_not_active" });
+
+      await expect(send()).resolves.toEqual({
+        output: expect.objectContaining({ code: "TASK_UNREACHABLE" }),
+        permanent: true,
+      });
+      expect(dispatchSession).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("sends a workflow run its input on its command hook, with the send's call", async () => {

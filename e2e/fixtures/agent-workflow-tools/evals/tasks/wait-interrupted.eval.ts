@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { startedTaskIds, waitForStarts } from "./helpers";
+import { waitForStarts } from "./helpers";
 
 /**
  * Alice sets a long reminder and the model waits on it. When Alice writes
@@ -17,14 +17,13 @@ export default defineEval({
     const live = await conversation.start(
       "Alice would like a reminder to call Bob. TASKS-INTERRUPT-START",
     );
-    await waitForStarts(t, live, "remind_later", 1);
+    const [taskId] = await waitForStarts(live, "remind_later", 1);
     await live.waitForEvent("actions.requested", {
       data: {
         actions: (actions) =>
           actions.some((action) => "toolName" in action && action.toolName === "task_wait"),
       },
     });
-    const [taskId] = startedTaskIds(live.events, "remind_later");
 
     const message = await conversation.send(
       "Alice has a quick question about the reminder. TASKS-PING",

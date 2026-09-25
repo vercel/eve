@@ -15,12 +15,17 @@ import {
   type TaskOwnerUpdate,
   type WorkflowCallerReply,
 } from "#tasks/owner.js";
-import type { TaskDeadlineSignal, TaskError, TaskOutcome } from "#tasks/protocol.js";
+import {
+  isTerminalTaskStatus,
+  type TaskDeadlineSignal,
+  type TaskError,
+  type TaskOutcome,
+} from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { STATE_LOST_MESSAGE } from "#tasks/render.js";
 import { isReadableTaskCreator } from "#tasks/results.js";
 import { getTaskTable, readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
-import { isReportedLoss, markTaskDelivered, readTaskTable } from "#tasks/table.js";
+import { isNamedLoss, markTaskDelivered, readTaskTable, type LostTask } from "#tasks/table.js";
 import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
 import { hardStopTaskChild } from "#tasks/timer-steps.js";
 import { runCommands } from "#tasks/transport.js";
@@ -164,7 +169,9 @@ export async function applyTaskDeadlines(input: {
 /**
  * Fails each task whose record could not be read with `STATE_LOST`, through
  * the same routes as any outcome: a waited call's tool result, a `ctx.agent`
- * caller's reply, or a held detached result. The session continues.
+ * caller's reply, or a held detached result. A task whose result already
+ * reached history owes the model nothing. The stream gets only the events
+ * the task still owes it (see `lostTaskEvents`). The session continues.
  */
 function reportLostTasks(
   session: { readonly state?: SessionStateMap },
@@ -185,22 +192,10 @@ function reportLostTasks(
       taskId: task.id,
       taskName: task.name,
     });
-    if (!isReportedLoss(task)) continue;
+    if (!isNamedLoss(task)) continue;
+    events.push(...lostTaskEvents(task, error));
+    if (task.delivered === true) continue;
     const { callId, id, name } = task;
-    // Only a readable record can announce a generation, so the loss settles
-    // the generation the stream last started for the task, and ends it.
-    if (callId !== undefined) {
-      events.push(
-        createTaskSettledEvent({
-          callId,
-          error,
-          generation: task.generation ?? 1,
-          status: "failed",
-          taskId: id,
-        }),
-      );
-    }
-    events.push(createTaskEndedEvent(id));
     if (task.replyTo !== undefined || task.mode === "attached") {
       // Only the call that waits on the task can take its outcome.
       if (callId === undefined) continue;
@@ -231,6 +226,37 @@ function reportLostTasks(
     });
   }
   return { events, held };
+}
+
+/**
+ * The lifecycle events a lost task still owes the stream: its current
+ * generation's settle, if the stream announced that generation and saw no
+ * settle, then its end, if it has not ended. Only a readable record can
+ * announce a generation, so one the stream never saw start is not settled,
+ * and a task it never saw start at all publishes nothing.
+ */
+function lostTaskEvents(
+  task: LostTask & { readonly id: string },
+  error: TaskError,
+): TaskLifecycleStreamEvent[] {
+  // An unreadable status may be a working one.
+  const settled = task.status !== undefined && isTerminalTaskStatus(task.status);
+  if (task.ended === true || (settled && task.resumable !== true)) return [];
+  const generation = task.generation ?? 1;
+  const events: TaskLifecycleStreamEvent[] = [];
+  if (!settled && task.announced === true && task.callId !== undefined) {
+    events.push(
+      createTaskSettledEvent({
+        callId: task.callId,
+        error,
+        generation,
+        status: "failed",
+        taskId: task.id,
+      }),
+    );
+  }
+  if (task.announced === true || generation > 1) events.push(createTaskEndedEvent(task.id));
+  return events;
 }
 
 /** Ends the agent invocation span of the record's generation; later settlements are no-ops. */

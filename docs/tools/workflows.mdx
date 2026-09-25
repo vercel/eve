@@ -327,7 +327,9 @@ The first argument is an available agent target. On the root agent, `"agent"` st
 continue an idle agent this session started, such as one the `[Tasks]` note lists. A workflow body
 awaits the agent's own answer, so a `taskId` that names an agent still working fails with
 `TASK_BUSY`, and `ctx.agent` is never detached. For the same reason, while a `ctx.agent` call is
-working, a model send to that agent's task fails with `TASK_BUSY`. An inline
+working, a model send to that agent's task fails with `TASK_BUSY`. A `ctx.agent` call made after
+its generation stopped owning work, because it was cancelled, timed out, or already replied, fails
+with `TASK_NOT_WORKING`. An inline
 `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
 

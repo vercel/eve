@@ -7,7 +7,7 @@ import type {
   RuntimeSubagentChildResult,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
-import type { JsonValue } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { AgentTaskCall, WorkflowCallerReply } from "#tasks/owner.js";
 import { childCallId, isIdleTask, isOpenResumableTask, type TaskRecord } from "#tasks/record.js";
 import {
@@ -86,10 +86,12 @@ export function retireIdleTasks(
  * anonymous principal, so this separates no two of them. A workflow body
  * awaits the result of the work it started, so a generation a body awaits
  * takes no send, and a body's send never joins work it did not start. A task
- * holds at most {@link MAX_UNREAD_SENDS} sends it has not read. A send that
- * starts an idle task's next generation counts toward the working-task cap
- * like any start. The principal is checked first, so another caller learns
- * nothing about the task, not even its tool.
+ * holds at most {@link MAX_UNREAD_SENDS} sends it has not read and that no
+ * cancel stopped, and takes none after one its agent may not have received
+ * (see `markSendUnconfirmed`). A send that starts an idle task's next
+ * generation counts toward the working-task cap like any start. The
+ * principal is checked first, so another caller learns nothing about the
+ * task, not even its tool.
  */
 export function checkSend(input: {
   readonly caller: SessionAuthContext | null;
@@ -109,7 +111,7 @@ export function checkSend(input: {
     !isOpenResumableTask(record) ||
     (record.child === undefined && isTerminalTaskStatus(record.status))
   ) {
-    return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, toolName) };
+    return unknownSend(taskId, toolName);
   }
   if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
     return { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) };
@@ -127,7 +129,14 @@ export function checkSend(input: {
   if (working && input.fromWorkflow === true) {
     return { code: "TASK_BUSY", message: renderTaskBusy(record.id, toolName, "workflow-caller") };
   }
-  if ((record.sends?.length ?? 0) >= MAX_UNREAD_SENDS) {
+  if (record.sends?.some((send) => send.unconfirmed === true) === true) {
+    return { code: "TASK_BUSY", message: renderTaskBusy(record.id, toolName, "unconfirmed") };
+  }
+  // An agent keeps the send it is working on listed until it answers.
+  const unread = record.sends?.filter(
+    (send) => send.cancelled !== true && send.seq !== record.startedBy,
+  );
+  if ((unread?.length ?? 0) >= MAX_UNREAD_SENDS) {
     return {
       code: "TASK_BUSY",
       message: renderTooManyUnreadSends(record.id, toolName, MAX_UNREAD_SENDS),
@@ -179,6 +188,18 @@ export function readDynamicRemoteAgent(input: {
     return undefined;
   const selection = getDynamicSubagentSelection(input.ctx, input.action.nodeId);
   return selection?.kind === "remote" ? selection.remoteAgent : undefined;
+}
+
+/** The error of a send to a task the session does not have open. */
+export function unknownSend(taskId: string, toolName: string): TaskError {
+  return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, toolName) };
+}
+
+/** A send's input for an agent: its message, and the output schema its reply must match. */
+export function agentSendInput(action: RuntimeAgentDispatchRequest): JsonObject {
+  const { message, outputSchema } = action.input;
+  const input: JsonObject = { message: message ?? "" };
+  return outputSchema === undefined ? input : { ...input, outputSchema };
 }
 
 /** The `taskId` of an agent call that sends to an existing agent. */

@@ -37,6 +37,7 @@ import {
 import {
   answerRemoteAgentSession,
   continueRemoteAgentSession,
+  isRemoteAgentContinueRefusal,
   isRetryableRemoteAgentContinueError,
   readRemoteAgentReport,
   type RemoteCallback,
@@ -69,7 +70,15 @@ export type CommandEffect = Extract<TaskEffect, { kind: "send" }>;
 export interface SendFailure {
   readonly output: JsonValue;
   readonly permanent: boolean;
+  /** An attempt got no answer, so the agent may have the input after all. */
+  readonly unconfirmed?: true;
 }
+
+/**
+ * Attempts per message to an agent. The agent admits a message once per
+ * operation ID, so trying again with the same ID never delivers it twice.
+ */
+const AGENT_DELIVERY_ATTEMPTS = 3;
 
 type InputCommand = Extract<TaskCommand, { readonly kind: "input" }>;
 
@@ -142,7 +151,10 @@ async function runCommand(
  * answered. The message carries the send's output schema, which becomes the
  * turn's schema. A remote agent gets the same message over HTTP, with the
  * owner's callback for the call. Returns the call's error when the child did
- * not take it.
+ * not take it. An agent's delivery is tried again with the same key while
+ * the failure may clear (see `deliverToAgent`); a workflow run's own report
+ * of the generation it started resolves a failed delivery to it (see
+ * `adoptStartedGeneration`).
  */
 export async function sendTaskInput(input: {
   /** The owner's remote callback alias; a remote agent answers through it. */
@@ -156,13 +168,6 @@ export async function sendTaskInput(input: {
 }): Promise<SendFailure | undefined> {
   const { command, record } = input;
   const child = record.child;
-  const unreachable = (permanent: boolean): SendFailure => ({
-    output: {
-      code: TASK_UNREACHABLE,
-      message: renderTaskUnreachable(record, permanent ? "ended" : "temporary"),
-    },
-    permanent,
-  });
   if (child?.kind === "workflow") {
     // A workflow task's child is its run from the start, so its sends are never held.
     if (input.call === undefined) throw new Error("A send to a workflow task needs its call.");
@@ -176,37 +181,39 @@ export async function sendTaskInput(input: {
       await resumeHook(child.commandToken, message);
       return undefined;
     } catch (error) {
-      if (isWorkflowTargetGone(error)) return unreachable(true);
+      if (isWorkflowTargetGone(error)) return unreachable(record, true);
       logError(log, "failed to send input to a workflow task", error, { taskId: record.id });
-      return unreachable(false);
+      return unreachable(record, false);
     }
   }
   const bundle = input.ctx?.get(BundleKey);
-  if (child === undefined || bundle === undefined) return unreachable(false);
+  if (child === undefined || bundle === undefined) return unreachable(record, false);
   const message = typeof command.input.message === "string" ? command.input.message : "";
   const outputSchema = normalizeRequestedOutputSchema(command.input.outputSchema);
   // The send's identity: a retried step resends the same key, and the agent admits it once.
   const operationId = `${record.id}:${command.seq}`;
-  try {
-    if (child.kind === "remote") {
-      const remote = resolveRemoteChild(record, input.ctx);
-      if (remote === undefined || input.callbackAlias === undefined) return unreachable(true);
-      // Only the principal that started the task may send to it.
-      await continueRemoteAgentSession({
+  if (child.kind === "remote") {
+    const remote = resolveRemoteChild(record, input.ctx);
+    if (remote === undefined || input.callbackAlias === undefined) return unreachable(record, true);
+    const callback = remoteCallback(childCallId(record), record.name, child, input.callbackAlias);
+    // Only the principal that started the task may send to it.
+    return await deliverToAgent(record, () =>
+      continueRemoteAgentSession({
         auth: readTaskCreator(record.creator).auth,
-        callback: remoteCallback(childCallId(record), record.name, child, input.callbackAlias),
+        callback,
         message,
         operationId,
         outputSchema,
         remote: { ...remote, url: child.url },
         sessionId: child.sessionId,
         turnPolicy: "steer",
-      });
-      return undefined;
-    }
-    // Without `auth`, the child keeps acting as the principal that started
-    // it, which is the sending principal: only that principal may send.
-    const result = await createWorkflowRuntime({
+      }),
+    );
+  }
+  // Without `auth`, the child keeps acting as the principal that started
+  // it, which is the sending principal: only that principal may send.
+  return await deliverToAgent(record, () =>
+    createWorkflowRuntime({
       compiledArtifactsSource: bundle.compiledArtifactsSource,
       nodeId: record.nodeId,
     }).dispatchSession({
@@ -222,21 +229,58 @@ export async function sendTaskInput(input: {
         turnPolicy: "steer",
       },
       sessionId: child.sessionId,
-    });
-    return result.status === "accepted" ? undefined : unreachable(result.retryable !== true);
-  } catch (error) {
-    logError(log, "failed to send input to a working agent", error, {
-      childKind: child.kind,
-      taskId: record.id,
-    });
-    // A working agent that no longer speaks this protocol cannot take the input.
-    if (error instanceof RemoteTaskProtocolError) {
-      return { output: { code: TASK_UNREACHABLE, message: error.message }, permanent: true };
+    }),
+  );
+}
+
+/**
+ * Delivers one message to an agent, trying again with the same operation ID
+ * while the failure may clear. `deliver` resolves with the local runtime's
+ * dispatch result, or nothing once a remote agent took the message. A
+ * refusal, such as a session not ready yet, is certain; an attempt that got
+ * no answer, such as a timeout, may have delivered the message, so a failure
+ * after one is `unconfirmed`.
+ */
+async function deliverToAgent(
+  record: TaskRecord,
+  deliver: () => Promise<{ readonly status: string; readonly retryable?: boolean } | void>,
+): Promise<SendFailure | undefined> {
+  let unconfirmed = false;
+  for (let attempt = 1; ; attempt += 1) {
+    let permanent: boolean;
+    try {
+      const result = await deliver();
+      if (result === undefined || result.status === "accepted") return undefined;
+      permanent = result.retryable !== true;
+    } catch (error) {
+      logError(log, "failed to deliver a message to an agent", error, {
+        attempt,
+        childKind: record.child?.kind,
+        taskId: record.id,
+      });
+      // An agent that no longer speaks this protocol cannot take the message.
+      if (error instanceof RemoteTaskProtocolError) {
+        return { output: { code: TASK_UNREACHABLE, message: error.message }, permanent: true };
+      }
+      permanent =
+        isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error);
+      if (!isRemoteAgentContinueRefusal(error)) unconfirmed = true;
     }
-    return unreachable(
-      isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
-    );
+    if (permanent || attempt === AGENT_DELIVERY_ATTEMPTS) {
+      const failure = unreachable(record, permanent);
+      return unconfirmed && !permanent ? { ...failure, unconfirmed: true } : failure;
+    }
   }
+}
+
+function unreachable(record: TaskRecord, permanent: boolean): SendFailure {
+  return {
+    output: {
+      code: TASK_UNREACHABLE,
+      message: renderTaskUnreachable(record, permanent ? "ended" : "temporary"),
+    },
+    permanent,
+  };
 }
 
 /**
@@ -364,11 +408,6 @@ export async function readRemoteTaskReport(
   }
 }
 
-/** A remote on another task protocol version cannot start the work; the error says what to upgrade. */
-function protocolFailure(error: RemoteTaskProtocolError): JsonValue {
-  return { code: "START_FAILED", message: error.message };
-}
-
 function remoteCallback(
   callId: string,
   subagentName: string,
@@ -465,9 +504,8 @@ export async function cancelOrphanedChild(input: {
 }
 
 /**
- * Gives an idle agent its next generation, for the send `record` now names.
- * A lost response is never retried: the child may already have accepted the
- * message.
+ * Gives an idle agent its next generation, for the send `record` now names,
+ * trying again while the failure may clear (see `deliverToAgent`).
  */
 export async function deliverToChild(input: {
   readonly action: RuntimeAgentDispatchRequest;
@@ -481,23 +519,11 @@ export async function deliverToChild(input: {
   const { action, child, record } = input;
   const message = typeof action.input.message === "string" ? action.input.message : "";
   const outputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
-  const unreachable = (permanent: boolean): SendFailure => ({
-    output: {
-      code: TASK_UNREACHABLE,
-      message: renderTaskUnreachable(record, permanent ? "ended" : "temporary"),
-    },
-    permanent,
-  });
   // The call's identity: a retried step resends it, and the agent admits it once.
   const operationId = `${record.turnId}:${action.callId}`;
-  try {
-    if (child.kind === "remote") {
-      const resolved = resolveRemoteAgentForAction({
-        nodeId: action.nodeId,
-        remoteAgentName: record.name,
-        registry: input.bundle.subagentRegistry.subagentsByNodeId,
-      });
-      await continueRemoteAgentSession({
+  if (child.kind === "remote") {
+    return await deliverToAgent(record, () =>
+      continueRemoteAgentSession({
         activityObserver: input.activityObserver,
         auth: input.auth,
         callback: {
@@ -512,14 +538,22 @@ export async function deliverToChild(input: {
         message,
         operationId,
         outputSchema,
-        remote: { ...resolved, url: child.url },
+        remote: {
+          ...resolveRemoteAgentForAction({
+            nodeId: action.nodeId,
+            remoteAgentName: record.name,
+            registry: input.bundle.subagentRegistry.subagentsByNodeId,
+          }),
+          url: child.url,
+        },
         sessionId: child.sessionId,
         turnPolicy: "queue",
-      });
-      return undefined;
-    }
-    if (child.kind !== "local") return unreachable(true);
-    const result = await createWorkflowRuntime({
+      }),
+    );
+  }
+  if (child.kind !== "local") return unreachable(record, true);
+  return await deliverToAgent(record, () =>
+    createWorkflowRuntime({
       compiledArtifactsSource: input.bundle.compiledArtifactsSource,
       nodeId: action.nodeId,
     }).dispatchSession({
@@ -537,18 +571,6 @@ export async function deliverToChild(input: {
         turnPolicy: "queue",
       },
       sessionId: child.sessionId,
-    });
-    return result.status === "accepted" ? undefined : unreachable(result.retryable !== true);
-  } catch (error) {
-    logError(log, "task agent delivery failed", error, {
-      callId: action.callId,
-      taskId: record.id,
-    });
-    if (error instanceof RemoteTaskProtocolError) {
-      return { output: protocolFailure(error), permanent: true };
-    }
-    return unreachable(
-      isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
-    );
-  }
+    }),
+  );
 }

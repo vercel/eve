@@ -108,6 +108,13 @@ export interface TaskSend {
   readonly turnId: string;
   /** Cancelled with the task's work: its generation settles `cancelled`, unseen by the model. */
   readonly cancelled?: true;
+  /**
+   * An agent may not have this send: every delivery attempt failed, and one
+   * got no answer. It stays listed, so the agent's count of messages it read
+   * maps onto the sends it may have, and it is the task's last send until a
+   * report settles it (see `markSendUnconfirmed`).
+   */
+  readonly unconfirmed?: true;
 }
 
 /**
@@ -161,6 +168,12 @@ export interface RecoveredTaskFields {
   readonly generation?: number;
   readonly kind?: TaskKind;
   readonly mode?: TaskMode;
+  /** Absent when unreadable: the generation may still be working. */
+  readonly status?: TaskStatus;
+  /** The stream announced the current generation, as on a readable record. */
+  readonly announced?: true;
+  readonly resumable?: true;
+  readonly ended?: true;
   readonly creator?: JsonObject;
   /** Reply hook of the `ctx.agent` call waiting on the task. */
   readonly replyTo?: string;
@@ -248,7 +261,8 @@ function isTaskSend(value: unknown): value is TaskSend {
     isCount(value.seq) &&
     isString(value.callId) &&
     isString(value.turnId) &&
-    (value.cancelled === undefined || value.cancelled === true)
+    (value.cancelled === undefined || value.cancelled === true) &&
+    (value.unconfirmed === undefined || value.unconfirmed === true)
   );
 }
 
@@ -371,6 +385,10 @@ function recoverTaskFields(value: Record<string, unknown>): RecoveredTaskFields 
   }
   if (KINDS.has(value.kind as TaskKind)) fields.kind = value.kind as TaskKind;
   if (MODES.has(value.mode as TaskMode)) fields.mode = value.mode as TaskMode;
+  if (STATUSES.has(value.status as TaskStatus)) fields.status = value.status as TaskStatus;
+  if (value.announced === true) fields.announced = true;
+  if (value.resumable === true) fields.resumable = true;
+  if (value.ended === true) fields.ended = true;
   if (isRecordObject(value.creator)) fields.creator = value.creator as JsonObject;
   if (isRecordObject(value.workflowCaller) && isString(value.workflowCaller.replyTo)) {
     fields.replyTo = value.workflowCaller.replyTo;

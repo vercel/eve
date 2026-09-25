@@ -29,14 +29,17 @@ export default defineEval({
     const conversation = await t.session();
     const live = await conversation.start(REQUEST);
     await live.waitForEvent("turn.completed", { data: { held: true } });
-    const [start] = await t.require(
-      taskStarts(live.events, "launch-writer"),
+    // The writer reports its start through the parent's inbox, which can land
+    // after the waiting boundary.
+    const started = await live.waitForEvent("task.started", { data: { name: "launch-writer" } });
+    await t.require(
+      started.data,
       satisfies(
-        (calls: ReturnType<typeof taskStarts>) => calls.length === 1 && calls[0]?.generation === 1,
-        "one launch-writer task started before the waiting boundary",
+        (data: typeof started.data) => data.generation === 1,
+        "the launch-writer task started with its first generation",
       ),
     );
-    const taskId = start!.taskId;
+    const taskId = started.data.taskId;
 
     const followUp = await conversation.send(FOLLOW_UP, { turnPolicy: "steer" });
     followUp.expectOk();

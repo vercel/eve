@@ -15,7 +15,14 @@ import { sendReceiptResult, taskToolErrorResult } from "#tasks/receipts.js";
 import { renderUnknownSendTask } from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { findTask, TASK_CANCEL_CONFIRM_MS, type TaskTable } from "#tasks/table.js";
-import { endTask, sendTask, withdrawSend, type SentTask } from "#tasks/table-generations.js";
+import {
+  announceDeliveredGeneration,
+  endTask,
+  markSendUnconfirmed,
+  sendTask,
+  withdrawSend,
+  type SentTask,
+} from "#tasks/table-generations.js";
 import { armChildHardStop } from "#tasks/timer-steps.js";
 import {
   RETIRED_IDLE_TASK_REASON,
@@ -48,7 +55,8 @@ interface OwnerChange<T> {
  * Delivers a recorded send's input to its task's child, when the child is
  * started and takes input now, and writes the table after it. A send the
  * child did not take is withdrawn (see `withdrawSend`), and a child gone for
- * good ends its task, failing the work it held.
+ * good ends its task, failing the work it held. A send an agent may have
+ * taken after all stays queued, `unconfirmed` (see `markSendUnconfirmed`).
  */
 export async function deliverSend<T extends Session>(input: {
   readonly callbackAlias: string | undefined;
@@ -59,7 +67,7 @@ export async function deliverSend<T extends Session>(input: {
   readonly sent: SentTask;
   /** The session before the send. */
   readonly session: T;
-}): Promise<OwnerChange<T> & { readonly failure?: SendFailure }> {
+}): Promise<OwnerChange<T> & { readonly failure?: SendFailure; readonly unconfirmed?: true }> {
   const { sent, session } = input;
   const command = sent.effects.flatMap((effect) =>
     effect.kind === "send" ? effect.commands.filter(isInputCommand) : [],
@@ -76,14 +84,51 @@ export async function deliverSend<T extends Session>(input: {
   if (failure === undefined) {
     return { events: [], results: [], session: setTaskTable(session, sent.table) };
   }
+  if (failure.unconfirmed === true) {
+    const table = markSendUnconfirmed(sent.table, sent.record.id, sent.send);
+    return { events: [], results: [], session: setTaskTable(session, table), unconfirmed: true };
+  }
+  return { ...withdrawFailedSend(session, sent, failure, input.now), failure };
+}
+
+/**
+ * Applies the delivery of an idle agent's next turn, which `sendTask`
+ * started unannounced: the generation is announced once the agent took the
+ * turn. A turn it did not take is withdrawn like any failed send, even one
+ * it may have taken: its answer then names a call the task no longer waits
+ * on, and is dropped.
+ */
+export function applyIdleAgentDelivery<T extends Session>(input: {
+  readonly failure: SendFailure | undefined;
+  readonly now: string;
+  readonly sent: SentTask;
+  /** The session before the send. */
+  readonly session: T;
+}): OwnerChange<T> {
+  const { failure, sent, session } = input;
+  if (failure !== undefined) return withdrawFailedSend(session, sent, failure, input.now);
+  const announced = announceDeliveredGeneration(sent.table, sent.record.id);
+  return {
+    events: taskEvents(announced.effects, session.sessionId),
+    results: [],
+    session: setTaskTable(session, announced.table),
+  };
+}
+
+/** Takes back a send its child did not take, ending the task when the child is gone for good. */
+function withdrawFailedSend<T extends Session>(
+  session: T,
+  sent: SentTask,
+  failure: SendFailure,
+  now: string,
+): OwnerChange<T> {
   const withdrawn = withdrawSend(getTaskTable(session), sent.record.id, sent.send);
   const ended = failure.permanent
-    ? endTask(withdrawn, findTask(withdrawn, sent.record.id)!, input.now)
+    ? endTask(withdrawn, findTask(withdrawn, sent.record.id)!, now)
     : { effects: [], table: withdrawn };
   const routed = routeSettledResults(setTaskTable(session, ended.table), ended.effects);
   return {
     events: taskEvents(ended.effects, session.sessionId),
-    failure,
     results: routed.results,
     session: routed.session,
   };
@@ -165,7 +210,10 @@ export async function applyWorkflowSend<T extends Session>(input: {
  * Runs the commands held for a child that just reported `task.started`. A
  * held send that cannot be delivered then is withdrawn and logged, and no
  * generation waits for it; the call that sent it already returned its
- * receipt. A stopped task's held sends are not sent.
+ * receipt. One an agent may have taken after all stays queued, unconfirmed,
+ * and the sends held after it are withdrawn, since it must stay the last
+ * send the agent may have (see `markSendUnconfirmed`). A stopped task's held
+ * sends are not sent.
  */
 export async function flushHeldCommands(input: {
   readonly callbackAlias: string | undefined;
@@ -180,13 +228,21 @@ export async function flushHeldCommands(input: {
     const rest = effect.commands.filter((command) => command.kind !== "input");
     if (rest.length > 0) others.push({ ...effect, commands: rest });
     if (isTerminalTaskStatus(effect.record.status)) continue;
+    let unconfirmed = false;
     for (const command of effect.commands.filter(isInputCommand)) {
-      const failure = await sendTaskInput({ ...input, command, record: effect.record });
-      if (failure === undefined) continue;
+      const send = effect.record.sends?.find((entry) => entry.seq === command.seq);
+      if (!unconfirmed) {
+        const failure = await sendTaskInput({ ...input, command, record: effect.record });
+        if (failure === undefined) continue;
+        if (failure.unconfirmed === true && send !== undefined) {
+          unconfirmed = true;
+          table = markSendUnconfirmed(table, effect.record.id, send);
+          continue;
+        }
+      }
       log.error("a held send did not reach its task; its result will not reflect it", {
         taskId: effect.record.id,
       });
-      const send = effect.record.sends?.find((entry) => entry.seq === command.seq);
       if (send !== undefined) table = withdrawSend(table, effect.record.id, send);
     }
   }

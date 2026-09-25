@@ -13,7 +13,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session();
     const live = await session.start("Alice asked to pause before the next report. BG-SLEEP-START");
-    await waitForStarts(t, live, "sleep", 1);
+    await waitForStarts(live, "sleep", 1);
 
     const message = await live.session.start("Bob here: the report is ready now. BG-PING", {
       turnPolicy: "steer",

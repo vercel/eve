@@ -11,9 +11,22 @@ import {
   startTask,
   type TaskEffect,
   type TaskTable,
+  type TaskTransition,
 } from "#tasks/table.js";
 import { taskTable } from "#internal/testing/task-records.js";
-import { adoptWorkflowRun, sendTask, withdrawSend } from "#tasks/table-generations.js";
+import { taskLifecycleViolations } from "#internal/testing/task-lifecycle.js";
+import { taskEvents } from "#tasks/events.js";
+import { TASK_INPUT_UNCONFIRMED_MESSAGE, TASK_RESULT_LOST_MESSAGE } from "#tasks/render.js";
+import {
+  adoptWorkflowRun,
+  announceDeliveredGeneration,
+  endAllTasks,
+  endTask,
+  markSendUnconfirmed,
+  sendTask,
+  withdrawSend,
+} from "#tasks/table-generations.js";
+import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
 
 // Resumable tasks: each send starts or joins a generation, the owner
 // attributes generations from the sends a child reads in order, and a task
@@ -25,7 +38,11 @@ const SESSION = { continuationToken: "c", kind: "local", sessionId: "child" } as
 
 type ChildMessage = Exclude<TaskMessage, { kind: "task.deadline" }>;
 
-function startResumable(kind: "agent" | "workflow"): { table: TaskTable; taskId: string } {
+function startResumable(kind: "agent" | "workflow"): {
+  effects: readonly TaskEffect[];
+  table: TaskTable;
+  taskId: string;
+} {
   const start = startTask(taskTable([]), {
     callId: "call-1",
     kind,
@@ -47,7 +64,7 @@ function startResumable(kind: "agent" | "workflow"): { table: TaskTable; taskId:
     },
     NOW,
   );
-  return { table: adopted.table, taskId: start.record.id };
+  return { effects: adopted.effects, table: adopted.table, taskId: start.record.id };
 }
 
 /** The lifecycle events and commands an owner publishes and sends from effects. */
@@ -74,35 +91,24 @@ function lifecycle(effects: readonly TaskEffect[]): string[] {
   });
 }
 
-/** §4.7: one started then one settled per generation, one ended after the last settled. */
-function expectLifecycle(events: readonly string[]): void {
-  let open: string | undefined;
-  let ended = false;
-  for (const event of events) {
-    const [kind, generation] = event.split(" ");
-    if (kind === "input" || kind === "cancel") continue;
-    expect(ended, `${event} after ended`).toBe(false);
-    if (kind === "started") {
-      expect(open, `${event} while a generation is open`).toBeUndefined();
-      open = generation;
-    } else if (kind === "settled") {
-      expect(open, `${event} without started`).toBe(generation);
-      open = undefined;
-    } else if (kind === "ended") {
-      expect(open, `${event} with an open generation`).toBeUndefined();
-      ended = true;
-    }
-  }
+/** §4.7, on the events the owner publishes from a task's accumulated effects. */
+function expectLifecycle(effects: readonly TaskEffect[]): void {
+  expect(taskLifecycleViolations(taskEvents(effects, "session-1"))).toEqual([]);
 }
 
 function driver(kind: "agent" | "workflow") {
   const task = startResumable(kind);
   let table = task.table;
   const events = [`started g1 call-1`];
+  const effects: TaskEffect[] = [...task.effects];
+  const record = (transition: { readonly effects: readonly TaskEffect[] }) => {
+    events.push(...lifecycle(transition.effects));
+    effects.push(...transition.effects);
+  };
   const apply = (message: ChildMessage) => {
     const applied = applyTaskMessage(table, message, NOW);
     table = applied.table;
-    events.push(...lifecycle(applied.effects));
+    record(applied);
   };
   const send = (seq: number, turnId = "turn-1") => {
     const sent = sendTask(table, {
@@ -114,8 +120,15 @@ function driver(kind: "agent" | "workflow") {
     });
     if (sent?.kind !== "sent") throw new Error(JSON.stringify(sent));
     table = sent.table;
-    events.push(...lifecycle(sent.effects));
+    record(sent);
     return sent;
+  };
+  /** Applies any other transition of the task's table. */
+  const transition = (next: (current: TaskTable) => TaskTransition) => {
+    const applied = next(table);
+    table = applied.table;
+    record(applied);
+    return applied;
   };
   const reply = (generation: number, read?: number[], steers?: number) =>
     apply({
@@ -128,12 +141,14 @@ function driver(kind: "agent" | "workflow") {
     });
   return {
     apply,
+    effects,
     events,
     record: () => findTask(table, task.taskId)!,
     reply,
     send,
     table: () => table,
     taskId: task.taskId,
+    transition,
   };
 }
 
@@ -167,7 +182,7 @@ describe("resumable workflow tasks", () => {
       "settled g3 send-2 completed",
       "ended",
     ]);
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
     expect(task.record()).toMatchObject({ ended: true });
     expect(task.record().child).toBeUndefined();
     // An ended task takes no send, and is pruned once its results are delivered.
@@ -215,7 +230,7 @@ describe("resumable workflow tasks", () => {
     // The stream announces it when the run confirms it read that send.
     task.apply({ generation: 3, kind: "task.started", send: 3, taskId: task.taskId });
     expect(task.events.at(-1)).toBe("started g3 send-3");
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
   });
 
   it("gives every send the body never read a generation that fails at once, then ends", () => {
@@ -234,7 +249,7 @@ describe("resumable workflow tasks", () => {
       "settled g3 send-2 failed",
       "ended",
     ]);
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
     const applied = applyTaskMessage(
       task.table(),
       { kind: "task.ended", taskId: task.taskId, unread: [] },
@@ -384,7 +399,7 @@ describe("a workflow run's report of the generation it started", () => {
     const before = task.table();
     task.apply({ ...started(2, 1), taskId: task.taskId });
     expect(task.table()).toBe(before);
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
   });
 
   it("adopts a generation a failed delivery started, so its reply settles it", () => {
@@ -481,9 +496,10 @@ describe("a workflow run's report of the generation it started", () => {
     );
     expect(lifecycle(confirmed.effects)).toEqual(["started g3 send-2"]);
     expectLifecycle([
-      "started g1 call-1",
-      "settled g1 call-1 completed",
-      ...lifecycle([...adopted.effects, ...replied.effects, ...confirmed.effects]),
+      ...task.effects,
+      ...adopted.effects,
+      ...replied.effects,
+      ...confirmed.effects,
     ]);
   });
 
@@ -497,7 +513,31 @@ describe("a workflow run's report of the generation it started", () => {
     expect(task.record()).toMatchObject({ generation: 2, startedBy: 2 });
     // Send 1 came before the send the run started, so the run already read it.
     expect(task.record().sends).toBeUndefined();
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
+  });
+
+  it("settles each generation whose reports were lost when the run reports a later start", () => {
+    const task = driver("workflow");
+    task.send(1);
+    task.send(2);
+    task.send(3);
+    // Generation 1's reply, and generation 2's start and reply, never arrived.
+    task.apply({ ...started(3, 2), taskId: task.taskId });
+    expect(task.events.slice(-4)).toEqual([
+      "settled g1 call-1 failed",
+      "started g2 send-1",
+      "settled g2 send-1 failed",
+      "started g3 send-2",
+    ]);
+    for (const effect of task.effects.filter((effect) => effect.kind === "settled")) {
+      expect(effect).toMatchObject({ outcome: { error: { message: TASK_RESULT_LOST_MESSAGE } } });
+    }
+    expect(task.record()).toMatchObject({ callId: "send-2", generation: 3, startedBy: 2 });
+    expect(task.record().sends).toEqual([{ callId: "send-3", seq: 3, turnId: "turn-1" }]);
+    // The task goes on from there: its next reply settles generation 3, and send 3 starts the next.
+    task.reply(3, []);
+    expect(task.record()).toMatchObject({ callId: "send-3", generation: 4, startedBy: 3 });
+    expectLifecycle(task.effects);
   });
 
   it("settles a send the owner cancelled as cancelled when the run starts it", () => {
@@ -537,6 +577,61 @@ describe("a workflow run's report of the generation it started", () => {
   });
 });
 
+describe("ending a resumable task", () => {
+  it("ends every task with its session, failing work in progress and the sends never read", () => {
+    const working = driver("workflow");
+    working.send(1);
+    working.transition((table) => endAllTasks(table, NOW));
+    expect(working.events.slice(-4)).toEqual([
+      "settled g1 call-1 failed",
+      "started g2 send-1",
+      "settled g2 send-1 failed",
+      "ended",
+    ]);
+    expectLifecycle(working.effects);
+
+    const idle = driver("agent");
+    idle.reply(1);
+    idle.transition((table) => endAllTasks(table, NOW));
+    expect(idle.events.slice(-2)).toEqual(["settled g1 call-1 completed", "ended"]);
+    expectLifecycle(idle.effects);
+  });
+
+  it("ends a stopped agent at its hard stop, settling the sends it dropped", () => {
+    const task = driver("agent");
+    task.send(1);
+    task.transition((table) => cancelTask(table, task.taskId, NOW));
+    const late = new Date(Date.parse(NOW) + 60 * 60_000).toISOString();
+    task.transition((table) => evaluateTaskDeadlines(table, late));
+    expect(task.events.slice(-5)).toEqual([
+      "settled g1 call-1 cancelled",
+      "cancel",
+      "started g2 send-1",
+      "settled g2 send-1 cancelled",
+      "ended",
+    ]);
+    expect(task.record()).toMatchObject({ ended: true });
+    expectLifecycle(task.effects);
+  });
+
+  it("ends a task whose child is gone for good when a send cannot reach it", () => {
+    const task = driver("agent");
+    task.send(1);
+    const failed = task.send(2);
+    task.transition((table) => {
+      const withdrawn = withdrawSend(table, task.taskId, failed.send);
+      return endTask(withdrawn, findTask(withdrawn, task.taskId)!, NOW);
+    });
+    expect(task.events.slice(-4)).toEqual([
+      "settled g1 call-1 failed",
+      "started g2 send-1",
+      "settled g2 send-1 failed",
+      "ended",
+    ]);
+    expectLifecycle(task.effects);
+  });
+});
+
 describe("adoptWorkflowRun", () => {
   it("points a task at the run that reports for it", () => {
     const task = driver("workflow");
@@ -567,7 +662,7 @@ describe("resumable agent tasks", () => {
     task.reply(2, undefined, 1);
     expect(task.record()).toMatchObject({ generation: 2, status: "completed" });
     expect(task.record().sends).toBeUndefined();
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
   });
 
   it("never settles the next generation with a repeat of the answer that opened it", () => {
@@ -608,14 +703,70 @@ describe("resumable agent tasks", () => {
     });
   });
 
-  it("delivers an idle agent's send as a new call, with no command", () => {
+  it("announces an idle agent's send as a new call once its turn reached the agent", () => {
     const task = driver("agent");
     task.reply(1);
     const sent = task.send(1, "turn-2");
-    // The owner starts the agent's next turn itself, so it announces it at once.
-    expect(lifecycle(sent.effects)).toEqual(["started g2 send-1"]);
+    // No command: the owner delivers the agent's next turn itself, and announces it only then.
+    expect(sent.effects).toEqual([]);
     expect(sent.record).toMatchObject({ callId: "send-1", generation: 2, startedBy: 1 });
+    expect(sent.record.announced).toBeUndefined();
     expect(sent.record.childCallId).toBeUndefined();
+    const announced = task.transition((table) => announceDeliveredGeneration(table, task.taskId));
+    expect(lifecycle(announced.effects)).toEqual(["started g2 send-1"]);
+    expectLifecycle(task.effects);
+  });
+
+  it("maps the agent's count onto a send it may not have, which stays its last", () => {
+    const unconfirmed = (task: ReturnType<typeof driver>, seq: number) => {
+      const sent = task.send(seq);
+      task.transition((table) => ({
+        effects: [],
+        table: markSendUnconfirmed(table, task.taskId, sent.send),
+      }));
+    };
+    // The agent had it: its answer counts it.
+    const had = driver("agent");
+    unconfirmed(had, 1);
+    expect(had.record().sends).toEqual([
+      { callId: "send-1", seq: 1, turnId: "turn-1", unconfirmed: true },
+    ]);
+    had.reply(1, undefined, 1);
+    expect(had.record()).toMatchObject({ generation: 1, status: "completed" });
+    expect(had.record().sends).toBeUndefined();
+    expectLifecycle(had.effects);
+
+    // It never got it: its answer counts nothing, and the send's own generation fails at once.
+    const missed = driver("agent");
+    unconfirmed(missed, 1);
+    missed.reply(1, undefined, 0);
+    expect(missed.events.slice(-3)).toEqual([
+      "settled g1 call-1 completed",
+      "started g2 send-1",
+      "settled g2 send-1 failed",
+    ]);
+    expect(missed.effects.at(-1)).toMatchObject({
+      outcome: { error: { code: "TASK_UNREACHABLE", message: TASK_INPUT_UNCONFIRMED_MESSAGE } },
+    });
+    expect(missed.record()).toMatchObject({ generation: 2, status: "failed" });
+    expect(missed.record().sends).toBeUndefined();
+    expectLifecycle(missed.effects);
+
+    // A cancel stops it like any queued send: it settles cancelled, unseen by the model.
+    const cancelled = driver("agent");
+    unconfirmed(cancelled, 1);
+    cancelled.transition((table) => cancelTask(table, cancelled.taskId, NOW));
+    cancelled.apply({
+      generation: 1,
+      kind: "task.settled",
+      outcome: { status: "cancelled" },
+      taskId: cancelled.taskId,
+    });
+    expect(cancelled.events.slice(-2)).toEqual([
+      "started g2 send-1",
+      "settled g2 send-1 cancelled",
+    ]);
+    expectLifecycle(cancelled.effects);
   });
 
   it("settles a cancelled agent's queued sends at once: the agent dropped them", () => {
@@ -658,6 +809,6 @@ describe("resumable agent tasks", () => {
       "settled g2 send-1 failed",
       "ended",
     ]);
-    expectLifecycle(task.events);
+    expectLifecycle(task.effects);
   });
 });

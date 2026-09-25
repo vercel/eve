@@ -3,7 +3,9 @@ import type { MockModelRequest, MockModelResponse, MockModelToolResult } from "e
 // Deterministic task flows, one `TASKS-*-START` directive per session. Each
 // flow names its calls, so later steps find earlier results by call ID, and
 // the evals assert on those IDs. The script waits explicitly with task_wait
-// so each wait's outcome is visible.
+// so each wait's outcome is visible. A quick task can settle before the
+// model's next step, and its result then arrives in a task.result message
+// instead; the flows that start one take it from there rather than wait.
 
 type Response = MockModelResponse | string;
 
@@ -34,6 +36,11 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
   // A later user message moves a flow to its next phase; a result message never does.
   const said = (marker: string) => request.userMessages.some((message) => message.includes(marker));
   const result = (id: string) => request.toolResults.find((entry) => entry.id === id);
+  // The task.result message that delivered a result containing `marker`, if one did.
+  const delivered = (marker: string) =>
+    request.userMessages.find(
+      (message) => message.startsWith("<task_result") && message.includes(marker),
+    );
   const call = (id: string, name: string, input: unknown) => ({ id, input, name });
 
   switch (directive) {
@@ -43,7 +50,7 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
       const remind = result("remind");
       if (remind === undefined) {
         return {
-          toolCalls: [call("remind", "remind_later", { note: "stretch", seconds: 3 })],
+          toolCalls: [call("remind", "remind_later", { note: "stretch", seconds: 10 })],
         };
       }
       const taskId = receiptTaskId(remind);
@@ -68,7 +75,7 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
       const remind = result("remind");
       if (remind === undefined) {
         return {
-          toolCalls: [call("remind", "remind_later", { note: "water the plants", seconds: 8 })],
+          toolCalls: [call("remind", "remind_later", { note: "water the plants", seconds: 20 })],
         };
       }
       if (result("wait") === undefined) {
@@ -108,8 +115,8 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
       if (first === undefined || second === undefined) {
         return {
           toolCalls: [
-            call("remind-a", "remind_later", { note: "stand-up", seconds: 2 }),
-            call("remind-b", "remind_later", { note: "lunch", seconds: 4 }),
+            call("remind-a", "remind_later", { note: "stand-up", seconds: 8 }),
+            call("remind-b", "remind_later", { note: "lunch", seconds: 12 }),
           ],
         };
       }
@@ -150,36 +157,39 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
         return { toolCalls: [call("notes-1", "draft_notes", { request: "the launch plan" })] };
       }
       const taskId = receiptTaskId(start);
-      if (result("notes-wait-1") === undefined) {
+      const draft = delivered("Draft 1:");
+      if (draft === undefined && result("notes-wait-1") === undefined) {
         return { toolCalls: [call("notes-wait-1", "task_wait", { taskId })] };
       }
       if (!said("TASKS-REVISE")) {
-        return `TASKS-NOTES ${text(result("notes-wait-1")?.output)}`;
+        return `TASKS-NOTES ${draft ?? text(result("notes-wait-1")?.output)}`;
       }
       if (result("notes-2") === undefined) {
         return {
           toolCalls: [call("notes-2", "draft_notes", { request: "a shorter plan", taskId })],
         };
       }
-      if (result("notes-wait-2") === undefined) {
+      const revision = delivered("Draft 2:");
+      if (revision === undefined && result("notes-wait-2") === undefined) {
         return { toolCalls: [call("notes-wait-2", "task_wait", { taskId })] };
       }
       if (result("notes-idle") === undefined) {
         return { toolCalls: [call("notes-idle", "task_wait", { taskId })] };
       }
       if (!said("TASKS-CLOSE")) {
-        return `TASKS-REVISED ${text(result("notes-wait-2")?.output)}`;
+        return `TASKS-REVISED ${revision ?? text(result("notes-wait-2")?.output)}`;
       }
       if (result("notes-3") === undefined) {
         return { toolCalls: [call("notes-3", "draft_notes", { request: "done", taskId })] };
       }
-      if (result("notes-wait-3") === undefined) {
+      const closed = delivered("Closed the notes.");
+      if (closed === undefined && result("notes-wait-3") === undefined) {
         return { toolCalls: [call("notes-wait-3", "task_wait", { taskId })] };
       }
       if (result("notes-4") === undefined) {
         return { toolCalls: [call("notes-4", "draft_notes", { request: "one more", taskId })] };
       }
-      return `TASKS-CLOSED ${text(result("notes-wait-3")?.output)}`;
+      return `TASKS-CLOSED ${closed ?? text(result("notes-wait-3")?.output)}`;
     }
 
     // An agent task: start it, then send it a follow-up by taskId. A send
@@ -225,7 +235,8 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
         return { toolCalls: [call("draft-1", "draft_notes", { request: "the agenda" })] };
       }
       const taskId = receiptTaskId(draft);
-      if (result("draft-wait-1") === undefined) {
+      const agenda = delivered("Draft 1:");
+      if (agenda === undefined && result("draft-wait-1") === undefined) {
         return { toolCalls: [call("draft-wait-1", "task_wait", { taskId })] };
       }
       if (said("TASKS-AGENDA")) {
@@ -234,10 +245,11 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
             toolCalls: [call("draft-2", "draft_notes", { request: "a shorter agenda", taskId })],
           };
         }
-        if (result("draft-wait-2") === undefined) {
+        const revision = delivered("Draft 2:");
+        if (revision === undefined && result("draft-wait-2") === undefined) {
           return { toolCalls: [call("draft-wait-2", "task_wait", { taskId })] };
         }
-        return `TASKS-AGENDA-REVISED ${text(result("draft-wait-2")?.output)}`;
+        return `TASKS-AGENDA-REVISED ${revision ?? text(result("draft-wait-2")?.output)}`;
       }
       if (said("TASKS-REMIND")) {
         if (result("cancel-a") !== undefined) return "TASKS-REMINDING";
@@ -248,7 +260,7 @@ export function respondTasks(request: MockModelRequest): Response | undefined {
           ],
         };
       }
-      return `TASKS-DRAFTED ${text(result("draft-wait-1")?.output)}`;
+      return `TASKS-DRAFTED ${agenda ?? text(result("draft-wait-1")?.output)}`;
     }
 
     default:

@@ -7,7 +7,7 @@ import {
   applyTaskMessage,
   cancelTask,
   findTask,
-  isReportedLoss,
+  isNamedLoss,
   pruneTaskTable,
   readTaskTable,
   setTaskWait,
@@ -437,6 +437,7 @@ describe("persistence", () => {
   it("keeps unreadable records through writes until their loss is reported", () => {
     const task = started();
     const unreadable = {
+      announced: true,
       callId: "call_9",
       creator: { auth: null },
       delivered: false,
@@ -445,6 +446,8 @@ describe("persistence", () => {
       kind: "agent",
       mode: "detached",
       name: "old",
+      resumable: true,
+      status: "completed",
       v: 0,
       workflowCaller: { replyTo: "hook-1", runId: "run-1" },
     };
@@ -454,6 +457,7 @@ describe("persistence", () => {
     expect(storedRecords(written)).toEqual([...task.table.records, unreadable]);
     const [lost] = readTaskTable(written).lost;
     expect(lost).toMatchObject({
+      announced: true,
       callId: "call_9",
       creator: { auth: null },
       delivered: false,
@@ -461,10 +465,12 @@ describe("persistence", () => {
       kind: "agent",
       mode: "detached",
       replyTo: "hook-1",
+      resumable: true,
+      status: "completed",
     });
-    expect(isReportedLoss(lost!)).toBe(true);
-    expect(isReportedLoss({ ...lost!, delivered: true })).toBe(false);
-    expect(isReportedLoss({ reason: "not an object" })).toBe(false);
+    expect(lost).not.toHaveProperty("ended");
+    expect(isNamedLoss(lost!)).toBe(true);
+    expect(isNamedLoss({ reason: "not an object" })).toBe(false);
 
     const dropped = writeTaskTable(written, task.table, { dropLost: true });
     expect(readTaskTable(dropped)).toEqual({ lost: [], table: task.table });
@@ -477,7 +483,7 @@ describe("persistence", () => {
 
     const [lost] = readTaskTable(state).lost;
     expect(lost).toMatchObject({ duplicate: true, reason: "duplicate id" });
-    expect(isReportedLoss(lost!)).toBe(false);
+    expect(isNamedLoss(lost!)).toBe(false);
     expect(storedRecords(writeTaskTable(state, task.table))).toEqual([record]);
   });
 

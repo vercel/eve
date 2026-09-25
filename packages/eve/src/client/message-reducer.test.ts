@@ -400,6 +400,63 @@ describe("defaultMessageReducer", () => {
     });
   });
 
+  it("keeps a reused call ID's task on the part of the turn that started it", () => {
+    // The model names its call call_1 in both of Bob's turns: the second is a
+    // send that starts the writer's next generation.
+    const reducer = defaultMessageReducer();
+    const call = (turnId: string, sequence: number) =>
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_1",
+            input: { message: "Draft it." },
+            kind: "tool-call",
+            toolName: "writer",
+          },
+        ],
+        sequence,
+        stepIndex: 0,
+        turnId,
+      });
+    const started = (generation: number, turnId: string) =>
+      createTaskStartedEvent({
+        callId: "call_1",
+        generation,
+        kind: "agent",
+        mode: "detached",
+        name: "writer",
+        parentSessionId: "session_1",
+        resumable: true,
+        taskId: "writer-aaaaaa",
+        turnId,
+      });
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      call("turn_0", 0),
+      started(1, "turn_0"),
+      createTaskSettledEvent({
+        callId: "call_1",
+        generation: 1,
+        output: "first",
+        status: "completed",
+        taskId: "writer-aaaaaa",
+      }),
+      call("turn_1", 1),
+      started(2, "turn_1"),
+    ]);
+
+    const tasks = data.messages.flatMap((message) =>
+      message.parts.flatMap((part) =>
+        part.type === "dynamic-tool"
+          ? [[message.metadata?.turnId, part.toolMetadata?.eve?.task] as const]
+          : [],
+      ),
+    );
+    expect(tasks).toEqual([
+      ["turn_0", { generation: 1, id: "writer-aaaaaa", status: "completed" }],
+      ["turn_1", { generation: 2, id: "writer-aaaaaa", status: "working" }],
+    ]);
+  });
+
   it("skips task events for calls with no tool part", () => {
     const reducer = defaultMessageReducer();
     const initial = reducer.initial();

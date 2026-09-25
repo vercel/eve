@@ -8,6 +8,7 @@ import {
   renderSendReceipt,
   renderStartReceipt,
   renderTooManyTasks,
+  renderUnconfirmedSendReceipt,
   type TaskReceipt,
 } from "#tasks/render.js";
 import { MAX_WORKING_TASKS, workingDetachedTaskIds, type TaskTable } from "#tasks/table.js";
@@ -23,18 +24,25 @@ export function startReceiptResult(
   return receiptResult(record.callId, record.id, toolName, renderStartReceipt(record, toolName));
 }
 
-/** Receipt of a send: to a working task, or to an idle one it started again (`started`). */
+/**
+ * Receipt of a send: to a working task, to an idle one it started again
+ * (`started`), or to a working agent that may not have received it
+ * (`unconfirmed`), which stays queued like any send.
+ */
 export function sendReceiptResult(input: {
   readonly callId: string;
   readonly record: Pick<TaskRecord, "id">;
   readonly started: boolean;
   readonly toolName: string;
+  readonly unconfirmed?: boolean;
 }): RuntimeToolResultActionResult {
   return receiptResult(
     input.callId,
     input.record.id,
     input.toolName,
-    renderSendReceipt(input.record, input.started),
+    input.unconfirmed === true
+      ? renderUnconfirmedSendReceipt(input.record)
+      : renderSendReceipt(input.record, input.started),
   );
 }
 

@@ -33,12 +33,16 @@ import type {
   RuntimeSubagentResult,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
-import { renderUnknownSendTask } from "#tasks/render.js";
 import { sendReceiptResult, startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
-import { deliverSend, flushHeldCommands, retireIdleTaskChildren } from "#tasks/send.js";
+import {
+  applyIdleAgentDelivery,
+  deliverSend,
+  flushHeldCommands,
+  retireIdleTaskChildren,
+} from "#tasks/send.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
@@ -47,12 +51,7 @@ import {
 } from "#tracing/agent-invocation-terminal.js";
 import { coordinationTurnId, getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
-import {
-  reportedAnswer,
-  reportedSteers,
-  type ChildAddress,
-  type TaskError,
-} from "#tasks/protocol.js";
+import { reportedAnswer, reportedSteers, type ChildAddress } from "#tasks/protocol.js";
 import {
   createFailedResult,
   failEmptyResult,
@@ -67,11 +66,13 @@ import {
   type CommandEffect,
 } from "#tasks/transport.js";
 import {
+  agentSendInput,
   checkSend,
   findReportedTask,
   readDynamicRemoteAgent,
   readSendTaskId,
   resolveFailedCall,
+  unknownSend,
 } from "#tasks/owner-calls.js";
 import {
   getTaskTable,
@@ -91,7 +92,7 @@ import {
   type TaskTable,
   type TaskTransition,
 } from "#tasks/table.js";
-import { sendTask } from "#tasks/table-generations.js";
+import { sendTask, type SentTask } from "#tasks/table-generations.js";
 import { syncTaskTimerInStep } from "#tasks/timer-steps.js";
 import { routeDetachedResult } from "#tasks/wait.js";
 
@@ -262,6 +263,8 @@ export async function startAgentTasks(input: {
     const timeoutMs = resolveAgentTaskTimeout({ action, bundle: prepared.bundle, ctx });
     let table = getTaskTable(session);
     let record: TaskRecord;
+    // An idle agent's send, and the session before it: the agent's next turn is delivered below.
+    let idle: { readonly before: typeof session; readonly sent: SentTask } | undefined;
     if (taskId === undefined) {
       const started = startTask(table, {
         callId: call.callId,
@@ -319,10 +322,17 @@ export async function startAgentTasks(input: {
         fail(call, action, { ...(refused ?? unknownSend(taskId, name)) });
         continue;
       }
-      const receipt = (started: boolean) =>
+      const { record: sentRecord } = sent;
+      const receipt = (started: boolean, unconfirmed?: true) =>
         detached &&
         results.push(
-          sendReceiptResult({ callId: call.callId, record: sent.record, started, toolName }),
+          sendReceiptResult({
+            callId: call.callId,
+            record: sentRecord,
+            started,
+            toolName,
+            unconfirmed,
+          }),
         );
       // A replayed send already reached the agent; a detached call still owes its receipt.
       if (sent.kind === "existing") {
@@ -335,12 +345,11 @@ export async function startAgentTasks(input: {
         ({ session } = delivered);
         events.push(...delivered.events);
         results.push(...delivered.results);
-        if (delivered.failure === undefined) receipt(false);
+        if (delivered.failure === undefined) receipt(false, delivered.unconfirmed);
         else fail(call, action, delivered.failure.output);
         continue;
       }
-      // The idle agent's next generation starts now; its turn is delivered below.
-      events.push(...taskEvents(sent.effects, session.sessionId));
+      idle = { before: session, sent };
       ({ record, table } = sent);
     }
     session = setTaskTable(session, table);
@@ -366,29 +375,38 @@ export async function startAgentTasks(input: {
 
     let child: ChildAddress | undefined;
     let failure: JsonValue | undefined;
-    // A child that never started, or cannot take a send for good, ends the task.
-    let childEnded = entry.kind === "start" ? (true as const) : undefined;
-    if (entry.kind === "resume") {
-      if (record.child !== undefined) {
-        const delivered = await deliverToChild({
+    if (idle !== undefined) {
+      // An idle task always has its child: `checkSend` refuses one that never started.
+      const delivered = await deliverToChild({
+        action,
+        activityObserver: prepared.activityObserver,
+        auth: prepared.auth,
+        bundle: createAgentContinuationBundle({
           action,
-          activityObserver: prepared.activityObserver,
-          auth: prepared.auth,
-          bundle: createAgentContinuationBundle({
-            action,
-            bundle: prepared.bundle,
-            dynamicRemoteAgent: readDynamicRemoteAgent({ action, bundle: prepared.bundle, ctx }),
-          }),
-          child: record.child,
-          record,
-          replyToken,
-        });
-        if (delivered !== undefined) {
-          failure = delivered.output;
-          if (delivered.permanent) childEnded = true;
-        }
+          bundle: prepared.bundle,
+          dynamicRemoteAgent: readDynamicRemoteAgent({ action, bundle: prepared.bundle, ctx }),
+        }),
+        child: record.child!,
+        record,
+        replyToken,
+      });
+      const applied = applyIdleAgentDelivery({
+        failure: delivered,
+        now: input.now,
+        sent: idle.sent,
+        session: idle.before,
+      });
+      ({ session } = applied);
+      events.push(...applied.events);
+      results.push(...applied.results);
+      if (delivered !== undefined) {
+        serializedContext = await flushAgentInvocationTraces(
+          tracing.fail(createFailedResult(action, call.callId, delivered.output)),
+        );
+        fail(call, action, delivered.output);
+        continue;
       }
-    } else {
+    } else if (entry.kind === "start") {
       const outcome = await startSubagent({
         activityObserver: prepared.activityObserver,
         auth: prepared.auth,
@@ -413,10 +431,11 @@ export async function startAgentTasks(input: {
     }
 
     if (failure !== undefined) {
+      // A child that never started ends its task.
       const settled = applyTaskMessage(
         table,
         {
-          childEnded,
+          childEnded: true,
           generation: record.generation,
           kind: "task.settled",
           outcome: { error: toTaskError(failure), status: "failed" },
@@ -646,17 +665,6 @@ function adoptChild(
     now,
   );
   return { ...applied, commands: commandEffects(applied.effects) };
-}
-
-/** A send's input for an agent: its message, and the output schema its reply must match. */
-function agentSendInput(action: RuntimeAgentDispatchRequest): JsonObject {
-  const { message, outputSchema } = action.input;
-  const input: JsonObject = { message: message ?? "" };
-  return outputSchema === undefined ? input : { ...input, outputSchema };
-}
-
-function unknownSend(taskId: string, name: string): TaskError {
-  return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, name) };
 }
 
 /** An unguessable alias: remote children present it as their callback token. */

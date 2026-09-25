@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { startedTaskIds } from "./helpers";
+import { receivedResult, startedTaskIds } from "./helpers";
 
 /**
  * Alice drafts notes with a resumable workflow tool. The first call starts a
@@ -46,10 +46,15 @@ export default defineEval({
       output: { status: "working", taskId },
     });
     revised.event("task.started", { count: 1, data: { generation: 2, taskId } });
-    revised.calledTool("task_wait", {
-      count: 1,
-      output: { status: "settled", taskId },
-    });
+    // The revision reaches the model once: through task_wait, or in a task.result
+    // message when it settles before the model's next step.
+    t.check(
+      receivedResult(revised, taskId!, 2),
+      satisfies(
+        (route: ReturnType<typeof receivedResult>) => route !== undefined,
+        "the second draft reached the model through a wait or a task.result message",
+      ),
+    );
     revised.calledTool("task_wait", { count: 1, output: { status: "idle", taskId } });
     revised.messageIncludes("Draft 2: a shorter plan");
     revised.notEvent("task.ended");

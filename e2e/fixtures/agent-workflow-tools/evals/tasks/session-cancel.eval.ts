@@ -27,8 +27,7 @@ export default defineEval({
 
     const reminding = await conversation.start("Alice would like two reminders. TASKS-REMIND");
     await reminding.waitForEvent("turn.completed", { data: { held: true } });
-    await waitForStarts(t, reminding, "remind_later", 2);
-    const reminderIds = startedTaskIds(reminding.events, "remind_later");
+    const reminderIds = await waitForStarts(reminding, "remind_later", 2);
 
     const cancelled = await conversation.cancel();
     await t.require(

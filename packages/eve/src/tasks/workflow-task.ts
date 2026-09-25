@@ -259,7 +259,9 @@ function toWorkflowTaskOutcome(
  * Applies one generation message of a resumable run: a generation it started
  * (checked against the owner's own, see `adoptStartedGeneration`), a reply,
  * or the task's end. Each message names the run that sent it, which the task
- * adopts (see `adoptWorkflowRun`). A reply or the end
+ * adopts (see `adoptWorkflowRun`). A reply for a generation the owner never
+ * saw start, because the run's reports of it were lost, starts it first, for
+ * the send whose call it answers. A reply or the end
  * first cancels the tasks the run still owns, such as an un-awaited
  * `ctx.agent` call, so their results precede the generation's own: its
  * result could no longer reflect them. Each cancelled call's awaiting body
@@ -308,7 +310,25 @@ export async function applyWorkflowGenerationStep(input: {
     ownedCalls.length === 0
       ? { commands: [], events: [], table }
       : cancelRunAgents(table, new Set([runId]), now, session.sessionId);
-  const applied = applyTaskMessage(owned.table, generationTaskMessage(record, message), now);
+  const lostStart =
+    message.kind === "reply" && message.from.generation > record.generation
+      ? sendForCall(record, message.from)
+      : undefined;
+  const adopted =
+    lostStart === undefined
+      ? { effects: [], table: owned.table }
+      : applyTaskMessage(
+          owned.table,
+          {
+            generation: message.from.generation,
+            kind: "task.started",
+            send: lostStart,
+            taskId: record.id,
+          },
+          now,
+        );
+  const replied = applyTaskMessage(adopted.table, generationTaskMessage(record, message), now);
+  const applied = { effects: [...adopted.effects, ...replied.effects], table: replied.table };
   if (owned.commands.length > 0) {
     await runCommands(owned.commands, await readContext(input.serializedContext));
   }
@@ -343,6 +363,16 @@ function generationTaskMessage(
       return { generation, kind: "task.settled", outcome, read: message.read, taskId: record.id };
     }
   }
+}
+
+/** The number of the send whose call a generation answers. */
+function sendForCall(
+  record: TaskRecord,
+  from: { readonly callId: string; readonly turnId: string },
+): number | undefined {
+  return [...(record.sends ?? []), ...(record.undelivered ?? [])].find(
+    (send) => send.callId === from.callId && send.turnId === from.turnId,
+  )?.seq;
 }
 
 /** What a body still awaiting a `ctx.agent` call gets when the owner cancels its task. */

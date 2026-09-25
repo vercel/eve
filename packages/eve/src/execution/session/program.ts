@@ -25,8 +25,6 @@ import {
   endSessionTasks,
   syncTaskTimer,
 } from "#tasks/owner-body.js";
-import { cancelTasksStep } from "#tasks/cancel.js";
-import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import {
   fireSessionCallbackStep,
   type SessionCallbackResult,
@@ -207,23 +205,26 @@ export async function failSession(input: {
   } catch {
     // Best effort: when resolution fails again there is no reachable caller to notify.
   }
-  const cursor = { serializedContext: input.serializedContext, sessionState: input.sessionState };
+  let cursor: ReplyCursor = {
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  };
   if (input.sessionState !== undefined) {
-    // No cursor publishes events here, so the tasks stop without their lifecycle events.
+    // The session never opened its inbox, and takes no input after this, so
+    // there are no hooks to claim.
+    const tasks = new SessionStateCursor({
+      inbox: { claimSessionHooks: async () => {} },
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+      sessionWritable: input.sessionWritable,
+    });
     try {
       // A failed session ends its tasks too, so its caller's reply follows them.
-      await cancelTasksStep({
-        selector: { kind: "all" },
-        serializedContext: input.serializedContext,
-        sessionState: input.sessionState,
-      });
+      await endSessionTasks(tasks);
     } catch {
       // Best effort: the failure is already being reported.
     }
-    await terminateChildSessionsStep({
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    });
+    cursor = tasks;
   }
   const finalized = await finalizeSession(
     { error: input.error, kind: "failed" },

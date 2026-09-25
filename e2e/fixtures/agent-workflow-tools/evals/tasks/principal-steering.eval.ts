@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { startedTaskIds, waitForStarts } from "./helpers";
+import { waitForStarts } from "./helpers";
 
 const BOB = { "x-eve-forwarded-principal-id": "bob" };
 
@@ -19,14 +19,13 @@ export default defineEval({
     const live = await conversation.start(
       "Alice would like a reminder to review the report. TASKS-PRINCIPAL-START",
     );
-    await waitForStarts(t, live, "remind_later", 1);
+    const [taskId] = await waitForStarts(live, "remind_later", 1);
     await live.waitForEvent("actions.requested", {
       data: {
         actions: (actions) =>
           actions.some((action) => "toolName" in action && action.toolName === "task_wait"),
       },
     });
-    const [taskId] = startedTaskIds(live.events, "remind_later");
 
     const bob = await conversation.send("Bob here with a question about lunch. TASKS-BOB", {
       headers: BOB,

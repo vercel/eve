@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import {
@@ -20,6 +20,7 @@ import {
   resumableQueueWorkflow,
 } from "#internal/testing/resumable-workflow-fixtures.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
+import { taskLifecycleViolations } from "#internal/testing/task-lifecycle.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
@@ -29,7 +30,12 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
 import { MAX_RETAINED_IDLE_TASKS } from "#tasks/owner-calls.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { AGENT_CALL_CANCELLED_MESSAGE, TASK_ENDED_BEFORE_READ_MESSAGE } from "#tasks/render.js";
+import { taskEvents } from "#tasks/events.js";
+import {
+  AGENT_CALL_CANCELLED_MESSAGE,
+  TASK_ENDED_BEFORE_READ_MESSAGE,
+  TASK_RESULT_LOST_MESSAGE,
+} from "#tasks/render.js";
 import { encodeTaskCreator, readPendingTaskResults } from "#tasks/results.js";
 import { applyWorkflowSend, retireIdleTaskChildren } from "#tasks/send.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
@@ -97,6 +103,15 @@ async function until<T>(read: () => T | undefined, timeout = 20_000): Promise<T>
 
 let sequence = 0;
 
+/** Every owner a test started, whose stream must keep the task lifecycle. */
+const owners: { readonly events: readonly UnstampedMessageStreamEvent[] }[] = [];
+
+afterEach(() => {
+  for (const owner of owners.splice(0)) {
+    expect(taskLifecycleViolations(owner.events)).toEqual([]);
+  }
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   injected.ambiguous.clear();
@@ -128,6 +143,7 @@ async function startOwnedTask(input: {
     taskId: "",
     token: "",
   };
+  owners.push(owner);
   const session = () => readDurableSession(owner.state);
   const commit = (next: ReturnType<typeof session>) => {
     owner.state = replaceDurableSessionSnapshot({ session: next, state: owner.state });
@@ -169,6 +185,7 @@ async function startOwnedTask(input: {
     turnId: "turn-1",
   });
   commit(started.session);
+  owner.events.push(...started.events);
   const record = getTaskTable(session()).records[0]!;
   owner.taskId = record.id;
   owner.token = record.child?.kind === "workflow" ? record.child.commandToken : "";
@@ -199,6 +216,12 @@ async function startOwnedTask(input: {
     commit(sent.session);
     owner.events.push(...sent.events);
     return sent.results[0]!;
+  };
+
+  /** Lets the run's messages until `count` arrive and never reach the owner, as lost reports. */
+  const lose = async (count: number) => {
+    await until(() => (recorded(inbox).length >= count ? true : undefined));
+    owner.applied = count;
   };
 
   /** Applies the run's messages until `count` have arrived, as the session body would. */
@@ -232,6 +255,15 @@ async function startOwnedTask(input: {
 
   const task = () => findTask(getTaskTable(session()), owner.taskId);
   const seed = (records: readonly TaskRecord[]) => {
+    // The stream announced each seeded task that has a child, as adopting it does.
+    owner.events.push(
+      ...taskEvents(
+        records.flatMap((record) =>
+          record.announced === true ? [{ kind: "started" as const, record }] : [],
+        ),
+        sessionId,
+      ),
+    );
     const current = session();
     commit({
       ...current,
@@ -245,7 +277,7 @@ async function startOwnedTask(input: {
     owner.events.flatMap((event) =>
       event.type === "task.settled" && event.data.taskId === owner.taskId ? [event.data] : [],
     );
-  return { commit, owner, pump, seed, send, session, settled, task };
+  return { commit, lose, owner, pump, seed, send, session, settled, task };
 }
 
 async function untilRunStatus(runId: string, status: string, timeout = 20_000): Promise<void> {
@@ -406,6 +438,7 @@ describe("sends to an idle resumable workflow task", () => {
       session: session(),
     });
     commit(retired.session);
+    owner.events.push(...retired.events);
 
     expect(task()).toBeUndefined();
     await pump(2);
@@ -507,6 +540,70 @@ describe("a send whose delivery fails", () => {
   );
 });
 
+describe("reports of a resumable run that never arrive", () => {
+  it("converges when a reply and the next start are lost, from the reply after them", async () => {
+    const { lose, owner, pump, send, settled, task } = await startOwnedTask({
+      execute: resumableNotesWorkflow,
+      input: { request: "0.67" },
+      name: "release_notes",
+    });
+    // The owner still thinks generation 1 works when the send arrives, so it queues it.
+    expect(await send("call-1", "shorter")).toMatchObject({ output: { status: "working" } });
+    // The run replies to generation 1 and starts generation 2 for the send; both reports are lost.
+    await lose(2);
+    await pump(3);
+
+    expect(lastKinds(owner.inbox)).toEqual(["reply", "started g2 send 1", "reply"]);
+    expect(settled().map((result) => [result.callId, result.status, result.output])).toEqual([
+      ["call-start", "failed", undefined],
+      ["call-1", "completed", "notes(0.67)>shorter @call-1"],
+    ]);
+    expect(settled()[0]?.error).toEqual({
+      code: "EXECUTION_FAILED",
+      message: TASK_RESULT_LOST_MESSAGE,
+    });
+    expect(task()).toMatchObject({ generation: 2, status: "completed" });
+    expect(task()?.sends).toBeUndefined();
+
+    // The task takes new work as usual.
+    expect(await send("call-2", "longer")).toMatchObject({ output: { status: "working" } });
+    await pump(5);
+    expect(settled().at(-1)).toMatchObject({ callId: "call-2", status: "completed" });
+    await cancelRun(await getWorld(), owner.runId, { cancelReason: "test finished" });
+  }, 60_000);
+
+  it("settles every generation whose reports were lost when the run reports a later start", async () => {
+    const { lose, owner, pump, send, settled, task } = await startOwnedTask({
+      execute: resumableNotesWorkflow,
+      input: { request: "0.67" },
+      name: "release_notes",
+    });
+    await send("call-1", "shorter");
+    await send("call-2", "longer");
+    // Generation 1's reply, generation 2's start and reply never arrive; generation 3's start does.
+    await lose(3);
+    await pump(5);
+
+    expect(lastKinds(owner.inbox)).toEqual([
+      "reply",
+      "started g2 send 1",
+      "reply",
+      "started g3 send 2",
+      "reply",
+    ]);
+    expect(settled().map((result) => [result.callId, result.status])).toEqual([
+      ["call-start", "failed"],
+      ["call-1", "failed"],
+      ["call-2", "completed"],
+    ]);
+    expect(settled()[1]?.error).toMatchObject({ message: TASK_RESULT_LOST_MESSAGE });
+    expect(task()).toMatchObject({ generation: 3, startedBy: 2, status: "completed" });
+    // Each result reaches the turn of the call it answers.
+    expect(readPendingTaskResults(owner.state.snapshot.session.state)).toHaveLength(3);
+    await cancelRun(await getWorld(), owner.runId, { cancelReason: "test finished" });
+  }, 60_000);
+});
+
 describe("agent tasks a resumable generation owns", () => {
   const agentFor = (message: Extract<Recorded, { kind: "request" }>): TaskRecord => {
     if (message.request.kind !== "agent-invoke") throw new Error(message.request.kind);
@@ -541,9 +638,9 @@ describe("agent tasks a resumable generation owns", () => {
       expect.objectContaining({ data: expect.objectContaining({ status: "cancelled" }) }),
     ]);
     // The agent's cancellation precedes the generation's result.
-    expect(owner.events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual(
-      ["researcher-7k2m9q", owner.taskId],
-    );
+    expect(
+      owner.events.flatMap((event) => (event.type === "task.settled" ? [event.data.taskId] : [])),
+    ).toEqual(["researcher-7k2m9q", owner.taskId]);
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({ sessionId: "agent-session" });
 
     await send("call-1", "Summarize");

@@ -15,7 +15,13 @@ import {
 } from "#execution/workflow-runtime.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { taskLifecycleViolations } from "#internal/testing/task-lifecycle.js";
 import { createTaskRecord, taskTable, taskTableState } from "#internal/testing/task-records.js";
+import {
+  createTaskEndedEvent,
+  createTaskSettledEvent,
+  createTaskStartedEvent,
+} from "#protocol/message.js";
 import { cancelRun, getRun, getWorld } from "#internal/workflow/runtime.js";
 import { applyTaskDeadlines } from "#tasks/deadlines.js";
 import { applyTaskReport } from "#tasks/owner.js";
@@ -585,6 +591,7 @@ describe("applyTaskDeadlines", () => {
     const working = createTaskRecord({ child: LOCAL_CHILD, deadlineAt: DEADLINE });
     const creator = { auth: null };
     const update = await applyLost(working, {
+      announced: true,
       callId: "call-9",
       creator,
       generation: 2,
@@ -592,6 +599,8 @@ describe("applyTaskDeadlines", () => {
       kind: "workflow",
       mode: "detached",
       name: "old",
+      resumable: true,
+      status: "working",
       v: 0,
     });
 
@@ -629,6 +638,7 @@ describe("applyTaskDeadlines", () => {
   it("discards an unreadable background record's STATE_LOST result when its creator is unreadable", async () => {
     // No principal can read it, so a held result would block handoff forever.
     const update = await applyLost(undefined, {
+      announced: true,
       callId: "call-9",
       creator: { auth: { principalId: 7 } },
       id: "old-abc234",
@@ -945,19 +955,8 @@ describe("applyTaskDeadlines", () => {
     });
 
     const error = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
-    expect(update.events).toEqual([
-      {
-        data: {
-          callId: "call-working",
-          error,
-          generation: 1,
-          status: "failed",
-          taskId: "call-working",
-        },
-        type: "task.settled",
-      },
-      { data: { taskId: "call-working" }, type: "task.ended" },
-    ]);
+    // That release published no task.started for it, so the stream owes it nothing.
+    expect(update.events).toEqual([]);
     // The turn it belongs to tells the model the work is lost at its next step.
     expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([
       {
@@ -971,6 +970,114 @@ describe("applyTaskDeadlines", () => {
     ]);
     expect(stateOf(update.sessionState)?.["eve.workflowTool"]).toBeUndefined();
     expect(wakeToArm(stateOf(update.sessionState))).toBeUndefined();
+  });
+
+  describe("publishes only the lifecycle events a lost task still owes", () => {
+    const announced = (generation: number, resumable = true) =>
+      createTaskStartedEvent({
+        callId: `call-${String(generation)}`,
+        generation,
+        kind: "workflow",
+        mode: "detached",
+        name: "old",
+        parentSessionId: "owner",
+        resumable,
+        taskId: "old-abc234",
+        turnId: "turn-1",
+      });
+    const settled = (generation: number) =>
+      createTaskSettledEvent({
+        callId: `call-${String(generation)}`,
+        generation,
+        output: "done",
+        status: "completed",
+        taskId: "old-abc234",
+      });
+    const ended = createTaskEndedEvent("old-abc234");
+    const lostSettle = (generation: number) =>
+      createTaskSettledEvent({
+        callId: `call-${String(generation)}`,
+        error: { code: "STATE_LOST", message: STATE_LOST_MESSAGE },
+        generation,
+        status: "failed",
+        taskId: "old-abc234",
+      });
+
+    it.each([
+      {
+        case: "a settled task that ended",
+        expected: [],
+        fields: { announced: true, delivered: false, status: "completed" },
+        held: 1,
+        stream: [announced(1, false), settled(1), ended],
+      },
+      {
+        case: "an idle task whose result reached history",
+        expected: [ended],
+        fields: { announced: true, delivered: true, resumable: true, status: "completed" },
+        held: 0,
+        stream: [announced(1), settled(1)],
+      },
+      {
+        case: "a settled resumable task whose result has not reached history",
+        expected: [ended],
+        fields: { announced: true, delivered: false, resumable: true, status: "failed" },
+        held: 1,
+        stream: [announced(1), settled(1)],
+      },
+      {
+        case: "a working generation the stream announced",
+        expected: [lostSettle(2), ended],
+        fields: {
+          announced: true,
+          delivered: false,
+          generation: 2,
+          resumable: true,
+          status: "working",
+        },
+        held: 1,
+        stream: [announced(1), settled(1), announced(2)],
+      },
+      {
+        case: "a working generation with an unreadable status",
+        expected: [lostSettle(1), ended],
+        fields: { announced: true, delivered: false, status: "pending" },
+        held: 1,
+        stream: [announced(1, false)],
+      },
+      {
+        case: "a generation the stream never announced",
+        expected: [ended],
+        fields: { delivered: false, generation: 2, resumable: true, status: "working" },
+        held: 1,
+        stream: [announced(1), settled(1)],
+      },
+      {
+        case: "a task the stream never saw start",
+        expected: [],
+        fields: { delivered: false, status: "working" },
+        held: 1,
+        stream: [],
+      },
+    ])("$case", async ({ expected, fields, held, stream }) => {
+      const generation = (fields as { generation?: number }).generation ?? 1;
+      const update = await applyLost(undefined, {
+        callId: `call-${String(generation)}`,
+        creator: { auth: null },
+        generation,
+        id: "old-abc234",
+        kind: "workflow",
+        mode: "detached",
+        name: "old",
+        v: 0,
+        ...fields,
+      });
+
+      expect(update.events).toEqual(expected);
+      expect(taskLifecycleViolations([...stream, ...update.events])).toEqual([]);
+      expect(readPendingTaskResults(stateOf(update.sessionState))).toHaveLength(held);
+      expect(stateOf(update.sessionState)?.["eve.taskTable"]).toBeUndefined();
+    });
   });
 
   it("removes an unreadable record whose result was already delivered without reporting it", async () => {

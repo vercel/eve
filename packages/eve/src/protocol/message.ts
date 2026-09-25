@@ -420,8 +420,8 @@ export interface TaskStartedStreamEvent {
   data: {
     callId: string;
     /**
-     * The child session to follow. Absent for a workflow tool task, and for a
-     * generation that failed before its child started.
+     * The child session to follow. Absent for a workflow tool task, and when
+     * the generation settled before its child reported.
      */
     child?: TaskChildStream;
     /** Counts from 1; each send that starts more work on the task adds one. */

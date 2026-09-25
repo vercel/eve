@@ -163,6 +163,27 @@ describe("checkSend", () => {
     // Sends held for an agent still starting count the same, so its held commands stay bounded.
     const starting = { ...working, child: undefined, sends: sends(MAX_UNREAD_SENDS) };
     expect(check([starting])).toMatchObject({ code: "TASK_BUSY" });
+    // The send the agent works on, which stays listed until it answers, and
+    // sends a cancel stopped, which the agent dropped, are not unread.
+    const full = sends(MAX_UNREAD_SENDS);
+    expect(check([{ ...working, sends: full, startedBy: 1 }])).toBeUndefined();
+    const cancelled = full.map((send, index) =>
+      index === 0 ? { ...send, cancelled: true as const } : send,
+    );
+    expect(check([{ ...working, sends: cancelled }])).toBeUndefined();
+  });
+
+  it("refuses a send after one its agent may not have received", () => {
+    const working = {
+      ...agent,
+      sends: [{ callId: "send-1", seq: 1, turnId: "turn-1", unconfirmed: true as const }],
+      status: "working" as const,
+    };
+    expect(check([working])).toEqual({
+      code: "TASK_BUSY",
+      message:
+        'Task "research-7k2m9q" may not have received your last input, so it can\'t take more yet. Wait for its next result with task_wait, then call research with its taskId again.',
+    });
   });
 
   it("refuses work a workflow body awaits, and a body's send to a working agent", () => {
