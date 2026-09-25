@@ -363,7 +363,8 @@ function projectInvocation(
         settled = undefined;
         break;
       case "message.completed":
-        if (event.data.finishReason === "stop" && event.data.message !== null) {
+        // Only tool-call narration continues the turn; any other finish is the reply.
+        if (event.data.finishReason !== "tool-calls" && event.data.message !== null) {
           result = safeJson(event.data.message);
         }
         break;
@@ -379,6 +380,15 @@ function projectInvocation(
         break;
     }
   }
+  const failure = typeof settled === "object" ? settled : undefined;
+  const failed = (): AgentInvocation => ({
+    ...base,
+    error: publicInvocationFailure(base.invocationId, failure),
+    status: "failed",
+  });
+  // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
+  if (runStatus === "failed" || failure?.type === "session.failed") return failed();
+  if (runStatus === "completed") return { ...base, result, status: "completed" };
   const pendingAuthorizations = [...authorizations.values()];
   if (pendingAuthorizations.length > 0) {
     return {
@@ -395,20 +405,9 @@ function projectInvocation(
   if (inputBatch !== undefined) {
     return { ...base, inputRequests: inputBatch.requests, result, status: "input_required" };
   }
-  if (runStatus === "failed" || typeof settled === "object") {
-    return {
-      ...base,
-      error: publicInvocationFailure(
-        base.invocationId,
-        typeof settled === "object" ? settled : undefined,
-      ),
-      status: "failed",
-    };
-  }
+  if (failure !== undefined) return failed();
   if (settled === "cancelled") return { ...base, status: "cancelled" };
-  if (settled === "completed" || isTerminalRunStatus(runStatus)) {
-    return { ...base, result, status: "completed" };
-  }
+  if (settled === "completed") return { ...base, result, status: "completed" };
   return { ...base, pollAfterMs: 1_000, result, status: "working" };
 }
 
@@ -523,9 +522,5 @@ function conflict(message: string): AgentInvocationMutationResult {
 }
 
 function isTerminal(status: AgentInvocationStatus): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
-function isTerminalRunStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }

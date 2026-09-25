@@ -8,7 +8,7 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { turnStep } from "#execution/session/turn-step.js";
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 
@@ -526,6 +526,45 @@ describe("SessionExecution background task checkpoints", () => {
   });
 
   it.each([
+    { capabilities: undefined, parks: false },
+    { capabilities: { requestInput: true }, parks: true },
+  ])(
+    "parks on pending input only when the session can request input: $capabilities",
+    async ({ capabilities, parks }) => {
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn(() => []),
+        hasPending: vi.fn(() => false),
+        next: vi.fn(() => new Promise<never>(() => {})),
+        onDelivery: vi.fn(() => () => {}),
+        onInterrupt: vi.fn(() => () => {}),
+        restore: vi.fn(),
+      };
+      const execution = createExecution({ capabilities, inbox, sessionState: state("") });
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementation(async (input) => ({
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: true,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        }));
+
+      const turn = execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+      });
+      if (parks) {
+        await expect(turn).resolves.toMatchObject({ kind: "park" });
+      } else {
+        await expect(turn).rejects.toThrow("cannot request human input");
+      }
+    },
+  );
+
+  it.each([
     { backgroundTasks: false, settled: { notifyCaller: true, output: "Done." } },
     { backgroundTasks: true, settled: { notifyCaller: true, output: "Done." } },
     { backgroundTasks: false, settled: { notifyCaller: false, output: "Still working." } },
@@ -728,6 +767,7 @@ describe("SessionExecution background task checkpoints", () => {
 });
 
 function createExecution(input: {
+  readonly capabilities?: SessionCapabilities;
   readonly inbox: SessionInbox;
   readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
@@ -740,6 +780,7 @@ function createExecution(input: {
     sessionState: input.sessionState,
   });
   return new SessionExecution({
+    capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,
     queue: input.queue ?? new SessionInputQueue(),

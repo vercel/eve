@@ -1,6 +1,6 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -36,7 +36,12 @@ import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
+const NO_INPUT_CAPABILITY_ERROR_MESSAGE =
+  "This session cannot request human input, so it cannot wait for a tool approval or question. " +
+  "Sessions started without `capabilities.requestInput`, such as schedules, must not use approval-gated tools.";
+
 export interface SessionExecutionInput {
+  readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
   readonly inbox: SessionInboxReader;
   readonly queue: SessionInputQueue;
@@ -156,6 +161,9 @@ export class SessionExecution {
       }
 
       if (result.action === "park") {
+        if (result.hasPendingInputBatch && this.input.capabilities?.requestInput !== true) {
+          throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
+        }
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
           kind: "park",

@@ -433,6 +433,38 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ status: "working" });
   });
 
+  it.each([
+    {
+      events: [inputRequestedEvent("event_1", ["question"])],
+      expected: { status: "completed" },
+      runStatus: "completed",
+    },
+    {
+      events: [
+        {
+          data: {
+            description: "Sign in to Linear",
+            name: "linear",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+          type: "authorization.required",
+        } as HandleMessageStreamEvent,
+      ],
+      expected: { error: { message: "Invocation failed." }, status: "failed" },
+      runStatus: "failed",
+    },
+  ])("reports a $runStatus run over a batch its session can no longer answer", async (input) => {
+    runsGet.mockResolvedValue(run({ status: input.runStatus }));
+    getReadable.mockReturnValue(eventStream([...input.events, ...turnSettledEvents("turn_1")]));
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject(input.expected);
+  });
+
   it("does not project intermediate tool-call narration as a result", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
     getReadable.mockReturnValue(
@@ -483,15 +515,18 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ result: "Done.", status: "working" });
   });
 
-  it("completes with the final message once the turn settles and the session parks", async () => {
+  it("completes with the final message even when the model hit its output limit", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
     getReadable.mockReturnValue(
-      eventStream([messageCompletedEvent("Done."), ...turnSettledEvents("turn_1")]),
+      eventStream([
+        messageCompletedEvent("# Migration guide\n\n1. Upgrade", "length"),
+        ...turnSettledEvents("turn_1"),
+      ]),
     );
 
     await expect(
       execution().read({ auth, invocationId: "wrun_invocation" }),
-    ).resolves.toMatchObject({ result: "Done.", status: "completed" });
+    ).resolves.toMatchObject({ result: "# Migration guide\n\n1. Upgrade", status: "completed" });
   });
 
   it("projects the workflow run reference without private error data", async () => {
@@ -683,9 +718,12 @@ function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleM
   };
 }
 
-function messageCompletedEvent(message: string): HandleMessageStreamEvent {
+function messageCompletedEvent(
+  message: string,
+  finishReason: "length" | "stop" = "stop",
+): HandleMessageStreamEvent {
   return {
-    data: { finishReason: "stop", message, sequence: 0, stepIndex: 0, turnId: "turn_1" },
+    data: { finishReason, message, sequence: 0, stepIndex: 0, turnId: "turn_1" },
     meta: { at: "2026-07-20T00:00:00.000Z", id: "event_message" },
     type: "message.completed",
   };

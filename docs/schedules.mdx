@@ -33,7 +33,7 @@ A TypeScript schedule with `markdown` is compile-only because eve stores the pro
 
 ## Markdown form (fire-and-forget)
 
-This is the minimal schedule. eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. The session has no channel, so it cannot ask a person for input, and nothing can send it a follow-up message. After its turn settles, the session parks like any other session until its [session timeout](./agent-config#runtime-limits) ends it.
+This is the minimal schedule. eve runs the agent on the prompt and throws away the output, though the agent can still call tools, write to backends, and log along the way. The session has no channel, so it cannot ask a person for input, and nothing can send it a follow-up message. If the agent calls a tool that needs approval, the session fails instead of waiting for an answer. After its turn settles, the session parks like any other session until its [session timeout](./agent-config#runtime-limits) ends it.
 
 ```ts title="agent/schedules/heartbeat.ts"
 import { defineSchedule } from "eve/schedules";
