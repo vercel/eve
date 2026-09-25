@@ -228,7 +228,7 @@ function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionI
     claimedTokens: [],
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => []),
-    forceClaimSessionHook: vi.fn(),
+    claim: vi.fn(),
     hasPending: vi.fn(() => false),
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),

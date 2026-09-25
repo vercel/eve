@@ -113,7 +113,7 @@ export class TakeoverSessionHandoff implements SessionHandoff {
  */
 export async function takeOverSession(
   input: HandoffWorkflowEntryInput,
-  inbox: Pick<SessionInboxHandle, "forceClaimSessionHook">,
+  inbox: Pick<SessionInboxHandle, "claim">,
   tokens: readonly string[],
 ): Promise<boolean> {
   // A re-run start step can boot this attempt twice, and forced claims would
@@ -130,6 +130,6 @@ export async function takeOverSession(
     if (isHookConflictError(error)) return false;
     throw error;
   }
-  for (const token of tokens) inbox.forceClaimSessionHook(token);
+  for (const token of tokens) inbox.claim(token);
   return true;
 }

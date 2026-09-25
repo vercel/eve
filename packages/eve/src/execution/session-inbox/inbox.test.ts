@@ -221,7 +221,7 @@ describe("createSessionInbox", () => {
     installHooks(stable);
     const inbox = createSessionInbox("session-1");
 
-    inbox.forceClaimSessionHook("stable");
+    inbox.claim("stable");
     expect(createHookMock).toHaveBeenCalledWith({
       experimental_force: true,
       metadata: { sessionId: "session-1" },

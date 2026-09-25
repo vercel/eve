@@ -128,7 +128,7 @@ describe("TakeoverSessionHandoff", () => {
 
 describe("takeOverSession", () => {
   it("fences the attempt, validates, then force-claims every hook", async () => {
-    const inbox = { forceClaimSessionHook: vi.fn() };
+    const inbox = { claim: vi.fn() };
     const tokens = ["eve:session:session-1:inbox", "channel:current"];
     installFence(null);
 
@@ -137,26 +137,26 @@ describe("takeOverSession", () => {
       token: "owner-1:handoff:delivery-deployment-b",
     });
     expect(validateSessionCheckpointStepMock).toHaveBeenCalledOnce();
-    expect(inbox.forceClaimSessionHook.mock.calls).toEqual(tokens.map((token) => [token]));
+    expect(inbox.claim.mock.calls).toEqual(tokens.map((token) => [token]));
   });
 
   it("leaves the session to another start of the same attempt", async () => {
-    const inbox = { forceClaimSessionHook: vi.fn() };
+    const inbox = { claim: vi.fn() };
     installFence({ runId: "wrun_first_start" });
 
     await expect(takeOverSession(handoffInput(), inbox, ["token"])).resolves.toBe(false);
-    expect(inbox.forceClaimSessionHook).not.toHaveBeenCalled();
+    expect(inbox.claim).not.toHaveBeenCalled();
   });
 
   it("claims nothing when the checkpoint is rejected", async () => {
-    const inbox = { forceClaimSessionHook: vi.fn() };
+    const inbox = { claim: vi.fn() };
     installFence(null);
     validateSessionCheckpointStepMock.mockRejectedValue(new Error("unsupported checkpoint"));
 
     await expect(takeOverSession(handoffInput(), inbox, ["token"])).rejects.toThrow(
       "unsupported checkpoint",
     );
-    expect(inbox.forceClaimSessionHook).not.toHaveBeenCalled();
+    expect(inbox.claim).not.toHaveBeenCalled();
   });
 
   it("serves only sources that stamp a handoff version", () => {
@@ -243,7 +243,7 @@ function createInbox(accepted: SessionInboxPayload[] = []): SessionInboxHandle {
     claimedTokens: [],
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => accepted),
-    forceClaimSessionHook: vi.fn(),
+    claim: vi.fn(),
     hasPending: vi.fn(() => false),
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),

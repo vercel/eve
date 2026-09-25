@@ -63,10 +63,10 @@ export interface SessionInboxOwnership {
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
   /**
-   * Takes a token from whichever run holds it, without waiting for the claim
-   * to register. The previous holder keeps what its hook accepted first.
+   * Takes a token from whichever run holds it. The previous holder keeps what
+   * its hook accepted first. Rejects when the World refuses the takeover.
    */
-  forceClaimSessionHook(token: string): void;
+  claim(token: string): void;
   dispose(): Promise<void>;
   /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
   release(): Promise<SessionInboxPayload[]>;
@@ -169,7 +169,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
-    forceClaimSessionHook(token) {
+    claim(token) {
       const source: Source = {
         token,
         hook: createHook<SessionInboxPayload>({
