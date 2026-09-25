@@ -86,7 +86,6 @@ import {
   shouldCompact,
 } from "#harness/compaction.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
-import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
@@ -136,7 +135,6 @@ import {
   getApprovedTools,
   getPendingInputRequestIds,
   hasRunnableDeferredStepInput,
-  hasPendingApprovalBatch,
   hasStepInput,
   resolvePendingInput,
   selectApprovalReplayBatch,
@@ -226,7 +224,6 @@ import {
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import { toModelSchema } from "#tools/schema.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { createHistoryViewPreparer, type HistoryViewProjector } from "#shared/history-view.js";
 import {
   canonicalizeMemoryRecords,
@@ -546,10 +543,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
 
       return {
-        next:
-          config.mode === "task" || hasDelegatedCaller
-            ? { done: true, isError: true, output: message }
-            : { done: true, output: "" },
+        next: hasDelegatedCaller
+          ? { done: true, isError: true, output: message }
+          : { done: true, output: "" },
         session,
       };
     };
@@ -560,7 +556,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       throwIfTurnAborted(config.abortSignal);
       if (isTurnCancellation(error)) throw error;
       if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
-      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
+      if (!emit || !(error instanceof BoundaryHookError)) {
         throw error;
       }
 
@@ -652,12 +648,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Resolve deferred input, task/control coordination, then HITL input; each stage
     // may park when its resume payload has not arrived.
 
-    const stepInput = consumeDeferredStepInput({
-      input,
-      preferCurrentInput:
-        config.mode !== "conversation" && input !== undefined && hasPendingApprovalBatch(session),
-      session,
-    });
+    const stepInput = consumeDeferredStepInput({ input, session });
     session = stepInput.session;
 
     const pendingCoordination = getPendingCoordinationBatch(session.state);
@@ -883,7 +874,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       replayBatch === undefined ? config.tools : await prepareApprovalTools(replayBatch);
     const pending = resolvePendingInput({
       activeTurnId: pendingCoordination?.event.turnId ?? activeTurnId(emissionState),
-      deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedCoordination.messages,
       internalStep: !isHarnessBetweenTurns(session),
       resolveApprovalKey: resolveApprovalKeyFromTools(responseAuthorizationTools),
@@ -901,12 +891,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }
           : pending.session;
 
-      if (
-        emit &&
-        config.mode === "conversation" &&
-        pending.deferredMessage === true &&
-        hasStepInput(input)
-      ) {
+      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         const deferredInput = createTurnInputMessages(effectiveStepInput);
         if (store !== undefined) {
           prepareDynamicInstructionPreamble(
@@ -962,7 +947,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ]),
           state: memoryCommit?.state ?? parkedSession.state,
         };
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(emit, emissionState);
         return {
           next: null,
           session: setHarnessEmissionState(parkedSession, emissionState),
@@ -970,8 +955,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
 
       if (resolvedCoordination.outcome === "resolved") {
-        if (emit && config.mode === "conversation") {
-          emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        if (emit) {
+          emissionState = await emitTurnEpilogue(emit, emissionState);
           parkedSession = setHarnessEmissionState(parkedSession, emissionState);
         }
         return { next: null, session: parkedSession };
@@ -979,7 +964,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       if (
         coordinated.kind === "responses-completed" &&
-        config.mode === "conversation" &&
         isHarnessBetweenTurns(pending.session) &&
         getPendingAuthorization(pending.session.state) === undefined
       ) {
@@ -1969,49 +1953,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           // failed `subagent-result`; top-level conversation failures already
           // emit `session.failed` here.
           return {
-            next:
-              config.mode === "task" || hasDelegatedCaller
-                ? { done: true, isError: true, output: taskFailureOutput }
-                : { done: true, output: "" },
-            session,
-          };
-        }
-
-        if (config.mode === "task") {
-          if (
-            classification === "recoverable" &&
-            !(finalError instanceof EmptyModelResponseError) &&
-            !(finalError instanceof ContentFilteredModelResponseError)
-          ) {
-            // Task runs cannot park for user-driven recovery. Let the durable
-            // step retry from committed session state, but only for errors
-            // that did not already consume the in-process transient budget or
-            // the dedicated empty-response reissue. Filtering is an explicit
-            // rejection, so it must not receive durable retries either.
-            log.warn(
-              upstreamRejection?.message ??
-                "model call failed recoverably in task mode — rethrowing for durable step retry",
-              modelCallLogFields,
-            );
-            throw finalError;
-          }
-
-          // A task run cannot park for a user retry (turnWorkflow rejects
-          // `next: null` in task mode). Classified transient errors arrive
-          // here only after their bounded in-process retries are exhausted;
-          // empty responses already received their specialized reissue.
-          log.error(
-            upstreamRejection?.message ?? "model call failed; failing the task run",
-            modelCallLogFields,
-          );
-          await emitFailedStep(emit, emissionState, {
-            code: "MODEL_CALL_FAILED",
-            details,
-            message: errorMessage,
-            sessionId: session.sessionId,
-          });
-          return {
-            next: { done: true, isError: true, output: taskFailureOutput },
+            next: hasDelegatedCaller
+              ? { done: true, isError: true, output: taskFailureOutput }
+              : { done: true, output: "" },
             session,
           };
         }
@@ -2857,10 +2801,8 @@ async function handleStepResult(input: {
         }),
       );
 
-      if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
-        parkedSession = setHarnessEmissionState(parkedSession, emissionState);
-      }
+      emissionState = await emitTurnEpilogue(emit, emissionState);
+      parkedSession = setHarnessEmissionState(parkedSession, emissionState);
     }
 
     return {
@@ -2915,9 +2857,7 @@ async function handleStepResult(input: {
       // above: the session keeps serving ordinary turns while the challenge
       // is open, so the stream must close its turn boundary — clients wait
       // on `session.waiting` and would otherwise hang on the parked turn.
-      if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
-      }
+      emissionState = await emitTurnEpilogue(emit, emissionState);
     }
 
     return {
@@ -2966,35 +2906,7 @@ async function handleStepResult(input: {
     return { next: runStep, session: nextSession };
   }
 
-  if (
-    config.mode === "task" &&
-    (getBackgroundTasks(nextSession.state).query({ state: "working" }).length > 0 ||
-      contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true)
-  ) {
-    return deferTaskTurn({
-      emissionState,
-      emit,
-      history: promptMessages,
-      result,
-      schema: nextSession.outputSchema,
-      session: nextSession,
-      stepOutput,
-    });
-  }
-
-  if (config.mode === "task") {
-    return finishTaskTurn({
-      emissionState,
-      emit,
-      history: promptMessages,
-      result,
-      schema: nextSession.outputSchema,
-      session: nextSession,
-      stepOutput,
-    });
-  }
-
-  return finishConversationTurn({
+  return finishTurn({
     emissionState,
     emit,
     history: promptMessages,
@@ -3003,37 +2915,6 @@ async function handleStepResult(input: {
     session: nextSession,
     stepOutput,
   });
-}
-
-/** Keeps a task session open until its background work settles. */
-async function deferTaskTurn(input: {
-  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly history: readonly HarnessModelMessage[];
-  readonly result: HarnessStepResult;
-  readonly schema: JsonObject | undefined;
-  readonly session: HarnessSession;
-  readonly stepOutput: string | null;
-}): Promise<StepResult> {
-  const { emit, history, result, schema, stepOutput } = input;
-  let { emissionState, session } = input;
-  session = clearTurnClientContextState(session);
-  const structured = schema === undefined ? undefined : extractFinalOutput(result);
-  if (structured !== undefined) {
-    session = {
-      ...persistStructuredAssistantTurn(session, history, structured),
-      outputSchema: schema,
-    };
-  }
-  if (emit) {
-    emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
-    session = setHarnessEmissionState(session, emissionState);
-  }
-  return {
-    next: null,
-    session,
-    settledTurn: { output: structured ?? stepOutput ?? "" },
-  };
 }
 
 function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
@@ -3075,12 +2956,11 @@ function persistStructuredAssistantTurn(
   };
 }
 
-/** Emits `result.completed` followed by the turn epilogue for `mode`. */
+/** Emits `result.completed` followed by the turn epilogue. */
 async function emitStructuredResult(
   emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>,
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
-  mode: RunMode,
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -3090,15 +2970,15 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, mode);
+  return emitTurnEpilogue(emit, emissionState);
 }
 
 /**
- * Closes a terminal task turn. Task runs cannot park, so an unmet output
- * schema fails as an error a delegating parent can surface; otherwise the
- * structured value — or the plain assistant text — is the run's output.
+ * Closes a terminal turn. An unmet output schema fails the turn recoverably;
+ * otherwise the structured value (or prose) ends the turn and the session
+ * waits for the next message.
  */
-async function finishTaskTurn(input: {
+async function finishTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly HarnessModelMessage[];
@@ -3113,57 +2993,7 @@ async function finishTaskTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "task");
-      session = setHarnessEmissionState(session, emissionState);
-    }
-    return { next: { done: true, output: stepOutput ?? "" }, session };
-  }
-
-  const structured = extractFinalOutput(result);
-  if (structured === undefined) {
-    // The schema belongs to the settled invocation.
-    session = { ...session, outputSchema: undefined };
-    if (emit) {
-      await emitFailedStep(emit, emissionState, {
-        ...OUTPUT_SCHEMA_NOT_FULFILLED,
-        sessionId: session.sessionId,
-      });
-    }
-    return {
-      next: { done: true, isError: true, output: OUTPUT_SCHEMA_NOT_FULFILLED.message },
-      session,
-    };
-  }
-
-  session = persistStructuredAssistantTurn(session, history, structured);
-  if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "task");
-    session = setHarnessEmissionState(session, emissionState);
-  }
-  return { next: { done: true, output: structured }, session };
-}
-
-/**
- * Closes a terminal conversation turn. Conversation runs may park, so an unmet
- * output schema parks recoverably; otherwise the structured value (or prose)
- * ends the turn and the session waits for the next message.
- */
-async function finishConversationTurn(input: {
-  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly history: readonly HarnessModelMessage[];
-  readonly result: HarnessStepResult;
-  readonly schema: JsonObject | undefined;
-  readonly session: HarnessSession;
-  readonly stepOutput: string | null;
-}): Promise<StepResult> {
-  const { emit, history, result, schema, stepOutput } = input;
-  let { emissionState, session } = input;
-  session = clearTurnClientContextState(session);
-
-  if (schema === undefined) {
-    if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+      emissionState = await emitTurnEpilogue(emit, emissionState);
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -3191,7 +3021,7 @@ async function finishConversationTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
+    emissionState = await emitStructuredResult(emit, emissionState, structured);
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;

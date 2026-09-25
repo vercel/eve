@@ -10,7 +10,6 @@ const audienceInput: AudienceContext<Record<string, unknown>> = {
   caller: { type: "anonymous" },
   channel: { kind: "channel:support", name: "support" },
   environment: "production",
-  mode: "conversation",
   state: {},
 };
 

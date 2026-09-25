@@ -49,7 +49,6 @@ describe("model request envelope accounting", () => {
       },
     });
     const runStep = createToolLoopHarness({
-      mode: "conversation",
       tools: new Map(),
       resolveModel: async (reference) =>
         (reference.id === "summary" ? summary : task) as LanguageModel,
@@ -93,7 +92,6 @@ describe("model request envelope accounting", () => {
       },
     });
     const runStep = createToolLoopHarness({
-      mode: "conversation",
       tools: new Map(),
       resolveModel: async (reference) =>
         (reference.id === "summary" ? summary : task) as LanguageModel,
@@ -129,7 +127,6 @@ describe("model request envelope accounting", () => {
       },
     });
     const runStep = createToolLoopHarness({
-      mode: "conversation",
       tools: new Map(),
       resolveModel: async (reference) =>
         (reference.id === "summary" ? summary : task) as LanguageModel,

@@ -501,7 +501,6 @@ describe("slackChannel()", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:slack" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe("private");

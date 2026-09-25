@@ -25,14 +25,12 @@ import {
   type StrictInputResponses,
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
   readonly initiatorAuth?: SessionAuthContext | null;
-  readonly mode?: RunMode;
   readonly outputSchema?: JsonObject;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;

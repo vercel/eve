@@ -85,7 +85,6 @@ describe("eve ID-addressed session routes", () => {
           message: undefined,
           outputSchema: undefined,
         },
-        mode: "conversation",
       }),
     );
   });
@@ -173,7 +172,6 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
-          mode: "conversation",
         }),
         headers: {
           "content-type": "application/json",
@@ -214,7 +212,6 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
-          mode: "conversation",
         }),
         headers: {
           "content-type": "application/json",

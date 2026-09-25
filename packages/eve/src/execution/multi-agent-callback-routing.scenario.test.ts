@@ -13,7 +13,6 @@ import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
@@ -401,7 +400,7 @@ describe("multi-agent callback routing", () => {
     }
   });
 
-  it.each(["session.completed", "turn.completed", "turn.failed"] as const)(
+  it.each(["turn.completed", "turn.failed"] as const)(
     "logs %s delivery failures when the public route prefix is absent",
     async (kind) => {
       stubAgentRuntimeEnvironment(undefined);
@@ -426,23 +425,15 @@ describe("multi-agent callback routing", () => {
         [SessionCallbackKey.name]: sessionCallback,
       };
       const deliver = async () => {
-        if (kind === "session.completed") {
-          await fireSessionCallbackStep({
-            output: "report done",
-            serializedContext,
-            status: "completed",
-          });
-        } else {
-          await notifyTurnCallerStep({
-            caller: await resolveInitialTurnCallerStep({ serializedContext }),
-            lifecycle: "terminal",
-            sessionId: "remote-session-1",
-            settled:
-              kind === "turn.failed"
-                ? { isError: true, output: { message: "private failure" } }
-                : { output: "report done" },
-          });
-        }
+        await notifyTurnCallerStep({
+          caller: await resolveInitialTurnCallerStep({ serializedContext }),
+          lifecycle: "terminal",
+          sessionId: "remote-session-1",
+          settled:
+            kind === "turn.failed"
+              ? { isError: true, output: { message: "private failure" } }
+              : { output: "report done" },
+        });
       };
       await expect(deliver()).rejects.toThrow(/callback failed with HTTP 404/);
       expect(errorSpy).toHaveBeenCalledExactlyOnceWith(

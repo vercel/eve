@@ -1,12 +1,10 @@
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { isObject } from "#shared/guards.js";
 
 export interface LegacyTurnInput {
   readonly completionToken: string;
   readonly capabilities?: SessionCapabilities;
-  readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -21,12 +19,7 @@ export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
   if (!isObject(value) || (value.version !== 1 && value.version !== 2))
     throw new Error("Unsupported legacy turn input version.");
   const step = value.stepInput;
-  if (
-    !isObject(step) ||
-    typeof value.completionToken !== "string" ||
-    !value.completionToken ||
-    (value.mode !== "conversation" && value.mode !== "task")
-  )
+  if (!isObject(step) || typeof value.completionToken !== "string" || !value.completionToken)
     throw new Error("Invalid legacy turn input.");
   const committed =
     isObject(value.initialStep) && isObject(value.initialStep.result)
@@ -62,7 +55,6 @@ export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
       : undefined;
   return {
     completionToken: value.completionToken,
-    mode: value.mode,
     capabilities: value.capabilities as SessionCapabilities | undefined,
     retention: value.retention as AgentWorkflowRetentionDefinition | undefined,
     // The former driver's wire field; the stream is the session's, not a parent's.

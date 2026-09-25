@@ -12,7 +12,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
-import type { RunMode } from "#shared/run-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
@@ -77,7 +76,6 @@ export interface CreateExecutionNodeStepInput {
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
-  readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
 }
@@ -109,7 +107,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
-    mode: input.mode,
     prepareApprovalTurn: input.prepareApprovalTurn,
     toolReplayIdentity: connectionToolReplayIdentity,
     resolveStepDynamicTools: (resolveInput) =>

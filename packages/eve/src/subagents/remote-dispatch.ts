@@ -104,7 +104,6 @@ export async function startRemoteAgentSession(input: {
     activityObserver?: ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
-    mode: "conversation" | "task";
     operationId?: string;
     outputSchema?: object;
   } = {
@@ -123,7 +122,6 @@ export async function startRemoteAgentSession(input: {
       action: input.action,
       remote: input.remote,
     }),
-    mode: "conversation",
     outputSchema:
       normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
   };

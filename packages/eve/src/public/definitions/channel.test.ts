@@ -174,7 +174,6 @@ describe("defineChannel", () => {
         caller: { type: "anonymous" },
         channel: { kind: "http" },
         environment: "production",
-        mode: "conversation",
         state: undefined,
       }),
     ).toBe("public");
@@ -204,7 +203,6 @@ describe("defineChannel", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:legacy" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe("public");

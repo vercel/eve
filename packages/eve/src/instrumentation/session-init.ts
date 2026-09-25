@@ -2,7 +2,6 @@ import type { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
-  ModeKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -53,7 +52,6 @@ export function initializeSessionInstrumentation(input: {
       channelKind: input.ctx.get(ChannelInstrumentationKey)?.kind,
       environment: resolveInstrumentationEnvironment(),
       forwardedTracePolicy,
-      mode: input.ctx.get(ModeKey),
       principalType: input.ctx.get(AuthKey)?.principalType,
     },
     { forwardedOverridesStored: true },

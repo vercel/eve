@@ -159,7 +159,6 @@ describe("telegramChannel() inbound route", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:telegram" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe(audience);

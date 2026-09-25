@@ -233,7 +233,7 @@ export function presentTool(
     };
   }
   if (baseName === "final_output") {
-    // Task-mode terminal signal (subagent streams): its input is the
+    // Structured-output terminal signal: its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
     return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
   }

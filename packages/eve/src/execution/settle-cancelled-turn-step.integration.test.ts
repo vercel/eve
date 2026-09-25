@@ -128,7 +128,6 @@ function buildSerializedContext(): Record<string, unknown> {
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: "http", state: {} },
     "eve.continuationToken": CONTINUATION_TOKEN,
-    "eve.mode": "conversation",
     "eve.sessionId": PARENT_SESSION_ID,
   };
 }

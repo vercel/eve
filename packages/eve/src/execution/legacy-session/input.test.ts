@@ -13,7 +13,6 @@ describe("legacy turn input", () => {
         version,
         stepInput: step,
         completionToken: "old:turn:0",
-        mode: "conversation",
       }).delivery,
     ).toEqual(step.input);
   });
@@ -23,7 +22,6 @@ describe("legacy turn input", () => {
         ...step,
         delivery: step.input,
         completionToken: "old:turn:0",
-        mode: "conversation",
       }),
     ).toThrow("Unsupported legacy turn input version.");
   });
@@ -36,7 +34,6 @@ describe("legacy turn input", () => {
       version: 2,
       stepInput: step,
       completionToken: "old:turn:0",
-      mode: "conversation",
       initialStep: { beforeStep: step, result: committed },
     });
     expect(input.sessionState).toEqual(committed.sessionState);
@@ -49,7 +46,6 @@ describe("legacy turn input", () => {
       version: 2,
       stepInput: step,
       completionToken: "old:turn:0",
-      mode: "conversation",
       initialStep: {
         result: {
           action: "park",

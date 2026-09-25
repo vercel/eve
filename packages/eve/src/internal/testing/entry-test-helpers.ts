@@ -13,7 +13,6 @@ export function buildSerializedContext(overrides: {
   channelKind: string;
   channelState?: Record<string, unknown>;
   continuationToken?: string;
-  mode: string;
   parent?: {
     readonly callId: string;
     readonly rootSessionId: string;
@@ -32,14 +31,12 @@ export function buildSerializedContext(overrides: {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": channel,
-    "eve.mode": overrides.mode,
   };
   if (overrides.audience !== undefined) {
     context[ConversationContextKey.name] = {
       audience: overrides.audience,
       channel: { kind: overrides.channelKind },
       environment: "production",
-      mode: overrides.mode,
       principalType: "anonymous",
     };
   }

@@ -18,7 +18,6 @@ const DEPLOY_INPUT_SCHEMA = toInputSchema({
 export function buildWorkflowToolSerializedContext(input: {
   readonly acceptedDeploymentId?: string;
   readonly continuationToken: string;
-  readonly mode: "conversation" | "task";
   readonly requestInput?: boolean;
 }): Record<string, unknown> {
   return {
@@ -37,7 +36,6 @@ export function buildWorkflowToolSerializedContext(input: {
           },
         }),
     "eve.continuationToken": input.continuationToken,
-    "eve.mode": input.mode,
   };
 }
 

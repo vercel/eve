@@ -36,7 +36,6 @@ describe("ChatGPT streamed reasoning replay", () => {
     const execute = vi.fn(async () => ({ id: "invoice-1", total: 42 }));
     const runStep = createToolLoopHarness({
       handleEvent: async () => {},
-      mode: "conversation",
       resolveModel: async () => model,
       tools: new Map([
         [

@@ -6,7 +6,7 @@ import type {
   SubagentAuthorizationEventHookPayload,
 } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -99,7 +99,6 @@ function buildContext(input: { readonly adapter: ChannelAdapter; readonly sessio
   ctx.set(BundleKey, bundle);
   ctx.set(ChannelKey, input.adapter);
   ctx.set(ContinuationTokenKey, "http:parent");
-  ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, input.sessionId);
   return { bundle, ctx, hook };
 }
@@ -119,7 +118,6 @@ function rehydrateContext(input: {
     ),
   );
   ctx.set(ContinuationTokenKey, input.serializedContext[ContinuationTokenKey.name] as string);
-  ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, input.serializedContext[SessionIdKey.name] as string);
   return ctx;
 }

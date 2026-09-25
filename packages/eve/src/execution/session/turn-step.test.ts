@@ -17,7 +17,6 @@ import {
   ContinuationHookTokensKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  ModeKey,
   ScheduleIdKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
@@ -65,7 +64,6 @@ import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep as runTurnStep } from "#execution/session/turn-step.js";
 import type { TurnStepInput, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import type { DeliverHookPayload } from "#channel/types.js";
@@ -278,15 +276,12 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(
-  mode: "conversation" | "task" = "conversation",
-): Record<string, unknown> {
+function createSerializedContext(): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, createStubBundle());
   ctx.set(ChannelKey, threadContextAdapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
-  ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "session-1");
   return serializeContext(ctx);
 }
@@ -1090,7 +1085,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
     ctx.set(ContinuationTokenKey, "ignore-correction");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "sess-test");
 
     const result = await turnStep({
@@ -1234,7 +1228,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
     ctx.set(ContinuationTokenKey, "http:scheduled-output-capture");
-    ctx.set(ModeKey, "task");
     ctx.set(ScheduleIdKey, "daily-report");
     ctx.set(SessionIdKey, "session-1");
     const serializedContext = serializeContext(ctx);
@@ -1661,7 +1654,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, compiledBundle);
     ctx.set(ChannelKey, threadContextAdapter);
     ctx.set(ContinuationTokenKey, "http:thread-context");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
     ctx.set(SessionDynamicSubagentRuntimeRevisionKey, "deployment:dpl_old");
     ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
@@ -1746,7 +1738,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, compiledBundle);
     ctx.set(ChannelKey, adapter);
     ctx.set(ContinuationTokenKey, "projection-failure");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
 
     await expect(
@@ -1781,7 +1772,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, createStubBundle());
     ctx.set(ChannelKey, adapter);
     ctx.set(ContinuationTokenKey, "deliver-failure");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
     const sessionWritable = createTestWritable();
 
@@ -1845,7 +1835,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, threadContextAdapter);
     ctx.set(ContinuationTokenKey, "http:auth-replacement");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
 
     let observed: SessionAuthContext | null | undefined;
@@ -1967,7 +1956,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, compiledBundle);
     ctx.set(ChannelKey, remoteTaskAdapter);
     ctx.set(ContinuationTokenKey, "child-token");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionCallbackKey, {
       callId: "parent-call",
       subagentName: "remote-worker",
@@ -2135,45 +2123,6 @@ describe("turnStep", () => {
     ]);
   });
 
-  it("rejects task completion while input requests remain pending", async () => {
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-pending-approval",
-            input: {},
-            kind: "tool-call",
-            toolName: "confirm",
-          },
-          kind: "tool-approval",
-          prompt: "Approve?",
-          requestId: "request-pending-approval",
-        },
-      ],
-      responseMessages: [],
-      session: createStubSession(),
-    });
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        next: { done: true, output: "must not complete" },
-        session: stepSession,
-      });
-    });
-
-    await expect(
-      turnStep({
-        input: {
-          kind: "deliver",
-          payloads: [{ message: "unrelated message" }],
-        },
-        sessionWritable: createTestWritable(),
-        serializedContext: createSerializedContext("task"),
-        sessionState: createStubSessionState(),
-      }),
-    ).rejects.toThrow("Task mode cannot complete while input requests remain pending.");
-  });
-
   it("prepares the session trace boundary before instrumenting a first-turn delivery", async () => {
     const published: string[] = [];
     const prepareSessionTrace = vi.fn(async () => {
@@ -2229,7 +2178,6 @@ describe("turnStep", () => {
       ctx.set(BundleKey, compiledBundle);
       ctx.set(ChannelKey, threadContextAdapter);
       ctx.set(ContinuationTokenKey, "first-turn-delivery");
-      ctx.set(ModeKey, "task");
       ctx.set(SessionIdKey, "session-1");
 
       await turnStep({
@@ -2296,7 +2244,6 @@ describe("turnStep", () => {
       description: "Perform deep research.",
       model: { id: "anthropic/claude-opus-4.6" },
     });
-    ctx.set(ModeKey, "task");
     ctx.set(SessionIdKey, "session-1");
 
     await turnStep({
@@ -3116,7 +3063,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, compiledBundle);
     ctx.set(ChannelKey, threadContextAdapter);
     ctx.set(ContinuationTokenKey, "http:thread-context");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
 
     await turnStep({
@@ -3229,7 +3175,6 @@ describe("turnStep", () => {
     ctx.set(BundleKey, compiledBundle);
     ctx.set(ChannelKey, threadContextAdapter);
     ctx.set(ContinuationTokenKey, "http:thread-context");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "session-1");
     ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
     ctx.set(SessionDynamicToolMetadataKey, [
@@ -3497,7 +3442,6 @@ describe("emitTerminalSessionFailureStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
     ctx.set(ContinuationTokenKey, `http:${sessionId}`);
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, sessionId);
     const serialized = serializeContext(ctx);
     serialized["eve.sessionId"] = sessionId;
@@ -3688,7 +3632,6 @@ describe("runProxySubagentEventStep", () => {
       });
     }
     ctx.set(ContinuationTokenKey, "http:proxy-test");
-    ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "parent-session");
     return serializeContext(ctx);
   }
@@ -3896,53 +3839,5 @@ describe("runProxySubagentEventStep", () => {
       "http:proxy-first",
       "http:proxy-second",
     ]);
-  });
-});
-
-describe("resolveEffectiveOutputSchema", () => {
-  const runSchema = { properties: { title: { type: "string" } }, type: "object" } as const;
-  const agentSchema = { properties: { summary: { type: "string" } }, type: "object" } as const;
-
-  it("uses a run-scoped schema in either mode", () => {
-    for (const mode of ["conversation", "task"] as const) {
-      const session = createStubSession();
-      const resolved = resolveEffectiveOutputSchema({
-        agentOutputSchema: agentSchema,
-        input: { outputSchema: runSchema },
-        mode,
-        session,
-      });
-      // Run-scoped schema always wins over the agent-declared one.
-      expect(resolved.outputSchema).toEqual(runSchema);
-    }
-  });
-
-  it("adopts the agent schema only for task runs without a run-scoped schema", () => {
-    const task = resolveEffectiveOutputSchema({
-      agentOutputSchema: agentSchema,
-      input: { message: "hi" },
-      mode: "task",
-      session: createStubSession(),
-    });
-    expect(task.outputSchema).toEqual(agentSchema);
-
-    const conversation = resolveEffectiveOutputSchema({
-      agentOutputSchema: agentSchema,
-      input: { message: "hi" },
-      mode: "conversation",
-      session: createStubSession(),
-    });
-    expect(conversation.outputSchema).toBeUndefined();
-  });
-
-  it("preserves the in-effect schema on a continuation step with no new input", () => {
-    const session = createStubSession({ outputSchema: runSchema });
-    const resolved = resolveEffectiveOutputSchema({
-      agentOutputSchema: agentSchema,
-      input: undefined,
-      mode: "conversation",
-      session,
-    });
-    expect(resolved).toBe(session);
   });
 });

@@ -45,7 +45,6 @@ describe("workflow tool cancellation", () => {
             serializedContext: {
               ...buildWorkflowToolSerializedContext({
                 continuationToken: `child-${kind}`,
-                mode: "conversation",
               }),
               "eve.channel": {
                 kind: "subagent",
@@ -116,7 +115,6 @@ describe("workflow tool cancellation", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:yielded-child-cancel",
-            mode: "conversation",
           }),
         },
       ]);
@@ -208,7 +206,6 @@ describe("workflow tool cancellation", () => {
           serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-cancel",
-            mode: "conversation",
           }),
         },
       ]);

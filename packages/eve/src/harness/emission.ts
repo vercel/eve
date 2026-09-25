@@ -25,7 +25,6 @@ import {
   createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
-  createSessionCompletedEvent,
   createSessionFailedEvent,
   createSessionStartedEvent,
   createSessionWaitingEvent,
@@ -35,7 +34,6 @@ import {
   createTurnFailedEvent,
   createTurnStartedEvent,
 } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import type { JsonObject } from "#shared/json.js";
 import {
@@ -225,13 +223,12 @@ export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
 }
 
 /**
- * Emits `turn.completed` and either `session.waiting` or `session.completed`.
+ * Emits `turn.completed` and `session.waiting`.
  * Returns updated emission state with an incremented sequence.
  */
 export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  mode: RunMode,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
@@ -239,12 +236,7 @@ export async function emitTurnEpilogue(
       turnId: state.turnId,
     }),
   );
-
-  if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
-  } else {
-    await emitFn(createSessionCompletedEvent());
-  }
+  await emitFn(createSessionWaitingEvent());
 
   return {
     sessionStarted: state.sessionStarted,

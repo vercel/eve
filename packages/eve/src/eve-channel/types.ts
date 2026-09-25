@@ -106,7 +106,7 @@ export interface EveChannelInput {
    * trace consumers treat as non-public.
    *
    * Pass a constant audience, or a function receiving the authenticated
-   * principal, channel, run mode, and deployment environment. Continuation
+   * principal, channel, and deployment environment. Continuation
    * turns from a different caller do not reclassify an existing session.
    */
   readonly audience?:

@@ -26,14 +26,13 @@ const FAILURE_EVENT_TYPES = ["step.failed", "turn.failed", "session.failed"] as 
 function buildSerializedContext(overrides: {
   channelKind: string;
   continuationToken: string;
-  mode: string;
 }): Record<string, unknown> {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.capabilities": { requestInput: true },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
-    "eve.mode": overrides.mode,
   };
 }
 
@@ -96,7 +95,6 @@ describe("session-limit continuation decline integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);

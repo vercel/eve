@@ -200,7 +200,7 @@ You can also steer a running remote background child by calling its subagent too
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-A failed _start_ rejects admission before a task receipt is returned. After a remote starts, a terminal failure callback fails the task and notifies the parent with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
+A failed _start_ rejects admission before a task receipt is returned. After a remote starts, a terminal failure callback fails the task and notifies the parent with the remote's error. Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
 
 ## What to read next
 

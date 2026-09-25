@@ -191,8 +191,8 @@ could retry against a fresh quota share. A reply that answers neither option
 is queued while the existing prompt stays pending; eve does not raise another
 copy. The reply is processed once the budget is granted.
 
-Sessions that cannot reach a human — task-mode runs such as schedules and
-delegated runs without input proxying — skip the prompt and fail the next model
+Sessions that cannot request input from a human, such as markdown schedules and
+delegated runs without input proxying, skip the prompt and fail the next model
 call with `SESSION_TOKEN_LIMIT_REACHED` for token budgets or
 `SESSION_TOKEN_COST_LIMIT_REACHED` for model token cost. A delegated task with
 no inherited quota also fails instead of raising a continuation prompt that

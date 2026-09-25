@@ -30,7 +30,7 @@ export type AgentTurnResult =
  * `parked` means the child session survived the turn and can accept another
  * delivery; `terminal` means the child session ended with this turn. The
  * lifecycle is carried explicitly: a failed turn can leave the child parked,
- * and a succeeded turn can be terminal (task mode). Consumers must never
+ * and a succeeded turn can be terminal. Consumers must never
  * infer lifecycle from success or error codes.
  *
  * `usageDelta` is the provider-reported usage this turn added to the child's

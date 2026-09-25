@@ -3,7 +3,6 @@ import type { UserContent } from "ai";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type {
   RuntimeSubagentChildResult,
   RuntimeSubagentDispatchFailure,
@@ -409,9 +408,9 @@ export type HookPayload =
  *
  * `url` is the absolute callback endpoint. `token` is the capability token
  * embedded in the framework-owned callback route. `callId` and `subagentName`
- * correlate the callee's result to the pending tool call. Task sessions send a
- * terminal session result. Conversation sessions use this as their first turn's
- * caller; each continuation supplies the caller for that turn.
+ * correlate the callee's result to the pending tool call. The session uses
+ * this as its first turn's caller; each continuation supplies the caller for
+ * that turn.
  */
 export interface ActivitySinkV1 {
   readonly url: string;
@@ -438,9 +437,7 @@ export interface SessionCallback {
 /**
  * Runtime capabilities granted to one eve session.
  *
- * Capabilities describe what the session may do mid-turn: a session-level
- * contract, orthogonal to {@link RunInput.mode} which decides done-vs-park on
- * an empty turn.
+ * Capabilities describe what the session may do mid-turn.
  *
  * Channel routes that can reach a human (HTTP, Slack, etc.) set
  * `requestInput: true` when starting a run. Subagent dispatch inherits the
@@ -454,8 +451,8 @@ export interface SessionCapabilities {
    *
    * 1. `ctx.ask()` resolves as `unavailable` instead of waiting when the
    *    session cannot request input.
-   * 2. The pending-input park guard: scheduled task sessions without this flag
-   *    fail fast rather than waiting for a response to a tool approval.
+   * 2. The pending-input park guard: sessions without this flag fail fast
+   *    rather than waiting for a response to a tool approval.
    */
   readonly requestInput?: boolean;
 }
@@ -511,9 +508,8 @@ export interface RunInput {
    */
   readonly title?: string;
   /**
-   * Optional caller callback. Task sessions post when the session completes or
-   * fails. Conversation sessions use it for the first turn; continuations carry
-   * the caller for their own turn.
+   * Optional caller callback for the first turn; continuations carry the
+   * caller for their own turn.
    */
   readonly callback?: SessionCallback;
   /** Private collector capability and current work lineage. */
@@ -549,7 +545,6 @@ export interface RunInput {
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
   };
-  readonly mode: RunMode;
   /** Observability correlation only; never grants delegated-session privileges. */
   readonly conversationId?: string;
   readonly parent?: SessionParent;

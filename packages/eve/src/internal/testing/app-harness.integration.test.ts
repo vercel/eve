@@ -5,18 +5,17 @@ import { workflowEntry } from "#execution/session/entry.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { readFirstTurnReply } from "#internal/testing/events.js";
 
 function buildSerializedContext(overrides: {
   channelKind: string;
   continuationToken: string;
-  mode: string;
 }): Record<string, unknown> {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
-    "eve.mode": overrides.mode,
   };
 }
 
@@ -56,11 +55,10 @@ describe("AppHarness", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken: "schedule:app-harness-tenant-a",
-              mode: "task",
             }),
           },
         ]);
-        return (await run.returnValue).output;
+        return await readFirstTurnReply(run);
       }),
       runtimeB.run(async () => {
         const run = await start(workflowEntry, [
@@ -71,11 +69,10 @@ describe("AppHarness", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken: "schedule:app-harness-tenant-b",
-              mode: "task",
             }),
           },
         ]);
-        return (await run.returnValue).output;
+        return await readFirstTurnReply(run);
       }),
     ]);
 

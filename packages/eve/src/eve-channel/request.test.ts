@@ -9,7 +9,6 @@ describe("parseCreateBody", () => {
       callback: undefined,
       capabilities: undefined,
       context: undefined,
-      mode: undefined,
       outputSchema: undefined,
     });
   });
@@ -27,14 +26,6 @@ describe("parseCreateBody", () => {
     expect(response).toBeInstanceOf(Response);
     await expect((response as Response).json()).resolves.toMatchObject({
       error: expect.stringContaining("does not accept"),
-    });
-  });
-
-  it("requires a message for task mode", async () => {
-    const response = parseCreateBody({ mode: "task" });
-    expect(response).toBeInstanceOf(Response);
-    await expect((response as Response).json()).resolves.toMatchObject({
-      error: "Task sessions require a non-empty 'message'.",
     });
   });
 });

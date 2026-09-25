@@ -26,7 +26,6 @@ describe("workflow step authorization", () => {
           serializedContext: {
             ...buildWorkflowToolSerializedContext({
               continuationToken: "http:step-token",
-              mode: "conversation",
             }),
             "eve.auth": {
               attributes: {},
@@ -77,7 +76,6 @@ describe("workflow step authorization", () => {
             serializedContext: {
               ...buildWorkflowToolSerializedContext({
                 continuationToken: "http:step-auth",
-                mode: "conversation",
                 requestInput: true,
               }),
               "eve.auth": {

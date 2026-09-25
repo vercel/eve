@@ -51,7 +51,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -172,7 +171,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -291,78 +289,6 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("defers ordinary deliveries while a task waits for authorization", async () => {
-    const { completeCalls, runtime } = await createWeatherAuthRuntime(
-      "workflow-entry-task-auth-open",
-    );
-    const continuationToken = "http:workflow-entry-task-auth-open";
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
-          serializedContext: buildSerializedContext({
-            auth: {
-              attributes: {},
-              authenticator: "test-idp",
-              issuer: "test-idp",
-              principalId: "user-1",
-              principalType: "user",
-            },
-            channelKind: "http",
-            continuationToken,
-            mode: "task",
-          }),
-        },
-      ]);
-      const stream = captureEvents(run);
-
-      try {
-        const firstTurn = await stream.nextUntil(
-          "initial task auth-required event",
-          (event) => event.type === "authorization.required",
-        );
-
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(continuationToken) },
-        );
-        await resumeHook(sessionInboxHookToken(continuationToken), {
-          kind: "send",
-          payload: { message: "This must not become a second task turn." },
-        });
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [
-            {
-              authorizationCallback: {
-                attemptId: authorizationAttemptId(firstTurn),
-                callback: { method: "GET", params: { code: "oauth-code" } },
-                connectionName: "weather",
-              },
-            },
-          ],
-        });
-
-        const completion = await stream.nextUntil(
-          "authorized task completion",
-          (event) => event.type === "session.completed",
-        );
-        const allEvents = [...firstTurn, ...completion];
-        expect(filterEventsByType(allEvents, "turn.started")).toHaveLength(1);
-        expect(filterEventsByType(allEvents, "message.received")).toHaveLength(1);
-        expect(filterEventsByType(allEvents, "authorization.completed")).toHaveLength(1);
-        expect(filterEventsByType(allEvents, "session.waiting")).toHaveLength(0);
-        expect(completeCalls()).toBe(1);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
-
   it("ignores stale and duplicate callbacks after a challenge is replaced", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-replaced",
@@ -385,7 +311,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -483,7 +408,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);

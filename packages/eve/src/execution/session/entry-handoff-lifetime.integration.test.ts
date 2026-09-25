@@ -35,7 +35,6 @@ describe("workflowEntry integration", () => {
               serializedContext: buildSerializedContext({
                 acceptedDeploymentId: "dpl_a",
                 channelKind: "http",
-                mode: "conversation",
               }),
             },
           ]);

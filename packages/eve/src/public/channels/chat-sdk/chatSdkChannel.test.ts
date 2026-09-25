@@ -169,7 +169,6 @@ describe("chatSdkChannel", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:chat-sdk" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe(audience);

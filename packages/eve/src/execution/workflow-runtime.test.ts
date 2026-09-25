@@ -160,8 +160,7 @@ describe("session owner starts", () => {
     getRunMock.mockReturnValue({ getWritable: () => sessionWritable });
     startMock.mockResolvedValue({ runId: "owner-2" });
     const checkpoint = {
-      version: 8,
-      mode: "conversation",
+      version: 9,
       serializedContext: {},
       sessionState: { continuationToken: "continuation-1", sessionId: "session-1" },
       sessionTimeoutMs: 60_000,
@@ -562,7 +561,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
     });
 
     expect(startMock).toHaveBeenCalledWith(
@@ -575,7 +573,6 @@ describe("createWorkflowRuntime#createSession", () => {
           serializedContext: expect.objectContaining({
             "eve.bundle": { source: compiledArtifactsSource },
             "eve.channel": expect.objectContaining({ kind: "http", state: {} }),
-            "eve.mode": "task",
             "eve.otelTraceEnabled": false,
           }),
         },
@@ -604,7 +601,6 @@ describe("createWorkflowRuntime#createSession", () => {
         adapter,
         auth: null,
         input: { message: "hello" },
-        mode: "conversation",
       }),
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
@@ -626,7 +622,6 @@ describe("createWorkflowRuntime#createSession", () => {
           ownerKey: "owner",
         },
         input: { message: "hello" },
-        mode: "task",
       }),
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
@@ -649,7 +644,6 @@ describe("createWorkflowRuntime#createSession", () => {
       continuationConflictCommand,
       continuationToken: "slack:thread",
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
@@ -667,7 +661,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message },
-      mode: "conversation",
       title: "ship it",
     });
 
@@ -688,7 +681,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, [workflowInput]] = startMock.mock.calls[0]!;
@@ -710,7 +702,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter: activityAdapter(),
       auth: null,
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
@@ -744,7 +735,6 @@ describe("createWorkflowRuntime#createSession", () => {
         adapter: activityAdapter(),
         auth: null,
         input: { message: "hello" },
-        mode: "conversation",
       });
 
       expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
@@ -768,7 +758,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter: activityAdapter(),
       auth: null,
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const workflowInput = startMock.mock.calls[1]?.[1][0];
@@ -786,7 +775,6 @@ describe("createWorkflowRuntime#createSession", () => {
         adapter: activityAdapter(),
         auth: null,
         input: { message: "hello" },
-        mode: "conversation",
       }),
     ).rejects.toBe(failure);
 
@@ -807,7 +795,6 @@ describe("createWorkflowRuntime#createSession", () => {
         auth: null,
         continuationToken: "slack:thread",
         input: { message: "hello" },
-        mode: "conversation",
       }),
     ).resolves.toMatchObject({ sessionId: "owner-run" });
 
@@ -832,7 +819,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "research this" },
-      mode: "task",
     });
 
     const [, [workflowInput]] = startMock.mock.calls[0]!;
@@ -858,7 +844,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
       requestId: "req_run",
     });
 
@@ -908,7 +893,6 @@ describe("createWorkflowRuntime#createSession", () => {
       auth: null,
       continuationToken: "subagent:parent-session:call-1",
       input: { message: "research this" },
-      mode: "task",
       parent: {
         callId: "call-1",
         rootSessionId: "root-session",
@@ -944,7 +928,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter: { kind: "subagent", state: { parentContinuationToken: "opaque-reply-hook" } },
       auth: null,
       input: { message: "research this" },
-      mode: "conversation",
       taskId: "task-1",
     });
 
@@ -960,7 +943,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
     });
 
     expect(startMock).toHaveBeenCalledTimes(1);
@@ -1002,7 +984,6 @@ describe("createWorkflowRuntime#createSession", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "task",
     });
 
     expect(getRunMock).not.toHaveBeenCalled();
@@ -1130,7 +1111,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "http", metadata: {} },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;
@@ -1179,7 +1159,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "slack", metadata: {} },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     expect(captured?.channel.kind).toBe("channel:slack");
@@ -1195,7 +1174,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "http", metadata: { audience: "private" } },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;
@@ -1225,7 +1203,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       adapter: { kind: "subagent" },
       auth: null,
       input: { message: "research" },
-      mode: "task",
       parent: {
         callId: "call-1",
         rootSessionId: "root-session",
@@ -1260,7 +1237,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       adapter,
       auth: null,
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;
@@ -1291,7 +1267,6 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       auth: null,
       channelMetadata: { kind: "http", metadata: { audience: "public" } },
       input: { message: "hello" },
-      mode: "conversation",
     });
 
     const [, workflowInput] = startMock.mock.calls[0]!;

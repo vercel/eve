@@ -2,7 +2,7 @@ import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { turnStep } from "#execution/session/turn-step.js";
@@ -244,7 +244,6 @@ function setup(
   ctx.set(InitiatorAuthKey, alice);
   ctx.set(BundleKey, bundle);
   ctx.set(ChannelKey, adapter);
-  ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, sessionId);
   const session: HarnessSession = {
     agent: { modelReference: { id: "test" }, system: "Save notes.", tools: [] },

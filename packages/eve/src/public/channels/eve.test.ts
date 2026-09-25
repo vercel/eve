@@ -61,7 +61,6 @@ type MockSendOptions = Pick<
   | "continuationToken"
   | "activityObserver"
   | "initiatorAuth"
-  | "mode"
   | "title"
 >;
 
@@ -143,7 +142,6 @@ function createEveCreateHandler(
       continuationToken: runInput.continuationToken,
       activityObserver: runInput.activityObserver,
       initiatorAuth: runInput.initiatorAuth,
-      mode: runInput.mode,
       title: runInput.title,
     } satisfies MockSendOptions);
     return {
@@ -1061,27 +1059,16 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send.mock.calls[0]?.[0]).toBe("hi");
   });
 
-  it("accepts task mode for callback-driven session creation", async () => {
-    const handler = createEveCreateHandler({ auth: none() });
-
-    const response = await handler.fetch(createJsonMessageRequest({ message: "hi", mode: "task" }));
-
-    expect(response.status).toBe(202);
-    expect(handler.send).toHaveBeenCalledTimes(1);
-    expect(handler.send.mock.calls[0]?.[1]).toMatchObject({ mode: "task" });
-  });
-
   it("accepts an explicit empty capability set for conversation sessions", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 
     const response = await handler.fetch(
-      createJsonMessageRequest({ capabilities: {}, message: "hi", mode: "conversation" }),
+      createJsonMessageRequest({ capabilities: {}, message: "hi" }),
     );
 
     expect(response.status).toBe(202);
     expect(handler.send.mock.calls[0]?.[1]).toMatchObject({
       capabilities: {},
-      mode: "conversation",
     });
   });
 
@@ -1097,7 +1084,6 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
-        mode: "conversation",
       }),
     );
 
@@ -1110,7 +1096,6 @@ describe("eveChannel — create session (text)", () => {
         token: "tok123",
         url: "https://caller.example.com/eve/v1/callback/tok123",
       },
-      mode: "conversation",
     });
   });
 
@@ -1126,7 +1111,6 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/support/v1/callback/tok123",
         },
         message: "hi",
-        mode: "task",
       }),
     );
 
@@ -1145,7 +1129,6 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
-        mode: "task",
       }),
     );
 
@@ -1168,7 +1151,6 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/other-token",
         },
         message: "hi",
-        mode: "task",
       }),
     );
 
@@ -1192,7 +1174,6 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
-        mode: "task",
       }),
     );
 
@@ -1200,20 +1181,6 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("Unrecognized key"),
-    });
-  });
-
-  it("rejects invalid create-session modes", async () => {
-    const handler = createEveCreateHandler({ auth: none() });
-
-    const response = await handler.fetch(
-      createJsonMessageRequest({ message: "hi", mode: "background" }),
-    );
-
-    expect(response.status).toBe(400);
-    expect(handler.send).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({
-      error: expect.stringContaining("mode"),
     });
   });
 
@@ -2055,7 +2022,7 @@ describe("eveChannel — forwarded principal", () => {
   };
 
   function forwardedRequest(forwardedPrincipal: unknown): Request {
-    return createJsonMessageRequest({ forwardedPrincipal, message: "hi", mode: "task" });
+    return createJsonMessageRequest({ forwardedPrincipal, message: "hi" });
   }
 
   function stamped(context: SessionAuthContext): SessionAuthContext {
@@ -2205,7 +2172,6 @@ describe("eveChannel — forwarded principal", () => {
         "eve:forwarded-by": ROUTER_CALLER.principalId,
       },
     });
-    expect(options.mode).toBe("task");
   });
 
   it("scopes create-once operations to the forwarded principal", async () => {

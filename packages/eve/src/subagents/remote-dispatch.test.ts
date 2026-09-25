@@ -345,7 +345,6 @@ describe("startRemoteAgentSession", () => {
         "find the marker",
       ].join("\n"),
       capabilities: {},
-      mode: "conversation",
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -520,7 +519,6 @@ describe("startRemoteAgentSession", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.outputSchema).toEqual(outputSchema);
-    expect(body.mode).toBe("conversation");
     expect(body.capabilities).toEqual({});
   });
 

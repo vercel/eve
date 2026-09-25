@@ -31,7 +31,7 @@ function findToolResult(messages: readonly ModelMessage[], toolCallId: string): 
 }
 
 describe("framework tool input validation (real AI SDK)", () => {
-  it("rejects invalid final_output input instead of terminating the task", async () => {
+  it("rejects invalid final_output input instead of settling the turn", async () => {
     const invalidCallId = "final-invalid";
     const validCallId = "final-valid";
     const outputSchema = {
@@ -73,7 +73,6 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const config: ToolLoopHarnessConfig = {
-      mode: "task",
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
     };
@@ -106,6 +105,7 @@ describe("framework tool input validation (real AI SDK)", () => {
 
     expect(model.doGenerateCalls).toHaveLength(2);
     expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
-    expect(validStep.next).toEqual({ done: true, output: { answer: "done" } });
+    expect(validStep.next).toBeNull();
+    expect(validStep.settledTurn).toEqual({ output: { answer: "done" } });
   });
 });

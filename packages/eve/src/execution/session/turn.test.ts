@@ -11,7 +11,6 @@ import { turnStep } from "#execution/session/turn-step.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -45,38 +44,6 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SessionExecution background task checkpoints", () => {
-  it("parks a yielded task-mode turn for background delivery", async () => {
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: () => [],
-      hasPending: () => false,
-      next: vi.fn(),
-      restore: vi.fn(),
-      onDelivery: () => () => {},
-      onInterrupt: () => () => {},
-    };
-    const sessionState = state("");
-    const settled = { notifyCaller: false, output: "Verification is running." };
-    vi.mocked(turnStep).mockResolvedValue({
-      action: "park",
-      hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
-      serializedContext: {},
-      sessionState,
-      settled,
-    });
-
-    await expect(
-      createExecution({ inbox, mode: "task", sessionState }).runTurn(undefined),
-    ).resolves.toEqual({
-      authorizationAttemptIds: undefined,
-      kind: "park",
-      settled,
-    });
-  });
-
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],
@@ -762,7 +729,6 @@ describe("SessionExecution background task checkpoints", () => {
 
 function createExecution(input: {
   readonly inbox: SessionInbox;
-  readonly mode?: RunMode;
   readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -776,7 +742,6 @@ function createExecution(input: {
   return new SessionExecution({
     cursor,
     inbox: input.inbox,
-    mode: input.mode ?? "conversation",
     queue: input.queue ?? new SessionInputQueue(),
     sessionId: input.sessionState.sessionId,
   });

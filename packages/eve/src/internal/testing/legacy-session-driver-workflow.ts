@@ -66,7 +66,6 @@ export async function legacySessionDriverWorkflow(input: {
     };
     const turnInput = {
       version: input.inputVersion ?? 2,
-      mode: "conversation",
       completionToken: completion.token,
       stepInput: {
         input: { ...delivery, kind: "deliver", payloads: delivery.payloads ?? [delivery.payload] },

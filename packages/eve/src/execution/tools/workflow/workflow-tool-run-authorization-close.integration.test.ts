@@ -36,7 +36,6 @@ describe("workflow step authorization failures", () => {
             serializedContext: {
               ...buildWorkflowToolSerializedContext({
                 continuationToken: "http:step-auth-failure",
-                mode: "conversation",
                 requestInput: true,
               }),
               "eve.auth": {

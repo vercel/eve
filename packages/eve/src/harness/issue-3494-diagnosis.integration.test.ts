@@ -60,7 +60,6 @@ it("continues the second step past an older approval batch", async () => {
     },
   });
   const config: ToolLoopHarnessConfig = {
-    mode: "conversation",
     tools: new Map<string, HarnessToolDefinition>([
       [
         "gate",

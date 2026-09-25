@@ -70,7 +70,6 @@ describe("workflowEntry integration", () => {
           serializedContext: buildSerializedContext({
             auth: { authenticator: "test", principalId: "mount", principalType: "user" },
             channelKind: "http",
-            mode: "conversation",
           }),
         },
       ]);
@@ -153,7 +152,6 @@ describe("workflowEntry integration", () => {
             input: { message: "Say hello to Alice." },
             serializedContext: buildSerializedContext({
               channelKind: "http",
-              mode: "conversation",
             }),
           },
         ]);
@@ -190,7 +188,6 @@ describe("workflowEntry integration", () => {
             acceptedDeploymentId: "dpl_inline",
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -285,7 +282,6 @@ describe("workflowEntry integration", () => {
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
-            mode: "conversation",
           }),
         },
       ]);
@@ -317,7 +313,6 @@ describe("workflowEntry integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -385,7 +380,6 @@ describe("workflowEntry integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
           sessionTimeoutMs: 25,
         },
@@ -458,7 +452,6 @@ describe("workflowEntry integration", () => {
               subagentName: "researcher",
             },
             continuationToken: childContinuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -562,7 +555,6 @@ describe("workflowEntry integration", () => {
                 subagentName: "researcher",
               },
               continuationToken: firstCallerToken,
-              mode: "conversation",
             }),
             "eve.capabilities": { requestInput: true },
           },
@@ -619,7 +611,6 @@ describe("workflowEntry integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -645,7 +636,6 @@ describe("workflowEntry integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -689,7 +679,6 @@ describe("workflowEntry integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -729,63 +718,6 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("completes immediately in task mode", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "workflow-entry-task" } });
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "hello there" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "http:workflow-entry-task",
-            mode: "task",
-          }),
-        },
-      ]);
-
-      await expect(run.returnValue).resolves.toEqual({
-        output: expect.stringContaining("hello there"),
-      });
-      await expect(run.status).resolves.toBe("completed");
-    });
-  });
-
-  it("returns agent-declared structured output in task mode", async () => {
-    const outputSchema = {
-      properties: {
-        summary: { type: "string" },
-      },
-      required: ["summary"],
-      type: "object",
-    } as const;
-    const runtime = await createTestRuntime({
-      agent: { name: "workflow-entry-task-output-schema", outputSchema },
-    });
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "hello there" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "http:workflow-entry-task-output-schema",
-            mode: "task",
-          }),
-        },
-      ]);
-
-      await expect(run.returnValue).resolves.toEqual({
-        output: { summary: "structured-output" },
-      });
-      await expect(run.status).resolves.toBe("completed");
-    });
-  });
-
   it("emits `$eve.*` session attributes onto the parent workflow run", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-tags" } });
     const continuationToken = "http:workflow-entry-tags";
@@ -796,7 +728,6 @@ describe("workflowEntry integration", () => {
           audience: "public",
           channelKind: "http",
           continuationToken,
-          mode: "conversation",
         }),
         [SessionTitleKey.name]: "session tag round-trip",
       };
@@ -850,7 +781,6 @@ describe("workflowEntry integration", () => {
         audience: "public",
         channelKind: "subagent",
         continuationToken: "subagent:parent-session:call-subagent-1",
-        mode: "task",
         parent: {
           callId: "call-subagent-1",
           rootSessionId: "root-session",
@@ -883,22 +813,25 @@ describe("workflowEntry integration", () => {
         },
       );
 
-      await expect(run.returnValue).resolves.toEqual({
-        output: expect.stringContaining("subagent tag round-trip"),
-      });
-      await expect(run.status).resolves.toBe("completed");
+      const stream = captureTurnEvents(run);
+      try {
+        await stream.nextTurn();
 
-      const world = await getWorld();
-      const persisted = await world.runs.get(run.runId);
-      const attrs = (persisted as { attributes?: Record<string, string> }).attributes ?? {};
+        const world = await getWorld();
+        const persisted = await world.runs.get(run.runId);
+        const attrs = (persisted as { attributes?: Record<string, string> }).attributes ?? {};
 
-      expect(attrs["$eve.type"]).toBe("subagent");
-      expect(attrs["$eve.is_trace_content_visible"]).toBe("true");
-      expect(attrs["$eve.parent"]).toBe("parent-session");
-      expect(attrs["$eve.parent_call"]).toBe("call-subagent-1");
-      expect(attrs["$eve.parent_turn"]).toBe("turn-parent");
-      expect(attrs["$eve.root"]).toBe("root-session");
-      expect(attrs["$eve.trigger"]).toBe("subagent");
+        expect(attrs["$eve.type"]).toBe("subagent");
+        expect(attrs["$eve.is_trace_content_visible"]).toBe("true");
+        expect(attrs["$eve.parent"]).toBe("parent-session");
+        expect(attrs["$eve.parent_call"]).toBe("call-subagent-1");
+        expect(attrs["$eve.parent_turn"]).toBe("turn-parent");
+        expect(attrs["$eve.root"]).toBe("root-session");
+        expect(attrs["$eve.trigger"]).toBe("subagent");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
     });
   });
 });

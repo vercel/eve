@@ -261,7 +261,6 @@ function createConfig(
     ],
   ]);
   return {
-    mode: "conversation",
     resolveModel: async (): Promise<LanguageModel> => model,
     tools,
   };
@@ -452,7 +451,6 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           order.push(`step.started:${String(version)}`);
         }
       },
-      mode: "conversation",
       resolveStepDynamicTools: (input) =>
         preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [resolver] }),
       resolveModel: async (): Promise<LanguageModel> => model,
@@ -732,6 +730,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
     const config = {
       ...createConfig(model, execute),
+      capabilities: { requestInput: true },
       handleEvent: async () => {},
     } satisfies ToolLoopHarnessConfig;
     const usageState = {

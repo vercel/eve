@@ -47,8 +47,8 @@ export interface RemoteAgentDefinition {
   /**
    * Optional structured return type the caller requires from the remote agent.
    * The compiler lowers it to JSON Schema and sends it on the remote
-   * create-session request; the remote deployment enforces it like any
-   * task-mode output schema.
+   * create-session request; the remote deployment enforces it as that turn's
+   * output schema.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
   /**

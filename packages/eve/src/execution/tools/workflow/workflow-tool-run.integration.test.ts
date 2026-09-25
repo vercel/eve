@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { start } from "#internal/workflow/runtime.js";
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import {
+  captureTurnEvents,
+  filterEventsByType,
+  readFirstTurnReply,
+} from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { SLEEP_INPUT_SCHEMA, executeSleepTool } from "#execution/tools/sleep.js";
@@ -36,11 +40,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:step-reference",
-            mode: "task",
           }),
         },
       ]);
-      return String((await run.returnValue).output);
+      return String(await readFirstTurnReply(run));
     });
     expect(output).toContain('"argument":"plan:api"');
     expect(output).toContain('"receiver":"api"');
@@ -61,12 +64,10 @@ describe("workflow tools", () => {
           input: { message: "Run sleep" },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-sleep",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain('"waitedSeconds":1');
@@ -87,12 +88,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-wait",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain('"plan":"plan:api"');
@@ -114,12 +113,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-step-context-misuse",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain('ctx.agents is unavailable inside a "use step" function.');
@@ -144,12 +141,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-fail",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain("deploy of api exploded");
@@ -172,7 +167,6 @@ describe("workflow tools", () => {
           serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-hitl",
-            mode: "conversation",
             requestInput: true,
           }),
         },
@@ -241,7 +235,6 @@ describe("workflow tools", () => {
           input: { message: 'Run confirm_deploy with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-ask-deadline",
-            mode: "conversation",
             requestInput: true,
           }),
         },
@@ -287,7 +280,6 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-progress",
-            mode: "conversation",
           }),
         },
       ]);

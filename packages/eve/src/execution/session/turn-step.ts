@@ -30,7 +30,6 @@ import {
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
-  ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
@@ -84,7 +83,6 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
@@ -450,7 +448,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       throw error;
     }
 
-    const mode = ctx.require(ModeKey);
     const modelCallsPerStep =
       bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
@@ -480,7 +477,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
-        mode,
         modelResolutionScope: {
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
@@ -506,14 +502,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
           const result = await runBackgroundStep(ctx, session, async (enrichedSession) => {
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-            let schemaSession = firstCall
-              ? resolveEffectiveOutputSchema({
-                  agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
-                  input: resolved,
-                  mode,
-                  session: enrichedSession,
-                })
-              : enrichedSession;
+            let schemaSession =
+              firstCall && resolved?.outputSchema !== undefined
+                ? { ...enrichedSession, outputSchema: resolved.outputSchema }
+                : enrichedSession;
             const connectionState = getHarnessEmissionState(schemaSession.state);
             await dynamicConnections.rehydrate(
               connectionState,
@@ -620,7 +612,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     const durableResult = resolveSessionStepResult(
       stepResult,
       nextSerializedContext,
-      mode,
       input.serializedContext,
       activeTurnId(initialEmissionState),
     );

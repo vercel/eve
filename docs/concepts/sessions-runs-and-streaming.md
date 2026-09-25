@@ -41,8 +41,8 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session
 
 eve starts the durable workflow, establishes its inbox, and waits for the first message before
 running session-scoped initialization or emitting `session.started`. The first message sent to the returned
-`sessionId` remains `turn_0`. Message-free creation supports conversation mode only and does not
-accept turn-scoped `clientContext`, `outputSchema`, callbacks, or activity observers.
+`sessionId` remains `turn_0`. Message-free creation does not accept turn-scoped `clientContext`,
+`outputSchema`, callbacks, or activity observers.
 
 To create the session and start its first turn in one request, include the message:
 
@@ -128,8 +128,7 @@ A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
 `details.finishReason: "content-filter"`. Details also include the Gateway
 `generationId` when available. eve does not retry the filtered response or emit
 `message.completed` for its partial text; deltas already streamed remain visible.
-Conversation sessions wait for another user message, while task-mode runs return
-a failed result.
+The session then waits for another user message.
 
 ## The event envelope
 

@@ -154,7 +154,6 @@ export function buildSubagentRunInput(input: {
       outputSchema: requestedOutputSchema ?? source.outputSchema,
     },
     limits: inheritedLimits,
-    mode: "conversation",
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,

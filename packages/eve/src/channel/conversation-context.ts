@@ -36,7 +36,6 @@ export function buildConversationContext(
       auth,
       caller: toAudienceCaller(auth),
       channel,
-      mode: run.mode,
       environment,
     });
 
@@ -45,7 +44,6 @@ export function buildConversationContext(
       channelKind: projection.kind,
       environment,
       forwardedTracePolicy,
-      mode: run.mode,
       principalType: auth?.principalType,
     }),
     audience,

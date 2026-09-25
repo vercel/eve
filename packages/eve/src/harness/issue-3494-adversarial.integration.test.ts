@@ -184,7 +184,6 @@ function fixture(
         ],
       }).dispatch(createTurnStartedEvent(event));
     },
-    mode: "conversation",
     capabilities: { requestInput: true },
     tools,
     resolveModel: async () => model,

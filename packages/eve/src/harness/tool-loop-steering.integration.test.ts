@@ -57,7 +57,6 @@ describe("generation steering with the real AI SDK", () => {
     }));
     try {
       const running = createToolLoopHarness({
-        mode: "conversation",
         abortSignal: cancellation.signal,
         steeringSignal: steering.signal,
         tools: new Map(),
@@ -105,7 +104,6 @@ describe("generation steering with the real AI SDK", () => {
         },
       });
       const harness = createToolLoopHarness({
-        mode: "conversation",
         capabilities: { requestInput: true },
         steeringSignal: steering.signal,
         tools: new Map([
@@ -150,7 +148,6 @@ describe("generation steering with the real AI SDK", () => {
     const model = new MockLanguageModelV3({ doStream });
     const events: UnstampedMessageStreamEvent[] = [];
     const result = await createToolLoopHarness({
-      mode: "conversation",
       steeringSignal: steering.signal,
       tools: new Map(),
       resolveModel: async () => model,
@@ -201,7 +198,6 @@ describe("generation steering with the real AI SDK", () => {
     const model = new MockLanguageModelV3({ doStream });
     const createStep = (signal?: AbortSignal) =>
       createToolLoopHarness({
-        mode: "conversation",
         resolveModel: async () => model,
         tools: new Map(),
         steeringSignal: signal,
@@ -283,7 +279,6 @@ describe("generation steering with the real AI SDK", () => {
     const model = new MockLanguageModelV3({ doStream });
     const createStep = (signal?: AbortSignal) =>
       createToolLoopHarness({
-        mode: "conversation",
         steeringSignal: signal,
         resolveModel: async () => model,
         handleEvent: async () => {},
@@ -329,7 +324,6 @@ describe("generation steering with the real AI SDK", () => {
       },
     });
     const result = await createToolLoopHarness({
-      mode: "conversation",
       steeringSignal: steering.signal,
       tools: new Map(),
       resolveModel: async () => model,

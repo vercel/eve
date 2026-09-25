@@ -6,15 +6,9 @@ import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-
 import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import { fireSessionCallbackStep } from "#subagents/callback-step.js";
-import { notifyDelegatedParentStep, notifyTurnCallerStep } from "#subagents/parent-notification.js";
-import {
-  createDelegatedSubagentErrorResult,
-  createDelegatedSubagentSuccessResult,
-} from "#subagents/parent-result.js";
+import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
 export type SessionTerminalOutcome =
@@ -28,14 +22,12 @@ export interface SessionFinalizationContext {
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState | undefined;
   };
-  readonly mode: RunMode;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
 /**
  * Terminates descendants, emits the terminal protocol event when the turn has
- * not already done so, then settles whoever is waiting on this session: the
- * task callback and delegated parent in task mode, or the parked caller.
+ * not already done so, then settles the parked caller waiting on this session.
  */
 export async function finalizeSession(
   outcome: SessionTerminalOutcome,
@@ -60,22 +52,7 @@ export async function finalizeSession(
   }
 
   const settled = settledResult(outcome, context);
-  if (context.mode === "task") {
-    await fireSessionCallbackStep({
-      error: settled.isError ? settled.output : undefined,
-      output: settled.isError ? undefined : settled.output,
-      serializedContext,
-      status: settled.isError ? "failed" : "completed",
-      usage: settled.sessionUsage,
-    });
-    await notifyDelegatedParentStep({
-      result: settled.isError
-        ? createDelegatedSubagentErrorResult(serializedContext, settled.output)
-        : createDelegatedSubagentSuccessResult(serializedContext, settled.output),
-      serializedContext,
-      usage: settled.sessionUsage,
-    });
-  } else if (context.caller !== undefined) {
+  if (context.caller !== undefined) {
     const notification: { isError?: boolean; output: unknown; usage?: TokenUsage } = {
       output: settled.output,
       usage: settled.turnUsage,

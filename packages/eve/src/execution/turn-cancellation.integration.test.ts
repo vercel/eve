@@ -41,14 +41,12 @@ const WAIT_TOOL_NAME = "wait_for_cancel";
 function buildSerializedContext(overrides: {
   channelKind: string;
   continuationToken: string;
-  mode: string;
 }): Record<string, unknown> {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
-    "eve.mode": overrides.mode,
   };
 }
 
@@ -350,7 +348,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -415,7 +412,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken: "http:turn-active-memory-abort",
-            mode: "conversation",
           }),
         },
       ]);
@@ -465,7 +461,6 @@ describe("turn cancellation integration", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken,
-              mode: "conversation",
             }),
           },
         ]);
@@ -517,7 +512,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -601,7 +595,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -694,7 +687,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -769,7 +761,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -818,7 +809,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);

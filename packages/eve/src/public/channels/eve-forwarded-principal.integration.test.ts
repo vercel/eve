@@ -131,7 +131,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
-          mode: "task",
         }),
         headers: {
           "content-type": "application/json",
@@ -246,7 +245,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
               url: "https://caller.example.com/eve/v1/callback/parent-token",
             },
             message: "check my dashboards",
-            mode: "task",
           }),
           headers: {
             "content-type": "application/json",
@@ -294,7 +292,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
-          mode: "task",
         }),
         headers: {
           "content-type": "application/json",
@@ -326,7 +323,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
-          mode: "task",
         }),
         headers: {
           "content-type": "application/json",
@@ -360,7 +356,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
 
     await handler.fetch(
       new Request("https://receiver.example.com/eve/v1/session", {
-        body: JSON.stringify({ message: "check my dashboards", mode: "task" }),
+        body: JSON.stringify({ message: "check my dashboards" }),
         headers: { "content-type": "application/json" },
         method: "POST",
       }),
@@ -411,7 +407,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             current: FORWARDED_CURRENT,
           },
           message: "check my dashboards",
-          mode: "task",
         }),
         headers: {
           "content-type": "application/json",

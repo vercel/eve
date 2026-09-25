@@ -36,7 +36,6 @@ describe("legacy session import", () => {
                 "eve.auth": null,
                 "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
                 "eve.channel": { kind: "http", state: {} },
-                "eve.mode": "conversation",
               },
             },
           ]);
@@ -250,6 +249,5 @@ function legacyContext() {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: "http", state: {} },
-    "eve.mode": "conversation",
   };
 }

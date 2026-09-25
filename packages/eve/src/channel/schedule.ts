@@ -49,8 +49,8 @@ export interface ScheduleDispatchInput {
  * so the dispatcher awaits in-flight work before settling.
  *
  * For markdown schedules: synthesizes a channel-less run that starts a
- * session with {@link SCHEDULE_ADAPTER} in task mode and the markdown
- * body as the message.
+ * session with {@link SCHEDULE_ADAPTER} and the markdown body as the
+ * message.
  *
  * Returns a {@link ScheduleDispatchResult} carrying any sessions the
  * handler started (for telemetry / task-result observability) and the
@@ -120,7 +120,6 @@ export class ScheduleDispatcher {
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
-      mode: "task",
     });
     return createSession(handle.sessionId, this.runtime);
   }

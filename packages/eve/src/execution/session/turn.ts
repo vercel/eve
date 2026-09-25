@@ -1,6 +1,6 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -34,16 +34,11 @@ import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js"
 import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
-const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
-
 export interface SessionExecutionInput {
-  readonly capabilities?: SessionCapabilities;
   readonly cursor: SessionStateCursor;
   readonly inbox: SessionInboxReader;
-  readonly mode: RunMode;
   readonly queue: SessionInputQueue;
   readonly sessionId: string;
 }
@@ -161,12 +156,6 @@ export class SessionExecution {
       }
 
       if (result.action === "park") {
-        const canPark =
-          result.hasPendingAuthorization ||
-          (result.hasPendingInputBatch && this.input.capabilities?.requestInput === true) ||
-          result.settled?.notifyCaller === false ||
-          this.input.mode === "conversation";
-        if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
         return {
           authorizationAttemptIds: result.authorizationAttemptIds,
           kind: "park",

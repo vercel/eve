@@ -388,7 +388,6 @@ describe("createExecutionNodeStep", () => {
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
       instrumentation,
-      mode: "task",
       modelResolutionScope,
       node: rootNode,
     });
@@ -420,7 +419,8 @@ describe("createExecutionNodeStep", () => {
       ),
     );
 
-    expect(result.next).toEqual({ done: true, output: "tool-output" });
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "tool-output" });
     expect(resolveRuntimeModelReference).toHaveBeenCalledWith(
       rootNode.turnAgent.model,
       modelResolutionScope,
@@ -465,7 +465,6 @@ describe("createExecutionNodeStep", () => {
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
       instrumentation: undefined,
-      mode: "task",
       modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
       node,
     });

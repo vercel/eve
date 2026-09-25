@@ -57,7 +57,6 @@ const traceContext = (agentName: string, audience: "public" | "private") => ({
   audience,
   channel: { kind: "http" as const },
   environment: "production" as const,
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 

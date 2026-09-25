@@ -238,8 +238,8 @@ const runtimeToolResultActionResultSchema = z
  * turn. The parent settles the agent handle from `outcome.kind` and folds
  * `outcome.usageDelta` into its session totals; `output`/`isError` remain
  * the tool-result projection shown to the model. Every producer states the
- * envelope explicitly — task-mode boundaries synthesize a terminal one —
- * so the parent never infers lifecycle from an absent field. `usage`
+ * envelope explicitly, so the parent never infers lifecycle from an absent
+ * field. `usage`
  * carries the turn's token spend so the caller can attribute the
  * subagent's tokens.
  *

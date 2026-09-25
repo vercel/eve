@@ -46,7 +46,6 @@ describe("content-filter reporting (real AI SDK)", () => {
       });
       const events: UnstampedMessageStreamEvent[] = [];
       const step = createToolLoopHarness({
-        mode: "conversation",
         resolveModel: async () => model,
         tools: new Map(),
         handleEvent: async (event) => {
@@ -95,7 +94,6 @@ describe("content-filter reporting (real AI SDK)", () => {
         },
       });
       const step = createToolLoopHarness({
-        mode: "task",
         resolveModel: async () => model,
         tools: new Map(),
       });

@@ -33,7 +33,6 @@ describe("workflowEntry integration", () => {
             serializedContext: buildSerializedContext({
               acceptedDeploymentId: "dpl_a",
               channelKind: "http",
-              mode: "conversation",
             }),
           },
         ]);
@@ -191,7 +190,6 @@ describe("workflowEntry integration", () => {
             serializedContext: buildSerializedContext({
               acceptedDeploymentId: "dpl_a",
               channelKind: "http",
-              mode: "conversation",
             }),
           },
         ]);
@@ -302,7 +300,6 @@ describe("workflowEntry integration", () => {
               acceptedDeploymentId: "dpl_a",
               channelKind: "http",
               continuationToken,
-              mode: "conversation",
             }),
           },
         ]);
@@ -406,7 +403,6 @@ describe("workflowEntry integration", () => {
             serializedContext: buildSerializedContext({
               acceptedDeploymentId: "dpl_a",
               channelKind: "http",
-              mode: "conversation",
             }),
           },
         ]);

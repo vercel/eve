@@ -137,7 +137,6 @@ describe("teamsChannel", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:teams" },
         environment: "production",
-        mode: "conversation",
         state: teamsAdapter.state,
       }),
     ).toBe(audience);

@@ -119,7 +119,6 @@ describe("buildSubagentRunInput", () => {
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
-    expect(runInput.mode).toBe("conversation");
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
@@ -275,7 +274,6 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
-    expect(runInput.mode).toBe("conversation");
   });
 
   it("uses a declared local outputSchema on the persistent child's first turn", () => {
@@ -291,7 +289,6 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
-    expect(runInput.mode).toBe("conversation");
   });
 
   it("lets a per-call outputSchema override the local child's declared schema", () => {
@@ -405,7 +402,6 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
-    expect(runInput.mode).toBe("conversation");
   });
 
   it("leaves outputSchema undefined when not provided", () => {

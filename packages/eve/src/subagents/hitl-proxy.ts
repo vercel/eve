@@ -12,7 +12,6 @@ import {
 import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { InputResponse } from "#shared/input.js";
 import { resolveTextToResponse } from "#channel/resolve-text.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
@@ -22,14 +21,13 @@ import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuatio
 // ---------------------------------------------------------------------------
 
 /**
- * Runs the parent-side work for a `subagent-input-request`. Conversation
- * mode emits a waiting boundary on the parent stream; the returned proxy
- * entries route the eventual response back down to the child.
+ * Runs the parent-side work for a `subagent-input-request`: emits the request
+ * and a waiting boundary on the parent stream. The returned proxy entries
+ * route the eventual response back down to the child.
  */
 export async function emitProxiedInputRequest(input: {
   readonly emit: HarnessEmitFn;
   readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly mode: RunMode;
   readonly session: HarnessSession;
 }): Promise<{
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
@@ -44,17 +42,11 @@ export async function emitProxiedInputRequest(input: {
     }),
   );
 
-  let nextSession = input.session;
-
-  if (input.mode === "conversation") {
-    const state = getHarnessEmissionState(input.session.state);
-    const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
-    nextSession = setHarnessEmissionState(input.session, nextState);
-  }
-
+  const state = getHarnessEmissionState(input.session.state);
+  const nextState = await emitTurnEpilogue(input.emit, state);
   return {
     entries: toProxyInputRequestEntries(input.hookPayload),
-    session: nextSession,
+    session: setHarnessEmissionState(input.session, nextState),
   };
 }
 

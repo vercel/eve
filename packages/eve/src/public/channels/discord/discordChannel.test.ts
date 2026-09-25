@@ -62,7 +62,6 @@ describe("discordChannel() audience classification", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:discord" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe(audience);

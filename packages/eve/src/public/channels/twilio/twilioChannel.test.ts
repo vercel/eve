@@ -188,7 +188,6 @@ describe("twilioChannel() inbound text pipeline", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:twilio" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe("private");

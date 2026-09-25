@@ -371,10 +371,10 @@ type PublicAgentDefinitionBase = {
    */
   readonly tool?: boolean;
   /**
-   * Optional structured return type used when this agent runs in task mode
-   * (for example as a subagent, schedule, or remote job). Interactive
-   * conversation turns ignore this field unless the client supplies a
-   * per-message output schema.
+   * Optional structured return type this agent produces when a parent
+   * delegates to it as a subagent and the call supplies no schema of its own.
+   * Top-level sessions ignore this field; clients pass a per-message output
+   * schema instead.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
 };

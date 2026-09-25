@@ -7,7 +7,6 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
   ParentSessionKey,
-  ModeKey,
 } from "#context/keys.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -32,7 +31,6 @@ function setConversation(context: ContextContainer, audience: "public" | "privat
     audience,
     channel: { kind: "channel:test", name: "test" },
     environment: "production",
-    mode: "conversation",
     principalType: "user",
   });
 }
@@ -100,7 +98,6 @@ describe("readInstrumentationSessionContext", () => {
     const context = new ContextContainer();
     context.set(ChannelInstrumentationKey, { kind: "channel:test", metadata: {} });
     context.set(AuthKey, current);
-    context.set(ModeKey, "task");
 
     const { conversation } = readInstrumentationSessionContext(context);
 
@@ -108,7 +105,6 @@ describe("readInstrumentationSessionContext", () => {
       audience: "unknown",
       channel: { kind: "channel:test", name: undefined },
       environment: "development",
-      mode: "task",
       principalType: "service",
     });
   });

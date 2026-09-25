@@ -45,7 +45,6 @@ function createConfig(
 ): ToolLoopHarnessConfig {
   return {
     handleEvent: emit,
-    mode: "conversation",
     resolveModel: vi.fn().mockResolvedValue(model),
     tools: new Map(),
     ...overrides,

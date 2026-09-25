@@ -37,7 +37,6 @@ describe("background workflow tools", () => {
           serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-background",
-            mode: "conversation",
           }),
         },
       ]);
@@ -90,7 +89,6 @@ describe("background workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-background-fail",
-            mode: "conversation",
           }),
         },
       ]);
@@ -137,7 +135,6 @@ describe("background workflow tools", () => {
           input: { message: 'Run confirm_deploy with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-background-hitl",
-            mode: "conversation",
             requestInput: true,
           }),
         },

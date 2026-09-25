@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
@@ -15,11 +15,10 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
-function fixture(mode: RunMode = "conversation", turnId = "parent-turn") {
+function fixture(turnId = "parent-turn") {
   const order: string[] = [];
   const events: MessageStreamEvent[] = [];
   const typed = vi.fn(async (event: MessageStreamEvent, _ctx: HookContext) => {
@@ -71,7 +70,6 @@ function fixture(mode: RunMode = "conversation", turnId = "parent-turn") {
   ctx.set(BundleKey, bundle);
   ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:parent");
-  ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "parent-session");
   const durableSession: DurableSession = {
     agent: { system: "" },
@@ -115,19 +113,12 @@ function fixture(mode: RunMode = "conversation", turnId = "parent-turn") {
 }
 
 describe("proxied stream hooks", () => {
-  it.each([
-    { mode: "conversation", turnId: "parent-turn" },
-    { mode: "conversation", turnId: "" },
-    { mode: "task", turnId: "parent-turn" },
-  ] as const)(
-    "publishes hooks in parent context ($mode, turn=$turnId)",
-    async ({ mode, turnId }) => {
-      const f = fixture(mode, turnId);
+  it.each([{ turnId: "parent-turn" }, { turnId: "" }] as const)(
+    "publishes hooks in parent context (turn=$turnId)",
+    async ({ turnId }) => {
+      const f = fixture(turnId);
       const result = await emitProxiedSubagentEvent(f);
-      const types =
-        mode === "conversation"
-          ? ["input.requested", "turn.completed", "session.waiting"]
-          : ["input.requested"];
+      const types = ["input.requested", "turn.completed", "session.waiting"];
       expect(f.events.map((event) => event.type)).toEqual(types);
       expect(f.order).toEqual(
         types.flatMap((type) => [

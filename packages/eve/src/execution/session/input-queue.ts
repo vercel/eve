@@ -181,7 +181,6 @@ export class SessionInputQueue {
   takeNext(
     state: SessionStateMap | undefined,
     options?: {
-      readonly deferDeliveries?: boolean;
       readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
       /**
        * Attempt ids of the open authorization challenge. Callbacks for other
@@ -224,7 +223,6 @@ export class SessionInputQueue {
     const index = this.nextActionableIndex(
       tasks,
       pendingCohorts,
-      options?.deferDeliveries === true,
       options?.taskDeliveryPolicy ?? "cohort",
     );
     if (index < 0) return undefined;
@@ -234,12 +232,11 @@ export class SessionInputQueue {
   private nextActionableIndex(
     tasks: BackgroundTasks,
     pendingCohorts: ReadonlySet<string>,
-    deferDeliveries: boolean,
     taskDeliveryPolicy: TaskDeliveryPolicy,
   ): number {
     return this.entries.findIndex((entry) => {
       if (entry.kind === "control") return true;
-      if (entry.kind === "authorization" || deferDeliveries) return false;
+      if (entry.kind === "authorization") return false;
       if (this.isCancelledDelivery(entry.delivery)) return false;
       const cohort = terminalCohort(entry.delivery, tasks);
       return taskDeliveryPolicy === "auto" || cohort === undefined || !pendingCohorts.has(cohort);

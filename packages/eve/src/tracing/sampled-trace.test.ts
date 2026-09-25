@@ -14,7 +14,6 @@ const traceContext = (
   agentName: "weather",
   ...contentContext(audience, environment),
   channel: { kind: "http" as const },
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 

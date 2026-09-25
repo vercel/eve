@@ -42,7 +42,6 @@ function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession 
 
 function createTestConfig(overrides?: Partial<ToolLoopHarnessConfig>): ToolLoopHarnessConfig {
   return {
-    mode: "conversation",
     resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
     tools: new Map([
       [

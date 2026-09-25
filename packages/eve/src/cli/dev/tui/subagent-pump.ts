@@ -242,12 +242,10 @@ export class SubagentPump {
    * nested subagent blocks.
    *
    * Pumps are fire-and-forget and must never be awaited at a turn boundary:
-   * a subagent dispatched in `task` mode that parks for HITL never emits a
-   * turn-boundary event on its own stream (`harness/tool-loop.ts` gates
-   * `emitTurnEpilogue` on `mode === "conversation"`), so blocking on a child
-   * stream would stall the prompt until the subagent's serverless function
-   * times out. Pumps stay open across HITL prompts and resume rendering when
-   * the subagent unparks; they end on the child's own boundary or via abort.
+   * a child session parks instead of ending, so its stream stays open and
+   * blocking on it would stall the prompt. Pumps stay open across HITL prompts
+   * and resume rendering when the subagent unparks; they end on the child's
+   * own boundary or via abort.
    */
   #activateOrQueue(callId: string): void {
     const run = this.#runs.get(callId);

@@ -165,7 +165,6 @@ describe("buildRunContext", () => {
           auth: null,
           adapter: { kind: "http" },
           input: { message: "Report" },
-          mode: "conversation",
           taskDeliveryPolicy,
         },
       });
@@ -183,7 +182,6 @@ describe("buildRunContext", () => {
           initiatorAuth,
           adapter: { kind: "http" },
           input: {},
-          mode: "conversation",
         },
       });
       expect(ctx.get(AuthKey)).toEqual(testAuth);
@@ -200,7 +198,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -217,7 +214,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -235,7 +231,6 @@ describe("buildRunContext", () => {
           auth: testAuth,
           adapter: { kind: "channel:slack" },
           input: { message: "run the scheduled task" },
-          mode: "conversation",
         },
       }),
     );
@@ -255,7 +250,6 @@ describe("buildRunContext", () => {
           auth: testAuth,
           adapter: { kind: "subagent" },
           input: { message: "Prepare report A" },
-          mode: "task",
           parent: {
             callId: "call-1",
             rootSessionId: "root-session",
@@ -276,7 +270,6 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "http" },
         input: { message: "Investigate the incident" },
-        mode: "conversation",
       },
     });
     const child = buildRunContext({
@@ -285,7 +278,6 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "subagent" },
         input: { message: "Delegated prompt" },
-        mode: "task",
         parent: {
           callId: "call-1",
           rootSessionId: "root-session",
@@ -306,7 +298,6 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "http" },
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -323,7 +314,6 @@ describe("buildRunContext", () => {
           adapter: { kind: "http" },
           continuationToken: "t",
           input: { message: "hi" },
-          mode: "conversation",
         },
       }),
     ).not.toThrow();
@@ -337,7 +327,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -362,7 +351,6 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "subagent" },
         input: { message: "hi" },
-        mode: "task",
         activityObserver: { sink, workIdentity },
       },
     });
@@ -379,7 +367,6 @@ describe("buildRunContext", () => {
       audience: "public" as const,
       channel: { kind: "channel:slack" as const, name: "slack" },
       environment: "production" as const,
-      mode: "conversation" as const,
       principalType: "user",
     };
     const ctx = buildRunContext({
@@ -391,7 +378,6 @@ describe("buildRunContext", () => {
         inheritedConversation,
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "task",
       },
     });
 
@@ -401,7 +387,6 @@ describe("buildRunContext", () => {
     expect(ctx.get(ConversationContextKey)).toEqual({
       ...inheritedConversation,
       channel: { kind: "subagent", name: undefined },
-      mode: "task",
       principalType: "anonymous",
     });
 
@@ -417,7 +402,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -439,7 +423,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "eve" },
         channelMetadata: { kind: "eve", metadata: {} },
         input: { message: "hi" },
-        mode: "task",
         parentTraceContext: {
           forwardedTracePolicy,
           spanId: "1".repeat(16),

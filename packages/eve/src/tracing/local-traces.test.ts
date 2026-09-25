@@ -41,7 +41,6 @@ const traceContext = (audience: "public" | "private" | "unknown") => ({
   audience,
   channel: { kind: "http" as const },
   environment: "development" as const,
-  mode: "conversation" as const,
   principalType: "user",
 });
 
@@ -142,7 +141,6 @@ describe("localTracePolicy", () => {
       },
       channel: { kind: "http" },
       environment: "development",
-      mode: "conversation",
     });
 
     expect(audience).toBe("private");

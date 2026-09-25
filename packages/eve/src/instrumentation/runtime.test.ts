@@ -65,7 +65,6 @@ function createContext(audience: "private" | "public" | "unknown" = "public"): C
     audience,
     channel: { kind: "channel:test", name: "test" },
     environment: "production",
-    mode: "conversation",
     principalType: "anonymous",
   });
   return ctx;
@@ -419,7 +418,6 @@ describe("bindInstrumentationRuntime", () => {
       audience: "private",
       channel: { kind: "channel:test", name: "test" },
       environment: "production",
-      mode: "conversation",
       principalType: "anonymous",
     });
   });
@@ -735,7 +733,6 @@ describe("bindInstrumentationRuntime", () => {
       audience: "public",
       channel: { kind: "channel:test", name: "test" },
       environment: "production",
-      mode: "conversation",
       principalType: "anonymous",
     });
     const second = instrumentation?.runStep(stepInput, async (scope) => readScopedState(scope));

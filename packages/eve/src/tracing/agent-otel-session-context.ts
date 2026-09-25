@@ -226,7 +226,6 @@ function resolveSessionTraceDecision(
       kind: normalizeInstrumentationChannelKind(event.channelKind ?? event.channelType),
     },
     environment,
-    mode: "conversation",
     principalType: "unknown",
   });
 }

@@ -37,7 +37,6 @@ function fixture(turnId = ""): PreparedLegacySession {
     deploymentId: "new",
     input: {
       retention: undefined,
-      mode: "conversation",
       completionToken: "old:completion",
       sessionWritable: new WritableStream(),
       serializedContext: {},

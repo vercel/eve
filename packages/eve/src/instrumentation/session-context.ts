@@ -1,7 +1,6 @@
 import type { AlsContext } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
-  ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
   AuthKey,
@@ -38,7 +37,6 @@ export function readInstrumentationSessionContext(context: AlsContext) {
     channelKind: instrumentation?.kind,
     environment: resolveInstrumentationEnvironment(),
     forwardedTracePolicy,
-    mode: context.get(ModeKey),
     principalType: context.get(AuthKey)?.principalType,
   });
   return {

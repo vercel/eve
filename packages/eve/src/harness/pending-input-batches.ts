@@ -201,15 +201,13 @@ export function activityRequestIdsForRootTurn(
 
 /**
  * Merges any queued follow-up input into the current step input and clears it
- * from session state. When `preferCurrentInput` is set, fresh input is returned
- * alone and the queued input remains deferred.
+ * from session state.
  *
  * Used when the harness has to process a pending tool-approval response first
  * and defer the user's new message to the next internal model step.
  */
 export function consumeDeferredStepInput(input: {
   readonly input?: StepInput;
-  readonly preferCurrentInput?: boolean;
   readonly session: HarnessSession;
 }): {
   readonly input?: StepInput;
@@ -219,12 +217,6 @@ export function consumeDeferredStepInput(input: {
 
   if (deferredInput === undefined) {
     return input;
-  }
-
-  // A fresh task delivery may answer the request that caused the deferral.
-  // Resolve it alone, leaving the older turn input queued for the next step.
-  if (input.preferCurrentInput === true && input.input !== undefined) {
-    return { input: input.input, session: input.session };
   }
 
   const session = clearDeferredStepInput(input.session);

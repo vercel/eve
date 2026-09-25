@@ -78,13 +78,6 @@ export function hasRunnableDeferredStepInput(session: HarnessSession): boolean {
   }
 }
 
-/** Returns true when any pending batch still contains a tool approval. */
-export function hasPendingApprovalBatch(session: HarnessSession): boolean {
-  return getPendingInputBatches(session.state).some((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-}
-
 /** Selects the complete approval batch that pending-input resolution will resume. */
 export function selectApprovalReplayBatch(
   session: HarnessSession,
@@ -119,7 +112,6 @@ export function resolvePendingInput(input: {
   readonly activeTurnId?: string;
   /** True while the harness has an open turn to continue. */
   readonly internalStep?: boolean;
-  readonly deferMessagesWhileApprovalsPending?: boolean;
   readonly history?: readonly ModelMessage[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly session: HarnessSession;
@@ -158,20 +150,6 @@ export function resolvePendingInput(input: {
         resolvedStepInput === undefined
           ? input.session
           : queueDeferredStepInput(input.session, compactStepInput(resolvedStepInput)),
-    };
-  }
-
-  if (
-    route.kind === "approvals" &&
-    input.deferMessagesWhileApprovalsPending === true &&
-    resolvedStepInput?.message !== undefined &&
-    findAnsweredApprovalBatches(batches, responses).length === 0
-  ) {
-    return {
-      deferredMessage: true,
-      outcome: "unresolved",
-      messages: baseHistory,
-      session: queueDeferredStepInput(input.session, compactStepInput(resolvedStepInput)),
     };
   }
 
