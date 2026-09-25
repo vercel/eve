@@ -39,6 +39,8 @@ function follow(host: string, options?: { follow?: boolean }) {
     resolveHeaders: () => Promise.resolve(new Headers()),
     path: "/eve/v1/session/s/stream",
     startIndex: 0,
+    // Keeps the default attempt budget so connection counts still pin it.
+    streamReconnectPolicy: { streamIdleReconnectPolicy: { baseDelayMs: 1, maxDelayMs: 1 } },
   });
 }
 

@@ -95,14 +95,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         role: "user",
       });
 
-    case "client.input.responded": {
-      let next = data;
-      for (const response of event.data.responses) {
-        next = respondToInputRequest(next, response);
-      }
-      return next;
-    }
-
     case "input.resolved": {
       let next = data;
       for (const resolution of event.data.resolutions) {

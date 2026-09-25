@@ -85,6 +85,28 @@ export function hasPendingApprovalBatch(session: HarnessSession): boolean {
   );
 }
 
+/** Selects the complete approval batch that pending-input resolution will resume. */
+export function selectApprovalReplayBatch(
+  session: HarnessSession,
+  stepInput?: StepInput,
+): PendingInputBatch | undefined {
+  const batches = getPendingInputBatches(session.state);
+  if (batches.some(isSessionLimitInputBatch)) return;
+  const resolved =
+    batches.length === 1 ? resolveTextMessageInput(batches[0]!, stepInput) : stepInput;
+  const responses = canonicalizeInputResponses(resolved?.inputResponses ?? []);
+  const batch = findAnsweredApprovalBatches(batches, responses)[0];
+  return batch?.requests.some(
+    (request) =>
+      isApprovalRequest(request) &&
+      responses.some(
+        (response) => response.requestId === request.requestId && response.optionId === "approve",
+      ),
+  )
+    ? batch
+    : undefined;
+}
+
 /**
  * Resolves pending input at the start of a harness step.
  *

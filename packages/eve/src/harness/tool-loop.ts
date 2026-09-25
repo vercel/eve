@@ -129,10 +129,7 @@ import {
   markApprovalCandidatePendingEventEmitted,
   markApprovalSettlementEventEmitted,
 } from "#harness/approval-candidates.js";
-import {
-  coordinateApprovalDelivery,
-  shouldPrepareApprovalReplayTools,
-} from "#harness/approval-delivery-coordinator.js";
+import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import {
   consumeDeferredStepInput,
@@ -142,6 +139,7 @@ import {
   hasPendingApprovalBatch,
   hasStepInput,
   resolvePendingInput,
+  selectApprovalReplayBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
@@ -163,6 +161,7 @@ import {
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
+  getPendingAuthorization,
   getSupersededAuthorizationChallenges,
   setPendingAuthorization,
 } from "#harness/authorization.js";
@@ -692,35 +691,46 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : effectiveStepInput;
 
     const approvalContext = contextStorage.getStore();
-    if (
-      approvalContext !== undefined &&
-      config.resolveStepDynamicTools !== undefined &&
-      shouldPrepareApprovalReplayTools({ session, stepInput: effectiveStepInput })
-    ) {
-      await config.resolveStepDynamicTools({
-        ctx: approvalContext,
-        event: createStepStartedEvent({
-          modelId: session.agent.modelReference?.id ?? "dynamic",
-          sequence: emissionState.sequence,
-          stepIndex: emissionState.stepIndex,
-          turnId: emissionState.turnId,
-        }),
-        messages: projectHistory(resolvedCoordination.messages, session.state),
+    const prepareApprovalTools = async (
+      batch: ReturnType<typeof getPendingInputBatches>[number] | undefined,
+    ) => {
+      if (batch?.event !== undefined) await config.prepareApprovalTurn?.(batch.event);
+      if (approvalContext !== undefined) {
+        await config.resolveStepDynamicTools?.({
+          ctx: approvalContext,
+          event: createStepStartedEvent({
+            modelId: session.agent.modelReference?.id ?? "dynamic",
+            ...(batch?.event ?? emissionState),
+          }),
+          messages: projectHistory(resolvedCoordination.messages, session.state),
+        });
+      }
+      return buildResponseAuthorizationTools({
+        authoredTools: config.tools,
+        context: approvalContext,
       });
-    }
-    const responseAuthorizationTools = shouldPrepareApprovalReplayTools({
-      session,
-      stepInput: effectiveStepInput,
-    })
-      ? buildResponseAuthorizationTools({
-          authoredTools: config.tools,
-          context: approvalContext,
-        })
-      : config.tools;
+    };
+    const pendingApprovalChallenges = getPendingAuthorization(session.state)?.challenges ?? [];
     const coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,
-      tools: responseAuthorizationTools,
+      tools: config.tools,
+      prepareTools: async (request) => {
+        const batch = getPendingInputBatches(session.state).find((batch) =>
+          batch.requests.some((entry) => entry.requestId === request.requestId),
+        );
+        const tools = await prepareApprovalTools(batch);
+        const expected = batch?.toolReplayIdentities?.[request.requestId];
+        if (
+          expected !== undefined &&
+          config.toolReplayIdentity?.(request.action.toolName) !== expected
+        ) {
+          const available = new Map(tools);
+          available.delete(request.action.toolName);
+          return available;
+        }
+        return tools;
+      },
     });
     session = coordinated.session;
     if (emit) {
@@ -735,6 +745,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
       }
       const audit = getApprovalAuditState(session.state);
+      for (const challenge of pendingApprovalChallenges) {
+        if (
+          !audit.candidateHistory.some(
+            (candidate) =>
+              candidate.candidateId === challenge.candidateId &&
+              candidate.status === "timed-out" &&
+              candidate.eventEmitted !== true,
+          )
+        )
+          continue;
+        await emit(
+          createAuthorizationCompletedEvent({
+            attemptId: challenge.attemptId,
+            authorization: challenge.challenge,
+            candidateId: challenge.candidateId,
+            name: challenge.name,
+            outcome: "failed",
+            reason: "The approval response expired. Please submit a new response.",
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
       for (const candidate of audit.activeCandidates.filter(
         (entry) => entry.pendingEventEmitted !== true,
       )) {
@@ -844,6 +878,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       };
     }
 
+    const replayBatch = selectApprovalReplayBatch(session, coordinated.stepInput);
+    const responseAuthorizationTools =
+      replayBatch === undefined ? config.tools : await prepareApprovalTools(replayBatch);
     const pending = resolvePendingInput({
       activeTurnId: pendingCoordination?.event.turnId ?? activeTurnId(emissionState),
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
@@ -940,6 +977,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         return { next: null, session: parkedSession };
       }
 
+      if (
+        coordinated.kind === "responses-completed" &&
+        config.mode === "conversation" &&
+        isHarnessBetweenTurns(pending.session) &&
+        getPendingAuthorization(pending.session.state) === undefined
+      ) {
+        // Like a conversation turn, a completed response may wait while background work continues.
+        await emit?.(createSessionWaitingEvent());
+      }
       return { next: null, session: pending.session };
     }
 
@@ -1221,6 +1267,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
       } catch (error) {
         return failBoundaryEvent(error, emissionState);
+      }
+    }
+    const replayRequests = (pending.resolvedInputs ?? []).flatMap((batch) =>
+      batch.inputs.filter((input) => input.outcome === "approved"),
+    );
+    if (replayRequests.length > 0) {
+      const replayTools = buildResponseAuthorizationTools({
+        authoredTools: config.tools,
+        context: ctx,
+      });
+      for (const { request, toolReplayIdentity } of replayRequests) {
+        if (
+          toolReplayIdentity !== undefined &&
+          config.toolReplayIdentity?.(request.action.toolName) !== toolReplayIdentity
+        ) {
+          throw new Error(
+            "The connection for this tool call changed or is unavailable. Request a new tool call and approval.",
+          );
+        }
+        if (!replayTools.has(request.action.toolName)) {
+          throw new Error(
+            "The approved tool is no longer available. Request a new tool call and approval.",
+          );
+        }
       }
     }
     const approvedTools = getApprovedTools(
@@ -2753,6 +2823,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       requests: inputRequests,
+      toolReplayIdentities: captureToolReplayIdentities(config, approvalRequests),
       responseMessages: [],
       session: parkedSession,
     });
@@ -2788,6 +2859,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       requests: inputRequests,
+      toolReplayIdentities: captureToolReplayIdentities(config, approvalRequests),
       responseAuthRequiredRequestIds: approvalRequests
         .filter((request) => {
           const approval = responseAuthorizationTools.get(request.action.toolName)?.approval;
@@ -3355,6 +3427,17 @@ async function maybeCompact(input: {
  * compound keys at recording time instead of pre-computing and persisting
  * them on the pending batch.
  */
+function captureToolReplayIdentities(
+  config: ToolLoopHarnessConfig,
+  requests: readonly InputRequest[],
+): Readonly<Record<string, string>> | undefined {
+  const identities = requests.flatMap((request) => {
+    const identity = config.toolReplayIdentity?.(request.action.toolName);
+    return identity === undefined ? [] : [[request.requestId, identity]];
+  });
+  return identities.length === 0 ? undefined : Object.fromEntries(identities);
+}
+
 function resolveApprovalKeyFromTools(
   tools: HarnessToolMap,
 ): (request: InputRequest) => string | undefined {

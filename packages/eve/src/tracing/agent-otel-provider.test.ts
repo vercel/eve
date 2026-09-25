@@ -49,6 +49,11 @@ import {
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
+import {
+  agentToolContentPolicy,
+  agentToolSpanContext,
+  annotateAgentToolSpan,
+} from "#tracing/agent-tool-span-context.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { parseLocalTraceSegment } from "#tracing/local-trace-reader.js";
 import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
@@ -2532,6 +2537,111 @@ describe("createAgentOtelInstrumentation", () => {
     withSpy.mockRestore();
   });
 
+  it("enriches the existing tool span with MCP attributes under its content policy", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), () => ({
+      emit: true,
+      recordInputs: false,
+      recordOutputs: false,
+    }));
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      channelAudience: "private",
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1");
+    const toolKey = "tool:session-1:turn-1:tool-1:0";
+
+    await publishTurnStarted({
+      channelAudience: "private",
+      hooks: runtime.hooks,
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      callId: "tool-1",
+      idempotencyKey: actionKey,
+      input: { issue: "ISSUE-1" },
+      kind: "tool-call",
+      name: "linear__get_issue",
+      scope,
+      type: "action.started",
+    });
+    await runtime.hooks.publish({
+      callId: "tool-1",
+      idempotencyKey: toolKey,
+      input: { issue: "ISSUE-1" },
+      scope,
+      toolName: "linear__get_issue",
+      type: "tool.call.started",
+    });
+
+    const withSpy = vi.spyOn(context, "with");
+    await runtime.runInContext({ idempotencyKey: toolKey, scope, type: "tool.call" }, async () => {
+      const active = withSpy.mock.calls[0]?.[0];
+      expect(active).toBeDefined();
+      expect(agentToolContentPolicy(active!)).toEqual({
+        recordInputs: false,
+        recordOutputs: false,
+      });
+      annotateAgentToolSpan(
+        {
+          "eve.connection.name": "linear",
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": "get_issue",
+          "jsonrpc.request.id": "7",
+          "mcp.method.name": "tools/call",
+        },
+        active!,
+      );
+    });
+    withSpy.mockRestore();
+
+    await runtime.hooks.publish({
+      idempotencyKey: toolKey,
+      output: { output: { title: "private issue" }, type: "result" },
+      scope,
+      type: "tool.call.completed",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: actionKey,
+      outcome: "completed",
+      output: { output: { title: "private issue" }, type: "result" },
+      scope,
+      type: "action.completed",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      scope,
+      type: "step.attempt.completed",
+    });
+    await completeTurn(runtime.hooks, scope.sessionId, scope.turnId);
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const tool = byName(spans, "execute_tool linear__get_issue")[0]!;
+    expect(tool.attributes).toMatchObject({
+      "eve.connection.name": "linear",
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.name": "get_issue",
+      "jsonrpc.request.id": "7",
+      "mcp.method.name": "tools/call",
+    });
+    expect(tool.attributes).not.toHaveProperty("gen_ai.tool.call.arguments");
+    expect(tool.attributes).not.toHaveProperty("gen_ai.tool.call.result");
+    expect(spans.filter((span) => span.name.startsWith("tools/call "))).toHaveLength(0);
+  });
+
   it("does not create approval spans for other input requests", async () => {
     const runtime = createRuntime();
     const scope: InstrumentationAttemptScope = {
@@ -3040,6 +3150,9 @@ describe("createAgentOtelInstrumentation", () => {
     );
 
     expect(withSpy).toHaveBeenCalledOnce();
+    const active = withSpy.mock.calls[0]?.[0];
+    expect(active).toBeDefined();
+    expect(agentToolSpanContext(active!)).toBeUndefined();
     withSpy.mockRestore();
   });
 

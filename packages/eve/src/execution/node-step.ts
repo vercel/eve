@@ -25,6 +25,7 @@ import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { connectionToolReplayIdentity } from "#execution/tools/connection-search.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -69,6 +70,10 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly prepareApprovalTurn?: (event: {
+    readonly sequence: number;
+    readonly turnId: string;
+  }) => Promise<void>;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -105,6 +110,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
+    prepareApprovalTurn: input.prepareApprovalTurn,
+    toolReplayIdentity: connectionToolReplayIdentity,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,

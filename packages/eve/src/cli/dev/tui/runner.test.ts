@@ -2242,6 +2242,65 @@ describe("EveTUIRunner initial input", () => {
 });
 
 describe("EveTUIRunner native continuation state", () => {
+  it.each(["rejected", "failed", "timed-out"])(
+    "offers a retry after a %s approval attempt",
+    async (outcome) => {
+      const prompts: Array<string | undefined> = ["Prepare Alice's task", undefined];
+      const session = sessionYieldingTurns([
+        [
+          {
+            type: "input.requested",
+            data: {
+              requests: [
+                {
+                  action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "save_note" },
+                  kind: "tool-approval",
+                  requestId: "request-1",
+                  prompt: "Approve Alice's note?",
+                  options: [
+                    { id: "approve", label: "Approve" },
+                    { id: "cancel", label: "Cancel" },
+                  ],
+                },
+              ],
+            },
+          },
+          { type: "session.waiting" },
+        ],
+        [
+          { type: "approval.candidate", data: { requestId: "request-1", outcome } },
+          { type: "session.waiting" },
+        ],
+        [
+          { type: "approval.settled", data: { requestId: "request-1", outcome: "cancelled" } },
+          {
+            type: "input.resolved",
+            data: { resolutions: [{ requestId: "request-1", outcome: "cancelled" }] },
+          },
+          { type: "session.waiting" },
+        ],
+      ]);
+      const readToolApproval = vi
+        .fn()
+        .mockResolvedValueOnce({ approved: true })
+        .mockResolvedValueOnce({ approved: false });
+      const renderer = fakeRenderer({
+        readPrompt: vi.fn(async () => prompts.shift()),
+        readToolApproval,
+        renderStream: vi.fn(async (result) => {
+          for await (const event of result.events) void event;
+        }),
+      });
+      await new EveTUIRunner({ session, renderer }).run();
+      expect(readToolApproval).toHaveBeenCalledTimes(2);
+      expect(session.respond).toHaveBeenNthCalledWith(
+        2,
+        [{ requestId: "request-1", optionId: "cancel" }],
+        { signal: expect.any(AbortSignal) },
+      );
+    },
+  );
+
   it("continues an input request from eve-native turn state", async () => {
     const prompts: Array<string | undefined> = ["approve this", undefined];
     const session = sessionYieldingTurns([

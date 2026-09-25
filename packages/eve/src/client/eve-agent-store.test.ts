@@ -4,6 +4,8 @@ import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createApprovalCandidateEvent,
+  createInputRequestedEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createMessageAppendedEvent,
@@ -441,6 +443,94 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.status).toBe("ready");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
     expect(store.snapshot.session?.streamIndex).toBe(6);
+  });
+
+  it("keeps following background completion after a refused approval returns to waiting", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse("approval-delivery"));
+    const initialEvents = stampTestEvents([
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: { kind: "tool-call", callId: "save-note", toolName: "save_note", input: {} },
+            kind: "tool-approval",
+            requestId: "approval-1",
+            prompt: "Approve Alice's note?",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-note",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: initialEvents.length },
+      initialEvents,
+      reducer: defaultMessageReducer(),
+    });
+    const onEvent = vi.fn();
+    store.setCallbacks({ onEvent });
+    const sending = store.send({
+      inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const refusal = stampTestEvents([
+      createApprovalCandidateEvent({
+        candidateId: "alice-attempt",
+        requestId: "approval-1",
+        responderPrincipalId: "alice",
+        outcome: "rejected",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-note",
+      }),
+      createSessionWaitingEvent(),
+    ]).map((event) => ({
+      ...event,
+      meta: { ...event.meta, id: `refusal-${event.meta.id}`, deliveryIds: ["approval-delivery"] },
+    }));
+    for (const event of refusal) live.emit(event);
+    await sending;
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages.flatMap((message) => message.parts)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "dynamic-tool", state: "approval-requested" }),
+      ]),
+    );
+
+    const background = stampTestEvents([
+      createTurnStartedEvent({ sequence: 1, turnId: "turn-report" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Bob's background report is complete.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-report",
+      }),
+      createSessionWaitingEvent(),
+    ]).map((event) => ({
+      ...event,
+      meta: { ...event.meta, id: `background-${event.meta.id}`, deliveryIds: ["report-delivery"] },
+    }));
+    live.emit(background[0]!);
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+    for (const event of background.slice(1)) live.emit(event);
+    await vi.waitFor(() =>
+      expect(store.snapshot.events).toEqual([...initialEvents, ...refusal, ...background]),
+    );
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages.flatMap((message) => message.parts)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "text", text: "Bob's background report is complete." }),
+      ]),
+    );
+    expect(onEvent).toHaveBeenCalledTimes(5);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]![1]?.signal?.aborted).toBe(false);
   });
 
   it("projects a background turn that arrives while another message is being accepted", async () => {

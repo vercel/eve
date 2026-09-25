@@ -7,6 +7,12 @@ const STOCK_PRICE = "178.92";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  if (message.includes("Read the parent input-hook audit")) {
+    const audit = request.toolResults.find((result) => result.name === "read_input_hooks");
+    return audit === undefined
+      ? { toolCalls: [{ name: "read_input_hooks", input: {} }] }
+      : JSON.stringify(audit.output);
+  }
   const prompt = request.messages.map((entry) => entry.text).join("\n");
   if (message.includes("Call the stock-price subagent exactly once")) {
     return request.toolResults.some((result) => result.name === "stock-price")

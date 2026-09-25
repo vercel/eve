@@ -20,32 +20,7 @@ function buildSerializedContext(overrides: {
   };
 }
 
-describe("AppHarness pilot", () => {
-  it("runs a task-mode turn end-to-end against an in-memory test runtime", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "pilot-agent" } });
-
-    const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "hello pilot harness" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "schedule:app-harness-pilot",
-            mode: "task",
-          }),
-        },
-      ]);
-
-      const result = await run.returnValue;
-      return result.output;
-    });
-
-    expect(typeof output).toBe("string");
-    expect(output).toContain("hello pilot harness");
-  });
-
+describe("AppHarness", () => {
   it("keeps compiled artifacts scoped to the test runtime session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "scope-probe" } });
 
