@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { delimiter } from "node:path";
 import { PassThrough } from "node:stream";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -88,6 +89,21 @@ describe("resolveVercelInvocation", () => {
 });
 
 describe("runVercel", () => {
+  test("uses the PATH CLI when the caller requires a trusted executable", async () => {
+    const child = createChildProcess();
+    mockSpawnReturn(child);
+
+    const result = runVercel(["whoami"], { cwd: process.cwd(), trustedCli: true });
+    child.emit("close", 0);
+
+    await expect(result).resolves.toBe(true);
+    const [command, _args, options] = mockedSpawn.mock.calls.at(-1)!;
+    expect(command).toBe("vercel");
+    expect(options).toBeDefined();
+    const path = ((options as { env: NodeJS.ProcessEnv }).env.PATH ?? "").split(delimiter);
+    expect(path).not.toContain(`${process.cwd()}/node_modules/.bin`);
+  });
+
   test("streams command output through a supplied handler", async () => {
     const child = createChildProcess();
     mockSpawnReturn(child);

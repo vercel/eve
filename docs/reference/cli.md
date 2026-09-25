@@ -1,6 +1,6 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, traces, link, deploy, eval, channels, extension, and telemetry."
+description: "Reference for every eve CLI command: init, doctor, set, info, build, start, dev, logs, traces, link, deploy, eval, channels, extension, and telemetry."
 ---
 
 Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
@@ -11,6 +11,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `eve`                          | Initialize the current directory, or start development when it is already an eve project                                           |
 | `eve init [target]`            | Create a new agent, or add an agent to an existing project                                                                         |
+| `eve doctor [path]`            | Diagnose eve project, environment, and Vercel readiness                                                                            |
 | `eve info`                     | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
 | `eve build`                    | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
 | `eve start`                    | Serve the built `.output/` app; prints the listening URL                                                                           |
@@ -142,6 +143,18 @@ Coding agents should use `eve add <item> --non-interactive`, adding `--yes` to a
 When setup is skipped, cancelled, or needs more input after installation, eve prints or returns the matching `eve add <item> --skip-install` continuation. It reruns the item's declared flows without reinstalling registry files.
 
 `eve registry add` records configured sources in `package.json#registries`. `eve registry list` aggregates the official catalog and all configured sources by default. `eve registry search` also includes [skills.sh](https://skills.sh), available without configuration at `@skills`, and groups results by source with each source's available result count. Search returns up to 10 matches per source by default; pass `--limit <count>` to request between 1 and 100. Either command can browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
+
+## `eve doctor`
+
+```bash
+eve doctor [path] [--offline] [--json]
+```
+
+Runs read-only checks for the current project or a supplied path. It checks the active Node.js version, eve project discovery, package-manager selection and conflicting lockfiles, dependency installation, Vercel CLI authentication, and Git state. The default Vercel check runs a bounded, non-interactive `vercel whoami` probe. The checks do not change project files, open a browser, log in, install packages, or evaluate authored code.
+
+In an `agents/` workspace, run `eve doctor` from the workspace root to inspect the shared environment and every discovered workspace member. From a member directory, it reports the shared environment and that member only. Results identify the agent that each agent-specific diagnostic affects.
+
+Use `--offline` to skip the Vercel authentication probe. Network failures and timeouts are reported as unknown rather than incorrectly diagnosing a logged-out account. Failures exit nonzero; warnings and unknown results exit `0`. Use `--json` for the same scoped report as machine-readable JSON.
 
 ## `eve info`
 

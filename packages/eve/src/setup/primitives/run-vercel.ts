@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, existsSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 
 import { withoutCodingAgentMarkers } from "./coding-agent-env.js";
 import { createProcessOutputBuffer, type ProcessOutputHandler } from "./process-output.js";
@@ -19,6 +19,18 @@ function buildSpawnEnv(extraEnv: Readonly<Record<string, string>>): NodeJS.Proce
   // attempt. eve's own agent detection reads `process.env` directly, so this
   // only changes what the child sees.
   return { ...withoutCodingAgentMarkers(process.env), ...CONNECT_FEATURE_FLAG_ENV, ...extraEnv };
+}
+
+function trustedPath(cwd: string): string | undefined {
+  const targetBins = new Set(
+    ancestorDirectories(cwd).map((dir) => join(dir, "node_modules", ".bin")),
+  );
+  const path = process.env.PATH;
+  if (path === undefined) return undefined;
+  return path
+    .split(delimiter)
+    .filter((entry) => !targetBins.has(resolve(cwd, entry)))
+    .join(delimiter);
 }
 
 function commandArgs(args: string[], nonInteractive: boolean | undefined): string[] {
@@ -47,6 +59,8 @@ function existingDir(dir: string): string {
 /** Options common to shared Vercel CLI subprocess operations. */
 export interface RunVercelOptions {
   cwd: string;
+  /** Use the Vercel CLI on PATH rather than resolving a project-local binary. */
+  trustedCli?: boolean;
   extraEnv?: Readonly<Record<string, string>>;
   /** Pass `--non-interactive` and close stdin so automation cannot stop on a prompt. */
   nonInteractive?: boolean;
@@ -244,12 +258,17 @@ function runVercelProcess<T>(
   }
   return new Promise<T>((resolvePromise) => {
     const cwd = existingDir(options.cwd);
-    const invocation = resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
+    const invocation = options.trustedCli
+      ? { command: "vercel", commandArgs: commandArgs(args, options.nonInteractive) }
+      : resolveVercelInvocation(cwd, commandArgs(args, options.nonInteractive));
     const outputBuffer = options.onOutput && createProcessOutputBuffer(options.onOutput);
     const child = spawn(invocation.command, invocation.commandArgs, {
       cwd,
       stdio: spec.stdio,
-      env: buildSpawnEnv(options.extraEnv ?? {}),
+      env: buildSpawnEnv({
+        ...options.extraEnv,
+        ...(options.trustedCli && { PATH: trustedPath(cwd) ?? "" }),
+      }),
       shell: invocation.shell,
       signal: options.signal,
     });

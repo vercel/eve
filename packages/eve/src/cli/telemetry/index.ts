@@ -121,6 +121,7 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["channels:list", "channels:list"],
   ["deploy", "deploy"],
   ["dev", "dev"],
+  ["doctor", "doctor"],
   ["eval", "eval"],
   ["extension", "extension"],
   ["extension:build", "extension:build"],
