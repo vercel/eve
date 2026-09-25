@@ -417,7 +417,6 @@ describe("multi-agent callback routing", () => {
       const sessionCallback = {
         callId: "call-support",
         subagentName: "research",
-        taskId: "task-support",
         ...callback,
       };
       const serializedContext = {
