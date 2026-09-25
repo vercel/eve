@@ -193,6 +193,30 @@
       ]
     },
     {
+      "name": "extension/stripe-link",
+      "type": "registry:item",
+      "title": "Stripe Link",
+      "description": "Give an eve agent guarded access to a Link wallet for payment methods, purchase requests, and checkout credentials.",
+      "dependencies": [
+        "@stripe/link-integrations-eve"
+      ],
+      "envVars": {
+        "LINK_ACCESS_TOKEN": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.54.4"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/extensions/stripe-link.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/link.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/kernel",
       "type": "registry:item",
       "title": "KERNEL",
