@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  projectSlackInboundContent,
   readSlackTextObject,
   resolveSlackInboundMrkdwn,
 } from "#public/channels/slack/inbound-content.js";
@@ -398,6 +399,44 @@ describe("resolveSlackInboundMrkdwn", () => {
     expect(result).toBe(
       ":crosspost:\nI can't find deployment protection or agent runs in the new sidebar.",
     );
+  });
+
+  it("projects all visible unfurl fields through one provenance boundary", () => {
+    const result = projectSlackInboundContent("investigate", {
+      attachments: [
+        {
+          service_name: "Deploys",
+          pretext: "Production alert",
+          fields: [{ title: "Status", value: "Failed" }],
+          footer: "Open dashboard",
+          blocks: [
+            {
+              type: "section",
+              text: { type: "mrkdwn", text: "Rollback required" },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.text).toContain("Production alert");
+    expect(result.modelText).toBe("investigate");
+    expect(result.unfurls).toEqual([
+      {
+        content: "Production alert\nStatus: Failed\nOpen dashboard\nRollback required",
+        source: "Deploys link preview",
+      },
+    ]);
+  });
+
+  it("keeps classic attachment content in model text", () => {
+    const result = projectSlackInboundContent("", {
+      attachments: [{ fields: [{ title: "Status", value: "Complete" }] }],
+    });
+
+    expect(result.text).toBe("Status: Complete");
+    expect(result.modelText).toBe("Status: Complete");
+    expect(result.unfurls).toEqual([]);
   });
 
   it("falls back to shared Slack message text when its blocks are absent", () => {
