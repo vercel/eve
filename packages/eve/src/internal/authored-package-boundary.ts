@@ -10,6 +10,11 @@ import {
 
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
+// Authored modules only run on the server, so `server-only` (common in code
+// shared with Next.js apps) is an empty module rather than the throwing export
+// Node selects without the `react-server` condition.
+const SERVER_ONLY_MODULE_ID = "\0eve-server-only";
+
 export const RESOLVE_EXTENSIONS = [
   ".ts",
   ".tsx",
@@ -45,6 +50,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
+    load: loadServerOnlyModule,
     async resolveId(
       this: RolldownResolveContext,
       source: string,
@@ -53,6 +59,10 @@ export function createGenerationPackageBoundaryPlugin(input: {
     ) {
       if (!isPackageImport(source)) {
         return undefined;
+      }
+
+      if (source === "server-only") {
+        return SERVER_ONLY_MODULE_ID;
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
@@ -92,6 +102,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
 
   return {
     name: "eve-runtime-loader-package-boundary",
+    load: loadServerOnlyModule,
     async resolveId(
       this: RolldownResolveContext,
       source: string,
@@ -100,6 +111,10 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
     ) {
       if (!isPackageImport(source)) {
         return undefined;
+      }
+
+      if (source === "server-only") {
+        return SERVER_ONLY_MODULE_ID;
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
@@ -183,6 +198,10 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       return undefined;
     },
   };
+}
+
+function loadServerOnlyModule(id: string) {
+  return id === SERVER_ONLY_MODULE_ID ? { code: "", moduleType: "js" as const } : undefined;
 }
 
 /**

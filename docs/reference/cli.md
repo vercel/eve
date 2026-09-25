@@ -164,8 +164,10 @@ eve build [--profile <path>] [--skip-sandbox-prewarm]
 Compiles and bundles in an invocation-owned directory under `.eve/builds/`, prepares sandbox artifacts, then publishes the completed host output and prints its path. Scratch workspaces are removed after success or failure. Pass `--skip-sandbox-prewarm` when you only need compiled output, such as before a separate typecheck. Skipping preparation can produce output that cannot start its configured sandbox, so do not deploy that output.
 
 Authored bundles preserve custom Node.js resolution conditions supplied through `--conditions`,
-`-C`, or `NODE_OPTIONS`. For example, `NODE_OPTIONS="--conditions=react-server" eve build`
-keeps a channel's `server-only` imports on the same export used during compilation.
+`-C`, or `NODE_OPTIONS`, so compilation and the bundle resolve packages to the same exports.
+
+Authored modules always run on the server, so `import "server-only"` is a no-op. Code shared
+with a Next.js app can keep its `server-only` imports without extra configuration.
 
 | Flag                     | Type   | Default | Description                                                                                   |
 | ------------------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
