@@ -7,6 +7,7 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   SessionIdKey,
+  SessionContextKey,
   InitiatorAuthKey,
   ContinuationTokenKey,
 } from "#context/keys.js";
@@ -38,6 +39,7 @@ export function buildResolveContext(
     model: effectiveModel === null ? null : { id: effectiveModel.reference.id },
     session: {
       id: sessionId,
+      context: ctx.get(SessionContextKey) ?? {},
       auth: {
         current: currentAuth,
         initiator: initiatorAuth,

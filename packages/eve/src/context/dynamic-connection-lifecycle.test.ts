@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey, SessionContextKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
@@ -227,7 +227,7 @@ describe("dynamic connection lifecycle", () => {
     expect(registry.getConnections()[0]?.instanceId).not.toBe(firstInstanceId);
   });
 
-  it("passes connection resolvers only trusted identity and channel kind", async () => {
+  it("passes session identity, application context, and channel kind to connection resolvers", async () => {
     const { ctx } = createContext();
     ctx.set(AuthKey, {
       attributes: {},
@@ -236,6 +236,7 @@ describe("dynamic connection lifecycle", () => {
       principalId: "user-1",
       principalType: "user",
     });
+    ctx.set(SessionContextKey, { surface: "docs" });
     let received: unknown;
     const resolver = createResolver({
       events: {
@@ -255,6 +256,7 @@ describe("dynamic connection lifecycle", () => {
     expect(received).toEqual({
       channel: { kind: undefined },
       session: {
+        context: { surface: "docs" },
         auth: {
           current: expect.objectContaining({ principalId: "user-1" }),
           initiator: null,

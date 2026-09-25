@@ -308,6 +308,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
+            sessionContext: body.sessionContext,
             taskDeliveryPolicy: body.taskDeliveryPolicy,
             activityObserver: body.activityObserver,
             audienceAuth: authResult,

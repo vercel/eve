@@ -126,6 +126,7 @@ describe("memory provider tools", () => {
         approvedTools: new Set(),
         callId: "call_1",
         session: {
+          context: {},
           auth: { current: null, initiator: null },
           id: "session_1",
           turn: { id: "turn_0", sequence: 0 },
@@ -163,7 +164,7 @@ describe("memory provider tools", () => {
           channel: {},
           model: null,
           messages: [],
-          session: { auth: { current: null, initiator: null }, id: "session_1" },
+          session: { context: {}, auth: { current: null, initiator: null }, id: "session_1" },
         }),
     );
 

@@ -53,6 +53,7 @@ function context(user = "user-1"): WorkflowStepContext {
     authorizationResults: [],
     abortSignal: new AbortController().signal,
     session: {
+      context: { surface: "docs" },
       id: "session-1",
       auth: { current: auth, initiator: auth },
       turn: { id: "turn-1", sequence: 1 },
@@ -80,6 +81,11 @@ describe("workflow step authorization", () => {
     durable.entries.clear();
   });
   afterEach(() => vi.unstubAllEnvs());
+  it("restores application context in authored workflow steps", async () => {
+    const result = await runStep((ctx) => ctx.session.context);
+    expect(result).toMatchObject({ kind: "result", output: { surface: "docs" } });
+  });
+
   it.each([
     {
       access: (ctx: WorkflowToolContext) => ctx.agents,

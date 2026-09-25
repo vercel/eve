@@ -18,6 +18,7 @@ const input: Omit<WorkflowToolRunInput, "hookToken"> = {
   input: { service: "api" },
   owner: { inbox: "owner-inbox" },
   session: {
+    context: {},
     auth: { current: null, initiator: null },
     id: "session-1",
     turn: { id: "turn-1", sequence: 0 },

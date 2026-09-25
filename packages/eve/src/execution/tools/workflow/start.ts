@@ -1,3 +1,4 @@
+import type { JsonObject } from "#shared/json.js";
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
@@ -44,6 +45,7 @@ export async function startWorkflowTask(input: {
   readonly initiatorAuth: SessionAuth["initiator"];
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
+  readonly sessionContext: JsonObject;
   readonly session: RuntimeSession;
   readonly task: RuntimeWorkflowTaskRequest;
 }): Promise<{ readonly result?: RuntimeToolResultActionResult; readonly session: RuntimeSession }> {
@@ -59,6 +61,7 @@ export async function startWorkflowTask(input: {
       session: {
         auth: { current: input.auth, initiator: input.initiatorAuth },
         id: session.sessionId,
+        context: input.sessionContext,
         parent: input.parentSession,
         turn: { id: batchEvent.turnId, sequence: batchEvent.sequence },
       },

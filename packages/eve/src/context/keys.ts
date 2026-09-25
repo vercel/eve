@@ -4,6 +4,7 @@
  * `#runtime/sessions/runtime-context-keys.ts`.
  */
 
+import type { JsonObject } from "#shared/json.js";
 import { TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
@@ -77,6 +78,8 @@ export interface Session {
 
 export const AuthKey = new ContextKey<SessionAuthContext | null>("eve.auth");
 export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.initiatorAuth");
+/** Application context fixed at session creation. */
+export const SessionContextKey = new ContextKey<JsonObject>("eve.sessionContext");
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ConversationIdKey = new ContextKey<string>("eve.conversationId");
 export const SessionInboxKey = new ContextKey<SessionInboxAddress>(SESSION_INBOX_CONTEXT_KEY);

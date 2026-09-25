@@ -9,6 +9,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  SessionContextKey,
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
@@ -38,6 +39,7 @@ import type {
   RuntimeToolCallActionRequest,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
+import type { JsonObject } from "#shared/json.js";
 import type { SessionParent } from "#channel/types.js";
 import {
   createDurableSessionState,
@@ -90,6 +92,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
+  readonly sessionContext: JsonObject;
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
@@ -228,6 +231,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
+    sessionContext: ctx.get(SessionContextKey) ?? {},
     plan,
     activityObserver: resolvePreparedActivity(
       ctx.get(ActivityObserverKey),

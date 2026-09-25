@@ -375,7 +375,10 @@ describe("EveAgentStore prewarming", () => {
     const onFinish = vi.fn();
     const onSessionChange = vi.fn();
     const prepareSend = vi.fn();
-    const store = createStore({ reducer: defaultMessageReducer() });
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+      sessionContext: { surface: "docs" },
+    });
     store.setCallbacks({ onFinish, onSessionChange, prepareSend });
 
     const first = store.prewarm();
@@ -388,7 +391,9 @@ describe("EveAgentStore prewarming", () => {
     );
     await first;
 
-    expect(fetchMock.mock.calls[0]![1]!.body).toBeUndefined();
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({
+      sessionContext: { surface: "docs" },
+    });
     expect(store.snapshot.session?.sessionId).toBe("session_1");
     expect(store.snapshot.status).toBe("ready");
     expect(onSessionChange).toHaveBeenCalledWith({ sessionId: "session_1", streamIndex: 0 });
@@ -666,7 +671,10 @@ describe("EveAgentStore stream overlap", () => {
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(disconnectingStreamResponse(events.slice(0, 3)))
       .mockResolvedValueOnce(streamResponse(events.slice(3)));
-    const store = createStore({ reducer: defaultMessageReducer() });
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+      sessionContext: { surface: "docs" },
+    });
     const streamingText: string[] = [];
     store.subscribe(() => {
       const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
@@ -675,6 +683,9 @@ describe("EveAgentStore stream overlap", () => {
 
     await store.send({ message: "Hello" });
 
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]?.body))).toMatchObject({
+      sessionContext: { surface: "docs" },
+    });
     expect(streamingText).toContain("Hel");
     expect(streamingText).toContain("Hello");
     expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({

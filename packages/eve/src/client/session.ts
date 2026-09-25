@@ -15,6 +15,7 @@ import {
   compactClientSession,
   resetClientSession,
 } from "#client/session-controls.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
 import type { InputResponse } from "#shared/input.js";
@@ -72,7 +73,13 @@ export class ClientSession {
     context: ClientSessionContext,
     input: SendTurnInput<TOutput>,
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
-    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
+    const response = await postTurn(
+      context,
+      EVE_SESSION_ROUTE_PATH,
+      input,
+      true,
+      input.sessionContext,
+    );
     const { sessionId } = await readAcceptedMessage(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
@@ -419,7 +426,13 @@ async function postCreateSession(
   options: CreateSessionOptions,
 ): Promise<Response> {
   const headers = await context.resolveHeaders(options.headers);
+  const body =
+    options.sessionContext === undefined
+      ? undefined
+      : JSON.stringify({ sessionContext: parseJsonObject(options.sessionContext) });
+  if (body !== undefined) headers.set("content-type", "application/json");
   const response = await fetch(createClientUrl(context.host, EVE_SESSION_ROUTE_PATH), {
+    body,
     headers,
     method: "POST",
     redirect: context.redirect,
@@ -441,6 +454,7 @@ async function postTurn(
   path: string,
   input: SendTurnPayload,
   requireMessage: boolean,
+  sessionContext?: JsonObject,
 ): Promise<Response> {
   const body = createMessageBody(input, requireMessage);
   if (body === null) {
@@ -451,6 +465,7 @@ async function postTurn(
     );
   }
 
+  if (sessionContext !== undefined) body.sessionContext = parseJsonObject(sessionContext);
   const headers = await context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
   const response = await fetch(createClientUrl(context.host, path), {

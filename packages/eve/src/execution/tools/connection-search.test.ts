@@ -53,7 +53,7 @@ async function executeConnectionSearch(
       model: { id: "openai/gpt-5.5" },
       channel: {},
       messages: [],
-      session: { auth: { current: null, initiator: null }, id: "test-session" },
+      session: { context: {}, auth: { current: null, initiator: null }, id: "test-session" },
     } satisfies DynamicResolveContext)) as DynamicToolSet;
 
     return resolved["connection_search"]!.execute(input, {} as ToolContext);
@@ -146,7 +146,7 @@ describe("connection dynamic tools", () => {
           model: { id: "openai/gpt-5.5" },
           channel: {},
           messages: [],
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
+          session: { context: {}, auth: { current: null, initiator: null }, id: "test-session" },
         },
       ),
     );
@@ -180,7 +180,7 @@ describe("connection dynamic tools", () => {
           channel: {},
           model: null,
           messages: [],
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
+          session: { context: {}, auth: { current: null, initiator: null }, id: "test-session" },
         },
       )) as DynamicToolSet;
       await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
@@ -190,7 +190,7 @@ describe("connection dynamic tools", () => {
           model: { id: "openai/gpt-5.5" },
           channel: {},
           messages: [],
-          session: { auth: { current: null, initiator: null }, id: "test-session" },
+          session: { context: {}, auth: { current: null, initiator: null }, id: "test-session" },
         },
       )) as DynamicToolSet;
     });
@@ -222,7 +222,7 @@ describe("connection dynamic tools", () => {
         channel: {},
         model: null,
         messages: [],
-        session: { auth: { current: null, initiator: null }, id: "identity-test" },
+        session: { context: {}, auth: { current: null, initiator: null }, id: "identity-test" },
       } satisfies DynamicResolveContext;
       const initial = (await resolve({}, context)) as DynamicToolSet;
       await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
@@ -276,7 +276,7 @@ describe("connection dynamic tools", () => {
         channel: {},
         model: null,
         messages: [],
-        session: { auth: { current: null, initiator: null }, id: "test-session" },
+        session: { context: {}, auth: { current: null, initiator: null }, id: "test-session" },
       } satisfies DynamicResolveContext;
       const initial = (await resolve({}, resolveContext)) as DynamicToolSet;
       await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
@@ -691,7 +691,11 @@ describe("connection_search", () => {
         channel: {},
         model: null,
         messages: [],
-        session: { auth: { current: null, initiator: null }, id: "session-auth-replay" },
+        session: {
+          context: {},
+          auth: { current: null, initiator: null },
+          id: "session-auth-replay",
+        },
       } satisfies DynamicResolveContext)) as DynamicToolSet;
       const reference = readDurableDynamicToolCallbacks(tools["connection_search"]!)!.execute!;
 

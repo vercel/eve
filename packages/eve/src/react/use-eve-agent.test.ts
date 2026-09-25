@@ -170,7 +170,7 @@ describe("useEveAgent", () => {
     });
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     function Chat() {
-      agent = useEveAgent({ prewarm: true });
+      agent = useEveAgent({ prewarm: true, sessionContext: { surface: "docs" } });
       return null;
     }
     let root: ReturnType<typeof create> | undefined;
@@ -191,6 +191,11 @@ describe("useEveAgent", () => {
       await vi.waitFor(() => expect(agent?.session?.sessionId).toBe("session_2"));
     });
     expect(creates).toBe(2);
+    expect(
+      fetchMock.mock.calls
+        .filter(([, init]) => init?.method === "POST")
+        .map(([, init]) => JSON.parse(String(init?.body))),
+    ).toEqual([{ sessionContext: { surface: "docs" } }, { sessionContext: { surface: "docs" } }]);
     expect(streams[0]?.signal.aborted).toBe(true);
     expect(streams[0]?.cancel).toHaveBeenCalledOnce();
     expect(streams[1]?.signal.aborted).toBe(false);

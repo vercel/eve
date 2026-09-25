@@ -10,6 +10,7 @@ function sessionContext(
   return {
     getSandbox: vi.fn(),
     session: {
+      context: {},
       auth: { current, initiator: null },
       id: "test-session",
       turn: { id: "test-turn", sequence: 0 },
