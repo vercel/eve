@@ -470,6 +470,8 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /** Application context captured at creation and available to authored callbacks. */
+  readonly sessionContext?: JsonObject;
   readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly adapter: ChannelAdapter<any>;
   /** Framework task that owns this run, when the run is a task executor. */

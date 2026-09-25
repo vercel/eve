@@ -57,6 +57,7 @@ const input = {
   execution: "background" as const,
   input: {},
   session: {
+    context: {},
     auth: { current: null, initiator: null },
     id: "session-1",
     turn: { id: "turn-1", sequence: 0 },

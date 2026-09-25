@@ -142,6 +142,7 @@ const workflowInput = {
     callId: "call-1",
     input: {},
     session: {
+      context: {},
       auth: { current: null, initiator: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 0 },

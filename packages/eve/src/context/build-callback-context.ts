@@ -2,7 +2,12 @@ import type { SessionContext } from "#context/session-context.js";
 import type { SandboxEnvironmentIdentity } from "#shared/sandbox-environment.js";
 import type { RuntimeSandboxSession, SandboxSession } from "#shared/sandbox-session.js";
 import { loadContext } from "#context/container.js";
-import { DynamicSkillSandboxKey, SandboxKey, SessionKey } from "#context/keys.js";
+import {
+  DynamicSkillSandboxKey,
+  SandboxKey,
+  SessionKey,
+  SessionContextKey,
+} from "#context/keys.js";
 
 /**
  * Builds a {@link SessionContext} from the active ALS scope.
@@ -18,6 +23,7 @@ export function buildCallbackContext(): SessionContext {
     session: {
       id: session.sessionId,
       auth: session.auth,
+      context: ctx.get(SessionContextKey) ?? {},
       turn: session.turn,
       parent: session.parent,
     },

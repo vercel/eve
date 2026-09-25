@@ -4,6 +4,7 @@ import type { ClientSession } from "#client/session.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
+  CreateSessionOptions,
   ClientAuth,
   ClientSessionState,
   HeadersValue,
@@ -51,7 +52,7 @@ export interface EveAgentStoreCallbacks<TData> {
  * connection options for a store-owned session or an existing `ClientSession`.
  * Saved events must be an ordered prefix of the same session stream.
  */
-export interface EveAgentStoreInit<TData> {
+export interface EveAgentStoreInit<TData> extends Pick<CreateSessionOptions, "sessionContext"> {
   readonly prewarm?: boolean;
   readonly auth?: ClientAuth;
   readonly headers?: HeadersValue;

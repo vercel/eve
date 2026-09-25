@@ -17,6 +17,7 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
   CancelSessionResult,
+  CreateSessionOptions,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -79,6 +80,8 @@ export interface UseEveAgentHelpers<TData> extends UseEveAgentSnapshot<TData> {
  * values to `auth` or `headers`; the client resolves those before each request.
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+  /** Context for new sessions, captured when the hook is created; ignored when attaching. */
+  readonly sessionContext?: CreateSessionOptions["sessionContext"];
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
@@ -183,6 +186,7 @@ export function useEveAgent<TData>(
       optimistic: options.optimistic,
       reducer,
       session: options.session,
+      sessionContext: options.sessionContext,
     });
   }
 

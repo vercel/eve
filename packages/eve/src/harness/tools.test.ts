@@ -1180,6 +1180,7 @@ describe("buildToolSet", () => {
       );
 
       expect(capturedCtx?.session).toEqual({
+        context: {},
         auth: session.auth,
         id: "session_current",
         parent: session.parent,

@@ -15,7 +15,10 @@ import {
   ScheduleIdKey,
   TaskDeliveryPolicyKey,
   SessionTitleKey,
+  StaticModelReferenceKey,
 } from "#context/keys.js";
+import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { buildCallbackContext } from "#context/build-callback-context.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -156,6 +159,28 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
 }
 
 describe("buildRunContext", () => {
+  it.each([undefined, { surface: "docs", flags: [true, null] }])(
+    "exposes creation context to dynamic resolvers and authored callbacks: %j",
+    (sessionContext) => {
+      const ctx = buildRunContext({
+        bundle: createMinimalBundle(),
+        run: {
+          auth: null,
+          adapter: { kind: "http" },
+          input: {},
+          mode: "conversation",
+          sessionContext,
+        },
+      });
+      ctx.set(SessionKey, createTestSession());
+      ctx.set(StaticModelReferenceKey, null);
+      expect(buildResolveContext(ctx, []).session.context).toEqual(sessionContext ?? {});
+      expect(contextStorage.run(ctx, () => buildCallbackContext().session.context)).toEqual(
+        sessionContext ?? {},
+      );
+    },
+  );
+
   it.each([undefined, "auto", "cohort"] as const)(
     "resolves an ordinary send policy %s",
     (taskDeliveryPolicy) => {

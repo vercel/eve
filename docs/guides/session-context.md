@@ -41,6 +41,7 @@ export default defineTool({
 Public fields include:
 
 - `id`: the durable session ID.
+- `context`: the read-only application JSON object supplied at session creation, or `{}`.
 - `turn.id`: the current turn ID.
 - `turn.sequence`: the turn's position in the session.
 - `auth.current`: the caller for the active inbound turn.
@@ -48,6 +49,58 @@ Public fields include:
 - `parent`: the parent call, session, root session, and turn for a child subagent session.
 
 Unprotected agents expose `auth.current` and `auth.initiator` as `null`. Top-level schedule sessions use the framework app principal (`principalId: "eve:app"`, `principalType: "runtime"`). See [Authentication](./auth-and-route-protection#what-reaches-ctxsessionauth) for how inbound identity becomes session auth.
+
+## Application context
+
+Pass `sessionContext` when creating a session to select behavior such as the UI surface:
+
+```tsx
+import { useEveAgent } from "eve/react";
+
+const agent = useEveAgent({
+  prewarm: true,
+  sessionContext: { surface: "docs" },
+});
+```
+
+React, Vue, and Svelte accept the same option. The hook captures it when its store is created and sends it with each new session, including prewarming and sessions created after `reset()`. Attaching or resuming an existing session preserves that session's original context. Remount the hook to change its creation context.
+
+The TypeScript client accepts the same object with or without a first message:
+
+```ts
+const { session } = await client.sessions.create({
+  sessionContext: { surface: "docs" },
+});
+
+await (await session.send("How do I configure redirects?")).result();
+```
+
+Read it through `ctx.session.context` in tools, hooks, connection resolvers, workflow tools, or dynamic definitions. For example, select instructions at session start:
+
+```ts title="agent/instructions/surface.ts"
+import { defineDynamic, defineInstructions } from "eve/instructions";
+
+const surfaceInstructions = {
+  docs: "Help the user understand the documentation.",
+  dashboard: "Help the user manage their projects.",
+};
+
+export default defineDynamic({
+  events: {
+    "session.started": (_, { session }) => {
+      const surface = session.context.surface;
+      if (surface !== "docs" && surface !== "dashboard") {
+        throw new Error("Expected a docs or dashboard surface.");
+      }
+      return defineInstructions({ content: surfaceInstructions[surface] });
+    },
+  },
+});
+```
+
+`sessionContext` must be a JSON object. eve checks that boundary and persists it before initialization, so `session.started` can read it even when the session was prewarmed. It survives later turns, reconnects, and workflow steps. A later session POST cannot replace it. Sessions created without context expose `{}`; child sessions do not inherit their parent's context automatically.
+
+There is no `defineAgent` schema or automatic application type inference. eve does not automatically include `session.context` in prompts: your instructions or tools choose what the model sees. Use [`clientContext`](./client/messages#send-a-full-turn-payload) for ephemeral per-turn model context, and [`defineState`](../concepts/state) for mutable session state.
 
 ## `ctx.getSandbox()`
 

@@ -96,6 +96,7 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
           model: { id: "eve-mock/model" },
           session: {
             id: started.sessionId,
+            context: {},
             auth: {
               current: expectedAuth(last ? "bob" : "alice"),
               initiator: expectedAuth("alice"),

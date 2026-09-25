@@ -90,6 +90,29 @@ describe("eve ID-addressed session routes", () => {
     );
   });
 
+  it.each([undefined, "Hello"])(
+    "captures session context at creation (message: %s)",
+    async (message) => {
+      const createSession = vi.fn().mockResolvedValue({ sessionId: "wrun_A" });
+      const response = await route("POST", "/eve/v1/session")(
+        new Request("https://eve.test/eve/v1/session", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message, sessionContext: { surface: "docs" } }),
+        }),
+        attachRouteSessionCreator(createArgs(), createSession),
+      );
+
+      expect(response.status).toBe(202);
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionContext: { surface: "docs" },
+          input: expect.objectContaining({ context: undefined }),
+        }),
+      );
+    },
+  );
+
   it.each([
     ["malformed JSON", "{"],
     ["a non-object JSON value", "[]"],

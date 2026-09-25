@@ -15,12 +15,14 @@ const {
   prepareDynamicInstructionPreamble,
 } = await import("#context/dynamic-instruction-lifecycle.js");
 
+import { serializeContext, deserializeContext } from "#context/serialize.js";
 import { ContextContainer } from "#context/container.js";
 import {
   StaticModelReferenceKey,
   SessionDynamicInstructionsKey,
   TurnDynamicInstructionsKey,
   SessionIdKey,
+  SessionContextKey,
 } from "#context/keys.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -461,10 +463,13 @@ describe("dispatchDynamicInstructionEvent", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("stores durable messages that survive serialization", async () => {
+  it("retains application context and selected instructions across serialized turns", async () => {
     const ctx = createCtx();
-    const resolver = createResolver("ctx", ["session.started"], () =>
-      defineInstructions({ markdown: "Durable." }),
+    ctx.set(SessionContextKey, { surface: "docs" });
+    const resolver = createResolver("surface", ["session.started", "turn.started"], (_, context) =>
+      defineInstructions({
+        content: `Help with ${(context as DynamicResolveContext).session.context.surface}.`,
+      }),
     );
 
     await dispatchDynamicInstructionEvent({
@@ -473,8 +478,19 @@ describe("dispatchDynamicInstructionEvent", () => {
       messages: [],
       event: makeEvent("session.started"),
     });
-
-    const serializedKeys = [...ctx.entries()].map(([key]) => key.name);
-    expect(serializedKeys).toContain("eve.sessionDynamicInstructions");
+    const restored = await deserializeContext(JSON.parse(JSON.stringify(serializeContext(ctx))));
+    expect(buildDynamicInstructionMessages(restored)).toEqual([
+      { role: "system", content: "Help with docs." },
+    ]);
+    await dispatchDynamicInstructionEvent({
+      ctx: restored,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    expect(buildDynamicInstructionMessages(restored)).toEqual([
+      { role: "system", content: "Help with docs." },
+      { role: "system", content: "Help with docs." },
+    ]);
   });
 });

@@ -11,6 +11,7 @@ function sessionContext(): SessionContext {
   return {
     getSandbox: vi.fn(),
     session: {
+      context: {},
       auth: {
         current: {
           attributes: {},

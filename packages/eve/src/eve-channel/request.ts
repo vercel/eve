@@ -4,7 +4,6 @@ import type {
   ActivityObserverConfig,
   SessionAuthContext,
   SessionCallback,
-  SessionCapabilities,
   TurnPolicy,
   TaskDeliveryPolicy,
 } from "#channel/types.js";
@@ -34,12 +33,17 @@ import {
 } from "#public/channels/upload-policy.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
 import {
   parseTaskDeliveryPolicyField,
   parseTurnPolicyField,
 } from "#eve-channel/delivery-policy-request.js";
-import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
+import {
+  type ParsedCreateBody,
+  parseCapabilitiesField,
+  parseModeField,
+  parseSessionContextField,
+  validateMessageFreeCreate,
+} from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
@@ -76,6 +80,8 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
+  const sessionContext = parseSessionContextField(payload.sessionContext);
+  if (sessionContext instanceof Response) return sessionContext;
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
@@ -124,6 +130,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     capabilities,
     mode,
     context,
+    sessionContext,
     outputSchema,
   };
   if (message !== undefined) result.message = message;
@@ -145,6 +152,12 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   payload: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  if (payload.sessionContext !== undefined) {
+    return Response.json(
+      { error: "'sessionContext' is only accepted when creating a session.", ok: false },
+      { status: 400 },
+    );
+  }
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -373,39 +386,6 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
-}
-
-function parseCapabilitiesField(value: unknown): SessionCapabilities | Response | undefined {
-  if (value === undefined) return undefined;
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return Response.json(
-      { error: "Expected 'capabilities' to be an object.", ok: false },
-      { status: 400 },
-    );
-  }
-
-  const keys = Object.keys(value);
-  const requestInput = Reflect.get(value, "requestInput");
-  if (
-    keys.some((key) => key !== "requestInput") ||
-    (requestInput !== undefined && typeof requestInput !== "boolean")
-  ) {
-    return Response.json(
-      { error: "Expected 'capabilities.requestInput' to be a boolean when provided.", ok: false },
-      { status: 400 },
-    );
-  }
-
-  return requestInput === undefined ? {} : { requestInput };
-}
-
-function parseModeField(value: unknown): RunMode | Response | undefined {
-  if (value === undefined) return undefined;
-  if (value === "conversation" || value === "task") return value;
-  return Response.json(
-    { error: "Expected 'mode' to be either 'conversation' or 'task'.", ok: false },
-    { status: 400 },
-  );
 }
 
 function parseMessageField(value: unknown): string | UserContent | undefined | Response {

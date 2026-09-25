@@ -20,6 +20,25 @@ const childModel = mockModel({
   }),
 });
 
+const sessionContextModel = mockModel({
+  modelId: "session-context",
+  respond: ({ messages, toolResults, userMessageCount }) => {
+    if (
+      !messages.some(
+        (message) =>
+          message.role === "system" && message.text.includes("Application surface: docs."),
+      )
+    ) {
+      throw new Error("Session-started instructions did not receive the application context.");
+    }
+    const id = `session-context-${userMessageCount}`;
+    const result = toolResults.find((entry) => entry.id === id);
+    return result === undefined
+      ? { toolCalls: [{ id, name: "read_session_context", input: {} }] }
+      : String(result.output);
+  },
+});
+
 const config = e2eAgentConfig({
   mock: ({ lastUserMessage, toolResults, userMessages }) => {
     if (lastUserMessage?.includes("favorite word") && lastUserMessage.includes("?")) {
@@ -50,6 +69,17 @@ export default defineAgent({
     events: {
       "step.started": (_event, ctx) => {
         // This child exercises traced HTTP cleanup; schema-following has separate model evals.
+        const isSessionContextRequest = ctx.messages.some((message) => {
+          if (message.role !== "user") return false;
+          const text =
+            typeof message.content === "string"
+              ? message.content
+              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+          return text.includes("Read its session context");
+        });
+        if (isSessionContextRequest) {
+          return { model: sessionContextModel, modelContextWindowTokens: 1_000_000 };
+        }
         const isResultChild = ctx.messages.some((message) => {
           if (message.role !== "user") return false;
           const text =

@@ -22,6 +22,7 @@ it("defaults agent metadata to an empty registry for older workflow payloads", a
       callId: "legacy-call",
       input: {},
       session: {
+        context: {},
         auth: { current: null, initiator: null },
         id: "session",
         turn: { id: "turn", sequence: 1 },
@@ -44,6 +45,7 @@ it("binds workflow-only methods to the run context", async () => {
     callId: "call",
     input: {},
     session: {
+      context: {},
       auth: { current: null, initiator: null },
       id: "session",
       turn: { id: "turn", sequence: 1 },

@@ -162,7 +162,7 @@ function createWorkflowBodyContext(
         "requireAuth()",
         'pass ctx directly to a "use step" helper to request authorization',
       ),
-    session: input.session,
+    session: { ...input.session, context: input.session.context ?? {} },
     toolName: input.toolName,
   };
   return ctx;

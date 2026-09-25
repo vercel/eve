@@ -22,7 +22,7 @@ import { serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
   buildCallbackContext: () => ({
-    session: { id: "test", auth: { current: null, initiator: null }, turn: {} },
+    session: { context: {}, id: "test", auth: { current: null, initiator: null }, turn: {} },
   }),
 }));
 
@@ -419,6 +419,7 @@ function createApprovalContext(input: {
     callId: "call_1",
     getSandbox: vi.fn(),
     session: {
+      context: {},
       auth: { current: null, initiator: null },
       id: "test-session",
       turn: { id: "test-turn", sequence: 0 },
@@ -1962,7 +1963,7 @@ describe("dynamic callback binding isolation", () => {
       const first = createCtx();
       const second = createCtx();
       const resolver = createResolver("conditional", ["session.started"], (_event, rawContext) => {
-        const context = rawContext as { session: { id: string } };
+        const context = rawContext as { session: { context: {}; id: string } };
         return {
           search: variantTool(
             context.session.id === first.require(SessionIdKey) ? "guarded" : "open",

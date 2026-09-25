@@ -99,7 +99,7 @@ describe("dynamic runtime model resolution", () => {
         model: { id: "openai/gpt-5.5" },
         channel: { kind: "slack" },
         messages: [{ content: "Hi", role: "user" }],
-        session: { auth: { current: null, initiator: null }, id: "session-1" },
+        session: { context: {}, auth: { current: null, initiator: null }, id: "session-1" },
       },
     );
 
