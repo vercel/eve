@@ -16,7 +16,7 @@ import {
 } from "#tasks/protocol.js";
 import {
   decodeTaskRecord,
-  isOpenResumableTask,
+  hasEnded,
   TASK_RECORD_VERSION,
   type RecoveredTaskFields,
   type TaskRecord,
@@ -98,30 +98,30 @@ export function isReportedLoss(
   );
 }
 
-/** What the owner must do after a table transition. Effects are never persisted. */
+/**
+ * What the owner must do after a table transition. Effects are never
+ * persisted. The lifecycle effects (`started`, `settled`, `cancelled`,
+ * `ended`) come in stream order: each generation is announced before it
+ * settles, a generation settles before the next is announced, and a task
+ * ends once, after its last settle.
+ */
 export type TaskEffect =
   | {
-      /** The first terminal outcome of a generation the owner did not cancel. */
+      /** The record's current generation started: publish its `task.started`. */
+      readonly kind: "started";
+      readonly record: TaskRecord;
+    }
+  | {
+      /** The first terminal outcome of a generation the owner did not cancel; it is delivered. */
       readonly kind: "settled";
       readonly record: TaskRecord;
       readonly outcome: TaskOutcome;
       readonly usage?: TokenUsage;
     }
   | {
-      readonly kind: "send";
-      readonly record: TaskRecord;
-      readonly commands: readonly TaskCommand[];
-    }
-  | {
-      /** A resumable task started its next generation, for the send `record.callId` names. */
-      readonly kind: "started";
-      readonly record: TaskRecord;
-    }
-  | {
       /**
-       * A generation the owner cancelled with its task's work before it began:
-       * a send `task_cancel` stopped. It starts and settles `cancelled` at
-       * once, and nothing reaches the model.
+       * A generation the owner cancelled: it settles `cancelled` on the
+       * stream, and nothing reaches the model.
        */
       readonly kind: "cancelled";
       readonly record: TaskRecord;
@@ -130,6 +130,11 @@ export type TaskEffect =
       /** The task stopped taking input, after its last generation settled. */
       readonly kind: "ended";
       readonly record: TaskRecord;
+    }
+  | {
+      readonly kind: "send";
+      readonly record: TaskRecord;
+      readonly commands: readonly TaskCommand[];
     }
   | {
       /**
@@ -310,7 +315,7 @@ export function applyTaskMessage(
 ): TaskTransition {
   const record = findTask(table, message.taskId);
   if (message.kind === "task.ended") {
-    return record === undefined || record.ended === true
+    return record === undefined
       ? { effects: [], table }
       : endTask(table, record, now, message.unread);
   }
@@ -327,15 +332,16 @@ export function applyTaskMessage(
     case "task.started": {
       if (record.child !== undefined || message.child === undefined) return { effects: [], table };
       const pending = record.pendingCommands ?? [];
-      const next = withoutUndefined({
+      const effects: TaskEffect[] = [];
+      let next: TaskRecord = withoutUndefined({
         ...record,
         child: message.child,
         pendingCommands: undefined,
       });
-      return {
-        effects: pending.length === 0 ? [] : [{ commands: pending, kind: "send", record: next }],
-        table: replaceRecord(table, next),
-      };
+      // A generation that settled before its child started was announced with its settle.
+      if (!isTerminalTaskStatus(next.status)) next = announceGeneration(next, effects);
+      if (pending.length > 0) effects.push({ commands: pending, kind: "send", record: next });
+      return { effects, table: replaceRecord(table, next) };
     }
     case "task.input": {
       // The clock rule: it stops while any surfaced request waits on a person.
@@ -374,18 +380,15 @@ export function applyTaskMessage(
       } else if (isTerminalTaskStatus(record.status)) {
         return { effects: [], table };
       } else {
-        next = withoutUndefined({ ...settleRecord(record, message.outcome), ...read, answerSeq });
-        effects.push(
-          withoutUndefined({
-            kind: "settled" as const,
-            outcome: message.outcome,
-            record: next,
-            usage: message.usage,
-          }),
+        next = settleGeneration(
+          withoutUndefined({ ...record, ...read, answerSeq }),
+          message.outcome,
+          effects,
+          { usage: message.usage },
         );
       }
       const settled = replaceRecord(table, next);
-      // An agent whose session ended with this answer takes no more input.
+      // A child that ended with this answer, or never started, takes no more input.
       const continued =
         message.childEnded === true
           ? endTask(settled, next, now)
@@ -404,18 +407,19 @@ export function failTask(
 ): TaskTransition {
   const record = findTask(table, taskId);
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
-  const outcome: TaskOutcome = { error, status: "failed" };
+  const effects: TaskEffect[] = [];
   // The child drops the input queued for work it stops, as for a cancel.
-  const failed = withoutUndefined({
-    ...settleRecord(record, outcome),
-    cancelConfirmBy: cancelConfirmBy(record, now),
-    sends: record.sends?.map((send) => ({ ...send, cancelled: true as const })),
-  });
+  const failed = settleGeneration(
+    withoutUndefined({
+      ...record,
+      cancelConfirmBy: cancelConfirmBy(record, now),
+      sends: record.sends?.map((send) => ({ ...send, cancelled: true as const })),
+    }),
+    { error, status: "failed" },
+    effects,
+  );
   const commanded = issueCommand(replaceRecord(table, failed), failed, { kind: "cancel" });
-  return {
-    effects: [{ kind: "settled", outcome, record: failed }, ...commanded.effects],
-    table: commanded.table,
-  };
+  return { effects: [...effects, ...commanded.effects], table: commanded.table };
 }
 
 /** Detached generations still working, which count toward {@link MAX_WORKING_TASKS}. */
@@ -432,29 +436,32 @@ export function workingDetachedTaskIds(table: TaskTable): readonly string[] {
 
 /**
  * Records cancellation immediately and asks the child to stop: the working
- * generation, and every send queued for the task, whose generations settle
- * `cancelled` as they come up. The child's own `cancelled` report is
- * dropped as a duplicate, so it never wakes the model.
+ * generation, which settles `cancelled` now, and every send queued for the
+ * task, whose generations settle `cancelled` as they come up. The child's
+ * own `cancelled` report is dropped as a duplicate, so it never wakes the
+ * model.
  */
 export function cancelTask(table: TaskTable, taskId: string, now: string): TaskTransition {
   const record = findTask(table, taskId);
   if (record === undefined || !hasCancellableWork(record)) return { effects: [], table };
   const sends = record.sends?.map((send) => ({ ...send, cancelled: true as const }));
+  const effects: TaskEffect[] = [];
   const cancelled = isTerminalTaskStatus(record.status)
     ? { ...record, sends }
-    : withoutUndefined({
-        ...record,
-        cancelConfirmBy: cancelConfirmBy(record, now),
-        clockStoppedAt: undefined,
-        deadlineAt: undefined,
-        // The owner already knows the outcome; there is nothing left to deliver.
-        delivered: true,
-        input: undefined,
-        lastStatus: renderLastStatus({ status: "cancelled" }),
-        sends,
-        status: "cancelled" as const,
-      });
-  return issueCommand(replaceRecord(table, cancelled), cancelled, { kind: "cancel" });
+    : settleGeneration(
+        withoutUndefined({
+          ...record,
+          cancelConfirmBy: cancelConfirmBy(record, now),
+          // The owner already knows the outcome; there is nothing left to deliver.
+          delivered: true,
+          sends,
+        }),
+        { status: "cancelled" },
+        effects,
+        { cancelled: true },
+      );
+  const commanded = issueCommand(replaceRecord(table, cancelled), cancelled, { kind: "cancel" });
+  return { effects: [...effects, ...commanded.effects], table: commanded.table };
 }
 
 /** A working generation, or a send queued for the task that no cancel has stopped yet. */
@@ -488,17 +495,19 @@ export function setTaskWait(
 }
 
 /**
- * Drops finished tasks whose results reached history: non-resumable tasks,
- * and resumable ones that ended or whose child never started. Idle tasks stay
- * listed. No window is kept for late duplicates: every report names the task
- * it answers, so one that matches no record is dropped and settles nothing.
+ * Drops ended tasks whose results reached history and whose children
+ * confirmed they stopped. Idle tasks stay listed. No window is kept for late
+ * duplicates: every report names the task it answers, so one that matches no
+ * record is dropped and settles nothing.
  */
 export function pruneTaskTable(table: TaskTable): TaskTable {
-  const records = table.records.filter((record) => {
-    if (!isTerminalTaskStatus(record.status) || !record.delivered) return true;
-    if (record.cancelConfirmBy !== undefined || record.sends !== undefined) return true;
-    return isOpenResumableTask(record) && record.child !== undefined;
-  });
+  const records = table.records.filter(
+    (record) =>
+      !hasEnded(record) ||
+      !record.delivered ||
+      record.cancelConfirmBy !== undefined ||
+      record.sends !== undefined,
+  );
   return records.length === table.records.length ? table : toTable(records);
 }
 
@@ -513,6 +522,44 @@ export function issueCommand(
   }
   const next = { ...record, pendingCommands: [...(record.pendingCommands ?? []), command] };
   return { effects: [], table: replaceRecord(table, next) };
+}
+
+/**
+ * Announces the record's current generation, unless the stream already has
+ * it. For `tasks/table*.ts` only.
+ */
+export function announceGeneration(record: TaskRecord, effects: TaskEffect[]): TaskRecord {
+  if (record.announced === true) return record;
+  const next: TaskRecord = { ...record, announced: true };
+  effects.push({ kind: "started", record: next });
+  return next;
+}
+
+/**
+ * Settles the current generation: announced first if the stream has not
+ * seen it start, then delivered, unless the owner `cancelled` it. A task
+ * that is not resumable ends with its only generation. For
+ * `tasks/table*.ts` only.
+ */
+export function settleGeneration(
+  record: TaskRecord,
+  outcome: TaskOutcome,
+  effects: TaskEffect[],
+  options: { readonly cancelled?: boolean; readonly usage?: TokenUsage } = {},
+): TaskRecord {
+  const settled = settleRecord(announceGeneration(record, effects), outcome);
+  effects.push(
+    options.cancelled === true
+      ? { kind: "cancelled", record: settled }
+      : withoutUndefined({
+          kind: "settled" as const,
+          outcome,
+          record: settled,
+          usage: options.usage,
+        }),
+  );
+  if (hasEnded(settled)) effects.push({ kind: "ended", record: settled });
+  return settled;
 }
 
 /** For `tasks/table*.ts` only. */

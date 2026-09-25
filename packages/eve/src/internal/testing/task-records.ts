@@ -4,7 +4,9 @@ import { readTaskTable, TASK_TABLE_STATE_KEY, type TaskTable } from "#tasks/tabl
 
 /**
  * One agent task record with test defaults: a working attached call with no
- * child yet. An agent task is resumable, as the owner starts every one.
+ * child yet. An agent task is resumable, as the owner starts every one. A
+ * record given a child has had its generation announced, as adopting the
+ * child does.
  */
 export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
   const record: TaskRecord = {
@@ -22,7 +24,10 @@ export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecor
     v: TASK_RECORD_VERSION,
   };
   const agent = overrides.kind === undefined || overrides.kind === "agent";
-  return agent ? { ...record, resumable: true, ...overrides } : { ...record, ...overrides };
+  const announced = overrides.child === undefined ? {} : { announced: true as const };
+  return agent
+    ? { ...record, resumable: true, ...announced, ...overrides }
+    : { ...record, ...announced, ...overrides };
 }
 
 /** Session state holding the given task records. */

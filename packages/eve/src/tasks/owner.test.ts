@@ -301,9 +301,11 @@ describe("startAgentTasks", () => {
             sessionId: "remote-child",
             streamPath: "/eve/v1/session/parent/subagents/call-1/remote-child/stream",
           },
+          generation: 1,
           kind: "agent",
           mode: "detached",
           name: "billing",
+          resumable: true,
           taskId: record?.id,
           turnId: "turn-1",
         },
@@ -366,14 +368,28 @@ describe("startAgentTasks", () => {
       { callId: "call-1", isError: true, kind: "tool-result", output, toolName: "research" },
     ]);
     const taskId = vi.mocked(startSubagent).mock.calls[0]![0].taskId;
-    // The child never started, so the task settles without a task.started.
+    // The child never started: the task starts with no child, fails, and ends.
     expect(update.events).toEqual([
       {
-        data: { callId: "call-1", error: output, status: "failed", taskId },
+        data: {
+          callId: "call-1",
+          generation: 1,
+          kind: "agent",
+          mode: "detached",
+          name: "research",
+          resumable: true,
+          taskId,
+          turnId: "turn-1",
+        },
+        type: "task.started",
+      },
+      {
+        data: { callId: "call-1", error: output, generation: 1, status: "failed", taskId },
         type: "task.settled",
       },
+      { data: { taskId }, type: "task.ended" },
     ]);
-    // The settled, delivered record has no child to continue, so the write prunes it.
+    // The ended, delivered record has no child to continue, so the write prunes it.
     expect(records(update.sessionState)).toEqual([]);
   });
 
@@ -515,9 +531,11 @@ describe("startAgentTasks", () => {
         data: {
           callId: "call-1",
           child: { sessionId: "child-session", streamPath: "/eve/v1/session/child-session/stream" },
+          generation: 2,
           kind: "agent",
           mode: "detached",
           name: "research",
+          resumable: true,
           taskId: idle.id,
           turnId: "turn-1",
         },
@@ -925,7 +943,7 @@ describe("sends to a working agent", () => {
 
     expect(dispatchSession).toHaveBeenCalledExactlyOnceWith(steer("Also cover pricing."));
     expect(records(adopted.sessionState)).toEqual([
-      { ...unstarted, child: LOCAL_CHILD, lastSeq: 1, sends: [sent] },
+      { ...unstarted, announced: true, child: LOCAL_CHILD, lastSeq: 1, sends: [sent] },
     ]);
   });
 
@@ -947,7 +965,7 @@ describe("sends to a working agent", () => {
     });
 
     expect(records(adopted.sessionState)).toEqual([
-      { ...unstarted, child: LOCAL_CHILD, lastSeq: 1 },
+      { ...unstarted, announced: true, child: LOCAL_CHILD, lastSeq: 1 },
     ]);
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining("a held send did not reach its task"),
@@ -1081,7 +1099,7 @@ describe("sends to a working agent", () => {
         }),
       }),
     ]);
-    expect(update.events.map((event) => event.type)).toEqual(["task.settled"]);
+    expect(update.events.map((event) => event.type)).toEqual(["task.settled", "task.ended"]);
     expect(records(update.sessionState)).toEqual([
       expect.objectContaining({ ended: true, generation: 1, status: "failed" }),
     ]);
@@ -1197,15 +1215,19 @@ describe("applyTaskReport", () => {
       sessionState: ownerState([record]),
     });
 
-    expect(records(update.sessionState)).toEqual([{ ...record, child: LOCAL_CHILD }]);
+    expect(records(update.sessionState)).toEqual([
+      { ...record, announced: true, child: LOCAL_CHILD },
+    ]);
     expect(update.events).toEqual([
       {
         data: {
           callId: "call-1",
           child: { sessionId: "child-session", streamPath: "/eve/v1/session/child-session/stream" },
+          generation: 1,
           kind: "agent",
           mode: "attached",
           name: "research",
+          resumable: true,
           taskId: record.id,
           turnId: "turn-1",
         },
@@ -1242,9 +1264,12 @@ describe("applyTaskReport", () => {
     // Alice's turn starts a research agent, and she cancels it before the child boots.
     const cancelled = cancelTask(taskTable([createTaskRecord()]), "research-abc234", NOW);
     expect(cancelled.table.records[0]?.pendingCommands).toEqual([{ kind: "cancel" }]);
-    // The confirmation window passes with no child to stop, and the record is pruned.
+    // The confirmation window passes with no child to stop: the task ends and is pruned.
     const expired = evaluateTaskDeadlines(cancelled.table, "2026-09-24T14:00:31.000Z");
-    expect(expired.effects).toEqual([expect.objectContaining({ kind: "unconfirmed" })]);
+    expect(expired.effects).toEqual([
+      expect.objectContaining({ kind: "unconfirmed" }),
+      expect.objectContaining({ kind: "ended" }),
+    ]);
     expect(expired.effects[0]).not.toHaveProperty("child");
     expect(pruneTaskTable(expired.table).records).toEqual([]);
 
@@ -1312,18 +1337,23 @@ describe("applyTaskReport", () => {
           toolName: "research",
         },
       ]);
-      expect(update.events).toEqual([
-        {
-          data: {
-            callId: "call-1",
-            output: "Found three sources.",
-            status: "completed",
-            taskId: record.id,
-            usage: { ...ZERO_USAGE, inputTokens: 2, outputTokens: 3 },
-          },
-          type: "task.settled",
+      const settled = {
+        data: {
+          callId: "call-1",
+          generation: 1,
+          output: "Found three sources.",
+          status: "completed",
+          taskId: record.id,
+          usage: { ...ZERO_USAGE, inputTokens: 2, outputTokens: 3 },
         },
-      ]);
+        type: "task.settled",
+      };
+      // A child whose session ended with this answer ends its task.
+      expect(update.events).toEqual(
+        kind === "terminal"
+          ? [settled, { data: { taskId: record.id }, type: "task.ended" }]
+          : [settled],
+      );
       expect(update.replies).toEqual([]);
       // A parked child stays listed as an idle agent; one whose session ended is dropped.
       expect(records(update.sessionState)).toEqual(
@@ -1371,6 +1401,7 @@ describe("applyTaskReport", () => {
         data: {
           callId: "call-1",
           error,
+          generation: 1,
           status: "failed",
           taskId: "research-abc234",
           usage: ZERO_USAGE,
@@ -1527,6 +1558,7 @@ describe("applyTaskReport", () => {
       {
         data: {
           callId: "call-1",
+          generation: 1,
           status: "cancelled",
           taskId: "research-abc234",
           usage: ZERO_USAGE,
@@ -1613,14 +1645,27 @@ describe("cancelTasksStep", () => {
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
       sessionId: "child-session",
     });
-    // A task cancelled before its child started still reports its outcome.
+    // A task cancelled before its child started starts with no child, then settles.
     expect(events).toEqual([
       {
-        data: { callId: "call-1", status: "cancelled", taskId: started.id },
+        data: { callId: "call-1", generation: 1, status: "cancelled", taskId: started.id },
         type: "task.settled",
       },
       {
-        data: { callId: "call-2", status: "cancelled", taskId: starting.id },
+        data: {
+          callId: "call-2",
+          generation: 1,
+          kind: "agent",
+          mode: "attached",
+          name: "research",
+          resumable: true,
+          taskId: starting.id,
+          turnId: "turn-1",
+        },
+        type: "task.started",
+      },
+      {
+        data: { callId: "call-2", generation: 1, status: "cancelled", taskId: starting.id },
         type: "task.settled",
       },
     ]);
@@ -1684,11 +1729,13 @@ describe("cancelTasksStep", () => {
       { hookToken: "control-hook", runId: "run-1" },
       expect.any(String),
     );
+    // A workflow tool call is not resumable, so it ends with its only generation.
     expect(events).toEqual([
       {
-        data: { callId: "call-1", status: "cancelled", taskId: workflowCall.id },
+        data: { callId: "call-1", generation: 1, status: "cancelled", taskId: workflowCall.id },
         type: "task.settled",
       },
+      { data: { taskId: workflowCall.id }, type: "task.ended" },
     ]);
     // Kept until the run confirms it stopped.
     expect(records(sessionState)).toEqual([
@@ -1771,7 +1818,7 @@ describe("cancelTasksStep", () => {
 
     expect(cancelled.events).toEqual([
       {
-        data: { callId: "call-1", status: "cancelled", taskId: working.id },
+        data: { callId: "call-1", generation: 1, status: "cancelled", taskId: working.id },
         type: "task.settled",
       },
     ]);

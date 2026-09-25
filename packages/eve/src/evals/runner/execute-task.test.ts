@@ -466,6 +466,43 @@ describe("executeTask", () => {
     expect(server.posts[0]?.body).toEqual({ message: "case prompt" });
   });
 
+  it("follows a held turn past its waiting boundary to its final reply", async () => {
+    const heldTurn = [
+      turnStarted("turn_1"),
+      messageCompleted("Checking with the researcher.", "turn_1"),
+      { data: { held: true, sequence: 2, turnId: "turn_1" }, type: "turn.completed" },
+      sessionWaiting(),
+      messageCompleted("The researcher found three sources.", "turn_1"),
+      turnCompleted("turn_1"),
+      sessionWaiting(),
+    ] satisfies UnstampedMessageStreamEvent[];
+    const server = createScriptedServer([
+      { sessionId: "held", events: heldTurn },
+      { sessionId: "live", events: heldTurn },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const turn = await t.send("Research this.");
+        turn.messageIncludes("three sources");
+        expect(turn.events.filter((event) => event.type === "session.waiting")).toHaveLength(2);
+
+        // A live turn still observes the first, held boundary.
+        const live = await (await t.session()).start("Research this.");
+        await live.waitForEvent("turn.completed", { data: { held: true } });
+        await expect(live.result()).resolves.toMatchObject({
+          message: "The researcher found three sources.",
+        });
+      }, "held-turn"),
+    });
+
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
+  });
+
   it("captures independent sessions created by send", async () => {
     const server = createScriptedServer([
       {
@@ -1146,9 +1183,11 @@ function taskStarted(
         sessionId: childSessionId,
         streamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       },
+      generation: 1,
       kind: "agent",
       mode: "attached",
       name,
+      resumable: true,
       taskId: `${name}-abc234`,
       turnId,
     },

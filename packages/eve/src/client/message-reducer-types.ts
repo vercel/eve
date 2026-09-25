@@ -227,7 +227,8 @@ export type EveDynamicToolPart = {
  * classifies the action (`"tool-call"`, `"subagent-call"`, `"load-skill"`, or
  * `"unknown"`), `eve.name` is the resolved action name, and `eve.inputRequest`
  * and `eve.inputResponse` store the HITL prompt and submitted response when the
- * call required approval.
+ * call required approval. `eve.task` tracks the task generation the call
+ * started ({@link EveMessageToolTask}).
  */
 export interface EveMessageToolMetadata {
   readonly eve?: {
@@ -235,7 +236,23 @@ export interface EveMessageToolMetadata {
     readonly inputResponse?: InputResponse;
     readonly kind: "load-skill" | "subagent-call" | "tool-call" | "unknown";
     readonly name: string;
+    readonly task?: EveMessageToolTask;
   };
+}
+
+/**
+ * The task generation a tool call started, from the `task.*` stream events.
+ * An agent call or a detached workflow tool call returns a receipt as its
+ * tool result at once; `status` then follows the work itself. A send (a call
+ * with a `taskId`) tracks the generation it started on the same task, so one
+ * task's generations each appear on their own call's part. `ended` is set once
+ * the task stops taking input.
+ */
+export interface EveMessageToolTask {
+  readonly ended?: true;
+  readonly generation: number;
+  readonly id: string;
+  readonly status: "cancelled" | "completed" | "failed" | "working";
 }
 
 /**

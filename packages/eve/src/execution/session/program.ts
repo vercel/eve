@@ -19,8 +19,14 @@ import {
   nextTurnDelivery,
   type NextTurnInstruction,
 } from "#execution/session/next-input.js";
-import { cancelTasks, closeTaskOwnerInbox, syncTaskTimer } from "#tasks/owner-body.js";
+import {
+  cancelTasks,
+  closeTaskOwnerInbox,
+  endSessionTasks,
+  syncTaskTimer,
+} from "#tasks/owner-body.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
+import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import {
   fireSessionCallbackStep,
   type SessionCallbackResult,
@@ -147,8 +153,8 @@ export async function runPreparedSession(
     }
     // Closed before anything else runs: nothing below may reopen an address.
     await closeTaskOwnerInbox(cursor, inbox);
-    // Session end cancels every working task; nothing is delivered afterwards.
-    await cancelTasks(cursor, { kind: "all" });
+    // Session end ends every task; nothing is delivered afterwards.
+    await endSessionTasks(cursor);
     const finalized = await finalizeSession(loop.outcome, {
       caller: progress.caller,
       cursor,
@@ -163,7 +169,7 @@ export async function runPreparedSession(
     if (!progress.terminalEmitted) {
       try {
         // A failed session ends its tasks too, so its caller's reply follows them.
-        await cancelTasks(cursor, { kind: "all" });
+        await endSessionTasks(cursor);
       } catch {
         // Best effort: the failure is already being reported.
       }
@@ -203,6 +209,7 @@ export async function failSession(input: {
   }
   const cursor = { serializedContext: input.serializedContext, sessionState: input.sessionState };
   if (input.sessionState !== undefined) {
+    // No cursor publishes events here, so the tasks stop without their lifecycle events.
     try {
       // A failed session ends its tasks too, so its caller's reply follows them.
       await cancelTasksStep({
@@ -213,6 +220,10 @@ export async function failSession(input: {
     } catch {
       // Best effort: the failure is already being reported.
     }
+    await terminateChildSessionsStep({
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    });
   }
   const finalized = await finalizeSession(
     { error: input.error, kind: "failed" },

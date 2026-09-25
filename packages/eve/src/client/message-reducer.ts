@@ -21,6 +21,9 @@ import {
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
 import {
+  findToolPart,
+  findToolPartByApprovalId,
+  isSettledToolPart,
   optimisticUserMessageId,
   partKey,
   projectReceivedParts,
@@ -28,6 +31,7 @@ import {
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
+import { reduceTaskEvent } from "#client/message-task-parts.js";
 import type { InputResponse } from "#shared/input.js";
 import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
 
@@ -42,6 +46,7 @@ export type {
   EveMessageMetadata,
   EveMessagePart,
   EveMessageToolMetadata,
+  EveMessageToolTask,
 } from "#client/message-reducer-types.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
@@ -414,6 +419,11 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "turn.failed":
       return removeStreamingToolPartsForTurn(data, event.data.turnId);
 
+    case "task.started":
+    case "task.settled":
+    case "task.ended":
+      return reduceTaskEvent(data, event);
+
     case "session.failed":
       return data;
 
@@ -640,25 +650,6 @@ function updateAuthorizationPart(
   return upsertMessage(data, upsertPart(message, next));
 }
 
-function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolPart | undefined {
-  for (const message of data.messages) {
-    for (const part of message.parts) {
-      if (part.type === "dynamic-tool" && part.toolCallId === toolCallId) {
-        return part;
-      }
-    }
-  }
-  return undefined;
-}
-
-function isSettledToolPart(part: EveDynamicToolPart): boolean {
-  return (
-    part.state === "output-denied" ||
-    part.state === "output-error" ||
-    (part.state === "output-available" && part.partial !== true)
-  );
-}
-
 function findLatestPendingAuthorizationPart(
   data: EveMessageData,
   name: string,
@@ -677,19 +668,5 @@ function findLatestPendingAuthorizationPart(
     }
   }
 
-  return undefined;
-}
-
-function findToolPartByApprovalId(
-  data: EveMessageData,
-  approvalId: string,
-): EveDynamicToolPart | undefined {
-  for (const message of data.messages) {
-    for (const part of message.parts) {
-      if (part.type === "dynamic-tool" && part.approval?.id === approvalId) {
-        return part;
-      }
-    }
-  }
   return undefined;
 }

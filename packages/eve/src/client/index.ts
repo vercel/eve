@@ -90,6 +90,7 @@ export type {
   EveMessageMetadata,
   EveMessagePart,
   EveMessageToolMetadata,
+  EveMessageToolTask,
 } from "#client/message-reducer.js";
 
 // ---------------------------------------------------------------------------
@@ -132,6 +133,7 @@ export type {
   StepStartedStreamEvent,
   SubagentChildEventStreamEvent,
   TaskChildStream,
+  TaskEndedStreamEvent,
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
   TaskUsage,

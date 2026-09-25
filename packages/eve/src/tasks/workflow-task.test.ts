@@ -110,9 +110,11 @@ describe("startWorkflowTask", () => {
       {
         data: {
           callId: "call-1",
+          generation: 1,
           kind: "workflow",
           mode: "detached",
           name: "deploy",
+          resumable: false,
           taskId: record!.id,
           turnId: "turn-1",
         },
@@ -199,16 +201,33 @@ describe("startWorkflowTask", () => {
       output: "Workflow queue unavailable",
       toolName: "deploy",
     });
+    // The run never started: the task starts with no child, fails, and ends.
+    const taskId = expect.stringMatching(/^deploy-/);
     expect(started.events).toEqual([
       {
         data: {
           callId: "call-1",
+          generation: 1,
+          kind: "workflow",
+          mode: "detached",
+          name: "deploy",
+          resumable: false,
+          taskId,
+          turnId: "turn-1",
+        },
+        type: "task.started",
+      },
+      {
+        data: {
+          callId: "call-1",
           error: { code: "START_FAILED", message: "Workflow queue unavailable" },
+          generation: 1,
           status: "failed",
-          taskId: expect.stringMatching(/^deploy-/),
+          taskId,
         },
         type: "task.settled",
       },
+      { data: { taskId }, type: "task.ended" },
     ]);
     // Delivered with its error result, the settled record is not kept.
     expect(getTaskTable(started.session).records).toEqual([]);
@@ -308,6 +327,7 @@ describe("settleWorkflowTask for a background task", () => {
     expect(update.results).toEqual([]);
     expect(update.events).toEqual([
       expect.objectContaining({ data: expect.objectContaining({ status: "completed" }) }),
+      expect.objectContaining({ type: "task.ended" }),
     ]);
     const state = update.sessionState.snapshot.session.state;
     expect(readPendingTaskResults(state)).toEqual([
@@ -354,12 +374,14 @@ describe("settleWorkflowTask", () => {
       {
         data: {
           callId: "call-1",
+          generation: 1,
           output: { deployed: true },
           status: "completed",
           taskId: WORKING.id,
         },
         type: "task.settled",
       },
+      { data: { taskId: WORKING.id }, type: "task.ended" },
     ]);
     // The result reached the waiting turn, so the settled record is not kept.
     expect(records(update.sessionState)).toEqual([]);
@@ -386,6 +408,7 @@ describe("settleWorkflowTask", () => {
       expect.objectContaining({
         data: expect.objectContaining({ error: expected, status: "failed" }),
       }),
+      expect.objectContaining({ type: "task.ended" }),
     ]);
   });
 
@@ -408,9 +431,10 @@ describe("settleWorkflowTask", () => {
     ]);
     expect(update.events).toEqual([
       {
-        data: { callId: "call-1", status: "cancelled", taskId: WORKING.id },
+        data: { callId: "call-1", generation: 1, status: "cancelled", taskId: WORKING.id },
         type: "task.settled",
       },
+      { data: { taskId: WORKING.id }, type: "task.ended" },
     ]);
   });
 
@@ -635,6 +659,7 @@ describe("applyWorkflowGenerationStep", () => {
         }),
         type: "task.settled",
       }),
+      { data: { taskId: NOTES.id }, type: "task.ended" },
     ]);
     expect(records(update.sessionState)[0]).toMatchObject({ ended: true, generation: 2 });
   });

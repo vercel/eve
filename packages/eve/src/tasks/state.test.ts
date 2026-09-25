@@ -25,8 +25,10 @@ describe("setTaskTable", () => {
       id: "research-bbbbbb",
       status: "completed",
     });
+    // A task whose child never started ended with its failure.
     const neverStarted = createTaskRecord({
       delivered: true,
+      ended: true,
       id: "research-cccccc",
       status: "failed",
     });

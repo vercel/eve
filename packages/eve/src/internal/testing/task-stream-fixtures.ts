@@ -52,15 +52,8 @@ export interface TaskStreamState {
   readonly inputRequests: number;
   /** Whether a `task.result` input or a settled `task_wait` delivered the task's result. */
   readonly delivered: boolean;
-}
-
-type TaskStreamEvent = Extract<
-  MessageStreamEvent,
-  { readonly type: "task.settled" | "task.started" }
->;
-
-export function isTaskStreamEvent(event: MessageStreamEvent): event is TaskStreamEvent {
-  return event.type === "task.started" || event.type === "task.settled";
+  /** Whether the task ended (`task.ended`) and takes no more input. */
+  readonly ended: boolean;
 }
 
 /**
@@ -78,6 +71,7 @@ export function deriveTaskStreamStates(
     if (state === undefined) {
       state = {
         delivered: false,
+        ended: false,
         generations: 0,
         inputRequests: 0,
         name: (callId === undefined ? undefined : toolNames.get(callId)) ?? taskId,
@@ -115,6 +109,9 @@ export function deriveTaskStreamStates(
         else state.errorCode = event.data.error.code;
         break;
       }
+      case "task.ended":
+        ensure(event.data.taskId).ended = true;
+        break;
       case "input.requested":
         if (event.data.taskId !== undefined) {
           ensure(event.data.taskId).inputRequests += event.data.requests.length;
@@ -162,6 +159,7 @@ export const TASK_STREAM_MANIFEST_KEYS = [
   "remote",
   "inputRequests",
   "delivered",
+  "ended",
 ] as const satisfies readonly (
   | keyof TaskStreamFixtureManifest
   | keyof TaskStreamFixture
@@ -225,7 +223,10 @@ export function normalizeTaskStream(
   }
   const firstCalls = new Map<string, string>();
   for (const event of events) {
-    if (isTaskStreamEvent(event) && !firstCalls.has(event.data.taskId)) {
+    if (
+      (event.type === "task.started" || event.type === "task.settled") &&
+      !firstCalls.has(event.data.taskId)
+    ) {
       firstCalls.set(event.data.taskId, event.data.callId);
     }
   }
@@ -253,8 +254,8 @@ export function normalizeTaskStream(
   }
   let deliveries = 0;
   const byDeliveryOrder = [
-    ...events.filter((event) => !isTaskStreamEvent(event)),
-    ...events.filter(isTaskStreamEvent),
+    ...events.filter((event) => !isTaskLifecycleEvent(event)),
+    ...events.filter(isTaskLifecycleEvent),
   ];
   for (const event of byDeliveryOrder) {
     for (const deliveryId of event.meta.deliveryIds ?? []) {
@@ -338,10 +339,21 @@ export function projectTaskStream(events: readonly MessageStreamEvent[]): {
   const withoutMeta = ({ meta: _meta, ...event }: MessageStreamEvent) => event;
   const tasks: Record<string, unknown[]> = {};
   for (const event of events) {
-    if (isTaskStreamEvent(event)) (tasks[event.data.taskId] ??= []).push(withoutMeta(event));
+    if (isTaskLifecycleEvent(event)) (tasks[event.data.taskId] ??= []).push(withoutMeta(event));
   }
   return {
-    ordered: events.filter((event) => !isTaskStreamEvent(event)).map(withoutMeta),
+    ordered: events.filter((event) => !isTaskLifecycleEvent(event)).map(withoutMeta),
     tasks,
   };
+}
+
+function isTaskLifecycleEvent(
+  event: MessageStreamEvent,
+): event is Extract<
+  MessageStreamEvent,
+  { readonly type: "task.ended" | "task.settled" | "task.started" }
+> {
+  return (
+    event.type === "task.started" || event.type === "task.settled" || event.type === "task.ended"
+  );
 }

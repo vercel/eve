@@ -17,8 +17,8 @@ import type {
   TaskStartedStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import { summarizeTurnEvents } from "#client/session-utils.js";
+import { isTurnFailureEvent } from "#protocol/message.js";
+import { summarizeTurnEvents, TurnEndTracker } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -443,6 +443,9 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
   ): Promise<EveEvalTurn> {
     try {
+      // A held turn's waiting boundary keeps the turn open, as it does for
+      // `send().result()`; `waitForEvent` still observes it.
+      const turnEnd = new TurnEndTracker();
       let sawBoundary = false;
       for await (const event of source) {
         this.#events.push(event);
@@ -457,7 +460,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
           );
         }
 
-        if (isCurrentTurnBoundaryEvent(event)) {
+        if (turnEnd.observe(event)) {
           sawBoundary = true;
           this.#closeWaiters(
             new Error(`Session ${this.sessionId} reached ${event.type} before the expected event.`),

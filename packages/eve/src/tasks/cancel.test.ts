@@ -6,6 +6,7 @@ import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js"
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionStateMap } from "#harness/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -86,11 +87,18 @@ describe("applyTaskCancelCall", () => {
         toolName: "task_cancel",
       },
     ]);
+    // A workflow tool call is not resumable: it ends with its only generation.
     expect(events).toEqual([
       {
-        data: { callId: "call-remind", status: "cancelled", taskId: "remind-q4x1ze" },
+        data: {
+          callId: "call-remind",
+          generation: 1,
+          status: "cancelled",
+          taskId: "remind-q4x1ze",
+        },
         type: "task.settled",
       },
+      { data: { taskId: "remind-q4x1ze" }, type: "task.ended" },
     ]);
     expect(commands).toEqual([
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
@@ -197,7 +205,7 @@ describe("applyTaskCancelCall", () => {
       mode: "detached",
       workflowCaller: { replyTo: "reply-hook", runId: "run-remind" },
     });
-    const session = { state: taskTableState([waited, nested]) };
+    const session = { sessionId: "owner", state: taskTableState([waited, nested]) };
 
     const cancelled = applyTaskCancelCall({
       caller: null,
@@ -226,7 +234,7 @@ describe("applyTaskCancelCall", () => {
     [{ taskId: "x".repeat(129) }],
     [{ taskIds: ["remind-q4x1ze"] }],
   ])("rejects the input %o without touching the table", (input) => {
-    const session = { state: taskTableState([REMINDER]) };
+    const session = { sessionId: "owner", state: taskTableState([REMINDER]) };
 
     const cancelled = applyTaskCancelCall({
       caller: null,
@@ -247,7 +255,7 @@ describe("applyTaskCancelCall", () => {
 
   it("refuses a task another principal started, and lets its creator stop it", () => {
     const alices = { ...REMINDER, creator: encodeTaskCreator({ auth: ALICE }) };
-    const session = { state: taskTableState([alices]) };
+    const session = { sessionId: "owner", state: taskTableState([alices]) };
 
     const byBob = applyTaskCancelCall({
       caller: { ...ALICE, principalId: "U-bob" },
@@ -376,11 +384,7 @@ describe("cancelTasksStep with the all selector", () => {
       sessionState: ownerState([REMINDER, waited, nested, idle]),
     });
 
-    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
-      "remind-q4x1ze",
-      "research-7k2m9q",
-      "research-b81d0c",
-    ]);
+    expect(settledIds(events)).toEqual(["remind-q4x1ze", "research-7k2m9q", "research-b81d0c"]);
     expect(cancelWorkflowToolRun).toHaveBeenCalledExactlyOnceWith(
       { hookToken: "control-hook", runId: "run-remind" },
       expect.any(String),
@@ -502,10 +506,7 @@ describe("cancelTasksStep with the turn selector", () => {
       sessionState: ownerState([REMINDER, other, nested]),
     });
 
-    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
-      "remind-q4x1ze",
-      "research-b81d0c",
-    ]);
+    expect(settledIds(events)).toEqual(["remind-q4x1ze", "research-b81d0c"]);
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(records(sessionState).map(({ id, status }) => ({ id, status }))).toEqual([
       { id: "remind-q4x1ze", status: "cancelled" },
@@ -586,10 +587,7 @@ describe("cancelTasksStep with the turn selector", () => {
       sessionState: ownerState([REMINDER, runAgent]),
     });
 
-    expect(events.map((event) => event.type === "task.settled" && event.data.taskId)).toEqual([
-      "remind-q4x1ze",
-      "research-b81d0c",
-    ]);
+    expect(settledIds(events)).toEqual(["remind-q4x1ze", "research-b81d0c"]);
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
       sessionId: "child-session",
     });
@@ -634,7 +632,7 @@ describe("cancelling a workflow task", () => {
 
     const { events, session } = cancel([REMINDER, runAgent, otherRunAgent], "remind-q4x1ze");
 
-    expect(events.map((event) => event.data.taskId)).toEqual(["remind-q4x1ze", "research-b81d0c"]);
+    expect(settledIds(events)).toEqual(["remind-q4x1ze", "research-b81d0c"]);
     expect(getTaskTable(session).records.map(({ id, status }) => ({ id, status }))).toEqual([
       { id: "remind-q4x1ze", status: "cancelled" },
       { id: "research-b81d0c", status: "cancelled" },
@@ -658,7 +656,7 @@ describe("interruptAttachedCalls", () => {
     const stopped = interruptAttachedCalls({
       callIds: [SLEEP.callId],
       now: NOW,
-      session: { state: taskTableState([SLEEP]) },
+      session: { sessionId: "owner", state: taskTableState([SLEEP]) },
       turnId: "turn-1",
     });
 
@@ -681,9 +679,10 @@ describe("interruptAttachedCalls", () => {
     ]);
     expect(stopped.events).toEqual([
       {
-        data: { callId: SLEEP.callId, status: "cancelled", taskId: SLEEP.id },
+        data: { callId: SLEEP.callId, generation: 1, status: "cancelled", taskId: SLEEP.id },
         type: "task.settled",
       },
+      { data: { taskId: SLEEP.id }, type: "task.ended" },
     ]);
     expect(stopped.commands).toEqual([
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
@@ -692,6 +691,7 @@ describe("interruptAttachedCalls", () => {
 
   it("leaves detached tasks, other turns' calls, settled calls, and ctx.agent calls alone", () => {
     const session = {
+      sessionId: "owner",
       state: taskTableState([
         { ...REMINDER, callId: "call-a", turnId: "turn-1" },
         { ...SLEEP, callId: "call-b", id: "sleep-b", turnId: "turn-0" },
@@ -810,12 +810,16 @@ function call(taskId: string): RuntimeWorkflowTaskRequest {
   };
 }
 
+function settledIds(events: readonly UnstampedMessageStreamEvent[]) {
+  return events.flatMap((event) => (event.type === "task.settled" ? [event.data.taskId] : []));
+}
+
 function cancel(existing: readonly TaskRecord[], taskId: string) {
   return applyTaskCancelCall({
     caller: null,
     now: NOW,
     request: call(taskId),
-    session: { state: taskTableState(existing) },
+    session: { sessionId: "owner", state: taskTableState(existing) },
   });
 }
 

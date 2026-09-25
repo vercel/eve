@@ -61,7 +61,7 @@ function lifecycle(effects: readonly TaskEffect[]): string[] {
       case "settled":
         return [`settled ${where} ${effect.outcome.status}`];
       case "cancelled":
-        return [`started ${where}`, `settled ${where} cancelled`];
+        return [`settled ${where} cancelled`];
       case "ended":
         return ["ended"];
       case "send":
@@ -114,7 +114,6 @@ function driver(kind: "agent" | "workflow") {
     });
     if (sent?.kind !== "sent") throw new Error(JSON.stringify(sent));
     table = sent.table;
-    if (sent.started) events.push(`started g${sent.record.generation} ${sent.record.callId}`);
     events.push(...lifecycle(sent.effects));
     return sent;
   };
@@ -156,14 +155,15 @@ describe("resumable workflow tasks", () => {
     task.reply(3);
     task.apply({ kind: "task.ended", taskId: task.taskId, unread: [] });
 
+    // Each generation a send starts is announced once the run reports it, for the send it read.
     expect(task.events).toEqual([
       "started g1 call-1",
       "settled g1 call-1 completed",
-      "started g2 send-1",
       "input #1",
+      "started g2 send-1",
       "settled g2 send-1 completed",
-      "started g3 send-2",
       "input #2",
+      "started g3 send-2",
       "settled g3 send-2 completed",
       "ended",
     ]);
@@ -206,11 +206,15 @@ describe("resumable workflow tasks", () => {
 
     task.send(2, "turn-2");
     task.send(3, "turn-3");
+    task.apply({ generation: 2, kind: "task.started", send: 2, taskId: task.taskId });
     task.reply(2, []);
     // The owner derives the next generation from the child's in-order reads: no round trip.
-    expect(task.events.slice(-2)).toEqual(["settled g2 send-2 completed", "started g3 send-3"]);
+    expect(task.events.at(-1)).toBe("settled g2 send-2 completed");
     expect(task.record()).toMatchObject({ startedBy: 3, turnId: "turn-3" });
     expect(task.record().sends).toBeUndefined();
+    // The stream announces it when the run confirms it read that send.
+    task.apply({ generation: 3, kind: "task.started", send: 3, taskId: task.taskId });
+    expect(task.events.at(-1)).toBe("started g3 send-3");
     expectLifecycle(task.events);
   });
 
@@ -243,7 +247,7 @@ describe("resumable workflow tasks", () => {
     const task = driver("workflow");
     task.send(1);
     const cancelled = cancelTask(task.table(), task.taskId, NOW);
-    expect(lifecycle(cancelled.effects)).toEqual(["cancel"]);
+    expect(lifecycle(cancelled.effects)).toEqual(["settled g1 call-1 cancelled", "cancel"]);
     expect(findTask(cancelled.table, task.taskId)).toMatchObject({
       sends: [{ cancelled: true, seq: 1 }],
       status: "cancelled",
@@ -295,8 +299,13 @@ describe("resumable workflow tasks", () => {
       { kind: "task.ended", taskId: task.taskId, unread: [2] },
       NOW,
     );
-    expect(lifecycle(ended.effects)).toEqual(["settled g3 send-2 failed", "ended"]);
-    expect(ended.effects[0]).toMatchObject({
+    // The run never announced the generation, so its end does, before failing it.
+    expect(lifecycle(ended.effects)).toEqual([
+      "started g3 send-2",
+      "settled g3 send-2 failed",
+      "ended",
+    ]);
+    expect(ended.effects[1]).toMatchObject({
       outcome: { error: { message: "The task ended before it read this input." } },
     });
   });
@@ -368,9 +377,14 @@ describe("a workflow run's report of the generation it started", () => {
     const task = driver("workflow");
     task.reply(1);
     task.send(1, "turn-2");
+    expect(task.events.at(-1)).toBe("input #1");
+    task.apply({ ...started(2, 1), taskId: task.taskId });
+    expect(task.events.at(-1)).toBe("started g2 send-1");
+    // A repeated report announces nothing more.
     const before = task.table();
     task.apply({ ...started(2, 1), taskId: task.taskId });
     expect(task.table()).toBe(before);
+    expectLifecycle(task.events);
   });
 
   it("adopts a generation a failed delivery started, so its reply settles it", () => {
@@ -435,8 +449,11 @@ describe("a workflow run's report of the generation it started", () => {
     if (retry?.kind !== "sent") throw new Error("not sent");
     expect(retry.record).toMatchObject({ callId: "send-2", generation: 2, startedBy: 2 });
 
+    // The retry's generation was never announced, so the stream starts it once,
+    // for the send the run read, and the retry gets its own generation later.
+    expect(lifecycle(retry.effects)).toEqual(["input #2"]);
     const adopted = applyTaskMessage(retry.table, { ...started(2, 1), taskId: task.taskId }, NOW);
-    expect(adopted.effects).toEqual([]);
+    expect(lifecycle(adopted.effects)).toEqual(["started g2 send-1"]);
     expect(findTask(adopted.table, task.taskId)).toMatchObject({
       callId: "send-1",
       generation: 2,
@@ -454,17 +471,20 @@ describe("a workflow run's report of the generation it started", () => {
       },
       NOW,
     );
-    expect(lifecycle(replied.effects)).toEqual([
-      "settled g2 send-1 completed",
-      "started g3 send-2",
-    ]);
+    expect(lifecycle(replied.effects)).toEqual(["settled g2 send-1 completed"]);
+    expect(findTask(replied.table, task.taskId)).toMatchObject({ callId: "send-2", generation: 3 });
     // The run starts generation 3 for the retry, as the owner expects.
     const confirmed = applyTaskMessage(
       replied.table,
       { ...started(3, 2), taskId: task.taskId },
       NOW,
     );
-    expect(confirmed.table).toBe(replied.table);
+    expect(lifecycle(confirmed.effects)).toEqual(["started g3 send-2"]);
+    expectLifecycle([
+      "started g1 call-1",
+      "settled g1 call-1 completed",
+      ...lifecycle([...adopted.effects, ...replied.effects, ...confirmed.effects]),
+    ]);
   });
 
   it("settles a generation whose reply was lost once the run starts the next one", () => {
@@ -592,7 +612,8 @@ describe("resumable agent tasks", () => {
     const task = driver("agent");
     task.reply(1);
     const sent = task.send(1, "turn-2");
-    expect(sent.effects).toEqual([]);
+    // The owner starts the agent's next turn itself, so it announces it at once.
+    expect(lifecycle(sent.effects)).toEqual(["started g2 send-1"]);
     expect(sent.record).toMatchObject({ callId: "send-1", generation: 2, startedBy: 1 });
     expect(sent.record.childCallId).toBeUndefined();
   });

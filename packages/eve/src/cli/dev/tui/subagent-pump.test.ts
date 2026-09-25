@@ -121,9 +121,11 @@ function taskStarted(
         sessionId: `child_${callId}`,
         streamPath: `/eve/v1/session/child_${callId}/stream`,
       },
+      generation: 1,
       kind: "agent",
       mode: "attached",
       name: "researcher",
+      resumable: true,
       taskId: `researcher-${callId}`,
       turnId,
     },
@@ -251,7 +253,7 @@ describe("SubagentPump.settleCancelledTurn", () => {
 
     // The parent's late `task.settled` fallback settles as a no-op.
     const completions = vi.mocked(view.complete).mock.calls.length;
-    pump.settle("call-1");
+    pump.settle({ callId: "call-1", generation: 1 });
     expect(vi.mocked(view.complete).mock.calls.length).toBe(completions);
   });
 });
@@ -308,7 +310,7 @@ describe("SubagentPump background receipts", () => {
     const { pump, view } = createPump();
 
     pump.begin(taskStarted("call-1"), "parent");
-    pump.settle("call-1");
+    pump.settle({ callId: "call-1", generation: 1 });
     expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-1" });
     pump.begin(taskStarted("call-1"), "parent");
     expect(view.begin).toHaveBeenCalledOnce();
@@ -459,7 +461,7 @@ describe("SubagentPump child stream transport", () => {
 
     pump.begin(first, "parent");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
-    pump.settle("call-1");
+    pump.settle({ callId: "call-1", generation: 1 });
     pump.begin(second, "parent");
     await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -475,6 +477,38 @@ describe("SubagentPump child stream transport", () => {
       path: "/eve/v1/session/conversation-child/stream",
       startIndex: 1,
     });
+  });
+
+  it("settles only the generation a call started, and completes queued ones when the task ends", async () => {
+    const firstStream = pushableChildStream();
+    const requests = serveChildStreams((request) => firstStream.response(request.signal));
+    const { pump, view } = createPump();
+    const first = taskStarted("call-1");
+    first.data.child.sessionId = "writer-child";
+    first.data.child.streamPath = "/eve/v1/session/writer-child/stream";
+    // A send the task ended before reading still starts its generation on the same child.
+    const unread = taskStarted("call-2", "turn-2");
+    unread.data.child = first.data.child;
+    unread.data.generation = 2;
+    unread.data.taskId = first.data.taskId;
+
+    pump.begin(first, "parent");
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    pump.begin(unread, "parent");
+    pump.settle({ callId: "call-2", generation: 1 });
+    expect(view.complete).not.toHaveBeenCalled();
+
+    pump.settle({ callId: "call-2", generation: 2 });
+    pump.ended(first.data.taskId);
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-2" });
+    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-2" });
+    // The active generation still ends on its own child boundary.
+    expect(view.complete).not.toHaveBeenCalledWith(expect.objectContaining({ callId: "call-1" }));
+    firstStream.push(boundaryEvent(0));
+    await vi.waitFor(() =>
+      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
+    );
+    expect(requests).toHaveLength(1);
   });
 
   it("leaves connection authorization events to the parent runner", async () => {
@@ -571,7 +605,7 @@ describe("SubagentPump child stream transport", () => {
 
     expect(requests).toHaveLength(1);
     expect(view.complete).not.toHaveBeenCalled();
-    pump.settle("call-1");
+    pump.settle({ callId: "call-1", generation: 1 });
     expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-1" });
   });
 
@@ -613,7 +647,7 @@ describe("SubagentPump child stream transport", () => {
     expect(view.background).toHaveBeenCalledExactlyOnceWith({ callId: "detached" });
 
     pump.background("settled");
-    pump.settle("settled");
+    pump.settle({ callId: "settled", generation: 1 });
     pump.begin(taskStarted("settled"), "parent");
     expect(view.background).toHaveBeenCalledTimes(1);
     pump.abortAll();

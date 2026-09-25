@@ -1639,7 +1639,8 @@ export class EveTUIRunner {
           this.#subagentPump.begin(started, sourceSession.state.sessionId);
           if (started.data.mode === "detached") this.#subagentPump.background(started.data.callId);
         },
-        onTaskSettled: (callId) => this.#subagentPump.settle(callId),
+        onTaskSettled: (settled) => this.#subagentPump.settle(settled),
+        onTaskEnded: (taskId) => this.#subagentPump.ended(taskId),
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
@@ -2102,7 +2103,8 @@ type EveStreamTranslatorInput = {
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onTaskStarted?: (event: TaskStartedStreamEvent) => void;
-  onTaskSettled?: (callId: string) => void;
+  onTaskSettled?: (settled: { readonly callId: string; readonly generation: number }) => void;
+  onTaskEnded?: (taskId: string) => void;
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
@@ -2149,6 +2151,7 @@ async function* eveEventsToTUIStream(
     turnState,
     onTaskStarted,
     onTaskSettled,
+    onTaskEnded,
     onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
@@ -2520,7 +2523,11 @@ async function* eveEventsToTUIStream(
         break;
 
       case "task.settled":
-        onTaskSettled?.(event.data.callId);
+        onTaskSettled?.(event.data);
+        break;
+
+      case "task.ended":
+        onTaskEnded?.(event.data.taskId);
         break;
 
       case "authorization.required":

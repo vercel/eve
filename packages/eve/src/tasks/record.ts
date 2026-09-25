@@ -55,7 +55,13 @@ export interface TaskRecord {
   readonly lastStatus?: string;
   /** The task takes more input by `taskId`: every agent, and a `resumable: true` workflow tool. */
   readonly resumable?: true;
-  /** The task stopped taking input. A send to it fails `UNKNOWN_TASK`. */
+  /**
+   * The stream announced the current generation (`task.started`). A
+   * generation is announced once its start is certain, and at the latest
+   * with its settle, so every `task.settled` follows its `task.started`.
+   */
+  readonly announced?: true;
+  /** The resumable task stopped taking input. A send to it fails `UNKNOWN_TASK`. */
   readonly ended?: true;
   /**
    * Sends the child has not read yet, oldest first. When a generation ends,
@@ -102,6 +108,20 @@ export interface TaskSend {
   readonly turnId: string;
   /** Cancelled with the task's work: its generation settles `cancelled`, unseen by the model. */
   readonly cancelled?: true;
+}
+
+/**
+ * The task stopped taking input and published `task.ended`: a resumable task
+ * that ended, or any other task once its only generation settled.
+ */
+export function hasEnded(record: TaskRecord): boolean {
+  return (
+    record.ended === true ||
+    (record.resumable !== true &&
+      (record.status === "completed" ||
+        record.status === "failed" ||
+        record.status === "cancelled"))
+  );
 }
 
 /** A resumable task that has not ended: sends can reach it. */
@@ -304,6 +324,7 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   if (value.lastStatus !== undefined && typeof value.lastStatus !== "string")
     return fail("invalid lastStatus");
   if (value.resumable !== undefined && value.resumable !== true) return fail("invalid resumable");
+  if (value.announced !== undefined && value.announced !== true) return fail("invalid announced");
   if (value.ended !== undefined && value.ended !== true) return fail("invalid ended");
   if (
     value.sends !== undefined &&

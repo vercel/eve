@@ -7,13 +7,12 @@ import { coordinationTurnId, getPendingCoordinationBatch } from "#harness/coordi
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
-import type { TaskSettledStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import { readTaskCancelId } from "#tasks/cancel-tool.js";
-import { taskSettledEvent } from "#tasks/events.js";
+import { taskEvents, type TaskLifecycleStreamEvent } from "#tasks/events.js";
 import { commandEffects, readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
 import { findCallerTask } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
@@ -33,6 +32,7 @@ import {
 } from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { cancelTask, hasCancellableWork, type TaskTable } from "#tasks/table.js";
+import { endAllTasks } from "#tasks/table-generations.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 import { endTaskWaits, takeLiveWait } from "#tasks/wait.js";
 
@@ -68,10 +68,10 @@ export type TaskCancelSelector =
 interface CancelledTasks {
   readonly table: TaskTable;
   readonly commands: readonly CommandEffect[];
-  readonly events: readonly TaskSettledStreamEvent[];
+  readonly events: readonly TaskLifecycleStreamEvent[];
 }
 
-type Session = { readonly state?: SessionStateMap };
+type Session = { readonly sessionId: string; readonly state?: SessionStateMap };
 
 /**
  * Records cancellation for every working task the selector picks, reports
@@ -92,7 +92,7 @@ export async function cancelTasksStep(input: {
   );
   const initial = getTaskTable(discarded.session);
   const selected = initial.records.filter(selectTasks(input.selector, discarded.session));
-  const cancelled = cancelRecords(initial, selected, new Date().toISOString());
+  const cancelled = cancelRecords(initial, selected, new Date().toISOString(), durable.sessionId);
   if (cancelled.table === initial && discarded.discarded.length === 0) {
     return {
       events: [],
@@ -123,6 +123,31 @@ export async function cancelTasksStep(input: {
     serializedContext: input.serializedContext,
     sessionState: replaceDurableSessionSnapshot({
       session: applied.session,
+      state: input.sessionState,
+    }),
+  };
+}
+
+/**
+ * Ends every task that has not ended, as the owner session ends and after
+ * its children were asked to stop: each task's remaining generations settle
+ * and it publishes `task.ended`. Nothing is delivered afterwards.
+ */
+export async function endTasksStep(input: {
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<TaskOwnerUpdate> {
+  "use step";
+
+  const durable = readDurableSession(input.sessionState);
+  const ended = endAllTasks(getTaskTable(durable), new Date().toISOString());
+  return {
+    events: taskEvents(ended.effects, durable.sessionId),
+    replies: [],
+    results: [],
+    serializedContext: input.serializedContext,
+    sessionState: replaceDurableSessionSnapshot({
+      session: setTaskTable(durable, ended.table),
       state: input.sessionState,
     }),
   };
@@ -201,7 +226,7 @@ export function interruptAttachedCalls<T extends Session>(input: {
   if (selected.length === 0)
     return { commands: [], events: [], results: [], session: input.session };
   const calls = getPendingCoordinationBatch(input.session.state)?.tasks ?? [];
-  const cancelled = cancelRecords(table, selected, input.now);
+  const cancelled = cancelRecords(table, selected, input.now, input.session.sessionId);
   const results = selected.map((record): RuntimeToolResultActionResult => {
     const waitedMs = Math.max(0, Date.parse(input.now) - Date.parse(record.startedAt));
     return {
@@ -256,7 +281,7 @@ export function applyTaskCancelCall<T extends Session>(input: {
   if (!hasCancellableWork(record)) {
     return unchanged(cancelResult(request, { status: "already_finished" }));
   }
-  const cancelled = cancelRecords(table, [record], input.now);
+  const cancelled = cancelRecords(table, [record], input.now, session.sessionId);
   const applied = applyCancelled(session, cancelled.table, [record]);
   return {
     commands: cancelled.commands,
@@ -349,6 +374,7 @@ export function cancelRunAgents(
   table: TaskTable,
   runIds: ReadonlySet<string>,
   now: string,
+  ownerSessionId: string,
 ): CancelledTasks {
   if (runIds.size === 0) return { commands: [], events: [], table };
   return cancelRecords(
@@ -357,6 +383,7 @@ export function cancelRunAgents(
       (record) => record.workflowCaller !== undefined && runIds.has(record.workflowCaller.runId),
     ),
     now,
+    ownerSessionId,
   );
 }
 
@@ -365,6 +392,7 @@ function cancelRecords(
   table: TaskTable,
   selected: readonly TaskRecord[],
   now: string,
+  ownerSessionId: string,
 ): CancelledTasks {
   const runIds = new Set(
     selected.flatMap((record) => (record.child?.kind === "workflow" ? [record.child.runId] : [])),
@@ -380,16 +408,14 @@ function cancelRecords(
   ];
   let next = table;
   const commands: CommandEffect[] = [];
-  const events: TaskSettledStreamEvent[] = [];
+  const events: TaskLifecycleStreamEvent[] = [];
   for (const record of records) {
     if (!hasCancellableWork(record)) continue;
+    // Queued sends settle as their generations come up.
     const cancelled = cancelTask(next, record.id, now);
     next = cancelled.table;
     commands.push(...commandEffects(cancelled.effects));
-    // Queued sends settle as their generations come up.
-    if (!isTerminalTaskStatus(record.status)) {
-      events.push(taskSettledEvent({ outcome: { status: "cancelled" }, record }));
-    }
+    events.push(...taskEvents(cancelled.effects, ownerSessionId));
   }
   return { commands, events, table: next };
 }

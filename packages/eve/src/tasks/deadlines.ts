@@ -5,10 +5,10 @@ import {
 } from "#execution/durable-session-store.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
-import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
+import { createTaskEndedEvent, createTaskSettledEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { cancelRunAgents } from "#tasks/cancel.js";
-import { taskEvents } from "#tasks/events.js";
+import { taskEvents, type TaskLifecycleStreamEvent } from "#tasks/events.js";
 import {
   commandEffects,
   readContext,
@@ -120,7 +120,7 @@ export async function applyTaskDeadlines(input: {
     table = markTaskDelivered(table, record.id, record.generation);
     resolveCaller(record, outcome.error, { replies, results });
   }
-  const runAgents = cancelRunAgents(table, stoppedRuns, now);
+  const runAgents = cancelRunAgents(table, stoppedRuns, now, session.sessionId);
   table = runAgents.table;
   const commands = [...commandEffects(evaluated.effects), ...runAgents.commands];
   if (commands.length > 0) await runCommands(commands, await readContext(serializedContext));
@@ -173,10 +173,10 @@ function reportLostTasks(
     readonly results: RuntimeToolResultActionResult[];
   },
 ): {
-  readonly events: readonly TaskSettledStreamEvent[];
+  readonly events: readonly TaskLifecycleStreamEvent[];
   readonly held: readonly HeldResult[];
 } {
-  const events: TaskSettledStreamEvent[] = [];
+  const events: TaskLifecycleStreamEvent[] = [];
   const held: HeldResult[] = [];
   const error: TaskError = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
   for (const task of readTaskTable(session.state).lost) {
@@ -187,9 +187,20 @@ function reportLostTasks(
     });
     if (!isReportedLoss(task)) continue;
     const { callId, id, name } = task;
+    // Only a readable record can announce a generation, so the loss settles
+    // the generation the stream last started for the task, and ends it.
     if (callId !== undefined) {
-      events.push(createTaskSettledEvent({ callId, error, status: "failed", taskId: id }));
+      events.push(
+        createTaskSettledEvent({
+          callId,
+          error,
+          generation: task.generation ?? 1,
+          status: "failed",
+          taskId: id,
+        }),
+      );
     }
+    events.push(createTaskEndedEvent(id));
     if (task.replyTo !== undefined || task.mode === "attached") {
       // Only the call that waits on the task can take its outcome.
       if (callId === undefined) continue;

@@ -31,9 +31,11 @@ import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.j
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import {
   cancelTasksStep,
+  endTasksStep,
   interruptAttachedCallsStep,
   type TaskCancelSelector,
 } from "#tasks/cancel.js";
+import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import {
   applyTaskReportStep,
   startAgentTasksStep,
@@ -43,6 +45,7 @@ import {
 import { endTaskWaitsStep, type TaskWaitEnd } from "#tasks/wait.js";
 import { applyWorkflowGenerationStep, settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 import { hasCancellableWork } from "#tasks/table.js";
+import { hasEnded } from "#tasks/record.js";
 import { readPendingTaskResults } from "#tasks/results.js";
 
 // Owner-side helpers that run in the session workflow body. They only
@@ -228,6 +231,30 @@ export async function cancelTasks(
     cursor,
     await cancelTasksStep({
       selector,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    }),
+  );
+}
+
+/**
+ * Ends every task as the session ends: cancels the working ones, asks every
+ * child to stop while the table still names it, then ends each task, which
+ * publishes its `task.ended`. Nothing is delivered afterwards.
+ */
+export async function endSessionTasks(cursor: SessionStateCursor): Promise<void> {
+  try {
+    await cancelTasks(cursor, { kind: "all" });
+  } finally {
+    await terminateChildSessionsStep({
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    });
+  }
+  if (getTaskTable(cursor.sessionState.snapshot.session).records.every(hasEnded)) return;
+  await applyTaskOwnerUpdate(
+    cursor,
+    await endTasksStep({
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }),

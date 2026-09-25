@@ -1,7 +1,7 @@
-import { defineEval, type EveEvalTurn } from "eve/evals";
+import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { receiptTaskIds, taskResultDeliveries, taskStarts, watchTurnsUntil } from "./helpers";
+import { taskResultDeliveries, taskStarts } from "./helpers";
 
 const REQUEST = [
   "Hi, this is Alice from the product team.",
@@ -16,53 +16,36 @@ const FOLLOW_UP = [
 /**
  * A follow-up about work already in progress goes to the working agent
  * through its taskId: no second writer starts, and a draft that includes the
- * follow-up arrives. The writer's slow tool keeps it working when the
- * follow-up lands; if it still answers first, eve runs the follow-up as the
- * same agent's next detached work, and one more result arrives for it.
+ * follow-up arrives in the same turn. Alice writes it while the turn holds on
+ * the writer, whose slow tool keeps it working when the follow-up lands; if
+ * it still answers first, eve runs the follow-up as the same agent's next
+ * generation, and one more result arrives for it.
  */
 export default defineEval({
   description: "A follow-up for a working agent is sent to it instead of starting new work.",
   tags: ["real-model"],
   timeoutMs: 300_000,
   async test(t) {
-    const first = await t.send(REQUEST);
-    first.expectOk();
-    const [taskId] = await t.require(
-      receiptTaskIds(first, "launch-writer"),
+    const conversation = await t.session();
+    const live = await conversation.start(REQUEST);
+    await live.waitForEvent("turn.completed", { data: { held: true } });
+    const [start] = await t.require(
+      taskStarts(live.events, "launch-writer"),
       satisfies(
-        (taskIds: readonly string[]) => taskIds.length === 1,
-        "one launch-writer call that returned a receipt",
+        (calls: ReturnType<typeof taskStarts>) => calls.length === 1 && calls[0]?.generation === 1,
+        "one launch-writer task started before the waiting boundary",
       ),
     );
+    const taskId = start!.taskId;
 
-    const followUp = await first.session.send(FOLLOW_UP);
+    const followUp = await conversation.send(FOLLOW_UP, { turnPolicy: "steer" });
     followUp.expectOk();
     followUp.calledTool("launch-writer", { count: 1, input: { taskId } });
-    t.judge(
-      "The assistant tells Alice briefly that the price was passed on for the draft in progress. It does not present a draft or start a separate one.",
-      { on: followUp.message ?? "" },
-    ).gate(0.7);
 
-    const eventsWith = (turns: readonly EveEvalTurn[]) => [
-      ...first.events,
-      ...followUp.events,
-      ...turns.flatMap((turn) => turn.events),
-    ];
-    // Watch until every piece of the writer's work has reported.
-    const later = await watchTurnsUntil(
-      t,
-      followUp,
-      (watched) =>
-        taskResultDeliveries(eventsWith(watched)).flat().length >=
-        taskStarts(eventsWith(watched), "launch-writer").length,
-      2,
-    );
-    const result = later.at(-1)!;
-    result.expectOk();
-    result.messageIncludes(/\$49/);
-
-    const events = eventsWith(later);
-    const starts = taskStarts(events, "launch-writer");
+    const turn = await live.result();
+    turn.expectOk();
+    turn.messageIncludes(/\$49/);
+    const starts = taskStarts(turn.events, "launch-writer");
     t.check(
       starts,
       satisfies(
@@ -72,7 +55,7 @@ export default defineEval({
       ),
     );
     t.check(
-      taskResultDeliveries(events),
+      taskResultDeliveries(turn.events),
       satisfies(
         (deliveries: readonly (readonly string[])[]) =>
           deliveries.flat().length === starts.length &&
@@ -80,6 +63,6 @@ export default defineEval({
         "exactly one result arrives for each piece of the writer's work",
       ),
     );
-    for (const turn of later) turn.noFailedActions();
+    turn.noFailedActions();
   },
 });

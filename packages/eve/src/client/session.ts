@@ -218,7 +218,9 @@ export class ClientSession {
    * Pass a `task.started` event from this session's stream. The client reads its
    * `child.streamPath` with this session's host and credentials: a local child's
    * own stream route, or the parent-origin proxy for a remote child, which the
-   * parent deployment authenticates to the remote agent. Reading the child never
+   * parent deployment authenticates to the remote agent. Every generation of a
+   * resumable task names the same child session, so follow it once, from any
+   * generation's event, until the task's `task.ended`. Reading the child never
    * advances this session's cursor. The child cursor starts at `0`; pass
    * `startIndex` to resume. Stop at a child turn boundary with
    * `isCurrentTurnBoundaryEvent`.

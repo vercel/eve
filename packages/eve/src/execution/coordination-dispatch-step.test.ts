@@ -77,9 +77,10 @@ it("applies a task_cancel call as the owner and returns its result at once", asy
   ]);
   expect(update.events).toEqual([
     {
-      data: { callId: "call-remind", status: "cancelled", taskId: "remind-q4x1ze" },
+      data: { callId: "call-remind", generation: 1, status: "cancelled", taskId: "remind-q4x1ze" },
       type: "task.settled",
     },
+    { data: { taskId: "remind-q4x1ze" }, type: "task.ended" },
   ]);
   expect(runCommands).toHaveBeenCalledExactlyOnceWith(
     [expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" })],

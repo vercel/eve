@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { Client } from "../../src/client/client.js";
 import type { MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import { taskLifecycleViolations } from "../../src/internal/testing/task-lifecycle.js";
 import { startEveDev } from "./dev-server-harness.js";
 import { throughFirstBoundary } from "./first-boundary.js";
 
@@ -267,8 +268,21 @@ export default defineAgent({
         // The writer ends its own session, and its finalization ends the helper's.
         const ended = (events: readonly MessageStreamEvent[]) =>
           events.some((event) => event.type === "session.completed");
-        expect(ended(await collectUntil(session.streamSubagent(writer), ended))).toBe(true);
+        const writerEvents = await collectUntil(session.streamSubagent(writer), ended);
+        expect(ended(writerEvents)).toBe(true);
         expect(ended(await collectUntil(session.streamSubagent(helper), ended))).toBe(true);
+
+        // Each owner ended its idle task before its own session ended.
+        const rootEvents = await collectUntil(session.stream({ startIndex: 0 }), ended);
+        for (const [events, task] of [
+          [rootEvents, writer],
+          [writerEvents, helper],
+        ] as const) {
+          expect(events).toContainEqual(
+            expect.objectContaining({ data: { taskId: task.data.taskId }, type: "task.ended" }),
+          );
+          expect(taskLifecycleViolations(events)).toEqual([]);
+        }
       } finally {
         await server.stop();
       }

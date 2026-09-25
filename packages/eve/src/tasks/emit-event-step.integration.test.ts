@@ -37,16 +37,24 @@ const events: UnstampedMessageStreamEvent[] = [
     data: {
       callId: "call",
       child: { sessionId: "child", streamPath: "/child" },
+      generation: 1,
       kind: "agent",
       mode: "attached",
       name: "research",
+      resumable: true,
       taskId: "research-abc234",
       turnId: "turn",
     },
   },
   {
     type: "task.settled",
-    data: { callId: "call", output: "done", status: "completed", taskId: "research-abc234" },
+    data: {
+      callId: "call",
+      generation: 1,
+      output: "done",
+      status: "completed",
+      taskId: "research-abc234",
+    },
   },
 ];
 

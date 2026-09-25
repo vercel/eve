@@ -16,6 +16,8 @@ interface MutableToolCall {
 interface MutableSubagentCall {
   callId: string;
   taskId?: string;
+  generation?: number;
+  ended?: true;
   childSessionId?: string;
   name: string;
   remoteUrl?: string;
@@ -48,9 +50,10 @@ const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new S
  * Extracts derived execution facts from a completed run's stream events.
  *
  * Tool calls pair each `actions.requested` entry with its matching
- * `action.result` by call id; agent calls join `task.started` with
- * `task.settled` the same way. These facts power checks, scorers, and
- * reporters.
+ * `action.result` by call id; agent calls join each generation's
+ * `task.started` with its `task.settled` the same way, and `task.ended`
+ * marks every call of the task. Interim messages of a held turn are not
+ * counted. These facts power checks, scorers, and reporters.
  */
 export function deriveRunFacts(
   events: readonly MessageStreamEvent[],
@@ -61,9 +64,6 @@ export function deriveRunFacts(
   const toolCallsByCallId = new Map<string, MutableToolCall>();
   const subagentCalls: MutableSubagentCall[] = [];
   const subagentCallsByCallId = new Map<string, MutableSubagentCall>();
-  // Model calls whose input matches the agent tool contract, in case their
-  // task settles without ever starting a child.
-  const agentToolCallsByCallId = new Map<string, { name: string; turnIndex: number }>();
   // Detached calls: their tool result is a receipt, and only `task.settled`
   // resolves the agent call. A remote child reports `task.started` before
   // the receipt.
@@ -120,12 +120,6 @@ export function deriveRunFacts(
         for (const action of event.data.actions) {
           if (action.kind === "tool-call") {
             ensureToolCall(action.callId, action.toolName, action.input);
-            if (isAgentToolInput(action.input)) {
-              agentToolCallsByCallId.set(action.callId, {
-                name: action.toolName,
-                turnIndex: Math.max(turnIndex, 0),
-              });
-            }
           } else if (action.kind === "load-skill") {
             ensureToolCall(action.callId, LOAD_SKILL_TOOL_NAME, action.input);
           }
@@ -162,6 +156,7 @@ export function deriveRunFacts(
         if (event.data.mode === "detached") receiptCallIds.add(event.data.callId);
         const call = ensureSubagentCall(event.data.callId, event.data.name);
         call.taskId = event.data.taskId;
+        call.generation = event.data.generation;
         const child = event.data.child;
         if (child !== undefined) {
           call.childSessionId = child.sessionId;
@@ -171,20 +166,24 @@ export function deriveRunFacts(
       }
 
       case "task.settled": {
-        // Agent tasks join by `task.started`. An agent call that failed or
-        // was cancelled before its child started has only `task.settled`;
-        // its model call names the agent. The stream cannot tell such a call
-        // from a workflow tool with the same input shape that failed to start.
-        const unstarted = agentToolCallsByCallId.get(event.data.callId);
-        if (!subagentCallsByCallId.has(event.data.callId) && unstarted !== undefined) {
-          const created = ensureSubagentCall(event.data.callId, unstarted.name);
-          created.taskId = event.data.taskId;
-          created.turnIndex = unstarted.turnIndex;
-        }
+        // Every generation settles after its `task.started`, which named the agent.
         const call = subagentCallsByCallId.get(event.data.callId);
-        if (call?.status !== "working" || call.taskId !== event.data.taskId) break;
+        if (
+          call?.status !== "working" ||
+          call.taskId !== event.data.taskId ||
+          call.generation !== event.data.generation
+        ) {
+          break;
+        }
         call.output = event.data.status === "failed" ? event.data.error : event.data.output;
         call.status = event.data.status;
+        break;
+      }
+
+      case "task.ended": {
+        for (const call of subagentCalls) {
+          if (call.taskId === event.data.taskId) call.ended = true;
+        }
         break;
       }
 
@@ -197,7 +196,7 @@ export function deriveRunFacts(
       }
 
       case "message.completed": {
-        if (event.data.finishReason !== "tool-calls") {
+        if (event.data.finishReason !== "tool-calls" && event.data.interim !== true) {
           messageCount += 1;
         }
         break;
@@ -227,19 +226,6 @@ export function deriveRunFacts(
     failureCode,
   };
 }
-
-/**
- * Every agent tool (declared, remote, or built-in `agent`) shares one input
- * contract: a `message`, plus optional `taskId` and `outputSchema`.
- */
-function isAgentToolInput(input: JsonObject): boolean {
-  return (
-    typeof input.message === "string" &&
-    Object.keys(input).every((key) => AGENT_TOOL_INPUT_KEYS.has(key))
-  );
-}
-
-const AGENT_TOOL_INPUT_KEYS = new Set(["message", "outputSchema", "taskId"]);
 
 /**
  * Returns empty derived facts, used when a case produced no events

@@ -115,7 +115,7 @@ describe("applyWorkflowSend", () => {
 
     const failed = await send([working]);
 
-    expect(failed.events.map((event) => event.type)).toEqual(["task.settled"]);
+    expect(failed.events.map((event) => event.type)).toEqual(["task.settled", "task.ended"]);
     expect(getTaskTable(failed.session).records).toEqual([
       expect.objectContaining({ ended: true, status: "failed" }),
     ]);

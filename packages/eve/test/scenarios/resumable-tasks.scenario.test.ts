@@ -6,6 +6,7 @@ import {
   materializeScenarioApp,
   type ScenarioApp,
 } from "../../src/internal/testing/scenario-app.js";
+import { taskLifecycleViolations } from "../../src/internal/testing/task-lifecycle.js";
 import { startEveDev, type RunningEveDev } from "./dev-server-harness.js";
 import { throughFirstBoundary } from "./first-boundary.js";
 
@@ -256,13 +257,19 @@ describe("resumable tasks", () => {
       );
       expect(second).toContainEqual(
         expect.objectContaining({
-          data: expect.objectContaining({ callId: "notes-send-1", taskId }),
+          data: expect.objectContaining({
+            callId: "notes-send-1",
+            generation: 2,
+            resumable: true,
+            taskId,
+          }),
           type: "task.started",
         }),
       );
       expect(settledFor(second, taskId!)).toEqual([
         expect.objectContaining({
           callId: "notes-send-1",
+          generation: 2,
           output: "notes(0.67)>shorter",
           status: "completed",
         }),
@@ -274,6 +281,7 @@ describe("resumable tasks", () => {
       expect(settledFor(third, taskId!)).toEqual([
         expect.objectContaining({
           callId: "notes-send-2",
+          generation: 3,
           output: "published notes(0.67)>shorter",
           status: "completed",
         }),
@@ -289,6 +297,12 @@ describe("resumable tasks", () => {
       });
       expect(replies(fourth).at(-1)).toMatch(/^Refused: /u);
       expect(settledFor(fourth, taskId!)).toEqual([]);
+      // The run reports its end apart from its last result, so it can land after that turn.
+      const events = (await session.snapshot()).events;
+      expect(events).toContainEqual(
+        expect.objectContaining({ data: { taskId }, type: "task.ended" }),
+      );
+      expect(taskLifecycleViolations(events)).toEqual([]);
     },
     SCENARIO_TIMEOUT_MS,
   );
@@ -335,13 +349,16 @@ describe("resumable tasks", () => {
       const later = await collectUntil(session.stream(), (events) =>
         replies(events).some((reply) => reply.startsWith("Structured: ")),
       );
+      // The correction joined generation 3 rather than starting another.
       expect(settledFor([...fourth, ...later], taskId!)).toEqual([
         expect.objectContaining({
+          generation: 3,
           output: { messages: 4, title: "Orbit pricing" },
           status: "completed",
         }),
       ]);
       expect(replies(later).at(-1)).toContain("Orbit pricing");
+      expect(taskLifecycleViolations((await session.snapshot()).events)).toEqual([]);
     },
     SCENARIO_TIMEOUT_MS,
   );

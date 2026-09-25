@@ -27,6 +27,7 @@ import {
   type TaskStreamFixture,
   type TaskStreamFixtureManifest,
 } from "../../src/internal/testing/task-stream-fixtures.js";
+import { taskLifecycleViolations } from "../../src/internal/testing/task-lifecycle.js";
 import { startEveDev, type RunningEveDev } from "./dev-server-harness.js";
 import { throughFirstBoundary } from "./first-boundary.js";
 
@@ -350,6 +351,7 @@ export default defineRemoteAgent({
             sessionId: recording.sessionId,
           });
           expect(findVolatileStrings(events)).toEqual([]);
+          expect(taskLifecycleViolations(events)).toEqual([]);
           const entry: TaskStreamFixture = {
             description: recording.description,
             file: `${name}.ndjson`,
@@ -405,13 +407,23 @@ export default defineRemoteAgent({
   fixture("agent-call-held-turn", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.background });
     await response.result();
-    const events = await recordUntilReply(session, REPLIES.background);
+    await recordUntilReply(session, REPLIES.background);
+    // The idle writer stays available until its session ends.
+    await session.reset();
+    const events = await recordUntilSessionEnd(session);
     expect(deriveTaskStreamStates(events)).toMatchObject([
-      { delivered: true, kind: "agent", mode: "detached", name: "writer", status: "completed" },
+      {
+        delivered: true,
+        ended: true,
+        kind: "agent",
+        mode: "detached",
+        name: "writer",
+        status: "completed",
+      },
     ]);
     return {
       description:
-        "An agent call the model does not wait on: the call returns a receipt and the model ends its turn, so eve holds the turn. The interactive turn shows turn.completed and session.waiting but stays open; the answer arrives as a task.result input in the same turn, which closes under the same turn ID again. The child's task.started can land before or after the waiting boundary.",
+        "An agent call the model does not wait on: the call returns a receipt and the model ends its turn, so eve holds the turn. The interactive turn shows turn.completed and session.waiting but stays open; the answer arrives as a task.result input in the same turn, which closes under the same turn ID again. The child's task.started can land before or after the waiting boundary. The writer is resumable, so it stays available until the session is reset, which ends it with task.ended before session.completed.",
       events,
       sessionId: session.state.sessionId,
     };
@@ -521,6 +533,21 @@ async function recordUntilReply(
   // Let anything the owner publishes after parking reach the durable tail.
   await new Promise((resolve) => setTimeout(resolve, 1_500));
   return (await session.snapshot()).events;
+}
+
+/** Follows the session until it ends, then returns every event it published. */
+async function recordUntilSessionEnd(
+  session: ClientSession,
+): Promise<readonly MessageStreamEvent[]> {
+  const deadline = Date.now() + EVENT_TIMEOUT_MS;
+  for (;;) {
+    const { events } = await session.snapshot();
+    if (events.some((event) => event.type === "session.completed")) return events;
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out; saw ${events.map((event) => event.type).join(", ")}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
 }
 
 function repliedAndParked(events: readonly MessageStreamEvent[], reply: string): boolean {

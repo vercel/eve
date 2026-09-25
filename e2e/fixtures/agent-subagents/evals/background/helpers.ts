@@ -1,4 +1,4 @@
-import type { EveEvalContext, EveEvalTurn } from "eve/evals";
+import type { EveEvalTurn } from "eve/evals";
 
 /** Stream events of one eval session, in order. */
 type SessionEvents = EveEvalTurn["events"];
@@ -33,33 +33,22 @@ export function taskResultDeliveries(events: SessionEvents): readonly (readonly 
 }
 
 /**
- * Waits for the session's next turn segment after `turn`: the rest of a
- * held turn, which delivers a detached agent's answer after the turn's
- * waiting boundary, or the next turn. Events the turn already published are
- * replayed from the session cursor.
+ * The assistant's reply at the turn's first waiting boundary, where an
+ * interactive turn holds on its tasks and shows what it has so far.
  */
-export async function watchNextTurn(t: EveEvalContext, turn: EveEvalTurn): Promise<EveEvalTurn> {
-  return await t.target
-    .watchTurn(turn.sessionId, { startIndex: turn.session.state.streamIndex })
-    .result();
-}
-
-/**
- * Watches the turns after `turn` until the turns watched so far satisfy
- * `done`, for at most `maxTurns` turns, and returns every turn it watched.
- */
-export async function watchTurnsUntil(
-  t: EveEvalContext,
-  turn: EveEvalTurn,
-  done: (watched: readonly EveEvalTurn[]) => boolean,
-  maxTurns: number,
-): Promise<readonly EveEvalTurn[]> {
-  const watched: EveEvalTurn[] = [];
-  let last = turn;
-  while (watched.length < maxTurns) {
-    last = await watchNextTurn(t, last);
-    watched.push(last);
-    if (done(watched)) break;
-  }
-  return watched;
+export function heldReply(turn: EveEvalTurn): string | undefined {
+  const boundary = turn.events.findIndex(
+    (event) => event.type === "turn.completed" && event.data.held === true,
+  );
+  if (boundary < 0) return undefined;
+  return turn.events
+    .slice(0, boundary)
+    .flatMap((event) =>
+      event.type === "message.completed" &&
+      event.data.message !== null &&
+      event.data.finishReason !== "tool-calls"
+        ? [event.data.message]
+        : [],
+    )
+    .at(-1);
 }

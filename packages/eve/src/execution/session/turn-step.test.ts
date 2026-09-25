@@ -415,9 +415,11 @@ describe("dispatchCoordinationStep", () => {
       {
         data: {
           callId: "call-1",
+          generation: 1,
           kind: "workflow",
           mode: "detached",
           name: "research",
+          resumable: false,
           taskId: record!.id,
           turnId: "turn_0",
         },
@@ -458,7 +460,12 @@ describe("dispatchCoordinationStep", () => {
         toolName: "research",
       },
     ]);
+    // The run never started: the task starts with no child, fails, and ends.
     expect(result.events).toEqual([
+      expect.objectContaining({
+        data: expect.not.objectContaining({ child: expect.anything() }),
+        type: "task.started",
+      }),
       expect.objectContaining({
         data: expect.objectContaining({
           error: { code: "START_FAILED", message: "Workflow queue unavailable" },
@@ -466,6 +473,7 @@ describe("dispatchCoordinationStep", () => {
         }),
         type: "task.settled",
       }),
+      expect.objectContaining({ type: "task.ended" }),
     ]);
   });
 

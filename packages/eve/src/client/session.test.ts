@@ -1395,9 +1395,11 @@ describe("ClientSession.streamSubagent", () => {
             : { resolverId: "subagents/research", url: "https://remote.test" },
         sessionId: "child_1",
       },
+      generation: 1,
       kind: "agent",
       mode: "attached",
       name: "research",
+      resumable: true,
       parentSessionId: "session_1",
       taskId: "research-abc234",
       turnId: "turn_1",
@@ -1483,9 +1485,11 @@ describe("ClientSession.streamSubagent", () => {
     const session = createSession();
     const started = createTaskStartedEvent({
       callId: "call_2",
+      generation: 1,
       kind: "workflow",
       mode: "attached",
       name: "deploy",
+      resumable: false,
       parentSessionId: "session_1",
       taskId: "deploy-abc234",
       turnId: "turn_1",

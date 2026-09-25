@@ -71,6 +71,9 @@ type SubagentToolState = {
 
 export type SubagentRun = {
   name: string;
+  /** The task and generation this call's section shows; a resumable task runs one per call. */
+  taskId: string;
+  generation: number;
   childSessionId: string;
   /** Parent turn that originated this dispatch; cancellation is scoped to it. */
   parentTurnId: string;
@@ -166,10 +169,18 @@ export class SubagentPump {
     const child = started.data.child;
     if (child === undefined) return;
     const callId = started.data.callId;
-    const existing = this.#runs.get(callId);
+    let existing = this.#runs.get(callId);
+    // A later generation attributed to the same call starts a section of its own.
+    if (existing !== undefined && existing.generation !== started.data.generation) {
+      this.#finalizeRun(callId, true);
+      this.#runs.delete(callId);
+      existing = undefined;
+    }
     if (existing === undefined) {
       this.#runs.set(callId, {
         name: started.data.name,
+        taskId: started.data.taskId,
+        generation: started.data.generation,
         childSessionId: child.sessionId,
         parentTurnId: started.data.turnId,
         background: false,
@@ -197,10 +208,27 @@ export class SubagentPump {
    * in flight on an independent connection. The pump remains open until the
    * child boundary supplies authoritative completion.
    */
-  settle(callId: string): void {
+  settle(settled: { readonly callId: string; readonly generation: number }): void {
+    const { callId } = settled;
     // A settled call no longer needs a background mark held for its child.
     this.#pendingBackgroundCalls.delete(callId);
+    if (this.#runs.get(callId)?.generation !== settled.generation) return;
     this.#finalizeRun(callId, false);
+  }
+
+  /**
+   * The task ended, so its child runs no more generations. A generation still
+   * queued behind the child's active one, such as a send the task ended
+   * before reading, never reaches a child boundary of its own, so it
+   * completes now. The active one still ends on its child's boundary.
+   */
+  ended(taskId: string): void {
+    for (const [callId, run] of this.#runs) {
+      if (run.taskId !== taskId || this.#activeChildCalls.get(run.childSessionId) === callId) {
+        continue;
+      }
+      this.#finalizeRun(callId, true);
+    }
   }
 
   /**

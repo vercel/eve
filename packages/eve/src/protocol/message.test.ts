@@ -18,6 +18,7 @@ import {
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
+  createTaskEndedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCancelledEvent,
@@ -285,10 +286,12 @@ describe("message stream protocol", () => {
   it("authors local and remote child stream paths on task.started", () => {
     const input = {
       callId: "call/1",
+      generation: 2,
       kind: "agent" as const,
       mode: "attached" as const,
       name: "research",
       parentSessionId: "parent/1",
+      resumable: true,
       taskId: "research-abc234",
       turnId: "turn_1",
     };
@@ -297,9 +300,11 @@ describe("message stream protocol", () => {
       data: {
         callId: "call/1",
         child: { sessionId: "child/1", streamPath: "/eve/v1/session/child%2F1/stream" },
+        generation: 2,
         kind: "agent",
         mode: "attached",
         name: "research",
+        resumable: true,
         taskId: "research-abc234",
         turnId: "turn_1",
       },
@@ -333,6 +338,7 @@ describe("message stream protocol", () => {
     expect(
       createTaskSettledEvent({
         callId: "call_1",
+        generation: 1,
         output: { summary: "done" },
         status: "completed",
         taskId: "research-abc234",
@@ -341,6 +347,7 @@ describe("message stream protocol", () => {
     ).toEqual({
       data: {
         callId: "call_1",
+        generation: 1,
         output: { summary: "done" },
         status: "completed",
         taskId: "research-abc234",
@@ -351,6 +358,7 @@ describe("message stream protocol", () => {
     expect(
       createTaskSettledEvent({
         callId: "call_1",
+        generation: 1,
         error: { code: "TIMED_OUT", message: "Too slow." },
         status: "failed",
         taskId: "research-abc234",
@@ -359,16 +367,29 @@ describe("message stream protocol", () => {
       data: {
         callId: "call_1",
         error: { code: "TIMED_OUT", message: "Too slow." },
+        generation: 1,
         status: "failed",
         taskId: "research-abc234",
       },
       type: "task.settled",
     });
     expect(
-      createTaskSettledEvent({ callId: "call_1", status: "cancelled", taskId: "research-abc234" }),
+      createTaskSettledEvent({
+        callId: "call_1",
+        generation: 3,
+        status: "cancelled",
+        taskId: "research-abc234",
+      }),
     ).toEqual({
-      data: { callId: "call_1", status: "cancelled", taskId: "research-abc234" },
+      data: { callId: "call_1", generation: 3, status: "cancelled", taskId: "research-abc234" },
       type: "task.settled",
+    });
+  });
+
+  it("creates task.ended with only the task ID", () => {
+    expect(createTaskEndedEvent("research-abc234")).toEqual({
+      data: { taskId: "research-abc234" },
+      type: "task.ended",
     });
   });
 

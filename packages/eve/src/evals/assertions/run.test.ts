@@ -319,16 +319,24 @@ describe("run assertions", () => {
       data: {
         callId: "c",
         child: { sessionId: "s", streamPath: "/eve/v1/session/s/stream" },
+        generation: 1,
         kind: "agent",
         mode: "attached",
         name: "child",
+        resumable: true,
         taskId: "child-abc234",
         turnId: "t",
       },
     };
     const completed: UnstampedMessageStreamEvent = {
       type: "task.settled",
-      data: { callId: "c", output: "ok", status: "completed", taskId: "child-abc234" },
+      data: {
+        callId: "c",
+        generation: 1,
+        output: "ok",
+        status: "completed",
+        taskId: "child-abc234",
+      },
     };
     const result = makeResult({ events: [called, called, completed] });
 
@@ -391,16 +399,24 @@ describe("run assertions", () => {
       data: {
         callId: "c",
         child: { sessionId: "s", streamPath: "/eve/v1/session/s/stream" },
+        generation: 1,
         kind: "agent",
         mode: "attached",
         name: "child",
+        resumable: true,
         taskId: "child-abc234",
         turnId: "t",
       },
     };
     const completed: UnstampedMessageStreamEvent = {
       type: "task.settled",
-      data: { callId: "c", output: "ok", status: "completed", taskId: "child-abc234" },
+      data: {
+        callId: "c",
+        generation: 1,
+        output: "ok",
+        status: "completed",
+        taskId: "child-abc234",
+      },
     };
     const result = makeResult({ events: [called, completed, called] });
 

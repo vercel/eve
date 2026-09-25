@@ -99,7 +99,7 @@ export type TaskMessage =
       readonly generation: number;
       readonly outcome: TaskOutcome;
       readonly usage?: TokenUsage;
-      /** The child session ended with this generation, so the agent cannot be given more work. */
+      /** The child ended with this generation, or never started, so the task takes no more input. */
       readonly childEnded?: boolean;
       /**
        * Messages an agent received for this generation before it answered,

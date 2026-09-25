@@ -410,16 +410,22 @@ export interface TaskUsage {
 }
 
 /**
- * Stream event emitted when a task's child has started and the parent knows
- * its address. `taskId` is stable across the task's generations; for an agent
- * it is the agent ID that continues it. `callId` identifies the call that
- * started this generation.
+ * Stream event emitted exactly once per task generation, when it starts.
+ * Every task follows one lifecycle: `task.started` then `task.settled` for
+ * each generation, in order, and one `task.ended` after the last. `taskId`
+ * is stable across the task's generations; `callId` identifies the call that
+ * started this generation: the task's start, or a send with its `taskId`.
  */
 export interface TaskStartedStreamEvent {
   data: {
     callId: string;
-    /** Absent when the task runs no child session. */
+    /**
+     * The child session to follow. Absent for a workflow tool task, and for a
+     * generation that failed before its child started.
+     */
     child?: TaskChildStream;
+    /** Counts from 1; each send that starts more work on the task adds one. */
+    generation: number;
     kind: "agent" | "workflow";
     /**
      * `detached`: the call returned a receipt and the task keeps working on
@@ -427,6 +433,8 @@ export interface TaskStartedStreamEvent {
      */
     mode: "attached" | "detached";
     name: string;
+    /** The task takes more input by `taskId`: every agent, and `resumable: true` workflow tools. */
+    resumable: boolean;
     taskId: string;
     turnId: string;
   };
@@ -434,9 +442,8 @@ export interface TaskStartedStreamEvent {
 }
 
 /**
- * Stream event emitted exactly once per task generation, with its first
- * terminal outcome. A generation that fails before its child starts emits
- * `task.settled` without a preceding `task.started`.
+ * Stream event emitted exactly once per task generation, after its
+ * `task.started`, with the generation's first terminal outcome.
  */
 export interface TaskSettledStreamEvent {
   data: {
@@ -445,12 +452,26 @@ export interface TaskSettledStreamEvent {
     error?: { code: string; message: string };
     /** Present when `status` is `completed`. */
     output?: JsonValue;
+    generation: number;
     status: "completed" | "failed" | "cancelled";
     taskId: string;
     /** Present when the child reported the generation's usage. */
     usage?: TaskUsage;
   };
   type: "task.settled";
+}
+
+/**
+ * Stream event emitted exactly once per task, after its last `task.settled`,
+ * when the task stops taking input: right after a non-resumable task's only
+ * generation, and when a resumable task's body returns, it is retired, it is
+ * stopped for good, or its session ends. A finished task is one that ended.
+ */
+export interface TaskEndedStreamEvent {
+  data: {
+    taskId: string;
+  };
+  type: "task.ended";
 }
 
 /**
@@ -826,6 +847,7 @@ export type UnstampedMessageStreamEvent =
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
   | SubagentChildEventStreamEvent
+  | TaskEndedStreamEvent
   | TaskSettledStreamEvent
   | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
@@ -1417,18 +1439,22 @@ export function createTaskStartedEvent(input: {
     readonly remote?: { readonly resolverId?: string; readonly url: string };
     readonly sessionId: string;
   };
+  readonly generation: number;
   readonly kind: TaskStartedStreamEvent["data"]["kind"];
   readonly mode: TaskStartedStreamEvent["data"]["mode"];
   readonly name: string;
   readonly parentSessionId: string;
+  readonly resumable: boolean;
   readonly taskId: string;
   readonly turnId: string;
 }): TaskStartedStreamEvent {
   const data: TaskStartedStreamEvent["data"] = {
     callId: input.callId,
+    generation: input.generation,
     kind: input.kind,
     mode: input.mode,
     name: input.name,
+    resumable: input.resumable,
     taskId: input.taskId,
     turnId: input.turnId,
   };
@@ -1460,6 +1486,7 @@ export function createTaskStartedEvent(input: {
 export function createTaskSettledEvent(
   input: {
     readonly callId: string;
+    readonly generation: number;
     readonly taskId: string;
     readonly usage?: TaskUsage;
   } & (
@@ -1470,6 +1497,7 @@ export function createTaskSettledEvent(
 ): TaskSettledStreamEvent {
   const data: TaskSettledStreamEvent["data"] = {
     callId: input.callId,
+    generation: input.generation,
     status: input.status,
     taskId: input.taskId,
   };
@@ -1479,6 +1507,11 @@ export function createTaskSettledEvent(
   }
   if (input.usage !== undefined) data.usage = input.usage;
   return { data, type: "task.settled" };
+}
+
+/** Creates the `task.ended` event for a task that stopped taking input. */
+export function createTaskEndedEvent(taskId: string): TaskEndedStreamEvent {
+  return { data: { taskId }, type: "task.ended" };
 }
 
 /**

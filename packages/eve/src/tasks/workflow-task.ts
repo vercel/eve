@@ -18,7 +18,7 @@ import type {
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
-import { settledEvents, taskEvents, taskStartedEvent } from "#tasks/events.js";
+import { taskEvents } from "#tasks/events.js";
 import { toTaskError } from "#tasks/outcome.js";
 import { cancelRunAgents } from "#tasks/cancel.js";
 import { readContext, type TaskOwnerUpdate, type WorkflowCallerReply } from "#tasks/owner.js";
@@ -33,7 +33,7 @@ import type { TaskRecord } from "#tasks/record.js";
 import { startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
 import { encodeTaskCreator, type TaskCreator } from "#tasks/results.js";
 import { findWorkflowTask, getTaskTable, setTaskTable } from "#tasks/state.js";
-import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
+import { applyTaskMessage, markTaskDelivered, startTask } from "#tasks/table.js";
 import { adoptWorkflowRun } from "#tasks/table-generations.js";
 import { runCommands } from "#tasks/transport.js";
 import { routeSettledResults } from "#tasks/wait.js";
@@ -111,9 +111,11 @@ export async function startWorkflowTask<
       output: toError(error),
       toolName: request.toolName,
     });
+    // No run will ever take input for the task, so it ends with the failure.
     const settled = applyTaskMessage(
       started.table,
       {
+        childEnded: true,
         generation: record.generation,
         kind: "task.settled",
         outcome: {
@@ -125,7 +127,7 @@ export async function startWorkflowTask<
       now,
     );
     return {
-      events: settledEvents(settled.effects),
+      events: taskEvents(settled.effects, session.sessionId),
       result,
       // The error is the call's result right now, so it is already delivered.
       session: setTaskTable(
@@ -146,9 +148,8 @@ export async function startWorkflowTask<
     { child, generation: record.generation, kind: "task.started", taskId: record.id },
     now,
   );
-  const adoptedRecord = findTask(adopted.table, record.id)!;
   const update = {
-    events: [taskStartedEvent({ child, ownerSessionId: session.sessionId, record: adoptedRecord })],
+    events: taskEvents(adopted.effects, session.sessionId),
     session: setTaskTable(session, adopted.table),
   };
   return detached ? { ...update, result: startReceiptResult(record, request.toolName) } : update;
@@ -306,7 +307,7 @@ export async function applyWorkflowGenerationStep(input: {
   const owned =
     ownedCalls.length === 0
       ? { commands: [], events: [], table }
-      : cancelRunAgents(table, new Set([runId]), now);
+      : cancelRunAgents(table, new Set([runId]), now, session.sessionId);
   const applied = applyTaskMessage(owned.table, generationTaskMessage(record, message), now);
   if (owned.commands.length > 0) {
     await runCommands(owned.commands, await readContext(input.serializedContext));

@@ -2,7 +2,6 @@ import type { TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
-import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
@@ -43,18 +42,15 @@ export interface FinalizedSession {
 }
 
 /**
- * Terminates descendants, emits the terminal protocol event when the turn has
- * not already done so, then returns the task-mode callback or the answer the
- * parked caller is owed.
+ * Emits the terminal protocol event when the turn has not already done so,
+ * then returns the task-mode callback or the answer the parked caller is
+ * owed. The session program ended its tasks and their children first.
  */
 export async function finalizeSession(
   outcome: SessionTerminalOutcome,
   context: SessionFinalizationContext,
 ): Promise<FinalizedSession> {
-  const { serializedContext, sessionState } = context.cursor;
-  if (sessionState !== undefined) {
-    await terminateChildSessionsStep({ serializedContext, sessionState });
-  }
+  const { serializedContext } = context.cursor;
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,

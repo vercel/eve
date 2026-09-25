@@ -232,14 +232,20 @@ it("settles the run's task and returns the outcome as a tool result", async () =
       toolName: "research",
     },
   ]);
-  expect(emitSubagentEventStep).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({
-      event: {
-        data: { callId: "call", output: "done", status: "completed", taskId: workflowTask.id },
-        type: "task.settled",
+  // The call is not resumable, so its task ends with its only generation.
+  expect(vi.mocked(emitSubagentEventStep).mock.calls.map(([input]) => input.event)).toEqual([
+    {
+      data: {
+        callId: "call",
+        generation: 1,
+        output: "done",
+        status: "completed",
+        taskId: workflowTask.id,
       },
-    }),
-  );
+      type: "task.settled",
+    },
+    { data: { taskId: workflowTask.id }, type: "task.ended" },
+  ]);
   // Delivered with its result, the settled record is no longer kept.
   expect(
     getTaskTable(cursor.sessionState.snapshot.session).records.map((record) => record.id),

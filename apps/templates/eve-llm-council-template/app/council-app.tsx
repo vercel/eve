@@ -124,7 +124,13 @@ export function CouncilApp() {
 
   const handleEvent = useCallback(
     (event: MessageStreamEvent) => {
-      if (event.type === "task.started" && isMemberId(event.data.name) && event.data.child) {
+      // A member's later generations run on the child session its first one streams.
+      if (
+        event.type === "task.started" &&
+        event.data.generation === 1 &&
+        isMemberId(event.data.name) &&
+        event.data.child
+      ) {
         const memberId = event.data.name;
         memberTasksRef.current.set(event.data.taskId, memberId);
         setMemberState((current) => ({

@@ -36,6 +36,11 @@ function inputMessage(
   return { generation: 1, input, kind: "task.input", taskId };
 }
 
+/** The kinds of a transition's effects, in order. */
+function kinds(transition: { readonly effects: readonly { readonly kind: string }[] }) {
+  return transition.effects.map(({ kind }) => kind);
+}
+
 function started(
   table: TaskTable = taskTable([]),
   overrides: Partial<Parameters<typeof startTask>[1]> = {},
@@ -134,7 +139,9 @@ describe("applyTaskMessage", () => {
       taskId: task.record.id,
     } as const;
     const first = applyTaskMessage(task.table, settled, NOW);
-    expect(first.effects).toEqual([expect.objectContaining({ kind: "settled" })]);
+    // Unannounced until now, the only generation starts, settles, and the task ends.
+    expect(kinds(first)).toEqual(["started", "settled", "ended"]);
+    expect(first.table.records[0]).toMatchObject({ announced: true, status: "completed" });
     expect(applyTaskMessage(first.table, settled, NOW).effects).toEqual([]);
     expect(
       applyTaskMessage(
@@ -158,7 +165,8 @@ describe("applyTaskMessage", () => {
       },
       NOW,
     );
-    expect(settled.effects).toHaveLength(1);
+    expect(kinds(settled)).toEqual(["started", "settled", "ended"]);
+    // The start was announced with the settle, so the late report announces nothing.
     const late = applyTaskMessage(
       settled.table,
       { child, generation: 1, kind: "task.started", taskId: task.record.id },
@@ -242,9 +250,10 @@ describe("applyTaskMessage", () => {
 
 describe("cancelTask", () => {
   it("records cancellation at once, holds the command until start, and confirms the child's report", () => {
-    const task = started();
+    const task = started(undefined, { resumable: true });
     const cancelled = cancelTask(task.table, task.record.id, NOW);
-    expect(cancelled.effects).toEqual([]);
+    // The generation starts and settles on the stream now; a resumable task stays open.
+    expect(kinds(cancelled)).toEqual(["started", "cancelled"]);
     // A workflow run gets its 30-second cleanup window plus a 5-second margin.
     expect(cancelled.table.records[0]).toMatchObject({
       cancelConfirmBy: "2026-09-24T14:02:35.000Z",
@@ -309,6 +318,8 @@ describe("cancelTask", () => {
     ).table;
     const cancelled = cancelTask(withChild, task.record.id, NOW);
     expect(cancelled.effects).toEqual([
+      expect.objectContaining({ kind: "cancelled" }),
+      expect.objectContaining({ kind: "ended" }),
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
     ]);
     expect(evaluateTaskDeadlines(cancelled.table, NOW).effects).toEqual([]);
@@ -365,6 +376,7 @@ describe("deadlines", () => {
           status: "failed",
         },
       }),
+      expect.objectContaining({ kind: "ended" }),
       expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
     ]);
     expect(due.table.records[0]).toMatchObject({

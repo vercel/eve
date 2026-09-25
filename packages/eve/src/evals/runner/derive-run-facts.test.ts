@@ -332,6 +332,33 @@ describe("deriveRunFacts", () => {
     expect(facts.messageCount).toBe(2);
   });
 
+  it("leaves out the interim messages of a turn held on its tasks", () => {
+    const facts = derive([
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          interim: true,
+          message: "Waiting on the research.",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "t1",
+        },
+      },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: "Here it is.",
+          sequence: 2,
+          stepIndex: 1,
+          turnId: "t1",
+        },
+      },
+    ]);
+    expect(facts.messageCount).toBe(1);
+  });
+
   it("counts reasoning.completed events", () => {
     const events: UnstampedMessageStreamEvent[] = [
       {
@@ -374,7 +401,13 @@ describe("deriveRunFacts", () => {
       taskStarted({ callId: "c1", name: "weather", remoteUrl: "http://127.0.0.1:4001" }),
       {
         type: "task.settled",
-        data: { callId: "c1", output: "Sunny, 72F", status: "completed", taskId: "weather-c1" },
+        data: {
+          callId: "c1",
+          generation: 1,
+          output: "Sunny, 72F",
+          status: "completed",
+          taskId: "weather-c1",
+        },
       },
     ];
 
@@ -383,6 +416,7 @@ describe("deriveRunFacts", () => {
       {
         callId: "c1",
         taskId: "weather-c1",
+        generation: 1,
         childSessionId: "child-c1",
         name: "weather",
         remoteUrl: "http://127.0.0.1:4001",
@@ -395,6 +429,57 @@ describe("deriveRunFacts", () => {
     expect(facts.subagentCallCount).toBe(1);
   });
 
+  it("gives each generation of a resumable task its own call, and marks them all when it ends", () => {
+    const facts = derive([
+      turnStarted("t1", 0),
+      taskStarted({ callId: "c1", mode: "detached", name: "writer" }),
+      {
+        type: "task.settled",
+        data: {
+          callId: "c1",
+          generation: 1,
+          output: "Draft.",
+          status: "completed",
+          taskId: "writer-c1",
+        },
+      },
+      taskStarted({
+        callId: "c2",
+        generation: 2,
+        mode: "detached",
+        name: "writer",
+        taskId: "writer-c1",
+      }),
+      // A settle for a generation the call did not start changes nothing.
+      {
+        type: "task.settled",
+        data: {
+          callId: "c2",
+          generation: 1,
+          output: "Stale.",
+          status: "completed",
+          taskId: "writer-c1",
+        },
+      },
+      {
+        type: "task.settled",
+        data: {
+          callId: "c2",
+          generation: 2,
+          output: "Revised.",
+          status: "completed",
+          taskId: "writer-c1",
+        },
+      },
+      { type: "task.ended", data: { taskId: "writer-c1" } },
+    ]);
+
+    expect(facts.subagentCalls).toEqual([
+      expect.objectContaining({ callId: "c1", ended: true, generation: 1, output: "Draft." }),
+      expect.objectContaining({ callId: "c2", ended: true, generation: 2, output: "Revised." }),
+    ]);
+  });
+
   it("takes failure and cancellation from task.settled before the tool result", () => {
     const error = { code: "TIMED_OUT", message: "The task did not finish within its time limit." };
     const facts = derive([
@@ -403,11 +488,22 @@ describe("deriveRunFacts", () => {
       taskStarted({ callId: "cancelled", name: "researcher" }),
       {
         type: "task.settled",
-        data: { callId: "failed", error, status: "failed", taskId: "researcher-failed" },
+        data: {
+          callId: "failed",
+          generation: 1,
+          error,
+          status: "failed",
+          taskId: "researcher-failed",
+        },
       },
       {
         type: "task.settled",
-        data: { callId: "cancelled", status: "cancelled", taskId: "researcher-cancelled" },
+        data: {
+          callId: "cancelled",
+          generation: 1,
+          status: "cancelled",
+          taskId: "researcher-cancelled",
+        },
       },
       actionResult({ callId: "failed", isError: true, output: "boom", toolName: "researcher" }),
     ]);
@@ -439,7 +535,13 @@ describe("deriveRunFacts", () => {
       ...events,
       {
         type: "task.settled",
-        data: { callId: "d1", output: "Found it.", status: "completed", taskId: "researcher-d1" },
+        data: {
+          callId: "d1",
+          generation: 1,
+          output: "Found it.",
+          status: "completed",
+          taskId: "researcher-d1",
+        },
       },
     ]);
     expect(settled.subagentCalls).toEqual([
@@ -463,7 +565,13 @@ describe("deriveRunFacts", () => {
       actionResult({ callId: "b1", output: receipt, toolName: "billing" }),
       {
         type: "task.settled",
-        data: { callId: "b1", output: "Refunded.", status: "completed", taskId: "billing-b1" },
+        data: {
+          callId: "b1",
+          generation: 1,
+          output: "Refunded.",
+          status: "completed",
+          taskId: "billing-b1",
+        },
       },
     ]);
 
@@ -483,15 +591,24 @@ describe("deriveRunFacts", () => {
           toolName: "billing",
         },
       ]),
+      taskStarted({ callId: "b1", mode: "detached", name: "billing", unstarted: true }),
       {
         type: "task.settled",
-        data: { callId: "b1", error, status: "failed", taskId: "billing-b1" },
+        data: { callId: "b1", error, generation: 1, status: "failed", taskId: "billing-b1" },
       },
+      { type: "task.ended", data: { taskId: "billing-b1" } },
     ]);
 
     expect(facts.subagentCalls).toEqual([
-      expect.objectContaining({ callId: "b1", name: "billing", output: error, status: "failed" }),
+      expect.objectContaining({
+        callId: "b1",
+        ended: true,
+        name: "billing",
+        output: error,
+        status: "failed",
+      }),
     ]);
+    expect(facts.subagentCalls[0]).not.toHaveProperty("childSessionId");
   });
 
   it("records a workflow tool call as a tool call, not a subagent call", () => {
@@ -502,9 +619,11 @@ describe("deriveRunFacts", () => {
         type: "task.started",
         data: {
           callId: "c1",
+          generation: 1,
           kind: "workflow",
           mode: "attached",
           name: "deploy",
+          resumable: false,
           taskId: "deploy-c1",
           turnId: "t1",
         },
@@ -513,6 +632,7 @@ describe("deriveRunFacts", () => {
         type: "task.settled",
         data: {
           callId: "c1",
+          generation: 1,
           output: { deployed: true },
           status: "completed",
           taskId: "deploy-c1",
@@ -527,25 +647,18 @@ describe("deriveRunFacts", () => {
     ]);
   });
 
-  it("records no delegation for a task that never started or runs a workflow", () => {
+  it("records no delegation for a workflow task", () => {
     const facts = derive([
       turnStarted("t1", 0),
-      {
-        type: "task.settled",
-        data: {
-          callId: "c1",
-          error: { code: "START_FAILED", message: "The queue is unavailable." },
-          status: "failed",
-          taskId: "weather-c1",
-        },
-      },
       {
         type: "task.started",
         data: {
           callId: "c2",
+          generation: 1,
           kind: "workflow",
           mode: "attached",
           name: "deploy",
+          resumable: false,
           taskId: "deploy-c2",
           turnId: "t1",
         },
@@ -562,10 +675,13 @@ describe("deriveRunFacts", () => {
         { callId: "c1", input: { message: "Find sources." }, toolName: "research" },
         { callId: "c2", input: { message: "Draft it.", taskId: null }, toolName: "writer" },
       ]),
+      taskStarted({ callId: "c1", name: "research", unstarted: true }),
+      taskStarted({ callId: "c2", name: "writer", unstarted: true }),
       {
         type: "task.settled",
         data: {
           callId: "c1",
+          generation: 1,
           error: { code: "START_FAILED", message: "The child could not start." },
           status: "failed",
           taskId: "research-c1",
@@ -573,7 +689,7 @@ describe("deriveRunFacts", () => {
       },
       {
         type: "task.settled",
-        data: { callId: "c2", status: "cancelled", taskId: "writer-c2" },
+        data: { callId: "c2", generation: 1, status: "cancelled", taskId: "writer-c2" },
       },
       actionResult({
         callId: "c1",
@@ -609,6 +725,7 @@ describe("deriveRunFacts", () => {
         type: "task.settled",
         data: {
           callId: "c1",
+          generation: 1,
           error: { code: "START_FAILED", message: "The queue is unavailable." },
           status: "failed",
           taskId: "deploy-c1",
@@ -676,7 +793,13 @@ describe("deriveRunFacts", () => {
     };
     const lateCompletion: UnstampedMessageStreamEvent = {
       type: "task.settled",
-      data: { callId: "c1", output: "late result", status: "completed", taskId: "researcher-c1" },
+      data: {
+        callId: "c1",
+        generation: 1,
+        output: "late result",
+        status: "completed",
+        taskId: "researcher-c1",
+      },
     };
     for (const events of [[cancelled], [cancelled, lateCompletion]]) {
       expect(derive(events).subagentCalls[0]).toMatchObject({
@@ -757,28 +880,34 @@ describe("deriveRunFacts", () => {
 
 function taskStarted(input: {
   readonly callId: string;
+  readonly generation?: number;
   readonly mode?: "attached" | "detached";
   readonly name: string;
   readonly remoteUrl?: string;
+  /** A start that failed before its child started names no child. */
+  readonly unstarted?: true;
+  readonly taskId?: string;
 }): UnstampedMessageStreamEvent {
   const sessionId = `child-${input.callId}`;
-  return {
-    type: "task.started",
-    data: {
-      callId: input.callId,
-      child:
-        input.remoteUrl === undefined
-          ? { sessionId, streamPath: `/eve/v1/session/${sessionId}/stream` }
-          : {
-              remote: { url: input.remoteUrl },
-              sessionId,
-              streamPath: `/eve/v1/session/s0/subagents/${input.callId}/${sessionId}/stream`,
-            },
-      kind: "agent",
-      mode: input.mode ?? "attached",
-      name: input.name,
-      taskId: `${input.name}-${input.callId}`,
-      turnId: "t1",
-    },
+  const data: Extract<UnstampedMessageStreamEvent, { type: "task.started" }>["data"] = {
+    callId: input.callId,
+    generation: input.generation ?? 1,
+    kind: "agent",
+    mode: input.mode ?? "attached",
+    name: input.name,
+    resumable: true,
+    taskId: input.taskId ?? `${input.name}-${input.callId}`,
+    turnId: "t1",
   };
+  if (input.unstarted !== true) {
+    data.child =
+      input.remoteUrl === undefined
+        ? { sessionId, streamPath: `/eve/v1/session/${sessionId}/stream` }
+        : {
+            remote: { url: input.remoteUrl },
+            sessionId,
+            streamPath: `/eve/v1/session/s0/subagents/${input.callId}/${sessionId}/stream`,
+          };
+  }
+  return { type: "task.started", data };
 }

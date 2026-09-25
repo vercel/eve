@@ -18,6 +18,9 @@ import {
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTaskEndedEvent,
+  createTaskSettledEvent,
+  createTaskStartedEvent,
   createTurnCancelledEvent,
   createTurnCompletedEvent,
   createTurnFailedEvent,
@@ -311,6 +314,105 @@ describe("defaultMessageReducer", () => {
       }),
     ]);
     expect(data).toBe(settled);
+  });
+
+  it("tracks each task generation on the tool part of the call that started it", () => {
+    // Alice's writer drafts, then revises after her send with its taskId.
+    const reducer = defaultMessageReducer();
+    const turn = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+    const call = (callId: string, input: Record<string, string>) =>
+      createActionsRequestedEvent({
+        ...turn,
+        actions: [{ callId, input, kind: "tool-call", toolName: "writer" }],
+      });
+    const started = (callId: string, generation: number) =>
+      createTaskStartedEvent({
+        callId,
+        child: { sessionId: "child_1" },
+        generation,
+        kind: "agent",
+        mode: "detached",
+        name: "writer",
+        parentSessionId: "session_1",
+        resumable: true,
+        taskId: "writer-abc234",
+        turnId: "turn_0",
+      });
+    const settled = (callId: string, generation: number) =>
+      createTaskSettledEvent({
+        callId,
+        generation,
+        output: `draft ${generation}`,
+        status: "completed",
+        taskId: "writer-abc234",
+      });
+    const taskOn = (data: ReturnType<typeof reducer.initial>, callId: string) =>
+      data.messages
+        .flatMap((message) => message.parts)
+        .flatMap((part) =>
+          part.type === "dynamic-tool" && part.toolCallId === callId ? [part] : [],
+        )
+        .at(0)?.toolMetadata?.eve?.task;
+
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      call("call_1", { message: "Draft it." }),
+      started("call_1", 1),
+    ]);
+    expect(taskOn(data, "call_1")).toEqual({
+      generation: 1,
+      id: "writer-abc234",
+      status: "working",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      settled("call_1", 1),
+      call("call_2", { message: "Shorter, please.", taskId: "writer-abc234" }),
+      started("call_2", 2),
+    ]);
+    expect(taskOn(data, "call_1")).toEqual({
+      generation: 1,
+      id: "writer-abc234",
+      status: "completed",
+    });
+    expect(taskOn(data, "call_2")).toEqual({
+      generation: 2,
+      id: "writer-abc234",
+      status: "working",
+    });
+
+    // A repeated start or a settle for another generation leaves the part as it is.
+    const repeated = reduceServerEvents(reducer, data, [
+      started("call_2", 2),
+      settled("call_2", 1),
+    ]);
+    expect(taskOn(repeated, "call_2")).toEqual(taskOn(data, "call_2"));
+
+    data = reduceServerEvents(reducer, repeated, [
+      settled("call_2", 2),
+      createTaskEndedEvent("writer-abc234"),
+    ]);
+    expect(taskOn(data, "call_1")).toMatchObject({ ended: true, generation: 1 });
+    expect(taskOn(data, "call_2")).toEqual({
+      ended: true,
+      generation: 2,
+      id: "writer-abc234",
+      status: "completed",
+    });
+  });
+
+  it("skips task events for calls with no tool part", () => {
+    const reducer = defaultMessageReducer();
+    const initial = reducer.initial();
+    const data = reduceServerEvents(reducer, initial, [
+      createTaskSettledEvent({
+        callId: "ctx-agent-1",
+        generation: 1,
+        status: "cancelled",
+        taskId: "writer-abc234",
+      }),
+      createTaskEndedEvent("writer-abc234"),
+    ]);
+    expect(data).toBe(initial);
   });
 
   it("projects workflow tool requests as named tool parts", () => {

@@ -1,4 +1,9 @@
-import type { EveMessage, EveMessageData, EveMessagePart } from "#client/message-reducer-types.js";
+import type {
+  EveDynamicToolPart,
+  EveMessage,
+  EveMessageData,
+  EveMessagePart,
+} from "#client/message-reducer-types.js";
 import type { MessageReceivedPart } from "#protocol/message.js";
 
 export function projectReceivedParts(
@@ -69,4 +74,36 @@ export function removeStreamingToolPartsForTurn(
 
 export function optimisticUserMessageId(submissionId: string): string {
   return `optimistic:${submissionId}:user`;
+}
+
+export function findToolPart(
+  data: EveMessageData,
+  toolCallId: string,
+): EveDynamicToolPart | undefined {
+  for (const message of data.messages) {
+    for (const part of message.parts) {
+      if (part.type === "dynamic-tool" && part.toolCallId === toolCallId) return part;
+    }
+  }
+  return undefined;
+}
+
+export function findToolPartByApprovalId(
+  data: EveMessageData,
+  approvalId: string,
+): EveDynamicToolPart | undefined {
+  for (const message of data.messages) {
+    for (const part of message.parts) {
+      if (part.type === "dynamic-tool" && part.approval?.id === approvalId) return part;
+    }
+  }
+  return undefined;
+}
+
+export function isSettledToolPart(part: EveDynamicToolPart): boolean {
+  return (
+    part.state === "output-denied" ||
+    part.state === "output-error" ||
+    (part.state === "output-available" && part.partial !== true)
+  );
 }

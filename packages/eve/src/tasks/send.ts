@@ -8,7 +8,7 @@ import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
-import { taskEvents, taskStartedEvent } from "#tasks/events.js";
+import { taskEvents } from "#tasks/events.js";
 import { checkSend, retireIdleTasks } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus, type TaskCommand } from "#tasks/protocol.js";
 import { sendReceiptResult, taskToolErrorResult } from "#tasks/receipts.js";
@@ -156,15 +156,9 @@ export async function applyWorkflowSend<T extends Session>(input: {
     };
     return { ...delivered, results: [failed, ...delivered.results] };
   }
-  const child = sent.record.child;
-  return {
-    events:
-      sent.started && child !== undefined
-        ? [taskStartedEvent({ child, ownerSessionId: session.sessionId, record: sent.record })]
-        : [],
-    results: [receipt(sent.started)],
-    session: delivered.session,
-  };
+  // The run announces the generation it starts for the send, which is the
+  // one it read (see `adoptStartedGeneration`).
+  return { events: [], results: [receipt(sent.started)], session: delivered.session };
 }
 
 /**

@@ -141,7 +141,13 @@ describe("applyTaskOwnerUpdate", () => {
       vi.fn(async () => {}),
     );
     const event: UnstampedMessageStreamEvent = {
-      data: { callId: "call-1", output: "done", status: "completed", taskId: "research-abc234" },
+      data: {
+        callId: "call-1",
+        generation: 1,
+        output: "done",
+        status: "completed",
+        taskId: "research-abc234",
+      },
       type: "task.settled",
     };
     const published = Promise.withResolvers<{
@@ -191,7 +197,7 @@ describe("cancelTasks", () => {
       vi.fn(async () => {}),
     );
     const event: UnstampedMessageStreamEvent = {
-      data: { callId: "call-1", status: "cancelled", taskId: "research-abc234" },
+      data: { callId: "call-1", generation: 1, status: "cancelled", taskId: "research-abc234" },
       type: "task.settled",
     };
     vi.mocked(cancelTasksStep).mockResolvedValue({
@@ -405,7 +411,7 @@ describe("answerTaskInput", () => {
 
 describe("withdrawn task input", () => {
   const settled: UnstampedMessageStreamEvent = {
-    data: { callId: "call-1", status: "cancelled", taskId: "research-abc234" },
+    data: { callId: "call-1", generation: 1, status: "cancelled", taskId: "research-abc234" },
     type: "task.settled",
   };
   const update = (sessionState: DurableSessionState) => ({
@@ -510,7 +516,13 @@ describe("settleWorkflowTask", () => {
       vi.fn(async () => {}),
     );
     const event: UnstampedMessageStreamEvent = {
-      data: { callId: "call-1", output: "done", status: "completed", taskId: "deploy-abc234" },
+      data: {
+        callId: "call-1",
+        generation: 1,
+        output: "done",
+        status: "completed",
+        taskId: "deploy-abc234",
+      },
       type: "task.settled",
     };
     const result = {
@@ -826,6 +838,7 @@ describe("applyTaskDeadline", () => {
     const event: UnstampedMessageStreamEvent = {
       data: {
         callId: "call-1",
+        generation: 1,
         error: { code: "TIMED_OUT", message: "Timed out." },
         status: "failed",
         taskId: "research-abc234",

@@ -27,7 +27,7 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { settledEvents, taskEvents, taskStartedEvent } from "#tasks/events.js";
+import { taskEvents } from "#tasks/events.js";
 import type {
   RuntimeAgentDispatchRequest,
   RuntimeSubagentResult,
@@ -48,7 +48,6 @@ import {
 import { coordinationTurnId, getPendingCoordinationBatch } from "#harness/coordination.js";
 import { agentTaskCallFromRequest, isAgentTaskRequest } from "#tasks/agent-tool.js";
 import {
-  isTerminalTaskStatus,
   reportedAnswer,
   reportedSteers,
   type ChildAddress,
@@ -86,11 +85,11 @@ import type { TaskRecord } from "#tasks/record.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 import {
   applyTaskMessage,
-  findTask,
   markTaskDelivered,
   startTask,
   type TaskEffect,
   type TaskTable,
+  type TaskTransition,
 } from "#tasks/table.js";
 import { sendTask } from "#tasks/table-generations.js";
 import { syncTaskTimerInStep } from "#tasks/timer-steps.js";
@@ -113,7 +112,7 @@ export interface WorkflowCallerReply {
 
 /** What the session body does after an owner step: publish events and resolve callers. */
 export interface TaskOwnerUpdate {
-  /** `task.*` lifecycle events: one `task.settled` per generation, whichever path settles it. */
+  /** `task.*` lifecycle events, in the order the task table's transitions produced them. */
   readonly events: readonly UnstampedMessageStreamEvent[];
   /** Tool results for waited model calls. */
   readonly results: readonly RuntimeToolResultActionResult[];
@@ -340,6 +339,8 @@ export async function startAgentTasks(input: {
         else fail(call, action, delivered.failure.output);
         continue;
       }
+      // The idle agent's next generation starts now; its turn is delivered below.
+      events.push(...taskEvents(sent.effects, session.sessionId));
       ({ record, table } = sent);
     }
     session = setTaskTable(session, table);
@@ -365,8 +366,8 @@ export async function startAgentTasks(input: {
 
     let child: ChildAddress | undefined;
     let failure: JsonValue | undefined;
-    // A send the child cannot take for good ends the task.
-    let childEnded: true | undefined;
+    // A child that never started, or cannot take a send for good, ends the task.
+    let childEnded = entry.kind === "start" ? (true as const) : undefined;
     if (entry.kind === "resume") {
       if (record.child !== undefined) {
         const delivered = await deliverToChild({
@@ -382,8 +383,7 @@ export async function startAgentTasks(input: {
           record,
           replyToken,
         });
-        if (delivered === undefined) child = record.child;
-        else {
+        if (delivered !== undefined) {
           failure = delivered.output;
           if (delivered.permanent) childEnded = true;
         }
@@ -429,13 +429,14 @@ export async function startAgentTasks(input: {
         session,
         markTaskDelivered(settled.table, record.id, record.generation),
       );
-      events.push(...settledEvents(settled.effects));
+      events.push(...taskEvents(settled.effects, session.sessionId));
       serializedContext = await flushAgentInvocationTraces(
         tracing.fail(createFailedResult(action, call.callId, failure)),
       );
       fail(call, action, failure);
       continue;
     }
+    // A remote child's address is known now; a local child reports its own.
     if (child !== undefined) {
       const adopted = adoptChild(getTaskTable(session), record, child, input.now);
       session = setTaskTable(
@@ -448,13 +449,7 @@ export async function startAgentTasks(input: {
           table: adopted.table,
         }),
       );
-      events.push(
-        taskStartedEvent({
-          child,
-          ownerSessionId: session.sessionId,
-          record: findTask(adopted.table, record.id)!,
-        }),
-      );
+      events.push(...taskEvents(adopted.effects, session.sessionId));
     }
     if (!detached) continue;
     results.push(
@@ -520,15 +515,18 @@ export async function applyTaskReport(input: {
     const { callId: startedCallId, child: reported } = input.payload;
     const tasks = getTaskTable(session);
     const record = tasks.records.find(
-      (candidate) => candidate.callId === startedCallId && candidate.child === undefined,
+      (candidate) =>
+        candidate.callId === startedCallId &&
+        candidate.child === undefined &&
+        candidate.ended !== true,
     );
     const duplicate = tasks.records.some(
       (candidate) =>
         candidate.child?.kind === "local" && candidate.child.sessionId === reported.sessionId,
     );
     if (record === undefined && !duplicate) {
-      // The task stopped and was pruned before its child reported, so the
-      // held cancel is gone; the child must not run unsupervised.
+      // The task ended before its child reported, so the held cancel is
+      // gone; the child must not run unsupervised.
       await cancelOrphanedChild({ callId: startedCallId, sessionId: reported.sessionId });
     }
     if (record !== undefined) {
@@ -545,13 +543,7 @@ export async function applyTaskReport(input: {
               table: adopted.table,
             });
       session = setTaskTable(session, flushed);
-      const current = findTask(flushed, record.id)!;
-      // A task cancelled before its child started already reported `task.settled`.
-      if (!isTerminalTaskStatus(current.status)) {
-        events.push(
-          taskStartedEvent({ child, ownerSessionId: session.sessionId, record: current }),
-        );
-      }
+      events.push(...taskEvents(adopted.effects, session.sessionId));
     }
   } else {
     const source = input.payload.source;
@@ -641,18 +633,19 @@ export async function applyTaskReport(input: {
   };
 }
 
+/** Records a child's address, announcing its generation, and returns the commands held for it. */
 function adoptChild(
   table: TaskTable,
   record: TaskRecord,
   child: ChildAddress,
   now: string,
-): { readonly table: TaskTable; readonly commands: readonly CommandEffect[] } {
+): TaskTransition & { readonly commands: readonly CommandEffect[] } {
   const applied = applyTaskMessage(
     table,
     { child, generation: record.generation, kind: "task.started", taskId: record.id },
     now,
   );
-  return { commands: commandEffects(applied.effects), table: applied.table };
+  return { ...applied, commands: commandEffects(applied.effects) };
 }
 
 /** A send's input for an agent: its message, and the output schema its reply must match. */

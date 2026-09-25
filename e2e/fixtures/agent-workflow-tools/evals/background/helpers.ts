@@ -12,19 +12,12 @@ export function taskResultDeliveries(events: Events): readonly (readonly string[
   );
 }
 
-/** Task IDs of the calls to one tool that returned a receipt. */
-export function receiptTaskIds(turn: EveEvalTurn, toolName: string): readonly string[] {
-  return turn.toolCalls.flatMap((call) => {
-    if (call.name !== toolName) return [];
-    const output = call.output as { readonly status?: unknown; readonly taskId?: unknown } | null;
-    return output?.status === "working" && typeof output.taskId === "string" ? [output.taskId] : [];
-  });
-}
-
-/** Task IDs of every `task.started` event for one tool. */
+/** Task IDs of the tasks one tool started: the first generation of each. */
 export function startedTaskIds(events: Events, name: string): readonly string[] {
   return events.flatMap((event) =>
-    event.type === "task.started" && event.data.name === name ? [event.data.taskId] : [],
+    event.type === "task.started" && event.data.name === name && event.data.generation === 1
+      ? [event.data.taskId]
+      : [],
   );
 }
 

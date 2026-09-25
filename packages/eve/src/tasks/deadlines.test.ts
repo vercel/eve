@@ -110,7 +110,7 @@ describe("applyTaskDeadlines", () => {
     expect(update.replies).toEqual([]);
     expect(update.events).toEqual([
       {
-        data: { callId: "call-1", error, status: "failed", taskId: working.id },
+        data: { callId: "call-1", generation: 1, error, status: "failed", taskId: working.id },
         type: "task.settled",
       },
     ]);
@@ -194,8 +194,13 @@ describe("applyTaskDeadlines", () => {
       [WORLD, "child-session", { cancelReason: expect.any(String) }],
       [WORLD, "run-1", { cancelReason: expect.any(String) }],
     ]);
-    expect(update).toMatchObject({ events: [], replies: [], results: [] });
-    // A stopped local agent can take no more work; the remote agent stays available.
+    // A stopped local agent can take no more work, so its task ends; the
+    // workflow call ended when it was cancelled, and the remote agent stays available.
+    expect(update).toMatchObject({
+      events: [{ data: { taskId: "research-abc234" }, type: "task.ended" }],
+      replies: [],
+      results: [],
+    });
     expect(records(update.sessionState).map((record) => record.id)).toEqual(["billing-abc234"]);
     expect(records(update.sessionState)[0]).not.toHaveProperty("cancelConfirmBy");
     // Each unconfirmed agent generation's span ends as cancelled; workflow tasks have none.
@@ -238,7 +243,12 @@ describe("applyTaskDeadlines", () => {
     });
     expect(update.events).toEqual([
       {
-        data: { callId: "call-nested", status: "cancelled", taskId: "research-b81d0c" },
+        data: {
+          callId: "call-nested",
+          generation: 1,
+          status: "cancelled",
+          taskId: "research-b81d0c",
+        },
         type: "task.settled",
       },
     ]);
@@ -333,12 +343,14 @@ describe("applyTaskDeadlines", () => {
         {
           data: {
             callId: "call-1",
+            generation: 1,
             output: { deployed: true },
             status: "completed",
             taskId: "deploy-abc234",
           },
           type: "task.settled",
         },
+        { data: { taskId: "deploy-abc234" }, type: "task.ended" },
       ]);
       expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
       // Delivered to the waiting call, the finished workflow task is pruned.
@@ -373,12 +385,14 @@ describe("applyTaskDeadlines", () => {
         {
           data: {
             callId: "call-1",
+            generation: 1,
             error: { code: "DEPLOY_REJECTED", message: "Rejected." },
             status: "failed",
             taskId: "deploy-abc234",
           },
           type: "task.settled",
         },
+        { data: { taskId: "deploy-abc234" }, type: "task.ended" },
       ]);
       expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
     });
@@ -587,11 +601,13 @@ describe("applyTaskDeadlines", () => {
           data: {
             callId: "call-9",
             error: { code: "STATE_LOST", message: STATE_LOST_MESSAGE },
+            generation: 2,
             status: "failed",
             taskId: "old-abc234",
           },
           type: "task.settled",
         },
+        { data: { taskId: "old-abc234" }, type: "task.ended" },
       ],
       replies: [],
       results: [],
@@ -627,11 +643,13 @@ describe("applyTaskDeadlines", () => {
         data: {
           callId: "call-9",
           error: { code: "STATE_LOST", message: STATE_LOST_MESSAGE },
+          generation: 1,
           status: "failed",
           taskId: "old-abc234",
         },
         type: "task.settled",
       },
+      { data: { taskId: "old-abc234" }, type: "task.ended" },
     ]);
     expect(update.results).toEqual([]);
     expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([]);
@@ -929,9 +947,16 @@ describe("applyTaskDeadlines", () => {
     const error = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
     expect(update.events).toEqual([
       {
-        data: { callId: "call-working", error, status: "failed", taskId: "call-working" },
+        data: {
+          callId: "call-working",
+          error,
+          generation: 1,
+          status: "failed",
+          taskId: "call-working",
+        },
         type: "task.settled",
       },
+      { data: { taskId: "call-working" }, type: "task.ended" },
     ]);
     // The turn it belongs to tells the model the work is lost at its next step.
     expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([

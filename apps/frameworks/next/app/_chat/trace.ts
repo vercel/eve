@@ -558,7 +558,12 @@ export function buildTraceTurnsFromTranscript(
       continue;
     }
 
-    if (event.type === "task.started" && event.data.kind === "agent") {
+    // Counts agent tasks; a send to one starts a later generation of the same task.
+    if (
+      event.type === "task.started" &&
+      event.data.kind === "agent" &&
+      event.data.generation === 1
+    ) {
       turn.subagentCount += 1;
       if (step !== undefined) {
         step.subagentCount += 1;

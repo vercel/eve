@@ -1,53 +1,82 @@
 import {
+  createTaskEndedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
+  type TaskEndedStreamEvent,
   type TaskSettledStreamEvent,
   type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
+import type { TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import type { TaskEffect } from "#tasks/table.js";
 
 // Project task lifecycle onto the owner's session stream. Both agent and
-// workflow tasks use these, so consumers read one event family.
+// workflow tasks use these, so consumers read one event family. The table
+// orders the lifecycle effects; this module only renders them.
 
-/** Announces the record's current generation once the owner knows its child. */
-export function taskStartedEvent(input: {
-  readonly child: ChildAddress;
-  readonly ownerSessionId: string;
-  readonly record: TaskRecord;
-}): TaskStartedStreamEvent {
-  const { child, record } = input;
+export type TaskLifecycleStreamEvent =
+  | TaskStartedStreamEvent
+  | TaskSettledStreamEvent
+  | TaskEndedStreamEvent;
+
+/** A transition's lifecycle events, in the order its effects list them. */
+export function taskEvents(
+  effects: readonly TaskEffect[],
+  ownerSessionId: string,
+): TaskLifecycleStreamEvent[] {
+  return effects.flatMap((effect): TaskLifecycleStreamEvent[] => {
+    switch (effect.kind) {
+      case "started":
+        return [taskStartedEvent(effect.record, ownerSessionId)];
+      case "settled":
+        return [taskSettledEvent(effect.record, effect.outcome, effect.usage)];
+      case "cancelled":
+        return [taskSettledEvent(effect.record, { status: "cancelled" })];
+      case "ended":
+        return [createTaskEndedEvent(effect.record.id)];
+      default:
+        return [];
+    }
+  });
+}
+
+function taskStartedEvent(record: TaskRecord, ownerSessionId: string): TaskStartedStreamEvent {
+  const { child } = record;
   return createTaskStartedEvent({
     callId: record.callId,
     child:
-      child.kind === "local"
+      child?.kind === "local"
         ? { sessionId: child.sessionId }
-        : child.kind === "remote"
+        : child?.kind === "remote"
           ? {
               remote: { resolverId: child.credentialResolver ?? record.nodeId, url: child.url },
               sessionId: child.sessionId,
             }
-          : // A workflow run has no session stream to follow.
+          : // A workflow run has no session stream to follow, and an unstarted child none yet.
             undefined,
+    generation: record.generation,
     kind: record.kind,
     mode: record.mode,
     name: record.name,
-    parentSessionId: input.ownerSessionId,
+    parentSessionId: ownerSessionId,
+    resumable: record.resumable === true,
     taskId: record.id,
     turnId: record.turnId,
   });
 }
 
-/** Reports the first terminal outcome of the record's current generation. */
-export function taskSettledEvent(input: {
-  readonly outcome: TaskOutcome;
-  readonly record: TaskRecord;
-  readonly usage?: TokenUsage;
-}): TaskSettledStreamEvent {
-  const { outcome, record } = input;
-  const identity = { callId: record.callId, taskId: record.id, usage: input.usage };
+function taskSettledEvent(
+  record: TaskRecord,
+  outcome: TaskOutcome,
+  usage?: TokenUsage,
+): TaskSettledStreamEvent {
+  const identity = {
+    callId: record.callId,
+    generation: record.generation,
+    taskId: record.id,
+    usage,
+  };
   switch (outcome.status) {
     case "completed":
       return createTaskSettledEvent({ ...identity, output: outcome.output, status: "completed" });
@@ -56,36 +85,4 @@ export function taskSettledEvent(input: {
     case "cancelled":
       return createTaskSettledEvent({ ...identity, status: "cancelled" });
   }
-}
-
-/** One `task.settled` for each first terminal outcome among a transition's effects. */
-export function settledEvents(effects: readonly TaskEffect[]): TaskSettledStreamEvent[] {
-  return effects.flatMap((effect) =>
-    effect.kind === "settled"
-      ? [taskSettledEvent({ outcome: effect.outcome, record: effect.record, usage: effect.usage })]
-      : [],
-  );
-}
-
-/**
- * A transition's events in order: one `task.settled` for each first terminal
- * outcome, one `task.started` for each generation a send started, and both
- * for a generation the owner cancelled with its task's work before it began.
- */
-export function taskEvents(
-  effects: readonly TaskEffect[],
-  ownerSessionId: string,
-): (TaskSettledStreamEvent | TaskStartedStreamEvent)[] {
-  return effects.flatMap((effect): (TaskSettledStreamEvent | TaskStartedStreamEvent)[] => {
-    if (effect.kind === "settled") return settledEvents([effect]);
-    if (effect.kind !== "started" && effect.kind !== "cancelled") return [];
-    const { record } = effect;
-    const started =
-      record.child === undefined
-        ? []
-        : [taskStartedEvent({ child: record.child, ownerSessionId, record })];
-    return effect.kind === "started"
-      ? started
-      : [...started, taskSettledEvent({ outcome: { status: "cancelled" }, record })];
-  });
 }

@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "../src/client/client.js";
 import { defaultMessageReducer } from "../src/client/message-reducer.js";
 import { deriveRunFacts } from "../src/evals/runner/derive-run-facts.js";
+import { taskLifecycleViolations } from "../src/internal/testing/task-lifecycle.js";
 import {
   deriveTaskStreamStates,
-  isTaskStreamEvent,
   parseTaskStream,
   TASK_STREAM_FIXTURE_VERSION,
   type TaskStreamFixtureManifest,
@@ -66,6 +66,7 @@ describe("published task stream fixtures", () => {
     );
     const types = new Set(fixtures.flatMap(({ events }) => events.map((event) => event.type)));
     expect([...types].filter((type) => type.startsWith("task.")).toSorted()).toEqual([
+      "task.ended",
       "task.settled",
       "task.started",
     ]);
@@ -92,31 +93,26 @@ describe("published task stream fixtures", () => {
     });
 
     it("keeps the task lifecycle contract", () => {
-      const started = new Set<string>();
-      const settled = new Set<string>();
-      const settledTasks = new Set<string>();
+      expect(taskLifecycleViolations(events)).toEqual([]);
       const tasks = new Set(fixture.tasks.map((task) => task.taskId));
+      const working = new Set<string>();
+      const settled = new Set<string>();
       for (const event of events) {
-        const generation = isTaskStreamEvent(event)
-          ? `${event.data.taskId} ${event.data.callId}`
-          : undefined;
         switch (event.type) {
           case "task.started":
-            expect(started.has(generation!)).toBe(false);
-            started.add(generation!);
+            working.add(event.data.taskId);
             break;
           case "task.settled":
-            expect(settled.has(generation!)).toBe(false);
             expect(event.data.status === "failed").toBe(event.data.error !== undefined);
             expect(event.data.status === "completed").toBe("output" in event.data);
-            settled.add(generation!);
-            settledTasks.add(event.data.taskId);
+            working.delete(event.data.taskId);
+            settled.add(event.data.taskId);
             break;
           case "message.received":
             if (event.data.kind === "task.result") {
               expect(event.data.taskIds?.length).toBeGreaterThan(0);
               for (const taskId of event.data.taskIds ?? []) {
-                expect(settledTasks.has(taskId)).toBe(true);
+                expect(settled.has(taskId)).toBe(true);
               }
             }
             break;
@@ -130,13 +126,13 @@ describe("published task stream fixtures", () => {
           case "input.requested":
             if (event.data.taskId !== undefined) {
               expect(tasks.has(event.data.taskId)).toBe(true);
-              expect(settledTasks.has(event.data.taskId)).toBe(false);
+              expect(working.has(event.data.taskId)).toBe(true);
             }
             break;
         }
       }
       // Every recorded session ran its tasks to an outcome.
-      expect([...started].filter((generation) => !settled.has(generation))).toEqual([]);
+      expect([...working]).toEqual([]);
     });
 
     it("projects through the default message reducer", () => {

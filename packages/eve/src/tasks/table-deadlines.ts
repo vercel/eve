@@ -59,8 +59,9 @@ export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransi
           ? { kind: "unconfirmed", record: confirmed }
           : { child, kind: "unconfirmed", record: confirmed },
       );
-      // A hard-stopped child takes no more input.
-      if (child !== undefined && record.resumable === true) {
+      // A hard-stopped child takes no more input, and neither does a task
+      // whose child never started: nothing will ever answer for it.
+      if (record.resumable === true && (child !== undefined || record.child === undefined)) {
         const ended = endTask(next, { ...confirmed, child }, now);
         next = ended.table;
         effects.push(...ended.effects);
