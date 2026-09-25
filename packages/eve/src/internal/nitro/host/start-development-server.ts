@@ -375,6 +375,7 @@ async function startNitroDevelopmentServer(
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
   const hasExplicitServerConfiguration =
+    options.resume === true ||
     options.developmentExtensions !== undefined ||
     options.host !== undefined ||
     options.port !== undefined ||
@@ -435,6 +436,7 @@ async function startNitroDevelopmentServer(
     workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
+      resume: options.resume,
       transportSecret: workflowTransportSecret,
     });
     const localWorkflowWorld = workflowWorld;

@@ -197,6 +197,68 @@ describe("eve dev server workflow generations", () => {
     },
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
+
+  // Re-enable after https://github.com/vercel/workflow/pull/3824 ships and eve
+  // vendors the release with abortable local queue deliveries.
+  it.skip(
+    "recovers a nonterminal child Workflow on its selected generation after restart",
+    async () => {
+      const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
+      let server = await startEveDev(app.appRoot, {
+        env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
+      });
+      const turnStartedPath = join(app.appRoot, ".turn-started");
+      const restartPath = join(app.appRoot, ".restart-generation-test");
+      const recoveredPath = join(app.appRoot, ".recovered-turn-started");
+
+      try {
+        await writeFile(
+          join(app.appRoot, "agent", "tools", "get_marker.ts"),
+          createGenerationMarkerToolSource("generation-one-runtime", true),
+        );
+        await forceDevelopmentRebuild(server.url);
+        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
+
+        const interruptedTurn = sendDevelopmentMessage({
+          message: "Use get_marker.",
+          session: createDevelopmentSessionState(),
+          serverUrl: server.url,
+        }).catch(() => undefined);
+        await waitForPath(turnStartedPath);
+
+        await writeFile(
+          join(app.appRoot, "agent", "tools", "get_marker.ts"),
+          createGenerationMarkerToolSource("generation-two", false),
+        );
+        await writeFile(
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
+          createInstrumentationSource("two"),
+        );
+        await forceDevelopmentRebuild(server.url);
+        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
+
+        await server.crash();
+        await withinDeadline(interruptedTurn, "Interrupted client stream did not settle.");
+        await writeFile(restartPath, "restart");
+        server = await startEveDev(app.appRoot, {
+          resume: true,
+          env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
+        });
+        await waitForPath(recoveredPath);
+        await expect(
+          readFile(recoveredPath, "utf8").then((source) => JSON.parse(source) as unknown),
+        ).resolves.toEqual({
+          // The recorded generation owns both its tool and instrumentation
+          // sources, even when recovery happens in a freshly started worker.
+          instrumentation: "one",
+          marker: "generation-one-runtime",
+        });
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
 });
 
 function readCompletedMessages(

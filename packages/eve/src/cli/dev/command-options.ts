@@ -19,6 +19,7 @@ export interface DevelopmentCliOptions {
   name?: string;
   port?: number;
   reasoning?: TerminalPartDisplayMode;
+  resume?: boolean;
   subagents?: TerminalPartDisplayMode;
   tools?: TerminalPartDisplayMode;
   ui?: boolean;

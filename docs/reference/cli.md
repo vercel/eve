@@ -208,21 +208,22 @@ eve dev [options]
 
 Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect --url <url>`.
 
-| Flag                                | Type   | Default            | Description                                 |
-| ----------------------------------- | ------ | ------------------ | ------------------------------------------- |
-| `--host <host>`                     | string | all interfaces     | Host interface to bind                      |
-| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                           |
-| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI  |
-| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions |
-| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI              |
-| `--input <text>`                    | string | none               | Pre-fill the prompt input                   |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                         |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                         |
-| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering                  |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering          |
-| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                  |
-| `--context-size <tokens>`           | number | none               | Model context window size                   |
-| `--logs <mode>`                     | enum   | `stderr`           | Server and agent logs to show               |
+| Flag                                | Type   | Default            | Description                                                        |
+| ----------------------------------- | ------ | ------------------ | ------------------------------------------------------------------ |
+| `--host <host>`                     | string | all interfaces     | Host interface to bind                                             |
+| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                                  |
+| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                         |
+| `--resume`                          | flag   | off                | Attempt recovery of retained runs from previous dev invocations   |
+| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                        |
+| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                     |
+| `--input <text>`                    | string | none               | Pre-fill the prompt input                                          |
+| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                                |
+| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                                |
+| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering                                         |
+| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                                 |
+| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                         |
+| `--context-size <tokens>`           | number | none               | Model context window size                                          |
+| `--logs <mode>`                     | enum   | `stderr`           | Server and agent logs to show                                      |
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
@@ -232,7 +233,7 @@ Local dev records the last ready URL per resolved app root in `.eve/dev-server-s
 
 Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. Each generation contains the compiled authored module graph and runtime resources rather than a recursive copy of the app or workspace. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
 
-With the built-in local Workflow World, `eve dev` cancels unfinished runs whose runtime snapshots are missing, at startup and after snapshot pruning. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not cancel runs whose snapshots remain available. The next start recovers only runs with compatible runtime metadata: the eve framework build and authored workflow sources must match. Incompatible runs remain stored but do not execute; startup reports skipped generations instead of attempting an unsafe replay. That admission decision lasts for the server invocation, including later timer and hook deliveries. Malformed snapshot metadata also skips the affected runs without preventing recovery of other compatible runs. Restore the affected snapshot from a backup or start a new session. Snapshots created before compatibility metadata was introduced cannot be recovered. Compatibility checks apply only to recovery at server startup. Hot reload does not recheck admitted runs against the latest workflow sources, so follow-up turns, cancellation, and `/new` retain their existing behavior. This does not guarantee safe replay of an authored workflow whose body changes while it is running. This cleanup and compatibility check do not apply to a custom Workflow World.
+With the built-in local Workflow World, `eve dev` cancels unfinished runs whose runtime snapshots are missing, at startup and after snapshot pruning. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not cancel runs whose snapshots remain available. By default, a new dev server leaves previous invocations' runs dormant, including deliveries triggered by timers or hooks. Source-watcher rebuilds and worker restarts within the same server retain current runs' eligibility. Pass `eve dev --resume` to recover unfinished runs from previous invocations. Recovery is best effort: snapshots must remain available, and the eve framework build and authored workflow sources must match. Incompatible runs remain stored but do not execute; startup reports skipped generations instead of attempting an unsafe replay. Malformed snapshot metadata also skips the affected runs without preventing recovery of other compatible runs. Restore the affected snapshot from a backup or start a new session. Snapshots created before compatibility metadata was introduced cannot be recovered. Ordinary authored changes that do not alter the host's workflow sources still use each run's pinned snapshot. This cleanup and recovery policy do not apply to a custom Workflow World; `--resume` rejects custom Worlds and URL targets. The flag requires starting a server, so it also refuses to attach to an already running local server. It recovers workflows, not the terminal transcript or a particular TUI conversation.
 
 Local development records traces under `.eve/traces/` by default and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`, or disable the destination with `agent/instrumentation/local.ts`; see [`eve traces`](#retention) for the rules and defaults.
 

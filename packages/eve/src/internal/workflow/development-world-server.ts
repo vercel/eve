@@ -55,6 +55,7 @@ export function createParentDevelopmentWorkflowWorld(input: {
   readonly agentName: string;
   readonly appRoot: string;
   readonly resolveActiveGenerationId: () => string;
+  readonly resume?: boolean;
   readonly transportSecret: string;
 }): ParentDevelopmentWorkflowWorld {
   return new LocalParentDevelopmentWorkflowWorld(input);
@@ -66,9 +67,12 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
   readonly #world: World;
-  readonly #incompatibleGenerations = new Map<
+  readonly #resume: boolean;
+  // Owned by the host, not a worker: rebuilds preserve the startup admission decision.
+  readonly #unrecoveredGenerations = new Map<
     string,
-    Extract<DevelopmentGenerationAvailability, { kind: "incompatible" }>
+    | Extract<DevelopmentGenerationAvailability, { kind: "incompatible" }>
+    | { readonly kind: "dormant" }
   >();
   #closed = false;
   #started = false;
@@ -78,11 +82,13 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     readonly agentName: string;
     readonly appRoot: string;
     readonly resolveActiveGenerationId: () => string;
+    readonly resume?: boolean;
     readonly transportSecret: string;
   }) {
     if (input.transportSecret.length < 16) {
       throw new Error("Development Workflow transport secret is too short to be trusted.");
     }
+    this.#resume = input.resume === true;
     this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
@@ -100,22 +106,27 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     // Queue redelivery starts with the World. Decide admission before it can wake retained runs.
     const recoveryGenerationId = this.#resolveActiveGenerationId();
-    this.#incompatibleGenerations.clear();
+    this.#unrecoveredGenerations.clear();
     for (const generationId of await listDevelopmentGenerationIds(this.#appRoot)) {
       if (generationId === recoveryGenerationId) continue;
+      if (!this.#resume) {
+        this.#unrecoveredGenerations.set(generationId, { kind: "dormant" });
+        continue;
+      }
       const availability = await readDevelopmentGenerationAvailability(
         this.#appRoot,
         generationId,
         recoveryGenerationId,
       );
       if (availability.kind === "incompatible") {
-        this.#incompatibleGenerations.set(generationId, availability);
+        this.#unrecoveredGenerations.set(generationId, availability);
       }
     }
     await this.#world.start?.();
     this.#started = true;
     try {
       await this.#reconcileExpiredRuns();
+      if (!this.#resume) return;
       const skippedGenerations = new Set<string>();
       await reenqueueActiveDevelopmentRuns({
         enqueue: this.#queue.bind(this),
@@ -303,11 +314,11 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return header !== null && timingSafeEqualStrings(header, this.#transportSecret);
   }
 
-  async #generationAvailability(generationId: string): Promise<DevelopmentGenerationAvailability> {
+  async #generationAvailability(generationId: string) {
     const availability = await readDevelopmentGenerationAvailability(this.#appRoot, generationId);
     // Pruning still expires a run, even when startup refused its recovery.
     if (availability.kind !== "ready") return availability;
-    return this.#incompatibleGenerations.get(generationId) ?? availability;
+    return this.#unrecoveredGenerations.get(generationId) ?? availability;
   }
 }
 
