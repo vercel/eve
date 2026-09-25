@@ -323,13 +323,10 @@ await buildWithNitroRolldown({
         toplevel: false,
       },
     },
-    // Skip rolldown's CJS-interop `__require` polyfill so the virtual
-    // runtime helper file doesn't import `node:module`. Without this
-    // every dist file would carry an `import "../_virtual/_rolldown/runtime.js"`
-    // side-effect import, and the workflow bundler (which runs under
-    // `platform: "neutral"`) would warn about the unresolved Node
-    // builtin every time it pulled an eve file into its graph.
-    polyfillRequire: false,
+    // Bundled dependencies can still contain CommonJS `require` calls. Emit
+    // Rolldown's Node `createRequire` interop helper so those calls remain
+    // valid when the published ESM package evaluates them.
+    polyfillRequire: true,
     preserveModules: true,
     preserveModulesRoot: SRC_ROOT,
     sourcemap: false,
