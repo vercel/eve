@@ -7,6 +7,7 @@ import {
 } from "#setup/primitives/pm/run.js";
 import { runVercel } from "#setup/primitives/run-vercel.js";
 
+import { checkDeployEnvironment } from "../deploy-environment-check.js";
 import {
   detectDeployment,
   isProjectResolved,
@@ -30,6 +31,7 @@ export interface DeployProjectDeps {
   runPackageManagerInstall: typeof runPackageManagerInstall;
   detectDeployment: typeof detectDeployment;
   syncHostFrameworkPreset: typeof syncHostFrameworkPreset;
+  checkDeployEnvironment?: typeof checkDeployEnvironment;
 }
 
 export interface DeployProjectOptions {
@@ -97,6 +99,7 @@ export function deployProject(
     runPackageManagerInstall,
     detectDeployment,
     syncHostFrameworkPreset,
+    checkDeployEnvironment,
   };
 
   return {
@@ -142,6 +145,20 @@ export function deployProject(
         if (!isProjectResolved(project)) {
           throw new Error("Vercel project linking failed. Deployment did not start.");
         }
+      }
+
+      const environmentCheck = await (deps.checkDeployEnvironment ?? checkDeployEnvironment)(
+        projectPath,
+        { signal },
+      );
+      if (environmentCheck.missing.length > 0) {
+        log.warning(
+          `Local environment variables missing from Vercel Production:\n${environmentCheck.missing
+            .map((key) => `  ${key}`)
+            .join(
+              "\n",
+            )}\nThe deployed agent may behave differently from local development. Add them to the Vercel project environment before deploying.`,
+        );
       }
 
       // The directory is now linked, so align the project's Framework Preset with

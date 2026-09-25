@@ -357,7 +357,9 @@ eve deploy
 eve deploy --non-interactive --yes [--project <name-or-id>] [--team <team-id-or-slug>]
 ```
 
-Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY. When a terminal is present, an unlinked deployment signs in to Vercel if needed and then walks the `eve link` pickers.
+Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. Before deploying, eve compares the variable names in your local development env files with the Vercel Production environment and warns if any are missing. The check never reads remote values or uploads local values, and a failed check does not block deployment.
+
+An already-linked project deploys with or without a TTY. When a terminal is present, an unlinked deployment signs in to Vercel if needed and then walks the `eve link` pickers.
 
 For CI or an agent, pass `--non-interactive --yes`. `--yes` explicitly confirms the production deployment. With `--project`, eve links that Vercel project and pulls its environment before deploying; `--team` has the same ID-or-slug semantics as `eve link`. Without `--project`, the directory must already be linked. The non-interactive mode never opens a picker, browser, or login flow.
 
