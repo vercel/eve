@@ -13,6 +13,7 @@ type AppendStreamEvent =
 
 const MAX_PENDING_EVENTS = 64;
 const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
+const APPEND_WRITE_INTERVAL_MS = 100;
 
 interface PendingEmission {
   deltaCharacters: number;
@@ -35,6 +36,13 @@ interface OrderedStreamEmitter {
  * remains an ordering barrier.
  * Coalescing before the durable writer keeps one Workflow chunk per emitted
  * event, so event-count reconnect cursors remain aligned with chunk indexes.
+ *
+ * Workflow's stream writer acknowledges writes once they are buffered, so
+ * write latency alone rarely creates batches. The first append of each stream
+ * is written at once; later ones wait until one interval after that stream's
+ * previous append write. Barriers, capacity limits and close flush a waiting
+ * append at once. Otherwise every provider token becomes a durable chunk that
+ * each history reader must fetch.
  */
 export function createOrderedStreamEmitter(
   emitFn: HarnessEmitFn,
@@ -54,7 +62,34 @@ export function createOrderedStreamEmitter(
   let failure: unknown;
   let failed = false;
   let pumping = false;
+  const lastAppendWriteAt = new Map<string, number>();
+  let wakePump: (() => void) | undefined;
   const failureController = new AbortController();
+
+  const wake = (): void => {
+    wakePump?.();
+  };
+
+  /** Resolves after `ms`, or earlier when an emission, capacity limit or close changes the queue. */
+  const waitForAppendWindow = async (ms: number): Promise<void> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await new Promise<void>((resolve) => {
+      wakePump = resolve;
+      timer = setTimeout(resolve, ms);
+    });
+    clearTimeout(timer);
+    wakePump = undefined;
+  };
+
+  const appendWriteDelay = (): number => {
+    const head = pending[0];
+    if (pending.length !== 1 || head === undefined || closeRequested || !hasCapacity()) {
+      return 0;
+    }
+    const key = appendStreamKey(head.event);
+    const lastWriteAt = key === undefined ? undefined : lastAppendWriteAt.get(key);
+    return lastWriteAt === undefined ? 0 : lastWriteAt + APPEND_WRITE_INTERVAL_MS - Date.now();
+  };
 
   const throwIfFailed = (): void => {
     if (failed) throw failure;
@@ -79,11 +114,18 @@ export function createOrderedStreamEmitter(
     pumping = true;
 
     while (pending.length > 0) {
+      const delay = appendWriteDelay();
+      if (delay > 0) {
+        await waitForAppendWindow(delay);
+        continue;
+      }
       const next = pending.shift();
       if (next === undefined) break;
       pendingDeltaCharacters -= next.deltaCharacters;
       pendingSourceEvents -= next.sourceEvents;
       settleCapacityWaiters();
+      const nextStreamKey = appendStreamKey(next.event);
+      if (nextStreamKey !== undefined) lastAppendWriteAt.set(nextStreamKey, Date.now());
 
       try {
         await emitFn(materializeEvent(next), next.messages);
@@ -128,6 +170,7 @@ export function createOrderedStreamEmitter(
   return {
     async closeAndDrain() {
       closeRequested = true;
+      wake();
       void pump();
       await waitForIdle();
     },
@@ -154,6 +197,7 @@ export function createOrderedStreamEmitter(
       pendingDeltaCharacters += delta?.length ?? 0;
       pendingSourceEvents += 1;
 
+      wake();
       void pump();
 
       if (
@@ -212,6 +256,12 @@ function appendKey(event: UnstampedMessageStreamEvent): string | undefined {
     default:
       return undefined;
   }
+}
+
+function appendStreamKey(event: UnstampedMessageStreamEvent): string | undefined {
+  if (!isAppendEvent(event)) return undefined;
+  const { sequence, stepIndex, turnId } = event.data;
+  return JSON.stringify([appendKey(event), turnId, stepIndex, sequence]);
 }
 
 function isAppendEvent(event: UnstampedMessageStreamEvent): event is AppendStreamEvent {
