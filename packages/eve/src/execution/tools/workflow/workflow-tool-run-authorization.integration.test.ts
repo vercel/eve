@@ -1,12 +1,12 @@
-import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
 import { describe, expect, it } from "vitest";
-import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
+import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import { workflowEntry } from "#execution/session/entry.js";
+import { hydrateWorkflowReturnValue } from "@workflow/core/serialization";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
+import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 import {
-  buildSerializedContext,
+  buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
 } from "#internal/testing/workflow-tool-run-harness.js";
 
@@ -24,7 +24,7 @@ describe("workflow step authorization", () => {
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "preauthorized"' },
           serializedContext: {
-            ...buildSerializedContext({
+            ...buildWorkflowToolSerializedContext({
               continuationToken: "http:step-token",
               mode: "conversation",
             }),
@@ -75,7 +75,7 @@ describe("workflow step authorization", () => {
             ownerDeploymentId: "dpl_inline",
             input: { message: `Run deploy_service with service "${service}"` },
             serializedContext: {
-              ...buildSerializedContext({
+              ...buildWorkflowToolSerializedContext({
                 continuationToken: "http:step-auth",
                 mode: "conversation",
                 requestInput: true,

@@ -1,37 +1,26 @@
-import type { HandoffWorkflowEntryInput } from "./entry-input.js";
+import type { HandoffWorkflowEntryInput } from "#execution/session/entry-input.js";
 import type { RunCreatedEventRequest } from "@workflow/world";
 import { assert, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import {
   dehydrateWorkflowArguments,
-  hydrateWorkflowArguments,
   hydrateStepReturnValue,
+  hydrateWorkflowArguments,
 } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
-import { buildSerializedContext } from "#internal/testing/entry-test-helpers.js";
+import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 
 describe("workflowEntry integration", () => {
   describe("deployment handoff", () => {
-    const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
-      turnPolicy: "queue" as const,
-      auth: null,
-      delivery: {
-        acceptedDeploymentId,
-        channelKind: "http",
-        channelName: "test",
-        deliveryId,
-      },
-      kind: "send" as const,
-      payload: { message },
-    });
-
     it("recovers the original owner when target rejects nested state", async () => {
       const runtime = await createTestRuntime({ agent: { name: "handoff-validation" } });
       await runtime.run(async () => {
@@ -126,7 +115,7 @@ describe("workflowEntry integration", () => {
           await stream.nextTurn();
           await waitForParkedTurnStep(anchor.runId);
           await workflowRuntime.dispatchSession({
-            command: followUp(
+            command: handoffFollowUp(
               "dpl_b",
               "Bob requests the next research step.",
               "validation-trigger",
@@ -238,7 +227,7 @@ describe("workflowEntry integration", () => {
 
           await expect(
             workflowRuntime.dispatchSession({
-              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              command: handoffFollowUp("dpl_b", "hello from b", "delivery-b"),
               sessionId: anchor.runId,
             }),
           ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
@@ -260,7 +249,7 @@ describe("workflowEntry integration", () => {
           );
           expect(owner.runId).toBe(anchor.runId);
           await workflowRuntime.dispatchSession({
-            command: followUp("dpl_b", "Bob sends a later sentinel.", "sentinel"),
+            command: handoffFollowUp("dpl_b", "Bob sends a later sentinel.", "sentinel"),
             sessionId: anchor.runId,
           });
           await stream.nextTurn();
@@ -340,7 +329,7 @@ describe("workflowEntry integration", () => {
             event.eventData?.token === sessionInboxHookToken(continuationToken)
           ) {
             gapDelivery = workflowRuntime.dispatchContinuation({
-              command: followUp("dpl_b", "Alice writes during the gap.", "delivery-gap"),
+              command: handoffFollowUp("dpl_b", "Alice writes during the gap.", "delivery-gap"),
               continuationToken,
             });
           }
@@ -352,7 +341,7 @@ describe("workflowEntry integration", () => {
 
           await expect(
             workflowRuntime.dispatchContinuation({
-              command: followUp("dpl_b", "hello from b", "delivery-b"),
+              command: handoffFollowUp("dpl_b", "hello from b", "delivery-b"),
               continuationToken,
             }),
           ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
@@ -432,11 +421,11 @@ describe("workflowEntry integration", () => {
           // first is evaluated, so neither may trigger a handoff.
           await Promise.all([
             workflowRuntime.dispatchSession({
-              command: followUp("dpl_b", "first burst", "delivery-1"),
+              command: handoffFollowUp("dpl_b", "first burst", "delivery-1"),
               sessionId: run.runId,
             }),
             workflowRuntime.dispatchSession({
-              command: followUp("dpl_b", "second burst", "delivery-2"),
+              command: handoffFollowUp("dpl_b", "second burst", "delivery-2"),
               sessionId: run.runId,
             }),
           ]);

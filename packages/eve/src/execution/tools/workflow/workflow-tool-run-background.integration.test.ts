@@ -1,20 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { start } from "#internal/workflow/runtime.js";
+import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import type { TestRuntime } from "#internal/testing/app-harness.js";
 import {
   backgroundDeployWorkflow,
   confirmDeployWorkflow,
   failingDeployWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
-import type { TestRuntime } from "#internal/testing/app-harness.js";
-import { start } from "#internal/workflow/runtime.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import {
-  buildSerializedContext,
+  buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
-  eventsText,
 } from "#internal/testing/workflow-tool-run-harness.js";
 
 describe("background workflow tools", () => {
@@ -35,7 +34,7 @@ describe("background workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run report_deploy with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-background",
             mode: "conversation",
@@ -89,7 +88,7 @@ describe("background workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-background-fail",
             mode: "conversation",
           }),
@@ -136,7 +135,7 @@ describe("background workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run confirm_deploy with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-background-hitl",
             mode: "conversation",
             requestInput: true,
@@ -211,4 +210,8 @@ function enableBackgroundTool(runtime: TestRuntime, toolName: string): void {
       ),
     },
   };
+}
+
+function eventsText(events: readonly { readonly data?: unknown }[]): string {
+  return events.map((event) => JSON.stringify(event.data ?? null)).join("\n");
 }

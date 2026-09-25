@@ -182,8 +182,8 @@ Never edit source or tests while Vitest is running in the checkout.
    and `pnpm lint` are the proof that nothing else depended on it.
 5. Inspect `git diff --numstat`; report production/tooling separately from
    tests and test support. Report before and after tier timings for speed work.
-6. Add a changeset when the published `eve` package changes behavior; pure test
-   and dead-code removals do not need one.
+6. Follow the root `AGENTS.md` changeset rule. Test-only changes need none;
+   removing dead production code from `packages/eve` still needs one.
 
 ## Landing and continuation
 

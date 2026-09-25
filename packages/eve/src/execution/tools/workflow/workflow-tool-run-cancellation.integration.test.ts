@@ -1,21 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
+import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { setAgentHandleStore } from "#subagents/handles/store.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
   holdUntilAbortedWorkflow,
   receiveDelegatedResultWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
-import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getRun, start } from "#internal/workflow/runtime.js";
+import { workflowToolRunWorkflowReference } from "#execution/workflow-runtime.js";
 import {
-  buildSerializedContext,
+  buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
-  listWorkflowToolRunIds,
-  waitForNewWorkflowToolRun,
   waitForWorkflowToolRunTerminal,
 } from "#internal/testing/workflow-tool-run-harness.js";
 
@@ -44,7 +43,7 @@ describe("workflow tool cancellation", () => {
             ownerDeploymentId: "dpl_inline",
             input: { message: 'Run deploy_service with service "api"' },
             serializedContext: {
-              ...buildSerializedContext({
+              ...buildWorkflowToolSerializedContext({
                 continuationToken: `child-${kind}`,
                 mode: "conversation",
               }),
@@ -115,7 +114,7 @@ describe("workflow tool cancellation", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:yielded-child-cancel",
             mode: "conversation",
           }),
@@ -206,7 +205,7 @@ describe("workflow tool cancellation", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-cancel",
             mode: "conversation",
@@ -241,3 +240,33 @@ describe("workflow tool cancellation", () => {
     });
   }, 60_000);
 });
+
+/** Ids of every workflow tool run in the shared world, so a test can spot the one it started. */
+async function listWorkflowToolRunIds(): Promise<Set<string>> {
+  const world = await getWorld();
+  const page = await world.runs.list({ pagination: { limit: 100 } });
+  return new Set(
+    page.data
+      .filter(
+        (entry: { readonly workflowName?: string }) =>
+          entry.workflowName === workflowToolRunWorkflowReference.workflowId,
+      )
+      .map((entry: { readonly runId: string }) => entry.runId),
+  );
+}
+
+/** Polls until exactly one workflow tool run exists that was not in `before`. */
+async function waitForNewWorkflowToolRun(
+  before: ReadonlySet<string>,
+  timeout = 15_000,
+): Promise<string> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const started = [...(await listWorkflowToolRunIds())].filter((runId) => !before.has(runId));
+    if (started.length === 1) return started[0]!;
+    if (started.length > 1)
+      throw new Error(`Expected one new workflow tool run, found ${started.length}.`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for a workflow tool run to start.");
+}

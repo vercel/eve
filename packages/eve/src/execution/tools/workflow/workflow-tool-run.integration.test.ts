@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
-import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { workflowEntry } from "#execution/session/entry.js";
+import { start } from "#internal/workflow/runtime.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import { workflowEntry } from "#execution/session/entry.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import { SLEEP_INPUT_SCHEMA, executeSleepTool } from "#execution/tools/sleep.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   askThenRaceWorkflow,
   confirmDeployWorkflow,
@@ -13,10 +14,9 @@ import {
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
-import { start } from "#internal/workflow/runtime.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import {
-  buildSerializedContext,
+  buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
 } from "#internal/testing/workflow-tool-run-harness.js";
 
@@ -34,7 +34,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:step-reference",
             mode: "task",
           }),
@@ -59,7 +59,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: "Run sleep" },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-sleep",
             mode: "task",
           }),
@@ -85,7 +85,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-wait",
             mode: "task",
           }),
@@ -112,7 +112,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-step-context-misuse",
             mode: "task",
           }),
@@ -142,7 +142,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-fail",
             mode: "task",
           }),
@@ -169,7 +169,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run confirm_deploy with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-hitl",
             mode: "conversation",
@@ -239,7 +239,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run confirm_deploy with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-ask-deadline",
             mode: "conversation",
             requestInput: true,
@@ -285,7 +285,7 @@ describe("workflow tools", () => {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
           input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildSerializedContext({
+          serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-progress",
             mode: "conversation",
           }),

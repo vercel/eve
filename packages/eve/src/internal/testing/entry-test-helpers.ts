@@ -1,22 +1,9 @@
-import { expect, vi } from "vitest";
+import { expect } from "vitest";
 import { getWorld } from "#internal/workflow/runtime.js";
-import { hydrateWorkflowArguments, hydrateStepReturnValue } from "@workflow/core/serialization";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { type ToolContext } from "#tools/definition.js";
-import type {
-  AuthorizationDefinition,
-  ConnectionPrincipal,
-  TokenResult,
-} from "#shared/connection-types.js";
-import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { toInputSchema } from "#tools/schema.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 
 export function buildSerializedContext(overrides: {
@@ -71,115 +58,6 @@ export function buildSerializedContext(overrides: {
     context["eve.parentSession"] = overrides.parent;
   }
   return context;
-}
-
-export interface WeatherAuthRuntime {
-  completeCalls(): number;
-  completedPrincipals(): readonly ConnectionPrincipal[];
-  runtime: Awaited<ReturnType<typeof createTestRuntime>>;
-}
-
-/**
- * A get_weather tool behind an interactive authorization: getToken always
- * requires sign-in, and completeAuthorization mints `weather-token` from the
- * `oauth-code` callback. Shared by the callback-resume and
- * challenge-stays-open owner tests.
- */
-export async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
-  let completeCalls = 0;
-  const completedPrincipals: ConnectionPrincipal[] = [];
-  const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
-    principalType: "user",
-    async getToken(): Promise<TokenResult> {
-      throw new ConnectionAuthorizationRequiredError("weather");
-    },
-    async startAuthorization({ callbackUrl }) {
-      return {
-        challenge: {
-          displayName: "Weather",
-          instructions: "Sign in to continue.",
-          url: `https://idp.example/authorize?callback=${encodeURIComponent(callbackUrl)}`,
-        },
-        resume: { nonce: "weather-nonce" },
-      };
-    },
-    async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
-      completeCalls += 1;
-      completedPrincipals.push(principal);
-      expect(callback.params.code).toBe("oauth-code");
-      expect(resume).toEqual({ nonce: "weather-nonce" });
-      return { token: "weather-token" };
-    },
-  };
-  const getWeatherTool: ResolvedToolDefinition = {
-    description: "Get the current weather for a city.",
-    execute: createToolExecuteWithAuth({
-      scope: "get_weather",
-      async execute(rawInput, rawCtx) {
-        const ctx = rawCtx as ToolContext;
-        const token = await ctx.getToken(weatherAuth, {
-          authKey: "weather",
-          displayName: "Weather",
-        });
-        const city =
-          typeof rawInput === "object" &&
-          rawInput !== null &&
-          typeof (rawInput as { city?: unknown }).city === "string"
-            ? (rawInput as { city: string }).city
-            : "Lisbon";
-        return {
-          city,
-          condition: "Sunny",
-          summary: `authorized with ${token.token}`,
-          temperatureF: 72,
-        };
-      },
-    }),
-    inputSchema: toInputSchema({
-      additionalProperties: false,
-      properties: {
-        city: { type: "string" },
-      },
-      required: ["city"],
-      type: "object",
-    }),
-    logicalPath: "tools/get_weather.ts",
-    name: "get_weather",
-    owner: { kind: "application" },
-    sourceId: "tools/get_weather.ts",
-    sourceKind: "module",
-  };
-  const runtime = await createTestRuntime({
-    agent: { name: agentName },
-    tools: [getWeatherTool],
-  });
-  const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
-  if (manifestTool === undefined) {
-    throw new Error("Expected get_weather to be present in the test manifest.");
-  }
-  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
-    default: {
-      execute: getWeatherTool.execute,
-    },
-  };
-  return {
-    completeCalls: () => completeCalls,
-    completedPrincipals: () => completedPrincipals,
-    runtime,
-  };
-}
-
-export function authorizationAttemptId(events: readonly MessageStreamEvent[]): string {
-  const required = filterEventsByType(events, "authorization.required")[0];
-  const webhookUrl = required?.data.webhookUrl;
-  if (webhookUrl === undefined) throw new Error("Missing authorization callback URL.");
-  const segments = new URL(webhookUrl).pathname.split("/");
-  const callbackIndex = segments.lastIndexOf("callback");
-  const attemptId = segments[callbackIndex + 1];
-  if (callbackIndex === -1 || attemptId === undefined) {
-    throw new Error("Authorization callback URL is missing its attempt ID.");
-  }
-  return decodeURIComponent(attemptId);
 }
 
 export function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string): void {
@@ -261,7 +139,7 @@ async function readUntil(
       throw new Error("Workflow stream closed before reaching the expected event.");
     }
 
-    buffer += decoder.decode(value);
+    buffer += decoder.decode(value, { stream: true });
 
     for (
       let newlineIndex = buffer.indexOf("\n");
@@ -325,105 +203,18 @@ export async function expectHookClaims(
   );
 }
 
-export async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {
-  const world = await getWorld();
-  const deadline = Date.now() + 10_000;
-  let receivedPayloads: unknown[] = [];
-
-  while (Date.now() < deadline) {
-    const events = await world.events.list({
-      pagination: { limit: 1000 },
-      resolveData: "all",
-      runId,
-    });
-    receivedPayloads = [];
-
-    for (const event of events.data) {
-      if (event.eventType === "hook_received") {
-        const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
-        receivedPayloads.push(payload);
-        if (hasSubagentResult(payload, callId)) {
-          return payload;
-        }
-      }
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  throw new Error(
-    `Timed out waiting for delegated result "${callId}". Received: ${JSON.stringify(receivedPayloads)}`,
-  );
-}
-
-export async function waitForSubagentInputRequest(runId: string, callId: string): Promise<unknown> {
-  const world = await getWorld();
-  const deadline = Date.now() + 10_000;
-
-  while (Date.now() < deadline) {
-    const events = await world.events.list({
-      pagination: { limit: 1000 },
-      resolveData: "all",
-      runId,
-    });
-    for (const event of events.data) {
-      if (event.eventType !== "hook_received") continue;
-      const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
-      if (
-        typeof payload === "object" &&
-        payload !== null &&
-        "kind" in payload &&
-        payload.kind === "subagent-input-request" &&
-        "callId" in payload &&
-        payload.callId === callId
-      ) {
-        return payload;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-
-  throw new Error(`Timed out waiting for a subagent input request from caller "${callId}".`);
-}
-
-function hasSubagentResult(value: unknown, callId: string): boolean {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("kind" in value) ||
-    value.kind !== "runtime-action-result" ||
-    !("results" in value) ||
-    !Array.isArray(value.results)
-  ) {
-    return false;
-  }
-
-  return value.results.some(
-    (result) =>
-      typeof result === "object" &&
-      result !== null &&
-      "callId" in result &&
-      result.callId === callId,
-  );
-}
-
-export async function readSessionTimer(
-  ownerRunId: string,
-): Promise<{ runId: string; deadline: Date }> {
-  const world = await getWorld();
-  let timer: { runId: string; deadline: Date } | undefined;
-  await vi.waitFor(async () => {
-    const steps = await world.steps.list({ runId: ownerRunId, resolveData: "all" });
-    const start = steps.data.find((step) => step.stepName.endsWith("//startSessionTimeoutStep"));
-    expect(start?.output).toBeDefined();
-    const result = (await hydrateStepReturnValue(start!.output, ownerRunId, undefined)) as {
-      runId: string;
-    };
-    const run = await world.runs.get(result.runId);
-    const [input] = (await hydrateWorkflowArguments(run.input, run.runId, undefined)) as [
-      { deadline: Date },
-    ];
-    timer = { runId: run.runId, deadline: input.deadline };
-  });
-  return timer!;
+/** A queued follow-up delivery accepted by `acceptedDeploymentId`. */
+export function handoffFollowUp(acceptedDeploymentId: string, message: string, deliveryId: string) {
+  return {
+    turnPolicy: "queue" as const,
+    auth: null,
+    delivery: {
+      acceptedDeploymentId,
+      channelKind: "http",
+      channelName: "test",
+      deliveryId,
+    },
+    kind: "send" as const,
+    payload: { message },
+  };
 }

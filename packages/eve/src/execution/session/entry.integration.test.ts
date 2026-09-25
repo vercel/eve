@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -22,13 +25,11 @@ import { defineTool } from "#tools/definition.js";
 import { SessionTitleKey } from "#context/keys.js";
 import {
   buildSerializedContext,
+  captureEvents,
+  expectHookClaims,
   expectSingleTurn,
   listCallerStepNames,
-  captureEvents,
   withTimeout,
-  expectHookClaims,
-  waitForRuntimeActionResult,
-  waitForSubagentInputRequest,
 } from "#internal/testing/entry-test-helpers.js";
 
 afterEach(() => {
@@ -901,3 +902,85 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+async function waitForRuntimeActionResult(runId: string, callId: string): Promise<unknown> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+  let receivedPayloads: unknown[] = [];
+
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    receivedPayloads = [];
+
+    for (const event of events.data) {
+      if (event.eventType === "hook_received") {
+        const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+        receivedPayloads.push(payload);
+        if (hasSubagentResult(payload, callId)) {
+          return payload;
+        }
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(
+    `Timed out waiting for delegated result "${callId}". Received: ${JSON.stringify(receivedPayloads)}`,
+  );
+}
+
+async function waitForSubagentInputRequest(runId: string, callId: string): Promise<unknown> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    for (const event of events.data) {
+      if (event.eventType !== "hook_received") continue;
+      const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "kind" in payload &&
+        payload.kind === "subagent-input-request" &&
+        "callId" in payload &&
+        payload.callId === callId
+      ) {
+        return payload;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for a subagent input request from caller "${callId}".`);
+}
+
+function hasSubagentResult(value: unknown, callId: string): boolean {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("kind" in value) ||
+    value.kind !== "runtime-action-result" ||
+    !("results" in value) ||
+    !Array.isArray(value.results)
+  ) {
+    return false;
+  }
+
+  return value.results.some(
+    (result) =>
+      typeof result === "object" &&
+      result !== null &&
+      "callId" in result &&
+      result.callId === callId,
+  );
+}

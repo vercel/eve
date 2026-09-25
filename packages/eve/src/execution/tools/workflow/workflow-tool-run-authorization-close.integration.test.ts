@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { workflowEntry } from "#execution/session/entry.js";
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
-import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 import { getWorld, start } from "#internal/workflow/runtime.js";
+import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import { workflowEntry } from "#execution/session/entry.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
+import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
+import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 import {
-  buildSerializedContext,
+  buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
   waitForWorkflowToolRunTerminal,
 } from "#internal/testing/workflow-tool-run-harness.js";
@@ -34,7 +34,7 @@ describe("workflow step authorization failures", () => {
             ownerDeploymentId: "dpl_inline",
             input: { message: `Run deploy_service with service "${disposition}"` },
             serializedContext: {
-              ...buildSerializedContext({
+              ...buildWorkflowToolSerializedContext({
                 continuationToken: "http:step-auth-failure",
                 mode: "conversation",
                 requestInput: true,

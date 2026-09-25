@@ -1,35 +1,25 @@
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
 import { describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import {
   buildSerializedContext,
+  handoffFollowUp,
   listCallerStepNames,
-  readSessionTimer,
 } from "#internal/testing/entry-test-helpers.js";
 
 describe("workflowEntry integration", () => {
   describe("deployment handoff", () => {
-    const followUp = (acceptedDeploymentId: string, message: string, deliveryId: string) => ({
-      turnPolicy: "queue" as const,
-      auth: null,
-      delivery: {
-        acceptedDeploymentId,
-        channelKind: "http",
-        channelName: "test",
-        deliveryId,
-      },
-      kind: "send" as const,
-      payload: { message },
-    });
-
     it.each([undefined, 60_000, false] as const)(
       "renews the configured lifetime across handoffs and keeps the original stream (%s)",
       async (sessionTimeoutMs) => {
@@ -64,7 +54,7 @@ describe("workflowEntry integration", () => {
 
             await expect(
               workflowRuntime.dispatchSession({
-                command: followUp("dpl_b", "hello from b", "delivery-b"),
+                command: handoffFollowUp("dpl_b", "hello from b", "delivery-b"),
                 sessionId: anchor.runId,
               }),
             ).resolves.toMatchObject({ sessionId: anchor.runId, status: "accepted" });
@@ -125,7 +115,7 @@ describe("workflowEntry integration", () => {
             // and still streams on the original run.
             await expect(
               workflowRuntime.dispatchSession({
-                command: followUp("dpl_b", "third message", "delivery-c"),
+                command: handoffFollowUp("dpl_b", "third message", "delivery-c"),
                 sessionId: anchor.runId,
               }),
             ).resolves.toMatchObject({ status: "accepted" });
@@ -143,7 +133,7 @@ describe("workflowEntry integration", () => {
             }
             await waitForParkedTurnStep(successor.runId, 2);
             await workflowRuntime.dispatchSession({
-              command: followUp("dpl_c", "fourth message", "delivery-d"),
+              command: handoffFollowUp("dpl_c", "fourth message", "delivery-d"),
               sessionId: anchor.runId,
             });
             expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
@@ -184,7 +174,7 @@ describe("workflowEntry integration", () => {
 
             await waitForParkedTurnStep(nextOwner.runId);
             await workflowRuntime.dispatchSession({
-              command: followUp("dpl_d", "fifth message", "delivery-e"),
+              command: handoffFollowUp("dpl_d", "fifth message", "delivery-e"),
               sessionId: anchor.runId,
             });
             expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
@@ -219,3 +209,22 @@ describe("workflowEntry integration", () => {
     );
   });
 });
+
+async function readSessionTimer(ownerRunId: string): Promise<{ runId: string; deadline: Date }> {
+  const world = await getWorld();
+  let timer: { runId: string; deadline: Date } | undefined;
+  await vi.waitFor(async () => {
+    const steps = await world.steps.list({ runId: ownerRunId, resolveData: "all" });
+    const start = steps.data.find((step) => step.stepName.endsWith("//startSessionTimeoutStep"));
+    expect(start?.output).toBeDefined();
+    const result = (await hydrateStepReturnValue(start!.output, ownerRunId, undefined)) as {
+      runId: string;
+    };
+    const run = await world.runs.get(result.runId);
+    const [input] = (await hydrateWorkflowArguments(run.input, run.runId, undefined)) as [
+      { deadline: Date },
+    ];
+    timer = { runId: run.runId, deadline: input.deadline };
+  });
+  return timer!;
+}

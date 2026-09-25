@@ -1,18 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { filterEventsByType } from "#internal/testing/events.js";
+import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { workflowEntry } from "#execution/session/entry.js";
-import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import type { ToolContext } from "#tools/definition.js";
+import type {
+  AuthorizationDefinition,
+  ConnectionPrincipal,
+  TokenResult,
+} from "#shared/connection-types.js";
+import type { ResolvedToolDefinition } from "#runtime/types.js";
+import { toInputSchema } from "#tools/schema.js";
 import {
   buildSerializedContext,
-  createWeatherAuthRuntime,
-  authorizationAttemptId,
-  expectSingleTurn,
   captureEvents,
   expectHookClaims,
+  expectSingleTurn,
 } from "#internal/testing/entry-test-helpers.js";
 
 describe("workflowEntry integration", () => {
@@ -540,3 +553,112 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+interface WeatherAuthRuntime {
+  completeCalls(): number;
+  completedPrincipals(): readonly ConnectionPrincipal[];
+  runtime: Awaited<ReturnType<typeof createTestRuntime>>;
+}
+
+/**
+ * A get_weather tool behind an interactive authorization: getToken always
+ * requires sign-in, and completeAuthorization mints `weather-token` from the
+ * `oauth-code` callback. Shared by the callback-resume and
+ * challenge-stays-open owner tests.
+ */
+async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
+  let completeCalls = 0;
+  const completedPrincipals: ConnectionPrincipal[] = [];
+  const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
+    principalType: "user",
+    async getToken(): Promise<TokenResult> {
+      throw new ConnectionAuthorizationRequiredError("weather");
+    },
+    async startAuthorization({ callbackUrl }) {
+      return {
+        challenge: {
+          displayName: "Weather",
+          instructions: "Sign in to continue.",
+          url: `https://idp.example/authorize?callback=${encodeURIComponent(callbackUrl)}`,
+        },
+        resume: { nonce: "weather-nonce" },
+      };
+    },
+    async completeAuthorization({ callback, principal, resume }): Promise<TokenResult> {
+      completeCalls += 1;
+      completedPrincipals.push(principal);
+      expect(callback.params.code).toBe("oauth-code");
+      expect(resume).toEqual({ nonce: "weather-nonce" });
+      return { token: "weather-token" };
+    },
+  };
+  const getWeatherTool: ResolvedToolDefinition = {
+    description: "Get the current weather for a city.",
+    execute: createToolExecuteWithAuth({
+      scope: "get_weather",
+      async execute(rawInput, rawCtx) {
+        const ctx = rawCtx as ToolContext;
+        const token = await ctx.getToken(weatherAuth, {
+          authKey: "weather",
+          displayName: "Weather",
+        });
+        const city =
+          typeof rawInput === "object" &&
+          rawInput !== null &&
+          typeof (rawInput as { city?: unknown }).city === "string"
+            ? (rawInput as { city: string }).city
+            : "Lisbon";
+        return {
+          city,
+          condition: "Sunny",
+          summary: `authorized with ${token.token}`,
+          temperatureF: 72,
+        };
+      },
+    }),
+    inputSchema: toInputSchema({
+      additionalProperties: false,
+      properties: {
+        city: { type: "string" },
+      },
+      required: ["city"],
+      type: "object",
+    }),
+    logicalPath: "tools/get_weather.ts",
+    name: "get_weather",
+    owner: { kind: "application" },
+    sourceId: "tools/get_weather.ts",
+    sourceKind: "module",
+  };
+  const runtime = await createTestRuntime({
+    agent: { name: agentName },
+    tools: [getWeatherTool],
+  });
+  const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);
+  if (manifestTool === undefined) {
+    throw new Error("Expected get_weather to be present in the test manifest.");
+  }
+  runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
+    default: {
+      execute: getWeatherTool.execute,
+    },
+  };
+  return {
+    completeCalls: () => completeCalls,
+    completedPrincipals: () => completedPrincipals,
+    runtime,
+  };
+}
+
+function authorizationAttemptId(events: readonly MessageStreamEvent[]): string {
+  const required = filterEventsByType(events, "authorization.required")[0];
+  const webhookUrl = required?.data.webhookUrl;
+  if (webhookUrl === undefined) throw new Error("Missing authorization callback URL.");
+  const segments = new URL(webhookUrl).pathname.split("/");
+  const callbackIndex = segments.lastIndexOf("callback");
+  const attemptId = segments[callbackIndex + 1];
+  if (callbackIndex === -1 || attemptId === undefined) {
+    throw new Error("Authorization callback URL is missing its attempt ID.");
+  }
+  return decodeURIComponent(attemptId);
+}
