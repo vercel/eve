@@ -18,7 +18,7 @@ export default defineAgent({
 ```
 
 For a static AI Gateway model ID, you can make the same source change from the
-project root with `eve set --model anthropic/claude-opus-5.5` or from the local
+project root with `eve set model anthropic/claude-opus-5.5` or from the local
 dev TUI with `/model anthropic/claude-opus-5.5`.
 
 The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `spacexai/grok-4.7`; authoring the file replaces that source.
@@ -133,7 +133,7 @@ A dynamic model selection can return `reasoning` alongside `model` to override
 the agent-level setting for that selection. Omitting it inherits the agent setting;
 `"provider-default"` explicitly uses the provider's default.
 
-Run `eve set --reasoning high` to update this field from the command line.
+Run `eve set model --reasoning high` to update this field from the command line.
 
 ## Compaction
 

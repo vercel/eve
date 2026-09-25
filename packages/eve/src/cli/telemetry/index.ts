@@ -168,13 +168,14 @@ export function canonicalCommand(argv: readonly string[]): string {
   const commandIndex = argv.findIndex((argument) => !argument.startsWith("-"));
   const command = argv[commandIndex];
   if (command === undefined || /^https?:\/\//.test(command)) return "dev";
-  if (command === "traces" && argv.length === commandIndex + 1) return "traces:show";
 
   const nested = argv.slice(commandIndex + 1).find((argument) => !argument.startsWith("-"));
   if (nested !== undefined) {
-    const nestedCommand = CLI_TELEMETRY_COMMANDS.get(`${command}:${nested}`);
+    const normalizedNested = nested === "ls" ? "list" : nested;
+    const nestedCommand = CLI_TELEMETRY_COMMANDS.get(`${command}:${normalizedNested}`);
     if (nestedCommand !== undefined) return nestedCommand;
   }
+  if (command === "logs" || command === "traces") return `${command}:show`;
   return CLI_TELEMETRY_COMMANDS.get(command) ?? "unknown";
 }
 

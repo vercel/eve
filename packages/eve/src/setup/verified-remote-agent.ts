@@ -36,6 +36,7 @@ const defaultDeps: InspectVerifiedRemoteAgentDeps = {
  * before inspection is retried.
  */
 export async function inspectVerifiedRemoteAgent(input: {
+  readonly headers?: Readonly<Record<string, string>>;
   readonly serverUrl: string;
   readonly workspaceRoot: string;
   readonly prompter?: Prompter;
@@ -45,6 +46,7 @@ export async function inspectVerifiedRemoteAgent(input: {
 }): Promise<VerifiedRemoteAgentInspection> {
   const deps = { ...defaultDeps, ...input.deps };
   const verified = await deps.resolveVerifiedRemoteDevelopmentClient({
+    headers: input.headers,
     serverUrl: input.serverUrl,
     signal: input.signal,
     workspaceRoot: input.workspaceRoot,
@@ -75,6 +77,7 @@ export async function inspectVerifiedRemoteAgent(input: {
   const options: ClientOptions = {
     ...verified.options,
     auth: { vercelOidc: { token: authentication.resolveToken } },
+    headers: input.headers,
     host: input.serverUrl,
     redirect: "manual",
   };

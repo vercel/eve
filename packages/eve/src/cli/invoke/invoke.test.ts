@@ -10,11 +10,6 @@ const cursor = {
   streamIndex: 3,
 };
 const target = { kind: "remote" as const, serverUrl: "https://example.com/" };
-const localTarget = {
-  kind: "local" as const,
-  serverUrl: "https://example.com/",
-  workspaceRoot: "/repo",
-};
 const resume = { session: cursor, target };
 const request = {
   action: { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "bash" },
@@ -179,7 +174,7 @@ describe("runInvoke", () => {
     });
   });
 
-  it("rejects authorization that depends on a temporary local callback server", async () => {
+  it("returns authorization with a callback URL", async () => {
     await expect(
       runStreamedInvocation([
         {
@@ -195,10 +190,9 @@ describe("runInvoke", () => {
           data: { continuationToken: "session-id", wait: "next-user-message" },
         },
       ]),
-    ).resolves.toEqual({
-      status: "failed",
-      message:
-        "Local invocations are not supported. Start eve dev, then use eve remote invoke with its URL.",
+    ).resolves.toMatchObject({
+      status: "authorization-required",
+      authorizations: [{ name: "linear" }],
     });
   });
 
@@ -308,8 +302,9 @@ async function runStreamedInvocation(
     .mockResolvedValueOnce(Response.json({ sessionId: "ses_1" }, { status: 202 }))
     .mockResolvedValueOnce(streamResponse(events));
   return runInvoke({
+    headers: { authorization: "Bearer explicit" },
     operation: { kind: "send", payload: { message: "do foo" } },
-    target: localTarget,
+    target: { kind: "remote", serverUrl: "https://example.com/", workspaceRoot: "/repo" },
     ...overrides,
   });
 }

@@ -7,9 +7,7 @@ import {
 } from "#client/index.js";
 import type { SendTurnPayload } from "#client/types.js";
 import { collectTurnEvents, summarizeTurnEvents } from "#client/session-utils.js";
-import { resolveLocalDevelopmentClientOptions } from "#services/dev-client/client-options.js";
-import { resolveLinkedDevelopmentOidcToken } from "#services/dev-client/request-headers.js";
-import type { DevelopmentTarget } from "#services/dev-client/target.js";
+import type { RemoteDevelopmentTarget } from "#services/dev-client/target.js";
 import {
   formatVercelTrustedSourcesFailure,
   isVercelAuthChallenge,
@@ -33,7 +31,7 @@ export interface RunInvokeInput {
   readonly headers?: Readonly<Record<string, string>>;
   readonly operation: InvokeOperation;
   readonly signal?: AbortSignal;
-  readonly target: DevelopmentTarget;
+  readonly target: RemoteDevelopmentTarget;
   readonly vercelScope?: string;
 }
 
@@ -128,18 +126,6 @@ async function createInvokeClient(input: RunInvokeInput): Promise<{
   readonly client: Client;
   readonly deploymentResolution?: VercelDeploymentResolution;
 }> {
-  if (input.target.kind === "local") {
-    return {
-      client: new Client({
-        ...resolveLocalDevelopmentClientOptions({
-          headers: input.headers,
-          serverUrl: input.target.serverUrl,
-          token: () => resolveLinkedDevelopmentOidcToken(input.target.workspaceRoot),
-        }),
-      }),
-    };
-  }
-
   const { deploymentResolution, options } = await resolveVerifiedRemoteDevelopmentClient({
     headers: input.headers,
     serverUrl: input.target.serverUrl,
@@ -174,7 +160,7 @@ async function observeSafely(
 }
 
 async function observeInvocation(
-  target: DevelopmentTarget,
+  target: RemoteDevelopmentTarget,
   session: ClientSession,
   response: AsyncIterable<MessageStreamEvent>,
 ): Promise<InvokeResult> {
@@ -202,16 +188,6 @@ async function observeInvocation(
 
   const authorizations = summary.pendingAuthorizations;
   if (authorizations.length > 0) {
-    if (
-      target.kind === "local" &&
-      authorizations.some((authorization) => authorization.webhookUrl !== undefined)
-    ) {
-      return {
-        status: "failed",
-        message:
-          "Local invocations are not supported. Start eve dev, then use eve remote invoke with its URL.",
-      };
-    }
     return { status: "authorization-required", authorizations, resume };
   }
 
@@ -222,15 +198,14 @@ async function observeInvocation(
   return { status: "ready", outcome, resume };
 }
 
-function runningResult(target: DevelopmentTarget, state: ClientSessionState): InvokeResult {
+function runningResult(target: RemoteDevelopmentTarget, state: ClientSessionState): InvokeResult {
   return { status: "running", resume: createResume(target, state) };
 }
 
-function createResume(target: DevelopmentTarget, session: ClientSessionState): InvokeResume {
+function createResume(target: RemoteDevelopmentTarget, session: ClientSessionState): InvokeResume {
   return {
     session,
-    target:
-      target.kind === "local" ? { kind: "local" } : { kind: "remote", serverUrl: target.serverUrl },
+    target: { kind: "remote", serverUrl: target.serverUrl },
   };
 }
 

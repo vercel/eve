@@ -55,10 +55,6 @@ interface CliLogger {
 
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
-  isActiveDevelopmentServerForApp(input: {
-    readonly appRoot: string;
-    readonly serverUrl: string;
-  }): Promise<boolean>;
   findApplicationRoot(cwd: string): Promise<string | undefined>;
   buildHost: BuildHost;
   resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;

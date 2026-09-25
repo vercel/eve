@@ -832,12 +832,11 @@ describe("eve remote connect", () => {
   });
 
   it("keeps an unverified loopback URL on the remote credential path", async () => {
-    const runDevelopmentTui = await runInteractiveDev(
-      ["remote", "connect", "http://127.0.0.1:2000"],
-      {
-        isActiveDevelopmentServerForApp: async () => false,
-      },
-    );
+    const runDevelopmentTui = await runInteractiveDev([
+      "remote",
+      "connect",
+      "http://127.0.0.1:2000",
+    ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -5,7 +5,7 @@ import {
   resolveDevelopmentUrlTarget,
   type DevelopmentRequestHeaders,
 } from "#cli/dev/url-target.js";
-import type { DevelopmentTarget } from "#services/dev-client/target.js";
+import type { RemoteDevelopmentTarget } from "#services/dev-client/target.js";
 
 import { resolveInvokeOperation, type RunInvokeInput } from "./invoke.js";
 import { parseInvokeResumeInput, type InvokeResult } from "./result.js";
@@ -86,9 +86,6 @@ async function runInvokeCommand(input: {
     { header: options.header, url: input.url },
     undefined,
   )!;
-  if (resumedTarget !== undefined && resumedTarget.kind !== "remote") {
-    throw new Error("A local invocation cannot be resumed by eve remote invoke.");
-  }
   if (
     resumedTarget?.serverUrl !== undefined &&
     resumedTarget.serverUrl !== remoteTarget.serverUrl
@@ -119,7 +116,7 @@ async function executeWithSignals(
     readonly logger: InvokeCommandLogger;
     readonly options: InvokeCliOptions;
   },
-  target: DevelopmentTarget,
+  target: RemoteDevelopmentTarget,
   headers: DevelopmentRequestHeaders | undefined,
   operation: RunInvokeInput["operation"],
   vercelScope?: string,
@@ -157,7 +154,9 @@ async function readJsonFromStdin(): Promise<unknown> {
   process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) text += chunk;
   if (text.trim().length === 0) {
-    throw new InvalidArgumentError("--resume expected a resumable eve invoke result on stdin.");
+    throw new InvalidArgumentError(
+      "--resume expected a resumable eve remote invoke result on stdin.",
+    );
   }
   try {
     return JSON.parse(text) as unknown;

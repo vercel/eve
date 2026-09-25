@@ -1,6 +1,8 @@
 import { InvalidArgumentError } from "#compiled/commander/index.js";
 import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 
+import { parseDevelopmentServerUrl } from "./url.js";
+
 export type DevelopmentRequestHeaders = Readonly<Record<string, string>>;
 
 export interface DevelopmentUrlTargetOptions {
@@ -63,7 +65,7 @@ export function resolveDevelopmentUrlTarget(
     throw new InvalidArgumentError("The --no-ui option cannot be used with --url.");
   }
 
-  const parsedUrl = URL.parse(url);
+  const parsedUrl = URL.parse(parseDevelopmentServerUrl(url));
   if (parsedUrl === null) {
     throw new InvalidArgumentError(`Expected an absolute http(s) URL, received "${url}".`);
   }

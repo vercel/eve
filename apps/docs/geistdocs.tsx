@@ -59,7 +59,7 @@ export const agent = {
   instructions: [
     "To create or extend an eve agent for the user, start from the Getting Started guide — get it as Markdown from /llms.mdx/getting-started (or via /llms.txt).",
     "Ask the user only for genuine decisions (name, model, channels, provider, deploy) and for browser/OAuth steps (vercel login, vercel link, vercel connect create slack); automate everything else.",
-    "Verify setup with `eve info --json` and `eve channels list --json` before reporting success.",
+    "Verify setup with `eve info --json` before reporting success.",
     "Use /llms.txt as a concise task-oriented index and /sitemap.md as the exhaustive page map.",
     "Use /llms-full.txt only when you need the complete documentation corpus for offline indexing or a large context window.",
     "Fetch individual docs or integration pages with a .md or .mdx extension for focused page-level context. Template pages are HTML discovery pages and do not expose this alternate Markdown route.",

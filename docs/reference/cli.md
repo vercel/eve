@@ -226,6 +226,14 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
+A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
+
+Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
+
+Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. Each generation contains the compiled authored module graph and runtime resources rather than a recursive copy of the app or workspace. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
+
+Local development records traces under `.eve/traces/` by default and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`, or disable the destination with `agent/instrumentation/local.ts`; see [`eve traces`](#retention) for the rules and defaults.
+
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
 
 ## `eve remote`
@@ -238,30 +246,48 @@ eve remote invoke https://agent.example.com "Summarize station telemetry"
 eve remote info https://agent.example.com
 ```
 
-`connect` opens the terminal UI. `invoke` emits a JSON result after a turn completes or reaches a blocking input or authorization event. It supports `--resume`, repeatable `-H, --header <header>`, and `--scope <team>`. `info` verifies the target and prints its inspection response. Remote commands never start a local application.
+`connect` opens the terminal UI. `info` verifies the target and prints its inspection response. Remote commands never start a local application.
 
-A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
-
-For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
+### `eve remote connect`
 
 ```bash
-eve remote connect https://user:pass@your-app.example.com
+eve remote connect <url> [-H "Name: value"]
 ```
 
-For bearer tokens or custom schemes, pass explicit headers with `-H`.
+Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
 
-Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
+### `eve remote invoke`
 
-Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. Each generation contains the compiled authored module graph and runtime resources rather than a recursive copy of the app or workspace. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
+```bash
+eve remote invoke <url> [prompt] [--resume] [-H "Name: value"] [--scope <team>]
+```
 
-Local development records traces under `.eve/traces/` by default and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`, or disable the destination with `agent/instrumentation/local.ts`; see [`eve traces`](#retention) for the rules and defaults.
+Invokes an existing agent without opening the terminal UI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
+
+| Option                  | Type   | Default  | Description                                     |
+| ----------------------- | ------ | -------- | ----------------------------------------------- |
+| `<url>`                 | string | required | Existing eve agent URL                          |
+| `[prompt]`              | string | none     | Prompt, follow-up, or answer to a pending input |
+| `-H, --header <header>` | string | none     | Request header for the URL target; repeatable   |
+| `--resume`              | flag   | off      | Read a previous resumable result from stdin     |
+| `--scope <team>`        | string | current  | Vercel team that owns the URL target            |
+
+`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input. An `authorization-required` result lists every unresolved challenge; complete them, then resume without text. Pass headers and scope again when resuming. Paused invocations exit `3`; failures exit `1`. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
+
+### `eve remote info`
+
+```bash
+eve remote info <url> [-H "Name: value"] [--json]
+```
+
+Verifies the existing agent and prints its inspection response. Use `-H, --header <header>` for protected targets; repeat it for multiple headers.
 
 ## `eve logs`
 
 ```bash
 eve logs            # print the most recent diagnostic log
-eve logs list         # list logs, most recent first
-eve logs show <logid>    # print a specific log
+eve logs list          # list logs, most recent first
+eve logs show <logid>  # print a specific log
 eve logs --dump     # prepend the log's environment dump
 eve logs --events   # interleave session events from the local workflow store
 ```
@@ -281,8 +307,8 @@ Each log has a same-named `.dump` sibling holding environment diagnostics and se
 ```bash
 eve traces list              # list traces, most recent first
 eve traces list --json       # emit machine-readable trace summaries
-eve traces show            # show the most recent span tree
-eve traces show <trace>         # show one span tree
+eve traces show         # show the most recent span tree
+eve traces show <trace> # show one span tree
 eve traces --verbose       # expand every span with all attributes and events
 eve traces --json          # dump the full trace as JSON
 ```

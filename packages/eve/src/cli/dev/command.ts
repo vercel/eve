@@ -15,8 +15,11 @@ import type { DevelopmentCliOptions } from "./command-options.js";
 import { runInteractiveDevelopmentUi } from "./run-interactive-ui.js";
 import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "./tui/tui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "./ui-options.js";
-import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "./url-target.js";
-import { parseDevelopmentServerUrl } from "./url.js";
+import {
+  parseDevelopmentHeaderOption,
+  resolveDevelopmentUrlTarget,
+  type DevelopmentRequestHeaders,
+} from "./url-target.js";
 import { waitForServerOrStop, waitForUiOrServer } from "./wait-for-ui.js";
 import {
   parseContextSizeOption,
@@ -67,19 +70,27 @@ export function registerRemoteCommands(input: {
   program
     .command("info <url>")
     .description("Inspect an existing eve agent.")
+    .option(
+      "-H, --header <header>",
+      'Request header for the URL target, in "Name: value" form (repeatable)',
+      parseDevelopmentHeaderOption,
+    )
     .option("--json", "Output as JSON")
-    .action(async (url: string, options: { json?: boolean }) => {
-      const serverUrl = parseDevelopmentServerUrl(url);
-      const inspection = await inspectVerifiedRemoteAgent({
-        prompter:
-          process.stdin.isTTY && process.stdout.isTTY
-            ? (await import("#setup/prompter.js")).createPrompter()
-            : undefined,
-        serverUrl,
-        workspaceRoot: applicationContext.root,
-      });
-      logger.log(JSON.stringify(inspection.info, null, options.json === true ? 0 : 2));
-    });
+    .action(
+      async (url: string, options: { header?: DevelopmentRequestHeaders; json?: boolean }) => {
+        const target = resolveDevelopmentUrlTarget({ header: options.header, url }, undefined)!;
+        const inspection = await inspectVerifiedRemoteAgent({
+          headers: target.headers,
+          prompter:
+            process.stdin.isTTY && process.stdout.isTTY
+              ? (await import("#setup/prompter.js")).createPrompter()
+              : undefined,
+          serverUrl: target.serverUrl,
+          workspaceRoot: applicationContext.root,
+        });
+        logger.log(JSON.stringify(inspection.info, null, options.json === true ? 0 : 2));
+      },
+    );
 
   program
     .command("connect <url>")
@@ -141,7 +152,6 @@ export function registerRemoteCommands(input: {
       try {
         await runInteractiveDevelopmentUi({
           applicationRoot: applicationContext.root,
-          existingLocalServer: false,
           lifecycle,
           onOnboardingStep: telemetry.trackSetupStep,
           onOnboardingTerminal: telemetry.trackSetupTerminal,
@@ -310,7 +320,6 @@ export function registerDevelopmentCommand(input: {
           runUi: async () =>
             await runInteractiveDevelopmentUi({
               applicationRoot: applicationContext.root,
-              existingLocalServer: false,
               lifecycle,
               onOnboardingStep: telemetry.trackSetupStep,
               onOnboardingTerminal: telemetry.trackSetupTerminal,

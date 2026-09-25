@@ -8,10 +8,7 @@ const sessionCursorSchema = z
     streamIndex: z.number().int().nonnegative(),
   })
   .strict();
-const targetSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("local") }).strict(),
-  z.object({ kind: z.literal("remote"), serverUrl: z.url() }).strict(),
-]);
+const targetSchema = z.object({ kind: z.literal("remote"), serverUrl: z.url() }).strict();
 const invokeResumeSchema = z
   .object({ session: sessionCursorSchema, target: targetSchema })
   .strict();
@@ -100,14 +97,3 @@ export function parseInvokeResumeInput(value: unknown): InvokeResult & { resume:
   }
   throw new Error("Resume JSON is not a valid resumable eve remote invoke result.");
 }
-
-/** JSON Schema generated from the canonical invoke result runtime schema. */
-export const invokeResultJsonSchema = {
-  ...z.toJSONSchema(invokeResultSchema, {
-    io: "input",
-    target: "draft-2020-12",
-    unrepresentable: "any",
-  }),
-  $id: "https://eve.dev/schemas/invoke-result.json",
-  title: "eve remote invoke result",
-};

@@ -60,7 +60,7 @@ describe("buildHomePageResponse", () => {
     const body = await response.text();
 
     expect(body).toContain("support-$&amp;-agent");
-    expect(body).toContain("eve dev https://agent-$&amp;.example");
+    expect(body).toContain("eve remote connect https://agent-$&amp;.example");
     expect(body).not.toContain("{{AGENT_NAME}}");
     expect(body).not.toContain("{{DEPLOYMENT_URL}}");
   });
@@ -68,7 +68,7 @@ describe("buildHomePageResponse", () => {
   it("echoes the deployment origin into the `eve dev` hint", async () => {
     const body = await buildResponseForRequest("https://my-agent.example.com/").text();
 
-    expect(body).toContain("eve dev https://my-agent.example.com");
+    expect(body).toContain("eve remote connect https://my-agent.example.com");
     expect(body).not.toContain("eve dev {{DEPLOYMENT_URL}}");
   });
 
@@ -80,7 +80,7 @@ describe("buildHomePageResponse", () => {
       "x-forwarded-proto": "https",
     }).text();
 
-    expect(body).toContain("eve dev https://agent.production.example");
+    expect(body).toContain("eve remote connect https://agent.production.example");
     expect(body).not.toContain("0.0.0.0");
   });
 
@@ -90,7 +90,7 @@ describe("buildHomePageResponse", () => {
       "x-forwarded-proto": "https",
     }).text();
 
-    expect(body).toContain("eve dev https://public.example");
+    expect(body).toContain("eve remote connect https://public.example");
     expect(body).not.toContain("internal-edge");
   });
 

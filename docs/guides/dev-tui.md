@@ -143,7 +143,7 @@ eve remote connect https://your-app.example.com -H 'Authorization: Bearer your_t
 
 Remote Vercel sessions reuse an existing authorized CLI session. They do not open an account login flow or modify the local project's Vercel link or `.env.local`.
 
-When Deployment Protection blocks startup, eve verifies the target project and asks before adding a Trusted Sources rule for development access to that deployment's environment. After approval, eve applies the rule and checks access again before returning to chat. Cancelling preserves your draft; restart `eve dev <url>` to try again. If you cannot change the project's policy, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or ask a project administrator to configure access in Deployment Protection settings.
+When Deployment Protection blocks startup, eve verifies the target project and asks before adding a Trusted Sources rule for development access to that deployment's environment. After approval, eve applies the rule and checks access again before returning to chat. Cancelling preserves your draft; restart `eve remote connect <url>` to try again. If you cannot change the project's policy, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or ask a project administrator to configure access in Deployment Protection settings.
 
 ## What to read next
 
