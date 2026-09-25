@@ -2955,7 +2955,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // appears beneath it.
     expect(snapshot).toContain("esc to dismiss");
     expect(snapshot).toContain("enter to select");
-    expect(snapshot).not.toContain("↑/↓ move");
+    expect(snapshot).toContain("↑/↓ move");
     expect(countOccurrences(snapshot, "esc to dismiss")).toBe(1);
 
     input.send("j");

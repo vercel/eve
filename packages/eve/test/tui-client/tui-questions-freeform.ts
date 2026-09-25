@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { Client } from "eve/client";
@@ -48,17 +47,17 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.type(promptLines.join(" · "));
   input.enter();
 
-  await screen.waitForText("› 1. Production", 60_000);
-  console.log(theme.muted("[tui-freeform] select UI live, highlight on Production"));
+  await screen.waitForText("↑/↓ move · enter to select · esc to dismiss", 60_000);
+  console.log(theme.muted("[tui-freeform] select drawer is live"));
 
-  await sleep(500);
+  await sleep(1_000);
 
   // Navigate past every predefined option to the freeform row.
-  input.emit("data", Buffer.from("\x1B[B")); // → Staging
-  input.emit("data", Buffer.from("\x1B[B")); // → Preview
-  input.emit("data", Buffer.from("\x1B[B")); // → Type your own answer
-  await screen.waitForText("› 4. Type your own answer", 2_000);
-  console.log(theme.muted("[tui-freeform] highlight moved to freeform row"));
+  input.down(); // → Staging
+  input.down(); // → Preview
+  input.down(); // → Type your own answer
+  await screen.waitForText("Type your own answer", 2_000);
+  console.log(theme.muted("[tui-freeform] moved to freeform row"));
 
   // The freeform row focuses its inline elbow editor the moment the cursor
   // reaches it — typing lands there directly, no Enter required.

@@ -1417,7 +1417,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#theme,
           width,
         ),
-        ["enter to select · esc to dismiss"],
+        ["↑/↓ move · enter to select · esc to dismiss"],
         this.#theme,
         width,
       );
