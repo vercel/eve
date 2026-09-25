@@ -130,10 +130,6 @@ export async function takeOverSession(
     if (isHookConflictError(error)) return false;
     throw error;
   }
-  // Every claim settles before a refusal propagates, so release sees them all.
-  const outcomes = await Promise.allSettled(
-    tokens.map((token) => inbox.forceClaimSessionHook(token)),
-  );
-  for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+  for (const token of tokens) inbox.forceClaimSessionHook(token);
   return true;
 }

@@ -128,7 +128,7 @@ describe("TakeoverSessionHandoff", () => {
 
 describe("takeOverSession", () => {
   it("fences the attempt, validates, then force-claims every hook", async () => {
-    const inbox = { forceClaimSessionHook: vi.fn(async () => {}) };
+    const inbox = { forceClaimSessionHook: vi.fn() };
     const tokens = ["eve:session:session-1:inbox", "channel:current"];
     installFence(null);
 
@@ -141,30 +141,15 @@ describe("takeOverSession", () => {
   });
 
   it("leaves the session to another start of the same attempt", async () => {
-    const inbox = { forceClaimSessionHook: vi.fn(async () => {}) };
+    const inbox = { forceClaimSessionHook: vi.fn() };
     installFence({ runId: "wrun_first_start" });
 
     await expect(takeOverSession(handoffInput(), inbox, ["token"])).resolves.toBe(false);
     expect(inbox.forceClaimSessionHook).not.toHaveBeenCalled();
   });
 
-  it("surfaces a refused takeover after every claim settles", async () => {
-    const refusal = Object.assign(new Error("refused"), { name: "HookConflictError" });
-    const inbox = {
-      forceClaimSessionHook: vi.fn(async (token: string) => {
-        if (token === "refused") throw refusal;
-      }),
-    };
-    installFence(null);
-
-    await expect(takeOverSession(handoffInput(), inbox, ["refused", "taken"])).rejects.toBe(
-      refusal,
-    );
-    expect(inbox.forceClaimSessionHook).toHaveBeenCalledTimes(2);
-  });
-
   it("claims nothing when the checkpoint is rejected", async () => {
-    const inbox = { forceClaimSessionHook: vi.fn(async () => {}) };
+    const inbox = { forceClaimSessionHook: vi.fn() };
     installFence(null);
     validateSessionCheckpointStepMock.mockRejectedValue(new Error("unsupported checkpoint"));
 
@@ -258,7 +243,7 @@ function createInbox(accepted: SessionInboxPayload[] = []): SessionInboxHandle {
     claimedTokens: [],
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => accepted),
-    forceClaimSessionHook: vi.fn(async () => {}),
+    forceClaimSessionHook: vi.fn(),
     hasPending: vi.fn(() => false),
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),

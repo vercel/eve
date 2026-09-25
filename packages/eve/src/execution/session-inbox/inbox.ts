@@ -63,10 +63,10 @@ export interface SessionInboxOwnership {
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
   /**
-   * Takes a token from whichever run holds it. The previous holder keeps what
-   * its hook accepted first. Rejects when the World refuses the takeover.
+   * Takes a token from whichever run holds it, without waiting for the claim
+   * to register. The previous holder keeps what its hook accepted first.
    */
-  forceClaimSessionHook(token: string): Promise<void>;
+  forceClaimSessionHook(token: string): void;
   dispose(): Promise<void>;
   /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
   release(): Promise<SessionInboxPayload[]>;
@@ -169,16 +169,17 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
-    async forceClaimSessionHook(token) {
-      const hook = createHook<SessionInboxPayload>({
-        token: sessionInboxHookToken(token),
-        metadata: { sessionId },
-        experimental_force: true,
-      });
-      // A run started below spec 8 cannot be taken from; the World answers
-      // with an ordinary conflict, which must surface before activation.
-      await claimHookOwnership(hook);
-      const source: Source = { token, hook, stopping: false, closed: false };
+    forceClaimSessionHook(token) {
+      const source: Source = {
+        token,
+        hook: createHook<SessionInboxPayload>({
+          token: sessionInboxHookToken(token),
+          metadata: { sessionId },
+          experimental_force: true,
+        }),
+        stopping: false,
+        closed: false,
+      };
       sources.push(source);
       void pump(source);
     },

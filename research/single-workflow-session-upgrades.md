@@ -208,10 +208,11 @@ every address always resolves to a live owner.
    forced claims would let the second start take the session from the first; the start that loses
    the fence exits without touching the session. The fence registers alongside validation and is
    read after it, so validation still runs inline.
-4. The candidate force-claims that exact hook set and waits for the claims to register before it
-   activates. A World refuses to take hooks from a run started below spec 8, and that refusal must
-   surface before the old owner is told to leave. The candidate performs no model or tool work until
-   it owns every hook, and processes the triggering delivery before any later arrival.
+4. The candidate force-claims that exact hook set and activates without waiting for the claims to
+   register: a version 2 or later source runs on a Workflow spec that can always be taken from.
+   The Workflow runtime commits every hook of a suspension before the activation step it schedules,
+   so the takeover precedes the old owner's activation signal. The candidate processes the
+   triggering delivery before any later arrival.
 5. On activation the old owner's readers have already delivered everything their hooks accepted
    before the takeover. The old owner forwards those commands to the successor in acceptance
    order, then exits, or parks as the stream anchor if it is the original run. Forwarded commands

@@ -1913,66 +1913,6 @@ describe("workflowEntry integration", () => {
       });
     });
 
-    it("keeps the session when the World refuses to take hooks from the current owner", async () => {
-      const runtime = await createTestRuntime({
-        agent: { name: "workflow-entry-handoff-refused" },
-      });
-
-      await runtime.run(async () => {
-        // A run started below spec 8 cannot be taken from; the World answers
-        // the successor's forced claims with an ordinary hook conflict.
-        const anchor = await start(
-          workflowEntry,
-          [
-            {
-              kind: "initial",
-              ownerDeploymentId: "dpl_a",
-              sessionTimeoutMs: false,
-              input: { message: "Alice opens a session." },
-              serializedContext: buildSerializedContext({
-                acceptedDeploymentId: "dpl_a",
-                channelKind: "http",
-                mode: "conversation",
-              }),
-            },
-          ],
-          { specVersion: 7 },
-        );
-        const stream = captureTurnEvents(anchor);
-        const workflowRuntime = createWorkflowRuntime({
-          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-        });
-        try {
-          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-          await waitForParkedTurnStep(anchor.runId);
-          await workflowRuntime.dispatchSession({
-            command: followUp("dpl_b", "Bob asks from the next deployment.", "refused-trigger"),
-            sessionId: anchor.runId,
-          });
-          const second = await withTimeout(stream.nextTurn(), "refused handoff turn");
-          expect(filterEventsByType(second, "session.failed")).toEqual([]);
-          expect(second.at(-1)?.type).toBe("session.waiting");
-
-          await workflowRuntime.dispatchSession({
-            command: followUp("dpl_a", "Alice follows up.", "refused-follow-up"),
-            sessionId: anchor.runId,
-          });
-          const third = await withTimeout(stream.nextTurn(), "turn after refused handoff");
-          expect(filterEventsByType(third, "session.failed")).toEqual([]);
-          expect(
-            third.some(
-              (event) =>
-                event.type === "message.completed" &&
-                event.data.message?.includes("Alice follows up.") === true,
-            ),
-          ).toBe(true);
-        } finally {
-          stream.dispose();
-          if ((await anchor.status) === "running") await anchor.cancel();
-        }
-      });
-    });
-
     it("keeps one owner when the same successor is started twice", async () => {
       const runtime = await createTestRuntime({
         agent: { name: "workflow-entry-handoff-duplicate" },

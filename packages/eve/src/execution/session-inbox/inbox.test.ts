@@ -213,16 +213,15 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
-  it("force-claims a token and reads from it once registered", async () => {
-    installHooks(
-      createMockHook({
-        reads: [Promise.resolve(resolved(send("after takeover")))],
-        token: "stable",
-      }),
-    );
+  it("force-claims a token and reads from it without waiting for registration", async () => {
+    const stable = createMockHook({
+      reads: [Promise.resolve(resolved(send("after takeover")))],
+      token: "stable",
+    });
+    installHooks(stable);
     const inbox = createSessionInbox("session-1");
 
-    await inbox.forceClaimSessionHook("stable");
+    inbox.forceClaimSessionHook("stable");
     expect(createHookMock).toHaveBeenCalledWith({
       experimental_force: true,
       metadata: { sessionId: "session-1" },
@@ -230,19 +229,10 @@ describe("createSessionInbox", () => {
     });
     expect(hookTokens(inbox)).toEqual(["stable"]);
     await expect(readResult(inbox)).resolves.toEqual(resolved(send("after takeover")));
+    expect(
+      (stable.hook as { getConflict: ReturnType<typeof vi.fn> }).getConflict,
+    ).not.toHaveBeenCalled();
     await inbox.dispose();
-  });
-
-  it("keeps nothing from a refused takeover", async () => {
-    const refused = createMockHook({ conflict: { runId: "wrun_spec_7" }, token: "stable" });
-    installHooks(refused);
-    const inbox = createSessionInbox("session-1");
-
-    await expect(inbox.forceClaimSessionHook("stable")).rejects.toMatchObject({
-      name: "HookConflictError",
-    });
-    expect(refused.dispose).toHaveBeenCalledOnce();
-    expect(hookTokens(inbox)).toEqual([]);
   });
 
   it("ends a taken reader quietly after it delivers what it accepted first", async () => {
