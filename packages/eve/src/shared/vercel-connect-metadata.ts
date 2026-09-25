@@ -43,10 +43,16 @@ function extractCredentialRequirement(value: unknown): ExternalCredentialRequire
   ) {
     return undefined;
   }
-  return {
-    ...(typeof method === "string" ? { method } : {}),
+  const parsed: {
+    method?: string;
+    reference: string;
+    service: string;
+    subjectTypes: ("app" | "user")[];
+  } = {
     reference,
     service,
     subjectTypes,
   };
+  if (typeof method === "string") parsed.method = method;
+  return parsed;
 }
