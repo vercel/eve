@@ -32,6 +32,27 @@ export async function prepareSelfModification(options = {}) {
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, contents);
   }
+  const model =
+    process.env.EVE_EVAL_EXPERIMENT === "1"
+      ? process.env.EVE_EXPERIMENT_SELF_MODIFICATION_MODEL
+      : undefined;
+  const reasoning = process.env.EVE_EXPERIMENT_SELF_MODIFICATION_REASONING;
+  if (process.env.EVE_EVAL_EXPERIMENT === "1" && (model || reasoning)) {
+    const extension = resolve(fixture, "agent/extensions/self-modification/extension.ts");
+    await mkdir(dirname(extension), { recursive: true });
+    await writeFile(
+      extension,
+      [
+        'import selfModification from "eve/self-modification";',
+        "",
+        "export default selfModification({",
+        ...(model ? [`  model: ${JSON.stringify(model)},`] : []),
+        ...(reasoning ? [`  reasoning: ${JSON.stringify(reasoning)},`] : []),
+        "});",
+        "",
+      ].join("\n"),
+    );
+  }
 }
 
 function requireDescendant(root, path) {
