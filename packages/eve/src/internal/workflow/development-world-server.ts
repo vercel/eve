@@ -51,6 +51,7 @@ export function createParentDevelopmentWorkflowWorld(input: {
   readonly agentName: string;
   readonly appRoot: string;
   readonly resolveActiveGenerationId: () => string;
+  readonly resume?: boolean;
   readonly transportSecret: string;
 }): ParentDevelopmentWorkflowWorld {
   return new LocalParentDevelopmentWorkflowWorld(input);
@@ -62,6 +63,9 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
   readonly #world: World;
+  readonly #resume: boolean;
+  // Owned by the host, not a worker: watcher replacements keep this admission set.
+  readonly #admittedGenerations = new Set<string>();
   #closed = false;
   #started = false;
   #reconciliation: Promise<void> = Promise.resolve();
@@ -70,11 +74,13 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     readonly agentName: string;
     readonly appRoot: string;
     readonly resolveActiveGenerationId: () => string;
+    readonly resume?: boolean;
     readonly transportSecret: string;
   }) {
     if (input.transportSecret.length < 16) {
       throw new Error("Development Workflow transport secret is too short to be trusted.");
     }
+    this.#resume = input.resume === true;
     this.#agentName = input.agentName;
     this.#appRoot = input.appRoot;
     this.#resolveActiveGenerationId = input.resolveActiveGenerationId;
@@ -94,20 +100,28 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     this.#started = true;
     try {
       await this.#reconcileExpiredRuns();
+      this.#admitActiveGeneration();
+      if (!this.#resume) return;
       const skippedGenerations = new Set<string>();
       await reenqueueActiveDevelopmentRuns({
         enqueue: this.#queue.bind(this),
         prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
         world: this.#world,
         canRecover: async (generationId) => {
-          const availability = await this.#generationAvailability(generationId);
+          const availability = await readDevelopmentGenerationAvailability(
+            this.#appRoot,
+            generationId,
+            this.#resolveActiveGenerationId(),
+          );
           if (availability.kind === "incompatible" && !skippedGenerations.has(generationId)) {
             skippedGenerations.add(generationId);
             console.warn(
               `[eve:dev] Skipping retained Workflow generation "${generationId}": ${availability.reason}`,
             );
           }
-          return availability.kind === "ready";
+          if (availability.kind !== "ready") return false;
+          this.#admittedGenerations.add(generationId);
+          return true;
         },
       });
     } catch (error) {
@@ -177,7 +191,11 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
           );
         }
         for (const run of page.data) {
-          const availability = await this.#generationAvailability(run.deploymentId);
+          const availability = await readDevelopmentGenerationAvailability(
+            this.#appRoot,
+            run.deploymentId,
+            this.#resolveActiveGenerationId(),
+          );
           if (availability.kind === "missing") runIds.push(run.runId);
         }
         cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
@@ -248,7 +266,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     // resolution, the delivery header); everything else forwards to the
     // vendored world by the dot-path the shared operation table names.
     if (call.operation === "getDeploymentId" || call.operation === "resolveLatestDeploymentId") {
-      return this.#resolveActiveGenerationId();
+      return this.#admitActiveGeneration();
     }
     if (call.operation === "queue") {
       return await this.#queue(...(args as Parameters<World["queue"]>));
@@ -278,12 +296,23 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return header !== null && timingSafeEqualStrings(header, this.#transportSecret);
   }
 
-  #generationAvailability(generationId: string) {
-    return readDevelopmentGenerationAvailability(
+  #admitActiveGeneration(): string {
+    const generationId = this.#resolveActiveGenerationId();
+    this.#admittedGenerations.add(generationId);
+    return generationId;
+  }
+
+  async #generationAvailability(generationId: string) {
+    const activeGenerationId = this.#admitActiveGeneration();
+    const availability = await readDevelopmentGenerationAvailability(
       this.#appRoot,
       generationId,
-      this.#resolveActiveGenerationId(),
+      activeGenerationId,
     );
+    if (availability.kind === "missing") return availability;
+    if (!this.#resume && !this.#admittedGenerations.has(generationId))
+      return { kind: "dormant" as const };
+    return availability;
   }
 }
 

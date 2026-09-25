@@ -96,6 +96,7 @@ export function createDevelopmentServer(
           existing: options.existing,
           host: options.host,
           port: options.port,
+          resume: options.resume,
         }),
       ],
       {

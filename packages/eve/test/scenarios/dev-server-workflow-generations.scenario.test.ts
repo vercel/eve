@@ -229,6 +229,7 @@ describe("eve dev server workflow generations", () => {
         await withinDeadline(interruptedTurn, "Interrupted client stream did not settle.");
         await writeFile(restartPath, "restart");
         server = await startEveDev(app.appRoot, {
+          resume: true,
           env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
         });
         await waitForPath(recoveredPath);

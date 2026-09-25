@@ -88,6 +88,7 @@ export function registerDevelopmentCommand(input: {
       parseDevelopmentHeaderOption,
     )
     .option("--no-ui", "Start the server without an interactive UI")
+    .option("--resume", "Recover retained, compatible runs from previous local dev invocations")
     .option("--no-default-extensions", "Do not mount default development extensions")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input")
@@ -134,6 +135,11 @@ export function registerDevelopmentCommand(input: {
     .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
       const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
       const remoteServerUrl = remoteTarget?.serverUrl;
+      if (options.resume && remoteTarget !== undefined) {
+        throw new InvalidArgumentError(
+          "--resume requires starting a local dev server, not a URL target.",
+        );
+      }
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
       telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
@@ -226,6 +232,7 @@ export function registerDevelopmentCommand(input: {
           ...(options.defaultExtensions === false
             ? { developmentExtensions: noDevelopmentExtensions() }
             : {}),
+          resume: options.resume,
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,
