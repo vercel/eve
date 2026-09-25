@@ -145,6 +145,7 @@ export type TaskRunInboundPayload = TaskCommandHookPayload | TaskInboundAnswerIn
 
 /** Generic task-owned request sent through the parent session payload. */
 interface TaskInputRequestDeliveryBase {
+  readonly inputSource?: string;
   readonly replyTo: string;
   readonly sequence: number;
   readonly stepIndex: number;

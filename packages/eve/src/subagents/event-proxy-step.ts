@@ -80,6 +80,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
     hookPayload: {
       callId: input.request.taskId,
       childContinuationToken: input.request.replyTo,
+      inputSource: input.request.inputSource,
       childSessionId: input.request.taskId,
       event: {
         requests: (input.request.requests ?? [input.request.request]) as never,
@@ -126,7 +127,14 @@ export async function emitProxiedSubagentEvent(input: {
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       // A remote session must forward even requests originating in its own
       // workflow tools; only the outermost parent owns channel delivery.
-      if (await forwardTaskEventToSessionCallback(ctx, event)) return;
+      const inputSource =
+        input.hookPayload.kind === "subagent-input-request"
+          ? JSON.stringify([
+              input.hookPayload.childContinuationToken,
+              input.hookPayload.inputSource ?? null,
+            ])
+          : undefined;
+      if (await forwardTaskEventToSessionCallback(ctx, event, inputSource)) return;
       await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
     };
 
@@ -168,6 +176,7 @@ export async function emitProxiedSubagentEvent(input: {
           ? proxyEntries
           : proxyEntries.map(([requestId, route]) => [requestId, { ...route, answerHook }]),
       forChildContinuationToken: input.hookPayload.childContinuationToken,
+      inputSource: input.hookPayload.inputSource,
       session: scopedSession,
     });
   }

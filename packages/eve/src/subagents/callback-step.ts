@@ -6,6 +6,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 /** Sends task-owned remote HITL and authorization events to the parent callback capability. */
 export async function fireTaskEventCallbackStep(input: {
   readonly callback: unknown;
+  readonly inputSource?: string;
   readonly childContinuationToken: string;
   readonly childSessionId: string;
   readonly event:
@@ -24,6 +25,7 @@ export async function fireTaskEventCallbackStep(input: {
       childContinuationToken: input.childContinuationToken,
       childSessionId: input.childSessionId,
       event: inputRequested ? input.event.data : input.event,
+      ...(inputRequested && input.inputSource !== undefined && { inputSource: input.inputSource }),
       kind,
       subagentName: callback.subagentName,
       taskId: callback.taskId,

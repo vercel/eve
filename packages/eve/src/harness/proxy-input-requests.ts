@@ -34,6 +34,8 @@ export interface AnswerHookQuestion {
 
 /** Routing and control metadata for one descendant-owned input request. */
 export interface ProxyInputRequest {
+  /** Batch replacement scope, separate from the destination used to answer it. */
+  readonly inputSource?: string;
   readonly answerHook?: AnswerHookRoute;
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
@@ -85,12 +87,13 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
 }
 
 /**
- * Replaces prior entries for `forChildContinuationToken` with the provided
+ * Replaces prior entries for the destination and input source with the provided
  * ones. A child raising a fresh batch overwrites its prior batch so the
  * parent never keeps stale request metadata. Other children's routes stay
  * independently answerable.
  */
 export function upsertProxyInputRequests(input: {
+  readonly inputSource?: string;
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
   readonly session: HarnessSession;
@@ -100,6 +103,7 @@ export function upsertProxyInputRequests(input: {
     state: upsertProxyInputRequestState({
       entries: input.entries,
       forChildContinuationToken: input.forChildContinuationToken,
+      inputSource: input.inputSource,
       state: input.session.state,
     }),
   };
@@ -107,6 +111,7 @@ export function upsertProxyInputRequests(input: {
 
 /** State-only variant for control-plane steps that already hold a durable projection. */
 export function upsertProxyInputRequestState(input: {
+  readonly inputSource?: string;
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
   readonly state: SessionStateMap | undefined;
@@ -114,7 +119,10 @@ export function upsertProxyInputRequestState(input: {
   const next: Record<string, ProxyInputRequest> = {};
 
   for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (route.childContinuationToken !== input.forChildContinuationToken) {
+    if (
+      route.childContinuationToken !== input.forChildContinuationToken ||
+      route.inputSource !== input.inputSource
+    ) {
       next[requestId] = route;
     }
   }
@@ -221,6 +229,7 @@ export function toProxyInputRequestEntries(
   return payload.event.requests.map((request) => {
     const route: {
       readonly childContinuationToken: string;
+      readonly inputSource?: string;
       childSessionInbox?: SessionInboxAddress;
       childResponseUrl?: string;
       readonly kind: InputRequestKind;
@@ -229,6 +238,7 @@ export function toProxyInputRequestEntries(
     } & { readonly batch: ProxyInputRequestBatch } = {
       batch,
       childContinuationToken: payload.childContinuationToken,
+      ...(payload.inputSource !== undefined && { inputSource: payload.inputSource }),
       kind: request.kind,
     };
     if (request.kind === "question") {
@@ -291,6 +301,9 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (typeof value.childContinuationToken !== "string" || !isInputRequestKind(value.kind)) {
     return undefined;
   }
+  const inputSource = "inputSource" in value ? value.inputSource : undefined;
+  if (inputSource !== undefined && (typeof inputSource !== "string" || inputSource.length === 0))
+    return undefined;
   const taskId = "taskId" in value ? value.taskId : undefined;
   const childRequestId = "childRequestId" in value ? value.childRequestId : undefined;
   const childResponseUrl = "childResponseUrl" in value ? value.childResponseUrl : undefined;
@@ -319,6 +332,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (childSessionInbox !== undefined && !isSessionInboxAddress(childSessionInbox))
     return undefined;
   const request: {
+    inputSource?: string;
     answerHook?: AnswerHookRoute;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
@@ -332,6 +346,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
   };
+  if (typeof inputSource === "string") request.inputSource = inputSource;
   if (answerHook !== undefined) request.answerHook = answerHook;
   if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;

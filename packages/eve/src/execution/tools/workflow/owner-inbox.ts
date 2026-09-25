@@ -71,6 +71,7 @@ export function workflowToolRunRequestToInputRequestPayload(
   return {
     callId: from.callId,
     childContinuationToken: replyTo,
+    inputSource: message.inputSource,
     childSessionId: from.runId,
     event: {
       requests: workflowToolRunInputRequests(message),

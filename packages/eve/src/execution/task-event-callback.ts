@@ -15,6 +15,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 export async function forwardTaskEventToSessionCallback(
   ctx: ContextContainer,
   event: UnstampedMessageStreamEvent,
+  inputSource?: string,
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
   if (callback?.taskId === undefined) return false;
@@ -27,6 +28,7 @@ export async function forwardTaskEventToSessionCallback(
   }
   await fireTaskEventCallbackStep({
     callback,
+    inputSource,
     childContinuationToken: ctx.require(ContinuationTokenKey),
     childSessionId: ctx.require(SessionIdKey),
     event,

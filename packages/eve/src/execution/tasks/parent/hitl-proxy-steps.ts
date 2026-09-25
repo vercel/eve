@@ -68,6 +68,7 @@ export async function recordTaskInputRequestStep(input: {
     const parentRequest = parentRequests[index]!;
     const route: { -readonly [K in keyof ProxyInputRequest]: ProxyInputRequest[K] } = {
       childContinuationToken: input.request.replyTo,
+      ...(input.request.inputSource !== undefined && { inputSource: input.request.inputSource }),
       childRequestId: request.requestId,
       kind: request.kind,
       taskId: input.request.taskId,
@@ -84,6 +85,7 @@ export async function recordTaskInputRequestStep(input: {
   const state = upsertProxyInputRequestState({
     entries,
     forChildContinuationToken: input.request.replyTo,
+    inputSource: input.request.inputSource,
     state: durableSession.state,
   });
   const request: TaskInputRequestDelivery =

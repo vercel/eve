@@ -17,7 +17,7 @@ const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 const HITL_ANSWER = "approved-by-parent";
-const HITL_CHILD_RESULT = `CHILD_APPROVED=${HITL_ANSWER}`;
+const HITL_CHILD_RESULT = `CHILD_APPROVED=${HITL_ANSWER}-Alice,${HITL_ANSWER}-Bob`;
 const HITL_PARENT_RESULT = `REMOTE_HITL_RESULT=${HITL_ANSWER}`;
 
 function createScriptedParentAgentSource(subagentName: string): string {
@@ -175,12 +175,8 @@ import { mockModel } from "eve/evals";
 
 const model = mockModel((request) => {
   const result = request.toolResults.find((entry) => entry.id === "ask-parent-1");
-  if (result !== undefined) return typeof result.output === "string" ? "CHILD_APPROVED=" + result.output : "BAD_ANSWER";
-  return { toolCalls: [{
-    id: "ask-parent-1",
-    name: "ask-parent",
-    input: {},
-  }] };
+  if (result !== undefined) return "CHILD_APPROVED=" + result.output;
+  return { toolCalls: [{ id: "ask-parent-1", name: "ask-parent", input: {} }] };
 });
 
 export default defineAgent({ model, modelContextWindowTokens: 32_000 });
@@ -194,11 +190,12 @@ export default defineWorkflowTool({
   outputSchema: { type: "string" },
   async execute(_input, ctx) {
     "use workflow";
-    const answer = await ctx.ask({
-      prompt: "What is the approval word?",
+    const answers = await Promise.all(["Alice", "Bob"].map((person) => ctx.ask({
+      prompt: "What is the approval word for " + person + "?",
+      dismissible: false,
       allowFreeform: true,
-    });
-    return answer.text ?? answer.optionId ?? "NO_ANSWER";
+    })));
+    return answers.map((answer) => answer.text ?? answer.optionId ?? "NO_ANSWER").join(",");
   },
 });
 `;
@@ -316,7 +313,7 @@ describe("agent messaging", () => {
   );
 
   it(
-    "proxies HITL from a background remote child to an input-capable parent",
+    "proxies HITL from concurrent remote workflow questions to an input-capable parent",
     async () => {
       const remoteApp = await scenarioApp(REMOTE_HITL_AGENT_DESCRIPTOR);
       const remoteServer = await startScriptedEveDev(remoteApp.appRoot);
@@ -336,23 +333,28 @@ describe("agent messaging", () => {
 
           const parentEvents = await waitForParentEvents({
             session: parentSession,
-            label: "proxied question",
-            ready: (events) => filterEventsByType(events, "input.requested").length > 0,
+            label: "both proxied questions",
+            ready: (events) => filterEventsByType(events, "input.requested").length === 2,
           });
           const inputRequests = filterEventsByType(parentEvents, "input.requested");
 
-          expect(inputRequests).toHaveLength(1);
-          const request = inputRequests[0]?.data.requests[0];
-          expect(request).toMatchObject({
-            kind: "question",
-            prompt: "What is the approval word?",
-          });
-          if (request === undefined) throw new Error("Expected a proxied input request.");
+          expect(inputRequests).toHaveLength(2);
+          const requests = inputRequests.flatMap((event) => event.data.requests);
+          expect(requests.map((request) => request.prompt).sort()).toEqual([
+            "What is the approval word for Alice?",
+            "What is the approval word for Bob?",
+          ]);
 
           expect(indexesOf(parentEvents, "session.waiting")[0]).toBeLessThan(
             indexesOf(parentEvents, "input.requested")[0]!,
           );
-          await parentSession.respond([{ requestId: request.requestId, text: HITL_ANSWER }]);
+          // Both sources must remain routable after the newer question arrives.
+          for (const request of requests) {
+            const person = request.prompt.includes("Alice") ? "Alice" : "Bob";
+            await parentSession.respond([
+              { requestId: request.requestId, text: `${HITL_ANSWER}-${person}` },
+            ]);
+          }
 
           // Background completion is a later notification, not the answer delivery's boundary.
           const finalEvents = await waitForParentEvents({
