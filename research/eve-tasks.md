@@ -35,9 +35,10 @@ content arrives through the inbox at step boundaries. Unlike Codex, eve holds a 
 its tasks work, because scheduled, child, MCP, and eval sessions have no later user message to
 collect results.
 
-**Baseline.** This plan assumes #3817 (no run mode) and #3700 (answers come only from people) are
-on `main`. After #3817, every session parks after each settled turn, `capabilities.requestInput`
-is the only gate on asking a person, and `outputSchema` is per turn.
+**Baseline.** This plan builds on #3817 (no run mode) and #3700 (answers come only from people),
+both on `main`. Every session parks after each settled turn, `capabilities.requestInput` is the
+only gate on asking a person, and `outputSchema` is a per-turn option only callers request,
+through the session API and `ctx.agent`; agent definitions and the model can't set it.
 
 ## Vocabulary
 
@@ -240,7 +241,7 @@ const { data, message, status } = await response.result();
 - A run's sessions end when the run finishes, cancelling any turn still running.
 
 **Agent tools.** Every agent is a tool named after it, with model input
-`{ message: string; outputSchema?: object; taskId?: string }`. It is a resumable workflow tool
+`{ message: string; taskId?: string }`. It is a resumable workflow tool
 that forwards each call to one session, as eve ships it:
 
 ```ts
@@ -250,7 +251,7 @@ async execute(ctx) {
   // A cancel aborts the call's abortSignal, which ends the agent's turn.
   const send = ({ input, abortSignal }: Awaited<ReturnType<typeof ctx.receive>>) =>
     agent
-      .send(input.message, { outputSchema: input.outputSchema, signal: abortSignal })
+      .send(input.message, { signal: abortSignal })
       .then((response) => response.result());
   let latest = send(await ctx.receive());
   for (;;) {
@@ -269,8 +270,9 @@ async execute(ctx) {
 }
 ```
 
-- **`outputSchema`** works per turn as on `main`, for the model's agent calls, `ctx.agent`, and
-  the client alike, with the agent's declared `outputSchema` as the default.
+- **No `outputSchema` from the model.** As on `main` after #3817, structured output is a
+  caller's per-turn choice through `send`; the model's agent tools and `agentRouter()` don't
+  offer it.
 - **One result per agent turn:** the turn's final response. A message that joined the turn is
   settled by the same reply.
 - The tool description is the agent's `description` followed by:
@@ -401,7 +403,7 @@ Session expiry and turn failures cancel the turn's tasks, as `session.cancel()` 
 model's interim message completes normally, and the stream emits `session.waiting` with the held
 `turnId`. A person can keep writing, and the turn resumes under the same ID. `turn.completed` is
 emitted only when the turn really ends, so an MCP `agent_get` or `send().result()` sees the final
-reply; this closes #3817's known gap for MCP `agent_start` with a delegating agent. A child turn
+reply; this closes the gap #3817 notes for MCP `agent_start` with a delegating agent. A child turn
 (its session has a caller) and a schedule's turn (`ScheduleIdKey`, `harness/tool-loop.ts`) show no
 boundary: a held text step reports `finishReason: "tool-calls"`, which channels already skip, so
 the run posts once. History and traces keep the model's own finish reason.
@@ -536,7 +538,7 @@ templates and apps, and 18 docs pages. In internal-agents it touches 15 files wi
 
 ## 9. Delivery
 
-The work lands as a stack of pull requests managed with `gh stack`, after #3817 and #3700 merge.
+The work lands as a stack of pull requests managed with `gh stack`, on top of #3817 and #3700.
 Each PR is one coherent step from the one below it: it passes CI on its own, updates the docs and
 fixtures for the behavior it changes, and carries a changeset (`minor` when it breaks a public
 API). Main may lack features between PRs, never correctness. **Hold the Changesets release from
@@ -625,9 +627,9 @@ body's first `receive()`; e2e, a user-defined resumable tool continued by `taskI
 `subagents/remote-dispatch.ts`, `execution/tools/subagent/`), the four `subagent.*` events, the
 `AGENT_*` codes, and `streamSubagent(called)`. Move the client reducer, dev TUI, eval assertions,
 and hook event map to task events. Tests: a scenario where an agent message races the end of the
-agent's turn and every call gets exactly one result; #3700's answers-only-from-people test for
-agent tools, local and remote; e2e, an agent continued by `taskId` across turns and after
-`task_cancel` with its conversation intact.
+agent's turn and every call gets exactly one result; #3700's delegated-session regressions and
+its `agent-subagents-hitl` eval pass unchanged for agent tools, local and remote; e2e, an agent
+continued by `taskId` across turns and after `task_cancel` with its conversation intact.
 
 **9. Slack post before a wait.** First confirm Slack's event handlers can read `ScheduleIdKey`.
 Tests (unit): a step whose only tool call is `task_wait` posts its text; a step with any other
