@@ -32,6 +32,7 @@ describe("startLocalSubagent", () => {
     const outcome = await startLocalSubagent({
       action: {
         callId: "call-1",
+        input: { message: "Look into it." },
         name: "research",
         nodeId: "subagents/research",
         subagentName: "research",
@@ -84,6 +85,7 @@ describe("startLocalSubagent", () => {
     await startLocalSubagent({
       action: {
         callId: "call-1",
+        input: { message: "Post the update." },
         name: "slack",
         nodeId: "subagents/slack",
         subagentName: "slack",

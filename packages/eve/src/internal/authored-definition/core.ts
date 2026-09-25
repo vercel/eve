@@ -1,4 +1,4 @@
-import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
+import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -18,6 +18,10 @@ import {
 } from "#internal/authored-module.js";
 import {
   AGENT_WORKFLOW_RETENTION_VALUES,
+  isModelChoicesDefinition,
+  MODEL_CHOICE_KIND,
+  type PublicAgentModelChoice,
+  type PublicAgentModelChoicesDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
 import {
@@ -83,6 +87,15 @@ export function normalizeAgentDefinition(
     );
   }
 
+  if (
+    isModelChoicesDefinition(definition.model) &&
+    (record.modelContextWindowTokens !== undefined || record.modelOptions !== undefined)
+  ) {
+    throw new Error(
+      `${message} A choice() model does not support sibling "modelContextWindowTokens" or "modelOptions" fields. Set "modelOptions" on each choice; eve resolves each model's limits from the AI Gateway catalog.`,
+    );
+  }
+
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
   }
@@ -145,6 +158,10 @@ function normalizeAgentModelDefinition(
   value: unknown,
   message: string,
 ): NormalizedAgentDefinition["model"] {
+  if (isModelChoicesDefinition(value)) {
+    return normalizeModelChoices(value, message);
+  }
+
   if (!isDynamicSentinel(value)) {
     return value as NormalizedAgentDefinition["model"];
   }
@@ -164,6 +181,50 @@ function normalizeAgentModelDefinition(
     events,
     kind: record.kind,
   } as NormalizedAgentDefinition["model"];
+}
+
+function normalizeModelChoices(value: unknown, message: string): PublicAgentModelChoicesDefinition {
+  const record = expectObjectRecord(value, message);
+  expectOnlyKnownKeys(record, ["choices", "kind"], message);
+  if (!Array.isArray(record.choices) || record.choices.length === 0) {
+    throw new Error(`${message} choice() must list at least one model.`);
+  }
+  const choices: PublicAgentModelChoice[] = record.choices.map((entry: unknown) => {
+    const choice = expectObjectRecord(entry, message);
+    expectOnlyKnownKeys(choice, ["description", "model", "modelOptions"], message);
+    const model = choice.model;
+    if (typeof model === "string" ? model.trim() === "" : !isRuntimeLanguageModel(model)) {
+      throw new Error(
+        `${message} Every choice() model must be a non-empty AI Gateway slug or a LanguageModel.`,
+      );
+    }
+    if (
+      choice.description !== undefined &&
+      (typeof choice.description !== "string" || choice.description.trim() === "")
+    ) {
+      throw new Error(`${message} A choice() description must be a non-empty string.`);
+    }
+    return {
+      description: choice.description === undefined ? undefined : choice.description,
+      model: model as PublicAgentStaticModelDefinition,
+      modelOptions:
+        choice.modelOptions === undefined
+          ? undefined
+          : normalizeAgentModelOptions(choice.modelOptions, message),
+    };
+  });
+  const slugs = choices.flatMap((choice) =>
+    typeof choice.model === "string" ? [choice.model] : [],
+  );
+  const duplicate = slugs.find((slug, index) => slugs.indexOf(slug) !== index);
+  if (duplicate !== undefined) {
+    throw new Error(`${message} choice() lists "${duplicate}" more than once.`);
+  }
+  const [first, ...rest] = choices;
+  if (first === undefined) {
+    throw new Error(`${message} choice() must list at least one model.`);
+  }
+  return { kind: MODEL_CHOICE_KIND, choices: [first, ...rest] };
 }
 
 /** `false` explicitly disables one numeric runtime limit. */

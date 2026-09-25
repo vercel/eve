@@ -29,7 +29,14 @@ export function assertRootOnlyConfig(
   isRoot: boolean,
   agentId: string,
 ): void {
-  if (isRoot) return;
+  if (isRoot) {
+    if (config.modelChoices !== undefined) {
+      throw new Error(
+        `choice() lets a caller pick a subagent's model, and a root agent has no caller. Give "${agentId}" one model.`,
+      );
+    }
+    return;
+  }
   if (config.experimental?.workflow?.world !== undefined) {
     throw new Error(
       `Workflow world configuration is only supported on the root agent config. Remove "experimental.workflow.world" from "${agentId}".`,

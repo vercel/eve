@@ -22,7 +22,8 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
-import { ActivityObserverKey } from "#context/keys.js";
+import { ActivityObserverKey, SessionDynamicModelReferenceKey } from "#context/keys.js";
+import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { serializeContext } from "#context/serialize.js";
 import {
   buildSessionAttributes,
@@ -137,6 +138,8 @@ export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
+  /** Caller-selected model for a new subagent session, from its `model` array. */
+  readonly sessionModelId?: string;
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
@@ -149,6 +152,13 @@ export function createWorkflowRuntime(config: {
         dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
         run: input,
       });
+      if (config.sessionModelId !== undefined) {
+        // Same slot a `session.started` dynamic model selection fills.
+        ctx.set(
+          SessionDynamicModelReferenceKey,
+          requireModelChoice(bundle.resolvedAgent.config?.modelChoices, config.sessionModelId),
+        );
+      }
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
@@ -568,6 +578,17 @@ async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult
     ? trace.deleteSpan(activeContext)
     : activeContext;
   return await context.with(workflowContext, callback);
+}
+
+function requireModelChoice(
+  choices: readonly RuntimeModelReference[] | undefined,
+  modelId: string,
+): RuntimeModelReference {
+  const choice = choices?.find((candidate) => candidate.id === modelId);
+  if (choice === undefined) {
+    throw new Error(`Model "${modelId}" is not one of this agent's model choices.`);
+  }
+  return choice;
 }
 
 function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {

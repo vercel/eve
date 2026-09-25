@@ -5,6 +5,10 @@ export const WORKSPACE_LOOKUP_MESSAGE = [
 ].join(" ");
 export const WORKSPACE_FORWARDING_MARKER = "Shared workspace membership check.";
 
+export const MODEL_CHOICE_SCENARIO =
+  "MODEL-CHOICE Ask report-writer to summarize Alice's weekly update using openai/gpt-5.4.";
+export const MODEL_CHOICE_SELECTED = "openai/gpt-5.4";
+
 export const SCHEDULED_REMOTE_ROOT_SCENARIO =
   "SCHEDULED-REMOTE-ROOT Ask remote-loopback to prepare Alice's scheduled report.";
 export const SCHEDULED_REMOTE_CHILD_SCENARIO =

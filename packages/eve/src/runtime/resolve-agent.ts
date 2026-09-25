@@ -2,6 +2,7 @@ import type {
   CompiledAgentNodeManifest,
   CompiledAgentResources,
   CompiledInstructionsDefinition,
+  CompiledRuntimeModelReference,
 } from "#compiler/manifest.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
@@ -291,25 +292,37 @@ function createResolvedAgentConfig(
   const model = manifest.config.model;
   return {
     ...config,
-    model:
-      model.source === undefined
-        ? {
-            id: model.id,
-            contextWindowTokens: model.contextWindowTokens,
-            maxOutputTokens: model.maxOutputTokens,
-            providerOptions: model.providerOptions,
-          }
-        : {
-            contextWindowTokens: model.contextWindowTokens,
-            id: model.id,
-            maxOutputTokens: model.maxOutputTokens,
-            providerOptions: model.providerOptions,
-            source: {
-              exportName: model.source.exportName,
-              sourceKind: "module" as const,
-              logicalPath: model.source.logicalPath,
-              sourceId: model.source.sourceId,
-            },
-          },
+    ...(manifest.config.modelChoices === undefined
+      ? {}
+      : {
+          modelChoices: manifest.config.modelChoices.map((choice) =>
+            toResolvedModelReference(choice.model),
+          ),
+        }),
+    model: toResolvedModelReference(model),
+  };
+}
+
+function toResolvedModelReference(
+  model: CompiledRuntimeModelReference,
+): NonNullable<NonNullable<ResolvedAgent["config"]>["model"]> {
+  const reference = {
+    id: model.id,
+    contextWindowTokens: model.contextWindowTokens,
+    maxOutputTokens: model.maxOutputTokens,
+    providerOptions: model.providerOptions,
+  };
+  if (model.source === undefined) return reference;
+  return {
+    ...reference,
+    source: {
+      exportName: model.source.exportName,
+      sourceKind: "module" as const,
+      logicalPath: model.source.logicalPath,
+      sourceId: model.source.sourceId,
+    },
+    ...(model.sourceChoiceIndex === undefined
+      ? {}
+      : { sourceChoiceIndex: model.sourceChoiceIndex }),
   };
 }

@@ -55,7 +55,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 51;
+export const COMPILED_AGENT_MANIFEST_VERSION = 52;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -128,6 +128,12 @@ export type CompiledRuntimeModelReference = InternalAgentModelDefinition & {
   routing: ModelRouting;
 };
 
+/** One `choice()` entry. The caller selects it by `model.id`. */
+export interface CompiledModelChoice {
+  readonly description?: string;
+  readonly model: CompiledRuntimeModelReference;
+}
+
 /**
  * Dynamic model resolver source preserved in the compiled manifest.
  */
@@ -160,10 +166,13 @@ export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
   (
     | {
         readonly model: CompiledRuntimeModelReference;
+        /** Models a caller may select for a new session; the first is `model`. */
+        readonly modelChoices?: readonly CompiledModelChoice[];
         readonly dynamicModel?: never;
       }
     | {
         readonly model?: never;
+        readonly modelChoices?: never;
         readonly dynamicModel: CompiledDynamicModelDefinition;
       }
   );
@@ -551,6 +560,7 @@ const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReferen
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
     source: moduleSourceRefSchema.optional(),
+    sourceChoiceIndex: z.number().int().nonnegative().optional(),
     providerOptions: z.record(z.string(), jsonObjectSchema).optional(),
     routing: modelRoutingSchema,
   })
@@ -618,6 +628,17 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
     .object({
       ...compiledAgentConfigBaseFields,
       model: compiledRuntimeModelReferenceSchema,
+      modelChoices: z
+        .array(
+          z
+            .object({
+              description: z.string().optional(),
+              model: compiledRuntimeModelReferenceSchema,
+            })
+            .strict(),
+        )
+        .min(1)
+        .optional(),
     })
     .strict(),
   z
@@ -1213,9 +1234,20 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
     };
   }
 
+  if (config.modelChoices === undefined) {
+    return {
+      ...base,
+      model: cloneCompiledRuntimeModelReference(config.model),
+    };
+  }
+
   return {
     ...base,
     model: cloneCompiledRuntimeModelReference(config.model),
+    modelChoices: config.modelChoices.map((choice) => ({
+      description: choice.description,
+      model: cloneCompiledRuntimeModelReference(choice.model),
+    })),
   };
 }
 
@@ -1311,6 +1343,9 @@ function cloneCompiledRuntimeModelReference(
   }
   if (model.source !== undefined) {
     clone.source = { ...model.source };
+  }
+  if (model.sourceChoiceIndex !== undefined) {
+    clone.sourceChoiceIndex = model.sourceChoiceIndex;
   }
   return clone;
 }

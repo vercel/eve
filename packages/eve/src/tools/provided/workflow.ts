@@ -23,7 +23,7 @@ export interface WorkflowToolInput {
 export type WorkflowTool = BlockingWorkflowToolDefinition<WorkflowToolInput, JsonValue>;
 
 const workflowProgramAgentContract =
-  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
+  "Call ctx.agent(name, { message: string, agentId?: string, model?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
 
 const workflowInputSchema = defineJsonSchema<WorkflowToolInput>({
   type: "object",

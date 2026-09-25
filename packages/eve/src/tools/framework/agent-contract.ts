@@ -1,4 +1,5 @@
 import type { JsonObject } from "#shared/json.js";
+import type { SubagentModelChoice } from "#runtime/types.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export const AGENT_TOOL_NAME = "agent";
@@ -13,28 +14,63 @@ export const AGENT_TOOL_DESCRIPTION = [
 export interface SubagentToolInput {
   agentId?: string | null;
   message: string;
+  model?: string;
   outputSchema?: JsonObject;
 }
 
-export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
-  type: "object",
-  properties: {
-    agentId: {
-      type: ["string", "null"],
-      description:
-        "The id of an existing agent from the <agents> list or a task receipt. A message to a busy agent steers it: its previous task is cancelled and the updated work runs in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
-    },
-    message: {
-      type: "string",
-      description:
-        "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
-    },
-    outputSchema: {
-      type: "object",
-      description:
-        "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the tool result.",
-    },
+const SUBAGENT_TOOL_INPUT_PROPERTIES = {
+  agentId: {
+    type: ["string", "null"],
+    description:
+      "The id of an existing agent from the <agents> list or a task receipt. A message to a busy agent steers it: its previous task is cancelled and the updated work runs in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
   },
-  required: ["message"],
-  additionalProperties: false,
-});
+  message: {
+    type: "string",
+    description:
+      "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
+  },
+  outputSchema: {
+    type: "object",
+    description:
+      "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the tool result.",
+  },
+} satisfies JsonObject;
+
+export const SUBAGENT_TOOL_INPUT_SCHEMA = createSubagentToolInputSchema(undefined);
+
+/**
+ * Subagent tool input. A subagent whose `agent.ts` lists several models also
+ * accepts a `model` choice; the first listed model is the default.
+ */
+export function createSubagentToolInputSchema(
+  modelChoices: readonly SubagentModelChoice[] | undefined,
+) {
+  return defineJsonSchema<SubagentToolInput>({
+    type: "object",
+    properties:
+      modelChoices === undefined
+        ? SUBAGENT_TOOL_INPUT_PROPERTIES
+        : {
+            ...SUBAGENT_TOOL_INPUT_PROPERTIES,
+            model: createModelChoiceProperty(modelChoices),
+          },
+    required: ["message"],
+    additionalProperties: false,
+  });
+}
+
+function createModelChoiceProperty(modelChoices: readonly SubagentModelChoice[]) {
+  const ids = modelChoices.map((choice) => choice.id);
+  const described = modelChoices.flatMap((choice) =>
+    choice.description === undefined ? [] : [`- ${choice.id}: ${choice.description}`],
+  );
+  return {
+    type: "string" as const,
+    enum: ids,
+    default: ids[0]!,
+    description: [
+      `Model for a new agent. Defaults to ${ids[0]}. Omit this field when continuing an agent with \`agentId\`.`,
+      ...described,
+    ].join("\n"),
+  };
+}

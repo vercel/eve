@@ -48,6 +48,8 @@ export type InternalAgentModelDefinition = {
   contextWindowTokens?: number;
   maxOutputTokens?: number;
   source?: ModuleSourceRef;
+  /** Position in the source export's `choice()` list when `source` holds several models. */
+  sourceChoiceIndex?: number;
   providerOptions?: Record<string, JsonObject>;
 };
 
@@ -91,11 +93,42 @@ export function isDynamicModelDefinition(
   return isDynamicSentinel(value);
 }
 
+export const MODEL_CHOICE_KIND = "eve.model-choice";
+
+/** One model a subagent's caller may pick, as normalized by `choice()`. */
+export interface PublicAgentModelChoice {
+  readonly model: PublicAgentStaticModelDefinition;
+  /** Tells the caller when to pick this model. */
+  readonly description?: string;
+  /** Provider options for this model only. */
+  readonly modelOptions?: AgentModelOptionsDefinition;
+}
+
+/**
+ * Models a subagent's caller may pick when it starts a child, created with
+ * `choice()` from `eve/models`. The first choice is the default.
+ */
+export interface PublicAgentModelChoicesDefinition {
+  readonly kind: typeof MODEL_CHOICE_KIND;
+  readonly choices: readonly [PublicAgentModelChoice, ...PublicAgentModelChoice[]];
+}
+
+export function isModelChoicesDefinition(
+  value: unknown,
+): value is PublicAgentModelChoicesDefinition {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === MODEL_CHOICE_KIND
+  );
+}
+
 /**
  * The model handle you assign to an agent's `model` field.
  */
 export type PublicAgentModelDefinition =
   | PublicAgentStaticModelDefinition
+  | PublicAgentModelChoicesDefinition
   | PublicAgentDynamicModelDefinition;
 
 export interface InternalAgentCompactionDefinition {
@@ -391,6 +424,15 @@ export type PublicAgentDefinition = PublicAgentDefinitionBase &
         /** Optional context-window override for the static model. */
         readonly modelContextWindowTokens?: number;
         readonly modelOptions?: AgentModelOptionsDefinition;
+      }
+    | {
+        /**
+         * Models the caller may pick when it starts this agent as a subagent,
+         * created with `choice()` from `eve/models`. The first is the default.
+         */
+        readonly model: PublicAgentModelChoicesDefinition;
+        readonly modelContextWindowTokens?: never;
+        readonly modelOptions?: never;
       }
     | {
         /** Resolver that must select a concrete model before model-dependent work. */

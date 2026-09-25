@@ -21,6 +21,7 @@ import type { ToolContext } from "#tools/definition.js";
 export type InternalAgentInput = {
   readonly agentId?: string;
   readonly message: string;
+  readonly model?: string;
   readonly outputSchema?: JsonObject;
   readonly target: string;
 };
@@ -65,6 +66,7 @@ export async function agent(
   return await invokeAgent(ctx, {
     agentId: input.agentId,
     message: input.message,
+    model: input.model,
     outputSchema: input.outputSchema,
     target,
   });
@@ -189,6 +191,9 @@ export function validateAgentInput(input: InternalAgentInput): void {
   }
   if (typeof input.message !== "string" || input.message.trim() === "") {
     throw new TypeError("agent() requires a non-empty `message`.");
+  }
+  if (input.model !== undefined && (typeof input.model !== "string" || input.model === "")) {
+    throw new TypeError("agent() `model` must be a non-empty model id.");
   }
   if (
     input.outputSchema !== undefined &&

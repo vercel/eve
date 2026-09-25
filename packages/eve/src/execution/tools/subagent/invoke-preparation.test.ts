@@ -76,4 +76,70 @@ describe("planAgentDispatch", () => {
       }),
     ).toMatchObject({ kind: "start", target: { action: localAction, kind: "local" } });
   });
+
+  describe("model choices", () => {
+    const bundle = (modelChoices?: readonly string[]) =>
+      ({
+        subagentRegistry: {
+          subagentsByNodeId: new Map([
+            [
+              localAction.nodeId,
+              {
+                definition: {
+                  description: "Research",
+                  kind: "subagent",
+                  modelChoices: modelChoices?.map((id) => ({ id })),
+                },
+              },
+            ],
+          ]),
+        },
+        turnAgent: {},
+      }) as never;
+    const plan = (input: Record<string, string>, modelChoices?: readonly string[]) =>
+      planAgentDispatch({
+        action: { ...localAction, input: { message: "Find it", ...input } },
+        bundle: bundle(modelChoices),
+        ctx: {} as never,
+        knownAgentIds: ["known"],
+        session: session() as never,
+      });
+
+    it("starts a new agent with a listed model", () => {
+      expect(
+        plan({ model: "openai/gpt-5.5" }, ["anthropic/claude-sonnet-5", "openai/gpt-5.5"]),
+      ).toMatchObject({
+        kind: "start",
+        target: { action: { input: { model: "openai/gpt-5.5" } }, kind: "local" },
+      });
+    });
+
+    it("rejects an unlisted model", () => {
+      expect(plan({ model: "openai/gpt-5.5" }, ["anthropic/claude-sonnet-5"])).toMatchObject({
+        kind: "reject",
+        result: {
+          output: {
+            code: "SUBAGENT_MODEL_INVALID",
+            message: 'Subagent "research" accepts one of these models: anthropic/claude-sonnet-5.',
+          },
+        },
+      });
+    });
+
+    it("rejects a model for a subagent without model choices", () => {
+      expect(plan({ model: "openai/gpt-5.5" })).toMatchObject({
+        kind: "reject",
+        result: { output: { code: "SUBAGENT_MODEL_INVALID" } },
+      });
+    });
+
+    it("rejects a model when continuing an existing agent", () => {
+      expect(
+        plan({ agentId: "known", model: "openai/gpt-5.5" }, [
+          "anthropic/claude-sonnet-5",
+          "openai/gpt-5.5",
+        ]),
+      ).toMatchObject({ kind: "reject", result: { output: { code: "SUBAGENT_MODEL_INVALID" } } });
+    });
+  });
 });

@@ -22,6 +22,8 @@ export interface TaskReceipt {
 export interface AgentInput {
   readonly agentId?: string;
   readonly message: string;
+  /** Model for a new agent, one of the slugs in its `choice()` config. */
+  readonly model?: string;
   readonly outputSchema?: JsonObject;
 }
 
@@ -70,6 +72,11 @@ type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue 
 
 export interface WorkflowAgentMetadata {
   readonly description: string;
+  /**
+   * Slugs accepted by `ctx.agent()`'s `model`, in `choice()` order. The first
+   * is the default.
+   */
+  readonly models?: Readonly<Record<string, { readonly description?: string }>>;
 }
 
 /** Context capabilities available inside an authored `"use step"` helper. */

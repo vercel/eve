@@ -111,6 +111,43 @@ A mounted extension can also contribute declared subagents from `extension/subag
 
 Local `eve dev` makes the bundled `self-modification__agent` subagent available by default. Bundled development extensions are not included in production builds. See [Self-Modification](/docs/guides/self-modification) for the local workflow.
 
+### Let the parent choose the model
+
+Use `choice` from `eve/models` to let the caller pick a model when it starts a child. The first entry is the default, and each description tells the caller when to pick it:
+
+```ts title="agent/subagents/researcher/agent.ts"
+import { defineAgent } from "eve";
+import { choice } from "eve/models";
+
+export default defineAgent({
+  description: "Investigate ambiguous questions before the parent agent responds.",
+  model: choice({
+    "anthropic/claude-sonnet-5": "Routine lookups where speed matters.",
+    "anthropic/claude-opus-5.5": "Hard questions that need careful reasoning.",
+  }),
+});
+```
+
+The subagent's tool then accepts an optional `model` field limited to those slugs, with the descriptions in its schema. `ctx.agent("researcher", { message, model })` accepts the same slugs, and `ctx.agents.researcher.models` lists them. The pick behaves like a `session.started` [dynamic model](./agent-config#choose-the-model-dynamically) selection: it applies to the new child for its whole lifetime, and compaction follows the chosen model's context window.
+
+`choice` also takes a list. A list entry is a slug or `{ model, description?, modelOptions? }`, where `model` may be an AI SDK `LanguageModel`; the caller then sends its Gateway slug. `modelOptions` applies to that choice only, so AI Gateway fallback models still work inside a choice:
+
+```ts
+model: choice([
+  "anthropic/claude-sonnet-5",
+  {
+    model: "anthropic/claude-opus-5.5",
+    modelOptions: { providerOptions: { gateway: { models: ["openai/gpt-5.5"] } } },
+  },
+]),
+```
+
+- Omitting `model` uses the first entry.
+- An unlisted slug, or `model` sent to a subagent without `choice`, is rejected as a tool error.
+- `model` with the `agentId` of an existing child is rejected; the child keeps its model.
+- Context windows come from the Gateway catalog, so `choice` does not accept a sibling `modelContextWindowTokens` or `modelOptions`. Slugs must be unique.
+- `choice` applies only to declared local subagents. A root agent has no caller, so the build rejects `choice` there. Dynamic subagent configs must return one static model.
+
 ### Vercel workspace peers
 
 In a Vercel agent workspace, expose one other workspace member as a remote subagent with `defineWorkspaceAgent`. Create an ordinary file under the caller's `agent/subagents/` directory. Its filename gives the model-visible tool name; `name` identifies the peer under `agents/`.
@@ -251,6 +288,7 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 {
   message: string;       // all context the child needs; it never sees the parent's history
   agentId?: string;      // continue or steer an existing child
+  model?: string;        // only for subagents whose `model` is an array; new children only
   outputSchema?: object; // require structured output for this turn
 }
 ```
