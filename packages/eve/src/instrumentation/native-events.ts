@@ -359,6 +359,7 @@ function instrumentationUsage(
   const result: {
     -readonly [K in keyof InstrumentationActionUsage]: InstrumentationActionUsage[K];
   } = {
+    costUsdComplete: usage.costUsdComplete ?? usage.costUsd !== undefined,
     inputTokenDetails: {
       cacheReadTokens: usage.cacheReadTokens,
       cacheWriteTokens: usage.cacheWriteTokens,

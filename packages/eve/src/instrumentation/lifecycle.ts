@@ -45,11 +45,12 @@ export interface InstrumentationUsage {
 }
 
 /**
- * Agent usage settled before the terminal event. Cost is absent for unpriced or
- * unsettled turns; reported cost excludes later spend and may omit unpriced calls.
+ * Agent usage settled before the terminal event. `costUsd` is the known subtotal;
+ * `costUsdComplete` says whether every settled turn reported a price.
  */
 export interface InstrumentationActionUsage extends InstrumentationUsage {
   readonly costUsd?: number;
+  readonly costUsdComplete?: boolean;
 }
 
 /** Final model input for one call. Message shape stays opaque to this layer. */

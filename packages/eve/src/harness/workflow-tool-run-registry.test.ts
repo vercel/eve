@@ -280,11 +280,11 @@ describe("shared workflow invocation ownership", () => {
   });
 
   it.each([
-    { second: 0.5, costUsd: 0.75 },
-    { second: undefined, costUsd: undefined },
+    { second: 0.5, costUsd: 0.75, costUsdComplete: true },
+    { second: undefined, costUsd: 0.25, costUsdComplete: false },
   ])(
-    "carries settled agent usage into the first outcome with cost $costUsd",
-    ({ second, costUsd }) => {
+    "carries settled agent usage into the first outcome with known cost $costUsd",
+    ({ second, costUsd, costUsdComplete }) => {
       const turn = { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 10, outputTokens: 3 };
       let state = registerWorkflowToolRun<{ state?: SessionStateMap }>({}, task("task-a")).state;
       state = recordWorkflowTaskUsage(state, "task-a", { ...turn, costUsd: 0.25 });
@@ -301,6 +301,7 @@ describe("shared workflow invocation ownership", () => {
         inputTokens: 20,
         outputTokens: 6,
         costUsd,
+        costUsdComplete,
       };
 
       expect(recorded.view.usage).toEqual(usage);
@@ -326,14 +327,15 @@ describe("shared workflow invocation ownership", () => {
       usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 1, outputTokens: 1 },
     });
 
-    expect(recorded.view.usage).toEqual({ ...settled, costUsd: 0.25 });
+    expect(recorded.view.usage).toEqual({ ...settled, costUsd: 0.25, costUsdComplete: true });
     expect(getBackgroundTasks(recorded.state).get("task-a")?.usage).toEqual({
       ...settled,
       costUsd: 0.25,
+      costUsdComplete: true,
     });
   });
 
-  it("keeps settled tokens but drops cost when an owned agent turn is unsettled", () => {
+  it("keeps settled cost and marks it incomplete when an owned agent turn is unsettled", () => {
     const settled = { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 10, outputTokens: 3 };
     const state = recordWorkflowTaskUsage(
       registerWorkflowToolRun<{ state?: SessionStateMap }>({}, task("task-a")).state,
@@ -346,8 +348,16 @@ describe("shared workflow invocation ownership", () => {
       { unsettledAgent: true },
     );
 
-    expect(recorded.view.usage).toStrictEqual(settled);
-    expect(getBackgroundTasks(recorded.state).get("task-a")?.usage).toStrictEqual(settled);
+    expect(recorded.view.usage).toStrictEqual({
+      ...settled,
+      costUsd: 0.25,
+      costUsdComplete: false,
+    });
+    expect(getBackgroundTasks(recorded.state).get("task-a")?.usage).toStrictEqual({
+      ...settled,
+      costUsd: 0.25,
+      costUsdComplete: false,
+    });
   });
 
   it("does not change lifetime on replay", () => {

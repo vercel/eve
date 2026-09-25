@@ -31,6 +31,8 @@ export interface TaskUsage {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
   readonly costUsd?: number;
+  /** Whether every settled agent turn included a reported price. */
+  readonly costUsdComplete?: boolean;
   readonly inputTokens: number;
   readonly outputTokens: number;
 }
@@ -41,6 +43,7 @@ export function readTaskUsage(value: unknown): TaskUsage | undefined {
   const cacheReadTokens = readUsageAxis(value, "cacheReadTokens");
   const cacheWriteTokens = readUsageAxis(value, "cacheWriteTokens");
   const costUsd = readUsageAxis(value, "costUsd");
+  const costUsdComplete = Reflect.get(value, "costUsdComplete");
   const inputTokens = readUsageAxis(value, "inputTokens");
   const outputTokens = readUsageAxis(value, "outputTokens");
   if (
@@ -51,14 +54,17 @@ export function readTaskUsage(value: unknown): TaskUsage | undefined {
   ) {
     return undefined;
   }
+  if (costUsdComplete !== undefined && typeof costUsdComplete !== "boolean") return undefined;
   const usage: {
     cacheReadTokens: number;
     cacheWriteTokens: number;
     costUsd?: number;
+    costUsdComplete?: boolean;
     inputTokens: number;
     outputTokens: number;
   } = { cacheReadTokens, cacheWriteTokens, inputTokens, outputTokens };
   if (costUsd !== undefined) usage.costUsd = costUsd;
+  if (costUsdComplete !== undefined) usage.costUsdComplete = costUsdComplete;
   return usage;
 }
 

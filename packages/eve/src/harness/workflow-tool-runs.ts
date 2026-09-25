@@ -471,10 +471,8 @@ export function recordWorkflowTaskView(
   // Parent-settled usage is what session totals counted, so it wins over a reported view usage.
   const { usage: settledUsage, ...task } = entry.task;
   let usage = settledUsage ?? outcome.usage;
-  if (options.unsettledAgent === true && usage?.costUsd !== undefined) {
-    const { costUsd: _unknown, ...tokens } = usage;
-    usage = tokens;
-  }
+  if (options.unsettledAgent === true && usage !== undefined)
+    usage = { ...usage, costUsdComplete: false };
   runs[index] = {
     ...entry,
     task: {
@@ -514,8 +512,11 @@ export function recordWorkflowTaskUsage(
     inputTokens: (previous?.inputTokens ?? 0) + usage.inputTokens,
     outputTokens: (previous?.outputTokens ?? 0) + usage.outputTokens,
   };
-  if (usage.costUsd !== undefined && (previous === undefined || previous.costUsd !== undefined))
-    next.costUsd = (previous?.costUsd ?? 0) + usage.costUsd;
+  if (previous?.costUsd !== undefined || usage.costUsd !== undefined)
+    next.costUsd = (previous?.costUsd ?? 0) + (usage.costUsd ?? 0);
+  next.costUsdComplete =
+    (previous?.costUsdComplete ?? (previous === undefined || previous.costUsd !== undefined)) &&
+    usage.costUsd !== undefined;
   const runs = [...registry.runs];
   runs[index] = { ...entry, task: { ...entry.task, usage: next } };
   return writeRegistry(state, { ...registry, runs });

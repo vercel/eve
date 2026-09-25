@@ -28,11 +28,13 @@ describe("task kernel types", () => {
       cacheReadTokens: 1,
       cacheWriteTokens: 2,
       costUsd: 0.25,
+      costUsdComplete: true,
       inputTokens: 3,
       outputTokens: 4,
     };
     expect(readTaskUsage(usage)).toEqual(usage);
     expect(readTaskUsage({ ...usage, inputTokens: -1 })).toBeUndefined();
+    expect(readTaskUsage({ ...usage, costUsdComplete: "yes" })).toBeUndefined();
     expect(readTaskUsage({ inputTokens: 1 })).toBeUndefined();
   });
 });

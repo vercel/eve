@@ -123,6 +123,7 @@ describe("background task action instrumentation", () => {
       scope,
       type: "action.completed",
       usage: {
+        costUsdComplete: false,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,
@@ -194,6 +195,7 @@ describe("background task action instrumentation", () => {
               cacheReadTokens: 3,
               cacheWriteTokens: 4,
               costUsd: 0.125,
+              costUsdComplete: true,
               inputTokens: 10,
               outputTokens: 5,
             },
@@ -206,6 +208,7 @@ describe("background task action instrumentation", () => {
       outcome: view.status,
       usage: {
         costUsd: 0.125,
+        costUsdComplete: true,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,
