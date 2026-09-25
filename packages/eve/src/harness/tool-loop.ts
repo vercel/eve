@@ -3314,6 +3314,7 @@ async function maybeCompact(input: {
         modelId: formatLanguageModelGatewayId(compaction.model),
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
+        stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
         usageInputTokens: getInputTokenCount(
           projectedPromptMessages,
@@ -3379,6 +3380,7 @@ async function maybeCompact(input: {
         modelId: formatLanguageModelGatewayId(compaction.model),
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
+        stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       }),
       input.historyProjector?.({ messages, state: session.state }) ?? messages,

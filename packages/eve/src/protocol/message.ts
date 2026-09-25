@@ -633,6 +633,7 @@ export interface CompactionRequestedStreamEvent {
     modelId: string;
     sequence: number;
     sessionId: string;
+    stepIndex: number;
     turnId: string;
     usageInputTokens: number | null;
   };
@@ -648,6 +649,7 @@ export interface CompactionCompletedStreamEvent {
     modelId: string;
     sequence: number;
     sessionId: string;
+    stepIndex: number;
     turnId: string;
   };
   type: "compaction.completed";
@@ -1645,6 +1647,7 @@ export function createCompactionRequestedEvent(input: {
   readonly modelId: string;
   readonly sequence: number;
   readonly sessionId: string;
+  readonly stepIndex: number;
   readonly turnId: string;
   readonly usageInputTokens: number | undefined;
 }): CompactionRequestedStreamEvent {
@@ -1653,6 +1656,7 @@ export function createCompactionRequestedEvent(input: {
       modelId: input.modelId,
       sequence: input.sequence,
       sessionId: input.sessionId,
+      stepIndex: input.stepIndex,
       turnId: input.turnId,
       usageInputTokens: input.usageInputTokens ?? null,
     },
@@ -1667,6 +1671,7 @@ export function createCompactionCompletedEvent(input: {
   readonly modelId: string;
   readonly sequence: number;
   readonly sessionId: string;
+  readonly stepIndex: number;
   readonly turnId: string;
 }): CompactionCompletedStreamEvent {
   return {
@@ -1674,6 +1679,7 @@ export function createCompactionCompletedEvent(input: {
       modelId: input.modelId,
       sequence: input.sequence,
       sessionId: input.sessionId,
+      stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
     type: "compaction.completed",

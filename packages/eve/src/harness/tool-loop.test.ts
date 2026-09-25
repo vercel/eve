@@ -9511,6 +9511,7 @@ describe("createToolLoopHarness", () => {
       modelId: "openai/gpt-4",
       sequence: 0,
       sessionId: "test-session",
+      stepIndex: 0,
       turnId: "turn_0",
       usageInputTokens: 5000,
     });
@@ -9519,6 +9520,7 @@ describe("createToolLoopHarness", () => {
       modelId: "openai/gpt-4",
       sequence: 0,
       sessionId: "test-session",
+      stepIndex: 0,
       turnId: "turn_0",
     });
     expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({

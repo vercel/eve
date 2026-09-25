@@ -475,6 +475,7 @@ describe("memory lifecycle", () => {
         modelId: "openai/test",
         sequence: 0,
         sessionId: "session_1",
+        stepIndex: 0,
         turnId: "turn_0",
         usageInputTokens: 100,
       },
@@ -505,6 +506,7 @@ describe("memory lifecycle", () => {
               modelId: "openai/test",
               sequence: 0,
               sessionId: "session_1",
+              stepIndex: 0,
               turnId: "turn_0",
             },
             type: "compaction.completed",
@@ -521,6 +523,7 @@ describe("memory lifecycle", () => {
     ]);
     expect(drainMemoryCommit(ctx)?.history).toHaveLength(3);
   });
+
   it("gives each completed compaction within one turn a distinct recall operation id", async () => {
     const ctx = createContext();
     const operationIds: string[] = [];
@@ -551,13 +554,6 @@ describe("memory lifecycle", () => {
     let stepIndex = 0;
 
     const completeCompaction = async () => {
-      const eventData = {
-        modelId: "openai/test",
-        sequence: 0,
-        sessionId: "session_1",
-        stepIndex: stepIndex++,
-        turnId: "turn_0",
-      };
       prepareMemoryCompaction(ctx, { history, state });
       const projected = await contextStorage.run(
         ctx,
@@ -565,7 +561,13 @@ describe("memory lifecycle", () => {
           await dispatchMemoryCompactionCompleted({
             ctx,
             event: {
-              data: eventData,
+              data: {
+                modelId: "openai/test",
+                sequence: 0,
+                sessionId: "session_1",
+                stepIndex: stepIndex++,
+                turnId: "turn_0",
+              },
               type: "compaction.completed",
             },
             memories: [definition],

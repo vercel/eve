@@ -86,8 +86,8 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `message.appended`        | An assistant text delta.                                                                                                                           |
 | `message.completed`       | A finalized assistant text block.                                                                                                                  |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                                      |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                                                     |
-| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                                                            |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.                                    |
+| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.                                  |
 | `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                                         |
 | `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                          |
 | `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                           |
