@@ -126,8 +126,8 @@ export default defineDynamic({
 });
 ```
 
-The returned remote definition can change its URL, path, headers, auth,
-principal forwarding, and output schema. Function-valued URLs resolve when the
+The returned remote definition can change its URL, path, headers, auth, and
+principal forwarding. Function-valued URLs resolve when the
 dynamic event runs. Auth and headers remain lazy and resolve before each
 outbound request without entering durable workflow state.
 

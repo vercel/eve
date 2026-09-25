@@ -213,49 +213,6 @@ describe("mcpChannel", () => {
     expect(authenticate).not.toHaveBeenCalled();
   });
 
-  it("bounds and rejects external output schemas before starting work", async () => {
-    const createSession = vi.fn();
-    const channel = mcpChannel({ auth: none() });
-    const route = channel.routes[1]!;
-    if (route.transport === "websocket") throw new Error("expected HTTP route");
-
-    const response = await route.handler(
-      mcpRequest({
-        id: 1,
-        jsonrpc: "2.0",
-        method: "tools/call",
-        params: {
-          arguments: {
-            message: "work",
-            outputSchema: { $ref: "https://attacker.example/schema.json" },
-          },
-          name: "agent_start",
-        },
-      }),
-      routeArgs(createSession),
-    );
-
-    await expect(jsonRpcResponse(response)).resolves.toMatchObject({
-      result: {
-        content: [
-          {
-            text: "outputSchema external $ref values are not supported.",
-            type: "text",
-          },
-        ],
-        isError: true,
-        structuredContent: {
-          error: {
-            code: "invalid_input",
-            message: "outputSchema external $ref values are not supported.",
-            retryable: false,
-          },
-        },
-      },
-    });
-    expect(createSession).not.toHaveBeenCalled();
-  });
-
   it("rejects oversized UTF-8 messages and input responses before starting work", async () => {
     const createSession = vi.fn();
     const channel = mcpChannel({ auth: none() });

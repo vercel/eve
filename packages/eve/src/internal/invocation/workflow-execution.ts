@@ -24,7 +24,7 @@ import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-c
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution {
@@ -39,7 +39,6 @@ export class WorkflowAgentInvocationExecution {
   async create(input: {
     readonly auth: SessionAuthContext | null;
     readonly message: string | UserContent;
-    readonly outputSchema?: JsonObject;
   }): Promise<AgentInvocation> {
     const continuationToken = `invocation:${crypto.randomUUID()}`;
     const handle = await this.#createSession({
@@ -50,7 +49,7 @@ export class WorkflowAgentInvocationExecution {
         continuationToken,
         ownerKey: invocationOwnerKey(input.auth),
       },
-      input: { message: input.message, outputSchema: input.outputSchema },
+      input: { message: input.message },
     });
 
     const run = await this.#readInvocationRun(handle.sessionId, input.auth);
@@ -321,16 +320,14 @@ function projectInvocation(
 ): AgentInvocation {
   const authorizations = new Map<string, AgentInvocationAuthorizationRequest>();
   let inputBatch: PendingInputBatch | undefined;
-  let message: JsonValue | undefined;
-  let structured: JsonValue | undefined;
+  let result: JsonValue | undefined;
   let settled: "completed" | "cancelled" | InvocationFailureEvent | undefined;
   for (const event of events) {
     switch (event.type) {
       case "turn.started":
         authorizations.clear();
         inputBatch = undefined;
-        message = undefined;
-        structured = undefined;
+        result = undefined;
         settled = undefined;
         break;
       case "input.requested":
@@ -367,11 +364,8 @@ function projectInvocation(
         break;
       case "message.completed":
         if (event.data.finishReason === "stop" && event.data.message !== null) {
-          message = safeJson(event.data.message);
+          result = safeJson(event.data.message);
         }
-        break;
-      case "result.completed":
-        structured = event.data.result;
         break;
       case "turn.completed":
         settled = "completed";
@@ -385,7 +379,6 @@ function projectInvocation(
         break;
     }
   }
-  const result = structured ?? message;
   const pendingAuthorizations = [...authorizations.values()];
   if (pendingAuthorizations.length > 0) {
     return {

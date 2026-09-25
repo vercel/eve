@@ -117,7 +117,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       30: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
-      32: "Run mode was removed; sessions always park, and send options, audience inputs, and ConversationContext no longer carry mode.",
+      32: "Run mode and caller-supplied output schemas were removed from channel operations; sessions always park, and send options, audience inputs, and ConversationContext no longer carry mode, while from().send() and from().respond() no longer accept outputSchema.",
     },
   },
   schedule: {

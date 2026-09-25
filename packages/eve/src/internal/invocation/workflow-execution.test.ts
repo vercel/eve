@@ -483,26 +483,15 @@ describe("WorkflowAgentInvocationExecution", () => {
     ).resolves.toMatchObject({ result: "Done.", status: "working" });
   });
 
-  it.each([
-    { events: [messageCompletedEvent("Done.")], result: "Done." },
-    {
-      events: [
-        messageCompletedEvent("Done."),
-        {
-          data: { result: { answer: 42 }, sequence: 0, stepIndex: 0, turnId: "turn_1" },
-          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_result" },
-          type: "result.completed",
-        } as HandleMessageStreamEvent,
-      ],
-      result: { answer: 42 },
-    },
-  ])("completes with $result once the turn settles and the session parks", async (input) => {
+  it("completes with the final message once the turn settles and the session parks", async () => {
     runsGet.mockResolvedValue(run({ status: "running" }));
-    getReadable.mockReturnValue(eventStream([...input.events, ...turnSettledEvents("turn_1")]));
+    getReadable.mockReturnValue(
+      eventStream([messageCompletedEvent("Done."), ...turnSettledEvents("turn_1")]),
+    );
 
     await expect(
       execution().read({ auth, invocationId: "wrun_invocation" }),
-    ).resolves.toMatchObject({ result: input.result, status: "completed" });
+    ).resolves.toMatchObject({ result: "Done.", status: "completed" });
   });
 
   it("projects the workflow run reference without private error data", async () => {
