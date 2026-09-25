@@ -47,7 +47,6 @@ export function resolveEffectiveAgentRuntimeFromConfig(
       ...turnAgent,
       compactionModel: config.compaction?.model,
       model: config.model,
-      outputSchema: config.outputSchema,
       reasoning: config.reasoning,
     },
   };

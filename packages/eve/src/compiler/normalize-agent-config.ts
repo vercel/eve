@@ -3,7 +3,6 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { serializeOutputSchema } from "#tools/schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
@@ -86,7 +85,6 @@ export async function compileAgentConfig(
     description?: string;
     experimental?: CompiledAgentDefinition["experimental"];
     name: string;
-    outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
     source: ModuleSourceRef;
     tool?: boolean;
@@ -128,10 +126,6 @@ export async function compileAgentConfig(
           ? undefined
           : [...definition.build.externalDependencies],
     };
-  }
-
-  if (definition.outputSchema !== undefined) {
-    compiledConfig.outputSchema = serializeOutputSchema(definition.outputSchema);
   }
 
   if (definition.reasoning !== undefined) {

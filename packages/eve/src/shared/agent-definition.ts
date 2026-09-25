@@ -1,5 +1,4 @@
 import type { CallSettings, LanguageModel } from "ai";
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
@@ -319,7 +318,6 @@ export type InternalAgentDefinition = {
   defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
-  outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   tool?: boolean;
@@ -370,13 +368,6 @@ type PublicAgentDefinitionBase = {
    * in workflow tools.
    */
   readonly tool?: boolean;
-  /**
-   * Optional structured return type for the first turn of a fresh subagent
-   * delegation when the call supplies no schema of its own. Continuations
-   * with an `agentId` and top-level sessions ignore this field; pass a
-   * per-message output schema instead.
-   */
-  readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
 };
 
 /**

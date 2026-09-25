@@ -30,7 +30,6 @@ export interface CompileFromMemoryInput {
     readonly maxTokenCostUsdPerSession?: number | false;
     readonly sessionTimeoutMs?: number | false;
   };
-  readonly outputSchema?: JsonObject;
   readonly revision?: string;
   readonly modules?: readonly ProgrammaticAgentModule[];
   readonly tools?: readonly CompileFromMemoryToolInput[];
@@ -70,7 +69,6 @@ export async function compileFromMemory(
     input.agent ?? {
       limits: input.limits,
       model: input.model,
-      outputSchema: input.outputSchema,
     },
   );
   const modules = [

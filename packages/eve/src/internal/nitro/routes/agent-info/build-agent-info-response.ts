@@ -81,7 +81,6 @@ export function buildAgentInfoResponse(
             },
       name: manifest.config.name,
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-      outputSchema: manifest.config.outputSchema,
     },
     capabilities: { devRoutes: input.mode === "development" },
     channels: {

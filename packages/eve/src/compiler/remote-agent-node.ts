@@ -1,7 +1,5 @@
 import { z } from "#compiled/zod/index.js";
 
-import { jsonObjectSchema } from "#shared/json-schemas.js";
-import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import type { AgentSourceOwner, CompiledModuleBinding } from "#compiler/source-graph.js";
@@ -28,7 +26,6 @@ export type CompiledRemoteAgentNode = Readonly<
       name: string;
       owner: AgentSourceOwner;
       parentNodeId: string;
-      outputSchema?: JsonObject;
       path: string;
       rootPath: string;
       tool?: boolean;
@@ -96,7 +93,6 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
         .strict(),
     ]),
     parentNodeId: z.string(),
-    outputSchema: jsonObjectSchema.optional(),
     path: z.string(),
     rootPath: z.string(),
     tool: z.boolean().optional(),

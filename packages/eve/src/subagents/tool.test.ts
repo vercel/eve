@@ -276,37 +276,6 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.outputSchema).toEqual(schema);
   });
 
-  it("uses a declared local outputSchema on the persistent child's first turn", () => {
-    const schema = { properties: { result: { type: "string" } }, type: "object" };
-    const { runInput } = buildSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      selfAgent: false,
-      session: makeSession(),
-      source: { description: "Research the request.", outputSchema: schema, type: "local" },
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toEqual(schema);
-  });
-
-  it("lets a per-call outputSchema override the local child's declared schema", () => {
-    const declared = { properties: { declared: { type: "string" } }, type: "object" };
-    const requested = { properties: { requested: { type: "number" } }, type: "object" };
-    const { runInput } = buildSubagentRunInput({
-      action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
-      auth: null,
-      initiatorAuth: null,
-      selfAgent: false,
-      session: makeSession(),
-      source: { description: "Research the request.", outputSchema: declared, type: "local" },
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toEqual(requested);
-  });
-
   it("hands the parent's trace window down to the child, and omits it when absent", () => {
     const traceContext = { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
     const { runInput } = buildRuntimeSubagentRunInput({
@@ -387,21 +356,6 @@ describe("buildSubagentRunInput", () => {
       ].join("\n"),
     );
     expect(runInput.input.message).not.toContain(action.description);
-  });
-
-  it("uses the root agent's declared outputSchema for a fresh built-in copy", () => {
-    const schema = { properties: { result: { type: "string" } }, type: "object" };
-    const { runInput } = buildSubagentRunInput({
-      action: { ...makeAction(), name: "agent", nodeId: "root", subagentName: "agent" },
-      auth: null,
-      initiatorAuth: null,
-      selfAgent: true,
-      session: makeSession(),
-      source: { outputSchema: schema, type: "runtime" },
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toEqual(schema);
   });
 
   it("leaves outputSchema undefined when not provided", () => {

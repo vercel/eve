@@ -21,7 +21,7 @@ import type {
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import type { Optional } from "#shared/optional.js";
 import type { Node } from "#shared/node.js";
 import type {
@@ -300,7 +300,6 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
       headers?: HeadersValue;
       kind: "remote";
       name: string;
-      outputSchema?: JsonObject;
       path: string;
       tool?: boolean;
       url: string;

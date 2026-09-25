@@ -167,9 +167,6 @@ export function createCompiledRemoteAgent(input: {
   if (input.sourceRef.exportName !== undefined) {
     Object.assign(node, { exportName: input.sourceRef.exportName });
   }
-  if (input.definition.outputSchema !== undefined) {
-    Object.assign(node, { outputSchema: input.definition.outputSchema });
-  }
   if (input.definition.tool !== undefined) Object.assign(node, { tool: input.definition.tool });
   if (input.definition.url !== undefined) Object.assign(node, { url: input.definition.url });
   return node;

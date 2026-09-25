@@ -54,7 +54,6 @@ async function resolveSelections(input: {
           logicalPath: resolver.logicalPath,
           name: resolver.name,
           nodeId: resolver.nodeId,
-          outputSchema: effectiveRemoteAgent.outputSchema,
           path: effectiveRemoteAgent.path,
           sourceId: resolver.sourceId,
           sourceKind: resolver.sourceKind,

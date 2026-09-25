@@ -16,17 +16,14 @@ import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
 export type SubagentInputSource =
   | {
       readonly description: string;
-      readonly outputSchema?: JsonObject;
       readonly type: "local";
     }
   | {
-      readonly outputSchema?: JsonObject;
       readonly type: "runtime";
     };
 
@@ -151,7 +148,7 @@ export function buildSubagentRunInput(input: {
         action,
         source,
       }),
-      outputSchema: requestedOutputSchema ?? source.outputSchema,
+      outputSchema: requestedOutputSchema,
     },
     limits: inheritedLimits,
     conversationId: input.parent.conversationId,

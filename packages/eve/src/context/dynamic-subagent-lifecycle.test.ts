@@ -299,7 +299,6 @@ describe("dynamic subagent lifecycle", () => {
       description: "Research on the remote deployment.",
       forwardPrincipal: true,
       headers,
-      outputSchema: { properties: { answer: { type: "string" } }, type: "object" },
       url: async () => "https://research.example.com",
     });
     const credentialsFactory = Object.assign(

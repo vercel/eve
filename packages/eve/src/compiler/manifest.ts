@@ -604,7 +604,6 @@ const compiledAgentConfigBaseFields = {
     .strict()
     .optional(),
   name: z.string(),
-  outputSchema: jsonObjectSchema.optional(),
   reasoning: z
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
@@ -1191,7 +1190,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
                   },
           },
     name: config.name,
-    outputSchema: config.outputSchema,
     reasoning: config.reasoning,
     limits:
       config.limits === undefined

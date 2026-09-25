@@ -188,7 +188,6 @@ function createResolvedAgentConfig(
     description?: string;
     experimental?: NonNullable<ResolvedAgent["config"]>["experimental"];
     name: string;
-    outputSchema?: NonNullable<ResolvedAgent["config"]>["outputSchema"];
     reasoning?: NonNullable<ResolvedAgent["config"]>["reasoning"];
     source?: NonNullable<ResolvedAgent["config"]>["source"];
     tool?: boolean;
@@ -251,10 +250,6 @@ function createResolvedAgentConfig(
               world: manifest.config.experimental.workflow.world,
             },
     };
-  }
-
-  if (manifest.config.outputSchema !== undefined) {
-    config.outputSchema = manifest.config.outputSchema;
   }
 
   if (manifest.config.reasoning !== undefined) {

@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 57,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 57],
+    current: 58,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 58],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -60,6 +60,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       52: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      57: "agentRouter() no longer accepts a model-facing outputSchema; structured subagent output is requested only through ctx.agent().",
     },
   },
   dynamicTool: {
@@ -135,7 +136,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
-      20: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
+      20: "Run mode was removed and agent definitions no longer declare outputSchema; sessions always park, ConversationContext no longer carries mode, and structured output is requested per turn.",
     },
   },
   connection: {

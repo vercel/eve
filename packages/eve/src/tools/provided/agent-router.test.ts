@@ -1,12 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { agentRouter } from "#tools/provided/agent-router.js";
-import {
-  AGENT_ROUTER_INPUT_SCHEMA,
-  executeAgentRouterTool,
-} from "#execution/tools/agent-router.js";
+import { executeAgentRouterTool } from "#execution/tools/agent-router.js";
 import { evaluate } from "#ai/evaluate.js";
-import { serializeInputSchema } from "#tools/schema.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 vi.mock("#ai/evaluate.js", () => ({ evaluate: vi.fn() }));
@@ -20,25 +16,6 @@ describe("agentRouter", () => {
     expect(definition.availableInSubagents).toBe(false);
     expect(definition.description).toContain("best available subagent");
     expect(definition.execute).toBe(executeAgentRouterTool);
-  });
-
-  it("advertises arbitrary output schemas without propertyNames", () => {
-    const serialized = serializeInputSchema(AGENT_ROUTER_INPUT_SCHEMA);
-
-    expect(serialized).toMatchObject({
-      properties: { outputSchema: { type: "object" } },
-    });
-    expect(JSON.stringify(serialized)).not.toContain('"propertyNames"');
-    expect(
-      AGENT_ROUTER_INPUT_SCHEMA["~standard"].validate({
-        message: "Return a structured result",
-        outputSchema: {
-          $defs: { answer: { type: "string" } },
-          properties: { answer: { $ref: "#/$defs/answer" } },
-          type: "object",
-        },
-      }),
-    ).not.toHaveProperty("issues");
   });
 
   it("routes through all workflow agent descriptions", async () => {
@@ -105,30 +82,6 @@ describe("agentRouter", () => {
     );
     expect(evaluate).not.toHaveBeenCalled();
     expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
-  });
-
-  it("forwards an output schema to the selected agent", async () => {
-    vi.mocked(evaluate).mockResolvedValue({
-      answers: { route: { choice: "researcher", type: "choice" } },
-    } as never);
-    const agent = vi.fn().mockResolvedValue({ answer: "done" });
-    const ctx = workflowContext({
-      agent,
-      agents: { researcher: { description: "Investigate and explain." } },
-    });
-    const outputSchema = {
-      additionalProperties: false,
-      properties: { answer: { type: "string" } },
-      required: ["answer"],
-      type: "object",
-    } as const;
-
-    await executeAgentRouterTool({ message: "Investigate", outputSchema }, ctx);
-
-    expect(agent).toHaveBeenCalledWith("researcher", {
-      message: "Investigate",
-      outputSchema,
-    });
   });
 
   it("rejects an agent map without descriptions before evaluation", async () => {

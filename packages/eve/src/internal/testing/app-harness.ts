@@ -1,4 +1,3 @@
-import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
@@ -47,7 +46,6 @@ export interface TestAppDescriptor {
     };
     readonly model?: string;
     readonly name?: string;
-    readonly outputSchema?: JsonObject;
   };
   /**
    * Authored tools projected into the compiled manifest and available to
@@ -178,7 +176,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
       },
       ...(descriptor.modules ?? []),
     ],
-    outputSchema: descriptor.agent?.outputSchema,
   };
 
   if (descriptor.tools !== undefined && descriptor.tools.length > 0) {

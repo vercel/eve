@@ -50,7 +50,6 @@ interface RuntimeTurnAgentBase {
    */
   readonly compactionModel?: RuntimeModelReference;
   readonly nodeId?: string;
-  readonly outputSchema?: ResolvedAgentDefinition["outputSchema"];
   readonly reasoning?: ResolvedAgentDefinition["reasoning"];
   readonly tools: readonly PreparedRuntimeTool[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;
@@ -127,7 +126,6 @@ export function createResolvedRuntimeTurnAgent(input: {
     }),
     compactionModel: config?.compaction?.model,
     nodeId: input.nodeId,
-    outputSchema: config?.outputSchema,
     reasoning: config?.reasoning,
     tools: [...input.tools],
     workspaceSpec: agent.workspaceSpec,

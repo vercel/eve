@@ -51,9 +51,8 @@ The root session receives `agent` by default. The model calls it to delegate a t
 
 ```ts
 {
-  message: string;       // everything the child needs; it does not see the parent's history
-  agentId?: string;      // continue or steer an existing child
-  outputSchema?: object; // require structured output for this turn
+  message: string;  // everything the child needs; it does not see the parent's history
+  agentId?: string; // continue or steer an existing child
 }
 ```
 
@@ -239,7 +238,7 @@ The root built-in `agent` tool is the exception. Its children reuse the root's s
 
 ## What the parent sees
 
-eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
+eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. To require structured output from a child, call it from an authored workflow tool with [`ctx.agent(name, { message, outputSchema })`](./tools/workflows); the schema applies to that turn, and the child remains available for follow-up messages afterward.
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
@@ -249,9 +248,8 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 
 ```ts
 {
-  message: string;       // all context the child needs; it never sees the parent's history
-  agentId?: string;      // continue or steer an existing child
-  outputSchema?: object; // require structured output for this turn
+  message: string;  // all context the child needs; it never sees the parent's history
+  agentId?: string; // continue or steer an existing child
 }
 ```
 
