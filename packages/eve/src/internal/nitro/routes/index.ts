@@ -368,7 +368,7 @@ export function buildHomePageResponse(
   const html = buildHomePageHtml({
     name: input.agentName,
     statusDetail: "Agent is up and accepting messages.",
-    terminalCommand: `eve remote connect ${deploymentUrl}`,
+    terminalCommand: `eve remote connect --url ${deploymentUrl}`,
   });
 
   return new Response(html, {

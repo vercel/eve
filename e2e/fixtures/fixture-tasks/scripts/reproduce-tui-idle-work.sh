@@ -48,4 +48,4 @@ Foreground hang lab (each holds for 45 seconds):
 EOF
 printf '\n'
 
-pnpm --filter fixture-tasks exec eve remote connect "http://127.0.0.1:${port}"
+pnpm --filter fixture-tasks exec eve remote connect --url "http://127.0.0.1:${port}"

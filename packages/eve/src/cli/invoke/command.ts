@@ -5,6 +5,7 @@ import {
   resolveDevelopmentUrlTarget,
   type DevelopmentRequestHeaders,
 } from "#cli/dev/url-target.js";
+import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import type { RemoteDevelopmentTarget } from "#services/dev-client/target.js";
 
 import { resolveInvokeOperation, type RunInvokeInput } from "./invoke.js";
@@ -56,8 +57,9 @@ export function registerInvokeCommand(input: {
   readonly program: Command;
 }): void {
   input.program
-    .command("invoke <url> [prompt]")
+    .command("invoke [prompt]")
     .description("Invoke an existing eve agent without a terminal UI.")
+    .requiredOption("-u, --url <url>", "Existing eve agent URL", parseDevelopmentServerUrl)
     .option(
       "-H, --header <header>",
       'Request header for a URL target, in "Name: value" form (repeatable)',
@@ -65,8 +67,8 @@ export function registerInvokeCommand(input: {
     )
     .option("--resume", "Read a previous resumable result from stdin")
     .option("--scope <team>", "Vercel team that owns the URL target")
-    .action((url: string, prompt: string | undefined, options: InvokeCliOptions) =>
-      runInvokeCommand({ ...input, options, prompt, url }),
+    .action((prompt: string | undefined, options: InvokeCliOptions & { url: string }) =>
+      runInvokeCommand({ ...input, options, prompt, url: options.url }),
     );
 }
 

@@ -54,7 +54,7 @@ describe("eve remote connect", () => {
     const startHost = vi.fn();
     const runDevelopmentTui = vi.fn(async () => {});
 
-    await runCli(["remote", "connect", "https://example.com"], logger, {
+    await runCli(["remote", "connect", "--url", "https://example.com"], logger, {
       runDevelopmentTui,
       startHost,
     });
@@ -87,7 +87,7 @@ describe("eve remote connect", () => {
     process.chdir(appRoot);
 
     try {
-      await runCli(["remote", "connect", "https://example.com"], logger, {
+      await runCli(["remote", "connect", "--url", "https://example.com"], logger, {
         runDevelopmentTui,
         startHost,
       });

@@ -521,6 +521,7 @@ describe("eve dev --input", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "https://example.com",
       "--input",
       "/model",
@@ -541,7 +542,7 @@ describe("eve dev --input", () => {
   it("rejects the option when the terminal cannot run the interactive UI", async () => {
     await expect(
       runCli(
-        ["remote", "connect", "https://example.com", "--input", "/model"],
+        ["remote", "connect", "--url", "https://example.com", "--input", "/model"],
         { error: () => {}, log: () => {} },
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
@@ -651,7 +652,7 @@ describe("eve remote invoke", () => {
     const output: string[] = [];
 
     await runCli(
-      ["remote", "invoke", "https://example.com", "--scope", "target-team", "do foo"],
+      ["remote", "invoke", "--url", "https://example.com", "--scope", "target-team", "do foo"],
       { error: () => {}, log: (message) => output.push(message) },
       { runInvoke },
     );
@@ -697,7 +698,7 @@ describe("eve remote invoke", () => {
 
     try {
       await runCli(
-        ["remote", "invoke", "https://example.com", "--resume", "follow up"],
+        ["remote", "invoke", "--url", "https://example.com", "--resume", "follow up"],
         { error: () => {}, log: () => {} },
         { runInvoke },
       );
@@ -714,7 +715,7 @@ describe("eve remote invoke", () => {
 
   it("requires a prompt for a fresh invocation", async () => {
     await expect(
-      runCli(["remote", "invoke", "https://example.com"], {
+      runCli(["remote", "invoke", "--url", "https://example.com"], {
         error: () => {},
         log: () => {},
       }),
@@ -726,7 +727,7 @@ describe("eve remote connect", () => {
   it("does not resolve a local application for a remote URL", async () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
-    await runInteractiveDev(["remote", "connect", "https://example.com"], {
+    await runInteractiveDev(["remote", "connect", "--url", "https://example.com"], {
       resolveApplicationProject: resolveProject,
     });
 
@@ -737,6 +738,7 @@ describe("eve remote connect", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "https://example.com?x-vercel-protection-bypass=secret",
     ]);
 
@@ -755,6 +757,7 @@ describe("eve remote connect", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "https://test%40user:p%20ss@example.com",
     ]);
 
@@ -776,6 +779,7 @@ describe("eve remote connect", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "https://user:pass@example.com",
       "-H",
       "Authorization: Bearer explicit-token",
@@ -799,6 +803,7 @@ describe("eve remote connect", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "https://example.com",
       "-H",
       "Authorization: Basic dGVzdDpzZWNyZXQ=",
@@ -824,7 +829,7 @@ describe("eve remote connect", () => {
   it("rejects malformed request headers", async () => {
     await expect(
       runCli(
-        ["remote", "connect", "https://example.com", "-H", "Authorization"],
+        ["remote", "connect", "--url", "https://example.com", "-H", "Authorization"],
         { error: () => {}, log: () => {} },
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
@@ -835,6 +840,7 @@ describe("eve remote connect", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "http://127.0.0.1:2000",
     ]);
 
@@ -861,6 +867,7 @@ describe("eve dev --logs", () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
+      "--url",
       "https://example.com",
       "--logs",
       "sandbox",
@@ -940,7 +947,7 @@ describe("eve acp", () => {
     }));
 
     await runCli(
-      ["acp", "https://agent.example.com", "--scope", "vercel-internal-playground"],
+      ["acp", "--url", "https://agent.example.com", "--scope", "vercel-internal-playground"],
       { error: () => {}, log: () => {} },
       { resolveVerifiedRemoteDevelopmentClient, runAcpServer },
     );
@@ -966,7 +973,7 @@ describe("eve acp", () => {
     const runAcpServer = vi.fn(async () => {});
 
     await runCli(
-      ["acp", "https://user:pass@example.com", "-H", "X-Tenant: acme"],
+      ["acp", "--url", "https://user:pass@example.com", "-H", "X-Tenant: acme"],
       { error: () => {}, log: () => {} },
       { runAcpServer, startHost },
     );

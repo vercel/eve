@@ -47,7 +47,7 @@ curl https://your_agent.example.com/eve/v1/health
 Then connect the development terminal user interface (TUI) to the deployment and send a real message:
 
 ```bash
-eve remote connect https://your_agent.example.com
+eve remote connect --url https://your_agent.example.com
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses Deployment Protection.

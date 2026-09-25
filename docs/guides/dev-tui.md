@@ -131,19 +131,19 @@ Use `--host` and `--port` to bind the local server, or `--no-ui` to run without 
 Pass a URL to use the terminal UI with an existing eve server instead of starting one locally:
 
 ```bash
-eve remote connect https://your-app.vercel.app
+eve remote connect --url https://your-app.vercel.app
 ```
 
 Use `eve remote connect` for an existing agent. To send credentials or custom request headers, use a URL with HTTP Basic credentials or repeat `-H, --header`:
 
 ```bash
-eve remote connect https://user:pass@your-app.example.com
-eve remote connect https://your-app.example.com -H 'Authorization: Bearer your_token_here'
+eve remote connect --url https://user:pass@your-app.example.com
+eve remote connect --url https://your-app.example.com -H 'Authorization: Bearer your_token_here'
 ```
 
 Remote Vercel sessions reuse an existing authorized CLI session. They do not open an account login flow or modify the local project's Vercel link or `.env.local`.
 
-When Deployment Protection blocks startup, eve verifies the target project and asks before adding a Trusted Sources rule for development access to that deployment's environment. After approval, eve applies the rule and checks access again before returning to chat. Cancelling preserves your draft; restart `eve remote connect <url>` to try again. If you cannot change the project's policy, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or ask a project administrator to configure access in Deployment Protection settings.
+When Deployment Protection blocks startup, eve verifies the target project and asks before adding a Trusted Sources rule for development access to that deployment's environment. After approval, eve applies the rule and checks access again before returning to chat. Cancelling preserves your draft; restart `eve remote connect --url <url>` to try again. If you cannot change the project's policy, provide `VERCEL_AUTOMATION_BYPASS_SECRET` or ask a project administrator to configure access in Deployment Protection settings.
 
 ## What to read next
 

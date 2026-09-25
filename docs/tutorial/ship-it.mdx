@@ -116,7 +116,7 @@ Open the HTTPS preview URL and enter the configured username and password. Creat
 The authenticated web app and eve runtime share the same origin, and the sandbox runs on Vercel Sandbox. You can also smoke-test the deployment through the authenticated CLI:
 
 ```bash
-npx eve remote connect https://your-analytics-app.vercel.app
+npx eve remote connect --url https://your-analytics-app.vercel.app
 ```
 
 For a production deployment, add the username, password, and model credential to the Production environment too, then run `npx vercel@latest deploy --prod`. Missing Basic credentials keep browser access closed.

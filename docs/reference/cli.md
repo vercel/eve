@@ -11,9 +11,9 @@ Relevant `eve` commands can run from the application root or any directory benea
 | ---------------------------------------------- | ------------------------------------------------------ |
 | `eve init [target]`                            | Create a new agent, or add one to an existing project  |
 | `eve dev`                                      | Start the local development server and terminal UI     |
-| `eve remote connect <url>`                     | Open the terminal UI for an existing agent             |
-| `eve remote invoke <url> [prompt]`             | Invoke an existing agent without a terminal UI         |
-| `eve remote info <url>`                        | Inspect an existing agent                              |
+| `eve remote connect --url <url>`               | Open the terminal UI for an existing agent             |
+| `eve remote invoke --url <url> [prompt]`       | Invoke an existing agent without a terminal UI         |
+| `eve remote info --url <url>`                  | Inspect an existing agent                              |
 | `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
 | `eve info`                                     | Inspect the local application                          |
 | `eve set model [model] [--reasoning <effort>]` | Change model and reasoning settings                    |
@@ -206,7 +206,7 @@ For self-hosted deployments, copy the app source, `.output/`, and installed depe
 eve dev [options]
 ```
 
-Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect <url>`.
+Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect --url <url>`.
 
 | Flag                                | Type   | Default            | Description                                 |
 | ----------------------------------- | ------ | ------------------ | ------------------------------------------- |
@@ -241,9 +241,9 @@ Local development records traces under `.eve/traces/` by default and bounds that
 Use `eve remote` only with an explicit existing agent URL:
 
 ```bash
-eve remote connect https://agent.example.com
-eve remote invoke https://agent.example.com "Summarize station telemetry"
-eve remote info https://agent.example.com
+eve remote connect --url https://agent.example.com
+eve remote invoke --url https://agent.example.com "Summarize station telemetry"
+eve remote info --url https://agent.example.com
 ```
 
 `connect` opens the terminal UI. `info` verifies the target and prints its inspection response. Remote commands never start a local application.
@@ -251,7 +251,7 @@ eve remote info https://agent.example.com
 ### `eve remote connect`
 
 ```bash
-eve remote connect <url> [-H "Name: value"]
+eve remote connect --url <url> [-H "Name: value"]
 ```
 
 Use `-H, --header <header>` for a bearer token or another custom request header; repeat it for multiple headers. For HTTP Basic authentication, put credentials in the URL. eve sends them as a Basic `Authorization` header and removes them from the target URL.
@@ -259,7 +259,7 @@ Use `-H, --header <header>` for a bearer token or another custom request header;
 ### `eve remote invoke`
 
 ```bash
-eve remote invoke <url> [prompt] [--resume] [-H "Name: value"] [--scope <team>]
+eve remote invoke --url <url> [prompt] [--resume] [-H "Name: value"] [--scope <team>]
 ```
 
 Invokes an existing agent without opening the terminal UI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
@@ -277,7 +277,7 @@ Invokes an existing agent without opening the terminal UI. It emits JSON after t
 ### `eve remote info`
 
 ```bash
-eve remote info <url> [-H "Name: value"] [--json]
+eve remote info --url <url> [-H "Name: value"] [--json]
 ```
 
 Verifies the existing agent and prints its inspection response. Use `-H, --header <header>` for protected targets; repeat it for multiple headers.

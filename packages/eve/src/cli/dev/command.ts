@@ -20,6 +20,7 @@ import {
   resolveDevelopmentUrlTarget,
   type DevelopmentRequestHeaders,
 } from "./url-target.js";
+import { parseDevelopmentServerUrl } from "./url.js";
 import { waitForServerOrStop, waitForUiOrServer } from "./wait-for-ui.js";
 import {
   parseContextSizeOption,
@@ -68,8 +69,9 @@ export function registerRemoteCommands(input: {
   const theme = createCliTheme();
 
   program
-    .command("info <url>")
+    .command("info")
     .description("Inspect an existing eve agent.")
+    .requiredOption("-u, --url <url>", "Existing eve agent URL", parseDevelopmentServerUrl)
     .option(
       "-H, --header <header>",
       'Request header for the URL target, in "Name: value" form (repeatable)',
@@ -77,8 +79,11 @@ export function registerRemoteCommands(input: {
     )
     .option("--json", "Output as JSON")
     .action(
-      async (url: string, options: { header?: DevelopmentRequestHeaders; json?: boolean }) => {
-        const target = resolveDevelopmentUrlTarget({ header: options.header, url }, undefined)!;
+      async (options: { header?: DevelopmentRequestHeaders; json?: boolean; url: string }) => {
+        const target = resolveDevelopmentUrlTarget(
+          { header: options.header, url: options.url },
+          undefined,
+        )!;
         const inspection = await inspectVerifiedRemoteAgent({
           headers: target.headers,
           prompter:
@@ -93,8 +98,9 @@ export function registerRemoteCommands(input: {
     );
 
   program
-    .command("connect <url>")
+    .command("connect")
     .description("Open the terminal UI for an existing eve agent.")
+    .requiredOption("-u, --url <url>", "Existing eve agent URL", parseDevelopmentServerUrl)
     .option(
       "-H, --header <header>",
       'Request header for the URL target, in "Name: value" form (repeatable)',
@@ -137,8 +143,8 @@ export function registerRemoteCommands(input: {
       "Which server/agent logs to show: all | stderr | sandbox | none",
       parseLogsMode,
     )
-    .action(async (url: string, options: DevelopmentCliOptions) => {
-      const remoteTarget = resolveDevelopmentUrlTarget({ ...options, url }, undefined)!;
+    .action(async (options: DevelopmentCliOptions & { url: string }) => {
+      const remoteTarget = resolveDevelopmentUrlTarget(options, undefined)!;
       const mode = resolveDevUiMode({ options, interactive: hasInteractiveTerminal() });
       if (mode === "headless") {
         throw new InvalidArgumentError("eve remote connect requires an interactive terminal.");
