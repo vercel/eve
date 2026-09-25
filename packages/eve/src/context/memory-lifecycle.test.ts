@@ -521,4 +521,71 @@ describe("memory lifecycle", () => {
     ]);
     expect(drainMemoryCommit(ctx)?.history).toHaveLength(3);
   });
+  it("gives each completed compaction within one turn a distinct recall operation id", async () => {
+    const ctx = createContext();
+    const operationIds: string[] = [];
+    const definition = memory("register", {
+      provider: {
+        recall: {
+          "compaction.completed": async (context) => {
+            operationIds.push(context.operationId);
+            return {
+              messages: [{ content: `findings revision ${operationIds.length}`, id: "register" }],
+            };
+          },
+          "turn.started": async () => null,
+        },
+      },
+      scope: "user_1",
+    });
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "register",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    ctx.set(TurnMemoryLocksKey, { register: memoryLock });
+    let history: ModelMessage[] = [{ content: "ordinary", role: "user" }];
+    let state: Readonly<Record<string, unknown>> | undefined;
+    let stepIndex = 0;
+
+    const completeCompaction = async () => {
+      const eventData = {
+        modelId: "openai/test",
+        sequence: 0,
+        sessionId: "session_1",
+        stepIndex: stepIndex++,
+        turnId: "turn_0",
+      };
+      prepareMemoryCompaction(ctx, { history, state });
+      const projected = await contextStorage.run(
+        ctx,
+        async () =>
+          await dispatchMemoryCompactionCompleted({
+            ctx,
+            event: {
+              data: eventData,
+              type: "compaction.completed",
+            },
+            memories: [definition],
+            messages: history,
+          }),
+      );
+      const commit = drainMemoryCommit(ctx)!;
+      history = [...commit.history];
+      state = commit.state;
+      return projected;
+    };
+
+    await completeCompaction();
+    const second = await completeCompaction();
+
+    expect(operationIds).toHaveLength(2);
+    expect(operationIds[1]).not.toBe(operationIds[0]);
+    expect(second).toEqual([
+      { content: "ordinary", role: "user" },
+      { content: "findings revision 2", kind: "memory.load", role: "user" },
+    ]);
+  });
 });
