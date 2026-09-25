@@ -1583,7 +1583,7 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageReceivedEvent({
         message:
-          '<task_result id="remind-q4x1ze" name="remind" status="completed">\nDone\n</task_result>',
+          '<task_result id="remind-q4x1ze" tool="remind" status="completed">\nDone\n</task_result>',
         sequence: 2,
         taskIds: ["remind-q4x1ze"],
         turnId: "turn_2",

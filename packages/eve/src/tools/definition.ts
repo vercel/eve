@@ -348,7 +348,7 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function rejectRemovedExecutionOption(definition: object, factory: string): void {
   if ("execution" in definition && definition.execution !== undefined) {
     throw new Error(
-      `${factory}: "execution" is no longer supported. Tool calls run inside the turn that makes them.`,
+      `${factory}: "execution" is no longer supported. A workflow tool call starts a detached task by default; set "attached: true" on defineWorkflowTool to hold the turn for its result instead.`,
     );
   }
 }

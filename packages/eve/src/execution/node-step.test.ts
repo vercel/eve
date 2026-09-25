@@ -264,9 +264,11 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.description).toContain("split a large task into independent pieces");
     expect(agentTool?.description).toContain("multiple `agent` calls in one response");
     expect(agentTool?.description).toContain("run a small fixed set in parallel");
-    expect(agentTool?.description).toContain("include essential context");
+    expect(agentTool?.description).toContain(
+      "It does not see this conversation, so put everything it needs in message.",
+    );
     expect(agentTool?.description).toContain("non-overlapping scopes");
-    expect(agentTool?.description).not.toContain("eve");
+    expect(agentTool?.description).not.toMatch(/\beve\b/u);
     expect(agentTool).not.toHaveProperty("execution");
     expect(agentTool?.execute).toBeUndefined();
     expect(agentTool?.workflowId).toEqual(expect.any(String));

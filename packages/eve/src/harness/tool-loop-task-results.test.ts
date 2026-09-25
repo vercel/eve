@@ -202,7 +202,7 @@ describe("detached result delivery in the tool loop", () => {
     });
 
     expect(lastUserText(requests[0]!)).toBe(
-      '<task_result id="remind-q4x1ze" name="remind" status="completed">\nReminder: stand-up at 10\n</task_result>',
+      '<task_result id="remind-q4x1ze" tool="remind" status="completed">\nReminder: stand-up at 10\n</task_result>',
     );
     const resultMessages = session.history.filter(
       (message) => message.role === "user" && message.kind === "task.result",

@@ -84,7 +84,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 By default, a remote agent is another subagent tool to the model. The model calls it the same way it calls a local subagent, with a `message` and an optional `outputSchema`. Set `tool: false` when an authored workflow tool should be the only model-facing routing surface; the workflow can still call the remote agent by its path-derived name through `ctx.agent()`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
-To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value becomes the tool result, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
+To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value becomes the task's result, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
 
 ## Outbound auth
 
@@ -135,7 +135,7 @@ export default defineRemoteAgent({
 
 The create-session request carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). Every continuation carries only that turn's `session.auth.current`; the remote session keeps its original `auth.initiator`. Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment resolves its own per-user credentials through its own connections.
 
-This keeps caller authority with the principal that started the child, even when the remote child session is persistent. Only that principal can continue the child: if Alice starts it and Bob's turn later names its `agentId`, the call fails with `AGENT_OTHER_PRINCIPAL`, and Bob's request needs a new child, which acts as Bob. When the parent turn's auth is `null`, a new local child has no `auth.current`, while a new remote child uses the freshly verified transport principal. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a turn can resolve only the grant belonging to its own `auth.current` principal.
+This keeps caller authority with the principal that started the child, even when the remote child session is persistent. Only that principal can continue the child: if Alice starts it and Bob's turn later sends to its `taskId`, the send fails with `TASK_OTHER_PRINCIPAL`, and Bob's request needs a new child, which acts as Bob. When the parent turn's auth is `null`, a new local child has no `auth.current`, while a new remote child uses the freshly verified transport principal. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a turn can resolve only the grant belonging to its own `auth.current` principal.
 
 The principal check covers calls made through the parent. The remote child is still an ordinary session on the remote deployment, and its conversation history, tool outputs, and other state persist there. If those values must not be visible across users, also enforce that ownership at the remote deployment's boundary.
 
@@ -185,17 +185,17 @@ widen capture and use metadata-only tracing.
 
 ## How remote dispatch and callbacks work
 
-A remote subagent runs in its own deployment, and the parent turn waits for its answer:
+A remote subagent runs in its own deployment. The call returns a receipt at once, and the parent turn stays open until the answer arrives:
 
 1. The parent reads the remote's task protocol version from `GET /eve/v1/health`, then starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL, the parent session's capabilities, and its task protocol version.
 2. The remote child runs its turn. Questions, approvals, and sign-in prompts it raises travel back through the same callback URL.
-3. The child posts its answer to the callback URL, and the answer becomes the tool result for the parent's call.
+3. The child posts its answer to the callback URL, and the answer reaches the parent's model through `task_wait` or a `task.result` message in the same turn.
 
-A remote call is a [task](../concepts/tasks) like a local one: the parent stream carries the same `task.started`, `action.result`, and `task.settled` events as local delegation, and the same receipts, detach, cancellation, and time limits apply. For a remote call, `task.started.data.child.remote.url` records the target.
+A remote call is a [task](../concepts/tasks) like a local one: the parent stream carries the same `task.started`, `action.result`, and `task.settled` events as local delegation, and the same receipts, waits, sends, cancellation, and time limits apply. For a remote call, `task.started.data.child.remote.url` records the target.
 
-In an interactive root session, the model can run a remote agent call in the background with `background: true`, exactly as with a local subagent: the call returns a receipt, and the remote child's answer arrives through the same callback and reaches the model later in a `task.result` message. See [Run a call in the background](../subagents#run-a-call-in-the-background).
+The model waits for a remote agent with `task_wait`, exactly as for a local subagent; see [Wait for an agent](../subagents#wait-for-an-agent).
 
-Passing the `agentId` of a remote child that is still working sends its message as a steering message for the child's current call, as for a local child. The remote child applies the message to its current turn, or, when it already answered, runs the message as its next turn for the same call; the parent then tracks that turn as the child's next background work, and its answer arrives through the callback. Only the principal whose call started the child's current work can give it more work or send it a message; a call from another principal fails with `AGENT_OTHER_PRINCIPAL`. When the definition forwards the caller identity, the continue request forwards that same principal.
+Calling the remote agent's tool with the `taskId` of a child that is still working sends the message as a steering message for the child's current turn, as for a local child. When the child already answered, it runs the message as its next turn; the parent tracks that turn as the task's next generation, and its answer arrives through the callback. A send to an idle remote child starts its next turn the same way. Only the principal that started the child can send to it; a send from another principal fails with `TASK_OTHER_PRINCIPAL`. When the definition forwards the caller identity, the continue request forwards that same principal.
 
 Clients follow a remote child through the parent. [`session.streamSubagent()`](./client/streaming#follow-a-subagent) reads `task.started.data.child.streamPath`, a route on the parent deployment. The parent verifies that the child belongs to that session, resolves the remote agent's `auth` and `headers`, and relays the child's stream. A browser never calls the remote deployment or holds its credentials; it only needs access to the parent session.
 
@@ -215,7 +215,7 @@ Cancelling the parent turn cancels the remote child's current turn. eve resolves
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-A failed _start_ fails the call with `START_FAILED`, including a start refused because the two deployments use different task protocol versions (see [Upgrading remote agents](#upgrading-remote-agents)). Each request the parent sends a remote has a 30-second limit and does not follow redirects. A create request with no answer in time fails the call with `START_FAILED`, and a message to a working child with no answer in time fails that message with `AGENT_UNREACHABLE` while the child's current call continues. After a remote starts, a terminal failure callback fails the call with the remote's error (or `EXECUTION_FAILED` when none is supplied). Callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
+A failed _start_ fails the call with `START_FAILED`, including a start refused because the two deployments use different task protocol versions (see [Upgrading remote agents](#upgrading-remote-agents)). Each request the parent sends a remote has a 30-second limit and does not follow redirects. A create request with no answer in time fails the call with `START_FAILED`, and a message to a working child with no answer in time fails that send with `TASK_UNREACHABLE` while the child's current work continues. After a remote starts, a terminal failure callback fails the call with the remote's error (or `EXECUTION_FAILED` when none is supplied). Callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the call complete, so the engine retries it.
 
 ### Questions, approvals, and sign-in
 
@@ -223,7 +223,7 @@ A remote child inherits the parent session's capabilities, as a local child does
 
 When the remote child cannot deliver a question, an approval, or a resolution to the parent, for example while the parent session moves to another deployment and its callback route answers `503`, the child sends it again, in order, in a retried step once the step that emitted it ends, before the child reports a result or waits for the answer. A question or approval the parent still does not take after those retries is dropped, and the call's time limit bounds the wait. A resolution is kept and sent again at the child's next step or wait, so the parent does not keep waiting on a request the child already resolved. An event the parent refuses outright, such as one from another task protocol version, is dropped.
 
-An answer that fails for a reason that may clear, such as a timeout, stays answerable on the parent. An answer that can never reach the remote child fails the call: with `AGENT_SESSION_ENDED` when the remote session no longer exists, and with `AGENT_UNREACHABLE` when the remote deployment now uses another task protocol version.
+An answer that fails for a reason that may clear, such as a timeout, stays answerable on the parent. An answer that can never reach the remote child fails the call: with `AGENT_SESSION_ENDED` when the remote session no longer exists, and with `TASK_UNREACHABLE` when the remote deployment now uses another task protocol version.
 
 ### Retries and lost callbacks
 
@@ -248,7 +248,7 @@ A call across mixed versions fails at once, in either direction, instead of wait
 - A remote agent on the current eve refuses a call from an older parent, which sends a callback without a version, with `409` and `"code": "TASK_PROTOCOL_MISMATCH"`, so the older parent's call fails at start.
 - A parent refuses a callback from another version with the same `409`. The child stops retrying it, and the call's time limit ends the parent's wait.
 
-Sessions are not migrated across versions. When a session from an earlier release next runs, each background task that release left working fails with `STATE_LOST`, the model receives that result in a `task.result` message, and the session continues. Start the work again if it is still needed.
+Sessions are not migrated across versions. When a session from an earlier release next runs, each task that release left working fails with `STATE_LOST`, the model receives that result in a `task.result` message, and the session continues. Start the work again if it is still needed.
 
 ## What to read next
 

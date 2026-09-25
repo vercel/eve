@@ -8,14 +8,13 @@ A workflow tool is a static tool defined with `defineWorkflowTool` from `eve/too
 `"use workflow"` as the first statement of its executor. Each call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
 delegate work to subagents, or coordinate retryable steps over a long period.
 
-By default, a workflow tool call resolves inside the turn that made it. The turn waits for the
-workflow's result, and the model sees that result as the tool result. While the body waits durably,
-the workflow holds no compute. In an interactive root session, a new message moves a waited call to
-the background so the agent can answer the message; see
-[Detach a waited call](#detach-a-waited-call). A tool defined with `detach: true` returns a receipt
-at once and delivers its result later in its own message; see
-[Return a receipt with `detach`](#return-a-receipt-with-detach). Each call runs as a
-[task](/docs/concepts/tasks), the model eve uses for both workflow tool calls and agent calls.
+Each call runs as a [task](/docs/concepts/tasks), the model eve uses for both workflow tool calls
+and agent calls. By default, a call is detached: it returns a receipt at once, the run keeps
+working, and the model gets its result with `task_wait` or later in the same turn, which cannot end
+while the run works. A tool defined with [`attached: true`](#hold-the-turn-with-attached) holds
+the turn instead, and its result is the tool result. A tool defined with
+[`resumable: true`](#take-more-input-with-resumable) keeps taking input by `taskId`. While the body
+waits durably, the workflow holds no compute. See [Detached by default](#detached-by-default).
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
@@ -66,8 +65,9 @@ async function applyDeploy(plan: DeployPlan) {
 }
 ```
 
-The model calls `deploy`. The turn parks while the human reads the plan. When they answer, minutes
-or days later, the run resumes, deploys, and returns. The model sees one tool result.
+The model calls `deploy`, which starts a task and returns a receipt. The turn stays open while the
+person reads the plan. When they answer, minutes or days later, the run resumes, deploys, and
+returns, and the model receives the result in the same turn.
 
 ### Rules
 
@@ -82,7 +82,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - Import `createHook`, `createWebhook`, `sleep`, and `FatalError` from `workflow` in the body.
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
-- In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, `agents`, and `ask`.
+- In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, `agents`, and `ask`,
+  plus `receive` and `reply` for a [resumable](#take-more-input-with-resumable) tool.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
   `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
@@ -117,7 +118,7 @@ export default workflow({ maxSubagents: 20 });
 ```
 
 The model supplies an async function body through the tool's `js` input. Its only host capability is
-`ctx.agent(name, { message, agentId?, outputSchema? })`. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
+`ctx.agent(name, { message, taskId?, outputSchema? })`. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
 
 ```js
 const [triage, review] = await Promise.all([
@@ -130,7 +131,7 @@ return { triage, review };
 `maxSubagents` defaults to `100` and must be an integer from `1` through `128`. The generated
 program cannot access the workflow context, session state,
 credentials, imports, or ordinary tools. Agent authorization, questions, approvals, cancellation,
-and `agentId` continuation use the same owner-managed behavior as direct `ctx.agent` calls.
+and `taskId` continuation use the same owner-managed behavior as direct `ctx.agent` calls.
 
 The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
 fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
@@ -297,9 +298,10 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 - Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
 - Several requests may be outstanding at once.
 - A response never steers. A new human message that does not answer a pending request follows the
-  session's normal `turnPolicy`. In an interactive root session, a steering message that answers
-  nothing moves a call whose request is not dismissible to the background; see
-  [Detach on a new message](#detach-on-a-new-message).
+  session's normal `turnPolicy`. A steering message from the turn's principal that answers nothing
+  dismisses a `dismissible` request and cancels an [attached](#hold-the-turn-with-attached) call
+  that waits on any other request. A detached call's requests stay pending and answerable; see
+  [Steering during a turn](/docs/concepts/tasks#steering-during-a-turn).
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Both compose: `approval` before the run, `ctx.ask` inside it.
@@ -321,13 +323,26 @@ const result = await ctx.agent("reviewer", {
 });
 ```
 
-The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
-continue an idle child. A workflow body waits for the child's own answer, so an `agentId` that names
-a child still working on another call fails with `AGENT_BUSY`, and `ctx.agent` never runs a call in
-the background. For the same reason, while a `ctx.agent` call is working, a model call that passes
-that child's `agentId` fails with `AGENT_BUSY` instead of sending it a message. An inline
+The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `taskId` to
+continue an idle agent this session started, such as one the `[Tasks]` note lists. A workflow body
+awaits the agent's own answer, so a `taskId` that names an agent still working fails with
+`TASK_BUSY`, and `ctx.agent` is never detached. For the same reason, while a `ctx.agent` call is
+working, a model send to that agent's task fails with `TASK_BUSY`. An inline
 `outputSchema` requires structured output and determines the
 return type, so `result` in the example is typed as `{ findings: string[] }`.
+
+Pass a `signal` as the third argument to stop a call early. Aborting it cancels the call's task
+through the normal cancel path, and the call rejects with the signal's reason:
+
+```ts
+const controller = new AbortController();
+const review = ctx.agent("reviewer", { message }, { signal: controller.signal });
+```
+
+Work never outlives the generation that started it. When a call to the tool ends, by returning or,
+for a resumable tool, by `ctx.reply`, eve first cancels every agent task the call still owns, such
+as a `ctx.agent` call the body never awaited. A body can therefore bound an agent call with
+`Promise.race` against `sleep` and return without cleaning up.
 
 ### Route to a hidden subagent with Jev
 
@@ -413,7 +428,7 @@ export default defineWorkflowTool({
 });
 ```
 
-The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
+The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the result of the `agent-router` call.
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. In a top-level root workflow, `ctx.agents.agent` always represents the root-copy target and carries the root's authored `description` when provided. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
 
@@ -441,13 +456,13 @@ advances the generator; use an awaited workflow operation when the body needs to
 | Operation       | Effect                                                            |
 | --------------- | ----------------------------------------------------------------- |
 | `yield value`   | Emits an `action.partial` snapshot for the pending tool call.     |
-| `return value`  | Settles the tool call with its output.                            |
+| `return value`  | Settles the call with its output, the task's result.              |
 | No return value | Uses the last yield as output, or `null` if there were no yields. |
 
 An explicit `return null` also falls back to the last yield. Prefer an
 explicit object return when progress snapshots and the final result have different shapes.
 Progress snapshots are last-write-wins by tool call id and do not enter model history as
-intermediate tool results. A snapshot used as the final output does enter history as the tool result.
+intermediate tool results. A snapshot used as the final output does enter history as the result.
 
 This workflow reports progress, then suspends until its timer expires:
 
@@ -463,7 +478,7 @@ export default defineWorkflowTool({
     "use workflow";
     yield { status: "waiting" }; // Published as progress for the pending tool call.
     await sleep(delay); // Durable suspension while the timer is pending.
-    return { reminder: note }; // The tool result.
+    return { reminder: note }; // The task's result.
   },
 });
 ```
@@ -471,81 +486,13 @@ export default defineWorkflowTool({
 Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 [yield and return](/docs/tools#yield-and-return) for the final-output rules.
 
-## Detach a waited call
+## Detached by default
 
-The `detach` option on `defineWorkflowTool` decides when a call stops holding its turn:
-
-| Value             | Behavior                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `false` (default) | The call waits. In an interactive root session, it detaches only when a new message steers the turn.                      |
-| `true`            | The call returns a receipt at once. See [Return a receipt with `detach`](#return-a-receipt-with-detach).                  |
-| `{ timeout }`     | Like `false`. In an interactive root session, the call also detaches if it is still working after `timeout` milliseconds. |
-
-A detached call keeps working; detaching never stops its run. A receipt becomes the call's tool
-result, and the run's result reaches the model later in a `task.result` message, like a
-[`detach: true` result](#return-a-receipt-with-detach). An interactive root session is a root
-session, not a subagent's session, in conversation mode. A turn that a schedule started never
-detaches, so a scheduled run posts one final reply. See
-[Which calls wait](/docs/concepts/tasks#which-calls-wait) for every call site.
-
-### Detach on a new message
-
-When a steering message (`turnPolicy: "steer"`, the default) arrives while an interactive root turn
-waits on calls, it first answers a pending question that it matches, then resolves questions created
-with `dismissible: true` as `dismissed`. Every call still waiting then detaches, including a call
-waiting on an approval, whose request stays pending. eve emits `task.detached` with
-`reason: "steer"` for each call, and the turn continues in one model step with the receipts followed
-by the new message. The model reads a receipt such as:
-
-```text
-A new message arrived, so this call moved to the background as task deploy-3fq8wd. Its result will arrive in a later message. Do not poll or repeat this work.
-```
-
-The calls that one message detaches, including [agent calls](/docs/subagents#steering-while-a-call-waits)
-in the same turn, deliver their results together once none of them is still working. A message with
-`turnPolicy: "queue"` never detaches anything. eve's [`sleep` tool](/docs/concepts/built-in-tools#sleep)
-is the exception in every session: a steering message ends a waited `sleep` early instead of
-detaching it. See [Detach a waited call](/docs/concepts/tasks#detach-a-waited-call) for the full
-order, detach groups, and how other sessions apply the message.
-
-### Detach after a timeout
-
-Use `detach: { timeout }` for a tool that is usually quick but sometimes long, such as a test run:
-
-```ts title="agent/tools/run_tests.ts"
-import { defineWorkflowTool } from "eve/tools";
-import { z } from "zod";
-
-export default defineWorkflowTool({
-  description: "Run the test suite in the sandbox.",
-  inputSchema: z.object({ filter: z.string().optional() }),
-  detach: { timeout: 2 * 60_000 },
-  async execute(input, ctx) {
-    "use workflow";
-    return await runTests(input, ctx); // A "use step" helper.
-  },
-});
-```
-
-In an interactive root turn, a call still working after `timeout` milliseconds detaches on its own.
-eve emits `task.detached` with `reason: "timeout"`, the model reads
-`This call is taking a while, so it moved to the background as task run_tests-3fq8wd.`, and the turn
-stops waiting for that call. Each call that times out detaches individually and delivers its result
-on its own, like a `detach: true` call. A result that arrives before the timer fires wins.
-
-The timer only affects the turn that made the call: once that turn stops waiting, a timer that has
-not fired no longer detaches anything. Outside interactive root turns, the call waits. Inside one,
-a steering message can still detach the call before its timer fires. `timeout` can be at most
-2,147,483,647 milliseconds (about 24.8 days), the longest delay `setTimeout` accepts.
-
-`detach.timeout` only stops the turn from waiting. To end a call that runs too long, set the
-top-level [`timeout`](#limit-a-call-with-timeout) instead.
-
-## Return a receipt with `detach`
-
-Set `detach: true` when the point of a tool is a later result, such as a reminder. The call returns
-a receipt at once, the turn continues without waiting, and the workflow's result arrives later as a
-task result:
+A workflow tool call is detached unless the tool sets `attached: true`. The call returns a receipt at
+once, the run keeps working, and a new message never stops it. Clients read the structured receipt on
+`action.result` as `output: { status: "working", taskId }`, and the model reads
+`Started task remind-q4x1ze. Use task_wait for its result.` The task starts with
+`mode: "detached"` on `task.started`.
 
 ```ts title="agent/tools/remind.ts"
 import { defineWorkflowTool } from "eve/tools";
@@ -555,11 +502,10 @@ import { z } from "zod";
 export default defineWorkflowTool({
   description: "Remind the user after a delay.",
   inputSchema: z.object({ note: z.string(), delay: z.string() }),
-  detach: true,
   async execute({ note, delay }) {
     "use workflow";
     await sleep(delay);
-    return { reminder: note }; // Delivered later as a task result.
+    return { reminder: note }; // The task's result.
   },
   toModelOutput(output) {
     return { type: "text", value: `Reminder: ${output.reminder}` };
@@ -567,36 +513,133 @@ export default defineWorkflowTool({
 });
 ```
 
-The model reads a receipt such as `Task remind-q4x1ze is working in the background.` Clients read
-the structured receipt on `action.result`: `output` is `{ status: "working", taskId }`. The task
-starts with `mode: "background"` on `task.started`. `detach: true` applies in every session, and a
-subagent's session or a task-mode run finishes only after the result is delivered. Without
-`detach: true`, the call waits until it returns or [detaches](#detach-a-waited-call).
+The model gets the result in one of two ways, both in the turn that made the call:
 
-When the run finishes, eve delivers its outcome to the model in a user-role message of kind
-`task.result`, with one `<task_result>` block per result:
+- It waits with `task_wait`, which returns the result as its tool result. A `timeout` bounds the
+  wait, not the run, so a usually quick but sometimes long tool, such as a test run, stays detached
+  and the model waits with `task_wait({ taskId, timeout: 120_000 })`.
+- It continues without waiting. The result arrives in a user-role message of kind `task.result` at
+  the turn's next tool step, or when the model tries to end the turn: a turn cannot end while tasks
+  it started are working, so eve holds it until they settle.
+
+Either way, the model reads the result as a `<task_result>` block:
 
 ```text
-<task_result id="remind-q4x1ze" name="remind" status="completed">
+<task_result id="remind-q4x1ze" tool="remind" status="completed">
 Reminder: stand-up at 10
 </task_result>
 ```
 
 The block body is the definition's `toModelOutput(output)` when it has one, and the output
-otherwise. A failed task carries `status="failed"`, a `code` attribute, and the error message.
-The turn that started the task receives the result at its next tool step, or when the model tries
-to end the turn: a turn cannot end while tasks it started are working, so eve holds it until they
-settle. No result starts a turn of its own, and a result never appears in another principal's turn. Until the result arrives, the task is listed in the `[Tasks]` note. See
+otherwise. A failed task carries `status="failed"`, a `code` attribute, and the error message. No
+result starts a turn of its own, and a result never appears in another principal's turn. Until the
+result arrives, the task is listed in the `[Tasks]` note. See
 [How results arrive](/docs/concepts/tasks#how-results-arrive) for every delivery rule.
 
-A session holds at most 10 working background tasks, and a `detach: true` call over that limit does
-not start: it fails with `TOO_MANY_BACKGROUND_TASKS`. Yields from a background run still publish
-`action.partial` for the originating call and never wake the model. Cancelling a turn also
-cancels the background tasks that are working. The model stops a background task with
-[`task_cancel`](/docs/concepts/built-in-tools#task_cancel), and application code with
-`session.cancel({ taskId })`; the run then unwinds as described in
-[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). See
-[Cancel tasks](/docs/concepts/tasks#cancel-tasks).
+A detached run's questions and approvals survive other messages: they stay pending, the task shows
+`input_required`, and the turn stays open until someone answers or the task is cancelled. A
+session holds at most 20 working tasks, and a call over that limit does not start: it fails with
+`TOO_MANY_TASKS`. Yields publish `action.partial` for the call and never reach the model. The model
+stops a task with [`task_cancel`](/docs/concepts/built-in-tools#task_cancel), and
+`session.cancel()` stops every working task; the run then unwinds as described in
+[Cancel and clean up](#cancel-and-clean-up-ctxabortsignal).
+
+## Hold the turn with `attached`
+
+Set `attached: true` when a call's result only matters to the turn that asked for it, such as a
+quick lookup. The turn waits for the call, its result is the tool result, and a steering message
+from the turn's principal cancels the call. eve's `sleep` and `ask_question` tools are attached.
+
+```ts title="agent/tools/lookup_order.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+import { findOrder } from "../lib/orders";
+
+export default defineWorkflowTool({
+  description: "Look up an order by ID.",
+  inputSchema: z.object({ orderId: z.string() }),
+  attached: true,
+  async execute({ orderId }) {
+    "use workflow";
+    return await findOrder(orderId); // A "use step" helper.
+  },
+});
+```
+
+When a steering message arrives, eve first lets it answer a pending question that it matches, then
+resolves questions created with `dismissible: true` as `dismissed`, and gives their calls 10 seconds
+to return. Every attached call still running is then cancelled through the normal cancel path, and
+its tool result reads `Stopped after 12 s because a new message arrived.` A message with
+`turnPolicy: "queue"` waits instead. See
+[Steering during a turn](/docs/concepts/tasks#steering-during-a-turn).
+
+Suspension does not decide attachment. A tool that waits on an approval, such as `deploy` above,
+should stay detached: an attached call's approval is not dismissible, so the next unrelated message
+would cancel it.
+
+## Take more input with `resumable`
+
+Set `resumable: true` when a task should take more input after it starts, such as a draft to
+revise or a stateful browser session. The model sends input by calling the tool again with the
+task's `taskId`; eve adds `taskId` to the tool's input schema and a sentence about it to the tool's
+description, and validates each send with the tool's own `inputSchema`. `resumable` cannot be
+combined with `attached: true`, because a resumable task stays available across turns; the build
+fails if a tool sets both.
+
+A resumable body gets two more methods on `ctx`:
+
+- `ctx.receive()` returns the next input sent with this task's `taskId`, typed by `inputSchema`.
+  Input the body does not read waits for its next `ctx.receive()`. Racing `ctx.receive()` against
+  the current work takes a correction into that work.
+- `ctx.reply(output)` settles the current piece of work, a generation, with its one result, typed
+  like the tool's output. `outputSchema` and `toModelOutput` apply to each result. A second reply
+  before the next input throws. After replying, the task is idle until input arrives, and
+  `ctx.receive()` then starts the next generation.
+
+```ts title="agent/tools/release_notes.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+import { draftNotes, reviseNotes } from "../lib/notes";
+
+export default defineWorkflowTool({
+  description: "Draft release notes, then revise them on request.",
+  inputSchema: z.object({ request: z.string() }),
+  resumable: true,
+  async execute(input, ctx) {
+    "use workflow";
+    let notes = await draftNotes(input.request); // A "use step" helper.
+    for (;;) {
+      ctx.reply(notes); // This generation's one result.
+      input = await ctx.receive(); // Idle until the model calls the tool again with taskId.
+      notes = await reviseNotes(notes, input.request);
+    }
+  },
+});
+```
+
+Returning from `execute` ends the task. The return value is the result of a generation that has not
+replied; after a reply, end the body with a bare `return`, because a returned value is ignored.
+Once the task ends, a send to its `taskId` fails with `UNKNOWN_TASK`. A send the body never read
+still gets the generation it would have started, which fails at once with `EXECUTION_FAILED`, so
+every send gets one result.
+
+A send to an idle task starts its next generation. A send to a working task reaches the body through
+`ctx.receive()` if the body reads while it works; otherwise the current generation ends with its own
+result and the next starts right away with the send. `ctx.callId`, `ctx.session.turn`,
+`ctx.abortSignal`, and `ctx.ask` follow the send that started the current generation. Yields
+publish progress for that call.
+
+Replying ends the generation, so eve first cancels the tasks it still owns, such as a `ctx.agent`
+call the body never awaited. Between a reply and the next `ctx.receive()`, no generation is running,
+so `ctx.agent` and `ctx.ask` throw.
+
+Cancelling a resumable task, with `task_cancel` or `session.cancel()`, stops its current generation
+and every send queued for it: `ctx.abortSignal` aborts, and the generation settles as `cancelled`.
+The body then decides. Returning or throwing ends the task. Calling `ctx.receive()` leaves the task
+idle, and only input sent after the cancel reaches it, so the cancelled work's late `ctx.reply`
+never settles the next generation. An idle run is parked on its hook and holds no compute; it lives
+as long as its session unless the session's idle limit of 50 retires it, and a send reaches it on
+the deployment that started it.
 
 ## Limit a call with `timeout`
 
@@ -618,9 +661,10 @@ export default defineWorkflowTool({
 });
 ```
 
-A call still working at the limit fails with `TIMED_OUT`. A waited call gets that error as its tool
-result, a background call (`detach: true` or detached) delivers it as a failed task result, and
-`task.settled` reports `failed` with the same error. eve then cancels the run, which unwinds as
+A call still working at the limit fails with `TIMED_OUT`. An attached call gets that error as its
+tool result, a detached call delivers it as a failed task result, and `task.settled` reports
+`failed` with the same error. For a resumable tool, the limit applies to each generation, and each
+generation starts a fresh clock. eve then cancels the run, which unwinds as
 described in [Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). Time the run spends waiting
 on `ctx.ask` or an approval does not count toward the limit. A `ctx.ask` request that a
 `Promise.race` moved past still waits, so the clock stays stopped until the request is answered or
@@ -631,19 +675,15 @@ reached the session settles the call with that outcome instead of `TIMED_OUT`. A
 `timeout` is never read this way: if its outcome never reaches the session, the call waits until the
 session ends.
 
-The top-level `timeout` and [`detach: { timeout }`](#detach-after-a-timeout) are different.
-`timeout` ends the call with `TIMED_OUT`. `detach.timeout` only stops the turn from waiting: the call
-keeps working and reports its result later. A tool can set both:
-
-```ts
-detach: { timeout: 2 * 60_000 }, // Stop waiting after 2 minutes.
-timeout: 20 * 60_000, // Fail the call after 20 minutes.
-```
+The tool's `timeout` and the `timeout` of a `task_wait` call are different. The tool's `timeout`
+ends the call with `TIMED_OUT`. A `task_wait` timeout only ends that wait: the task keeps working
+and reports its result later in the same turn.
 
 ## Cancel and clean up: `ctx.abortSignal`
 
-`ctx.abortSignal` aborts when the run is cancelled, for example when the turn that made the call is
-cancelled or a background task is stopped. It is durable — it survives replay, and a step that
+`ctx.abortSignal` aborts when the run is cancelled, for example by `session.cancel()`, by the
+model's `task_cancel`, or, for an attached call, by a steering message. In a resumable tool, it
+belongs to the current generation, and each generation gets a fresh signal. It is durable — it survives replay, and a step that
 receives it observes the abort. Pass it into the steps that should stop, and clean up in
 `try/finally`:
 
@@ -664,8 +704,8 @@ as cancelled whether or not it did. A body parked on a hook or a `sleep` does no
 it is abandoned when the grace period ends. Steps that received the signal are how you clean up
 first.
 
-The caller does not wait for that cleanup. Cancelling the turn, or stopping a background task,
-records the call as cancelled at once and signals the run, which unwinds on its own. A run that
+The caller does not wait for that cleanup. Cancelling records the call as cancelled at once and
+signals the run, which unwinds on its own. A run that
 cannot receive the signal yet, for example because it has only just started, is stopped
 immediately. A run that has not ended 35 seconds after the signal, 5 seconds past its own grace
 period, is stopped outright.
@@ -755,31 +795,31 @@ export default defineWorkflowTool({
 });
 ```
 
-The approval card appears on the channel, and the tool call stays pending while the workflow waits
-without holding compute. When it is answered, the refund runs and the model receives the outcome as
-the tool result.
+The call returns a receipt, and the approval card appears on the channel. The task shows
+`input_required` while the workflow waits without holding compute, and the turn stays open; in an
+interactive root session, it shows a waiting boundary so the conversation can continue. Unrelated
+messages do not cancel the request. When it is answered, the refund runs and the model receives the
+outcome in the same turn.
 
 ## Semantics
 
-One call, one result. A waited workflow tool call resolves once, with the return value, the error,
-or a cancellation. A `detach: true` or detached call resolves once with its receipt, and its task
-delivers the result once.
+One piece of work, one result. An attached call resolves once, with the return value, the error,
+or a cancellation. A detached call resolves once with its receipt, and its task delivers each
+generation's result once. A resumable task's sends each get one result.
 
-Every workflow tool call is a [task](/docs/concepts/tasks). When its run starts, the session stream
-emits `task.started` with `kind: "workflow"`, the tool `name`, `mode` (`"background"` for
-`detach: true`, otherwise `"foreground"`), and no `child`. A waited call that detaches emits
-`task.detached`, and its `action.result` carries the receipt. The call's first outcome emits one
-`task.settled`, and a run that fails to start settles with `error.code` `START_FAILED`. Progress
-stays on `action.partial` and the result on `action.result`. Agent calls emit the same events with
-`kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
+Every workflow tool call is a [task](/docs/concepts/tasks). Each generation emits `task.started`
+with `kind: "workflow"`, the tool `name`, `mode` (`"attached"` or `"detached"`), `resumable`, and
+no `child`, then one `task.settled` with its first outcome; a run that fails to start settles with
+`error.code` `START_FAILED`. The task emits `task.ended` once: right after the only generation of a
+non-resumable tool, and when a resumable task's body returns or its session ends. Progress stays on
+`action.partial`, and an attached call's result is on `action.result`. Agent calls emit the same
+events with `kind: "agent"`, so filter `task.*` events by `kind` and `name`. See
 [Task stream events](/docs/concepts/tasks#task-stream-events) for the fields.
 
-While a waited workflow tool runs, the turn waits for it. A message with `turnPolicy: "queue"` waits
-until the turn settles. A message with `turnPolicy: "steer"` (the default) detaches the call in an
-interactive root session; see [Detach on a new message](#detach-on-a-new-message). Elsewhere, the
-message is applied after the tool call resolves, in the same turn, so the model sees it before
-continuing. Steering never cancels the run, except for eve's `sleep`, which ends early. Input
-responses never steer. Cancelling the turn cancels the waited run, which withdraws its requests.
+A steering message from the turn's principal never stops a detached call. It cancels an attached
+call, after a pending question has had the chance to take it as an answer or be dismissed. A message
+with `turnPolicy: "queue"`, or from another principal, waits until the turn ends. Input responses
+never steer. `session.cancel()` cancels every working run, which withdraws its requests.
 
 Errors follow the SDK. A thrown error in a step retries per the step's policy; `FatalError` does
 not. An error that escapes the body fails the tool invocation.

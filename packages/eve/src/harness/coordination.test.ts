@@ -592,7 +592,7 @@ describe("resolvePendingCoordination", () => {
         output: {
           type: "text",
           value:
-            '<task_result id="remind-q4x1ze" name="remind" status="completed">\nReminder: stand-up at 10\n</task_result>',
+            '<task_result id="remind-q4x1ze" tool="remind" status="completed">\nReminder: stand-up at 10\n</task_result>',
         },
         toolCallId: "call-wait",
         toolName: "task_wait",

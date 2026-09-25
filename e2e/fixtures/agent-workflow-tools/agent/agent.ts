@@ -7,6 +7,8 @@ import {
   type MockModelResponse,
 } from "eve/evals";
 
+import { respondTasks } from "./lib/tasks-script.ts";
+
 function text(value: unknown): string {
   return typeof value === "string" ? value : JSON.stringify(value ?? null);
 }
@@ -183,7 +185,7 @@ const respondWorkflow = waitForTasks((request) => {
 });
 
 const respond: MockModelResponder = (request) =>
-  respondBackground(request) ?? respondWorkflow(request);
+  respondTasks(request) ?? respondBackground(request) ?? respondWorkflow(request);
 
 const base = e2eAgentConfig({ mock: respond });
 

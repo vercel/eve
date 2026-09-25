@@ -46,7 +46,7 @@ See [Sandbox](../sandbox) for workspace seeding, runtime access, backends, and l
 
 ## Delegate to a specialist with a subagent
 
-Use a subagent when work needs its own instructions, tools, skills, state, or sandbox. The child runs in a separate context instead of adding its working history to the parent. The call waits for the subagent's answer, which becomes the tool result.
+Use a subagent when work needs its own instructions, tools, skills, state, or sandbox. The child runs in a separate context instead of adding its working history to the parent. The call starts a task, and the subagent's answer reaches the parent as one result, through `task_wait` or later in the same turn.
 
 See [Subagents](../subagents) for the distinction between root-agent copies and declared specialists, including their isolation boundaries.
 

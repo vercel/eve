@@ -365,12 +365,25 @@
       "name": "tool/task_cancel",
       "type": "registry:item",
       "title": "Task Cancel",
-      "description": "Let the model stop background agents and tasks.",
+      "description": "Let the model stop one agent or workflow tool task.",
       "files": [
         {
           "path": "registry/tools/task_cancel.ts",
           "type": "registry:file",
           "target": "agent/tools/task_cancel.ts"
+        }
+      ]
+    },
+    {
+      "name": "tool/task_wait",
+      "type": "registry:item",
+      "title": "Task Wait",
+      "description": "Let the model wait for an agent or workflow tool task's next result.",
+      "files": [
+        {
+          "path": "registry/tools/task_wait.ts",
+          "type": "registry:file",
+          "target": "agent/tools/task_wait.ts"
         }
       ]
     },

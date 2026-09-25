@@ -174,7 +174,9 @@ deployment handoff or legacy-session import restarts the original configured
 duration. Process restarts, ordinary messages, and failed or skipped handoffs
 keep the existing deadline. At the deadline, eve lets an active turn settle,
 then emits `session.completed` and releases every continuation address; the next
-qualifying channel message starts fresh. Set it to `false` to disable the
+qualifying channel message starts fresh. A turn
+[held on its tasks](./concepts/tasks#held-turns) at the deadline is cancelled
+with its working tasks instead of settling, and every task ends with the session. Set it to `false` to disable the
 timeout. Expiration does not delete stored session data.
 
 Input tokens, output tokens, and model token cost are checked independently.

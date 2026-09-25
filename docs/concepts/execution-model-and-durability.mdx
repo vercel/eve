@@ -114,9 +114,9 @@ For ordinary tools, eve manages the workflow around your executor. Use [`defineW
 
 Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off.
 
-A workflow tool can suspend too, with its tool call still pending: the turn waits for the result
-while the workflow holds no compute. Declare durable waits with `defineWorkflowTool`; `defineTool`
-always executes inside its initiating step.
+A workflow tool can suspend too, while its task is still working: the turn stays open for the
+result while the workflow holds no compute. Declare durable waits with `defineWorkflowTool`;
+`defineTool` always executes inside its initiating step.
 
 An awaited workflow operation provides the durable wait. A generator's `yield` reports progress.
 See [tool calls finish inside the turn](../tools#tool-calls-finish-inside-the-turn) and
@@ -151,42 +151,45 @@ never starts a replacement session for an address that is mid-handoff.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, the session owner signals pending model generation to stop, then applies the correction within the same turn and with the same turn ID. This includes model requests that perform provider-managed search before answering; interrupted search work may run again. Reasoning and search progress do not count as assistant output.
 
-An executing eve tool finishes and commits its result before steering reaches the next model request. Subagent calls and workflow tools that wait for a person, webhook, or timer behave differently depending on the session:
+An executing eve tool finishes and commits its result before steering reaches the next model request. Only the turn's own principal steers it; a message from another principal waits until the turn ends. While the turn waits on [tasks](./tasks), eve applies a steering message the same way in every session:
 
-- **Interactive root session** (a root session in conversation mode, in a turn a schedule did not start; a schedule starts the first turn of a session it creates and any turn that a message it sends starts in an existing session): a message that answers a pending question answers it and does not steer. Otherwise, pending questions created with `dismissible: true` resolve as `dismissed`, and every other waited call moves to the background. The turn continues at once with those calls' receipts and the message in one model step, and the calls' results arrive later as task results. See [Detach a waited call](./tasks#detach-a-waited-call).
-- **Subagent sessions, task-mode runs, and scheduled turns:** the message is applied after the wait ends, in the same turn.
+1. A message that answers a pending question answers it and does not steer.
+2. Otherwise, pending questions created with `dismissible: true` resolve as `dismissed`.
+3. Every attached call still in flight ends: a `task_wait` returns `interrupted`, and an attached workflow tool, such as eve's `sleep`, is cancelled and reports how long it ran.
 
-Steering does not cancel the turn or the calls it waits on. The one exception is eve's `sleep` tool: in any session, a steering message ends a waited `sleep` early, and the call reports the time it waited. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
+Detached tasks, which include every agent call and most workflow tool calls, keep working. The model reads the message in the same step and decides whether it changes the work. See [Steering during a turn](./tasks#steering-during-a-turn). Steering never cancels the turn. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
 
 Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
 
-`turnPolicy: "queue"` preserves the message until the active turn settles, and never moves a waited call to the background. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
+`turnPolicy: "queue"` preserves the message until the active turn settles, and never ends a wait or an attached call. If several deliveries are ready when the owner checks, eve may fold adjacent messages into the next turn while preserving their arrival order. Pure `inputResponses` deliveries do not steer; they remain available to the pending request they address.
 
 Every built-in and custom channel accepts a default `turnPolicy`, and imperative message sends can override it. The policy is part of the same durable delivery command as the message, so concurrent senders cannot separate replacement ownership from cancellation intent. Separate sessions still run independently.
 
-## Background tasks
+## Tasks and held turns
 
-Every agent call and workflow tool call runs as a [task](./tasks). Most calls wait, but a call can
-run in the background: a [workflow tool](../tools/workflows#return-a-receipt-with-detach) defined
-with `detach: true`, an agent call made with
-[`background: true`](../subagents#run-a-call-in-the-background) in an interactive root session, or
-a waited call that [detaches](./tasks#detach-a-waited-call). The call returns a receipt, and the
-turn continues without waiting. When a background task finishes, eve holds its result in durable
-session state and delivers it as typed session input, not as a channel message. The model reads one
-`task.result` message per delivery, with a `<task_result>` block for each result. A turn cannot
-end while tasks it started are working: eve holds it and calls the model again as their results
-arrive. No result starts a turn of its own, and a result never appears in another principal's turn.
-Until its result reaches history, a background task stays listed in the `[Tasks]` note, including
-after compaction or a context clear.
+Every agent call and workflow tool call runs as a [task](./tasks). Most calls are detached: the
+call returns a receipt, the task keeps working, and the model either waits for the result with
+`task_wait` or continues. A workflow tool defined with `attached: true` holds the turn instead, and
+its result is the tool result. A result that no wait received reaches the model as typed session
+input, not as a channel message: one `task.result` message per delivery, with a `<task_result>`
+block for each result.
 
-Because every turn waits for its tasks, a delegated subagent answers its caller, and a task-mode
-run ends, with the reply it gives after seeing its tasks' results. Ending a session cancels every
-working task, and eve delivers nothing afterward. See
+No turn ends while tasks it started are working. When the model tries to end such a turn, eve holds
+it and calls the model again as their results arrive, so every result arrives in the turn that
+started its work. No result starts a turn of its own, and a result never appears in another
+principal's turn. A delegated subagent answers its caller, a scheduled run posts, and a task-mode
+run ends with the reply it gives after seeing its tasks' results. In an interactive root session, a
+held turn shows a waiting boundary and stays open under the same turn ID; see
+[Held turns](./tasks#held-turns).
+
+Until its result reaches history, a detached task stays listed in the `[Tasks]` note, including
+after compaction or a context clear. `session.cancel()` cancels the turn and every working task.
+Ending a session ends every task, and eve delivers nothing afterward. See
 [How results arrive](./tasks#how-results-arrive) for every delivery rule.
 
 ## Subagents
 
-A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call: the turn waits for the subagent's answer, which becomes the tool result. In an interactive root session, the call returns a receipt instead when the model [runs it in the background](../subagents#run-a-call-in-the-background) or a steering message [detaches](./tasks#detach-a-waited-call) it, and the answer arrives later as a task result. A call that is still working at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
+A turn can hand work off to a [subagent](../subagents). Each subagent gets its own context and its own durable session; a declared subagent also gets its own sandbox, skills, and state. Nothing crosses the boundary implicitly. The subagent call is an ordinary tool call that starts a detached task: the model [waits for the answer](../subagents#wait-for-an-agent) with `task_wait` when it needs it, or receives it later in the same turn. The subagent stays available afterward, and the model sends it more work by calling its tool with the subagent's `taskId`. Work still running at its time limit, 2 hours of active time unless the subagent sets `timeout`, fails with `TIMED_OUT`; time the subagent spends waiting on a person's answer or approval does not count. See [what the parent sees](../subagents#what-the-parent-sees).
 
 ## How eve orders session history
 
@@ -195,6 +198,6 @@ Conversation history within a session is append-only. Static user-role instructi
 ## What to read next
 
 - [Sessions and streaming](./sessions-runs-and-streaming): the handles you hold and the event stream you watch.
-- [Tasks](./tasks): waited and background calls, detach, cancellation, and time limits.
+- [Tasks](./tasks): detached and attached calls, `task_wait`, held turns, cancellation, and time limits.
 - [Security model](./security-model): the trust boundaries the runtime enforces.
 - [State](./state): durable per-session memory that persists across step boundaries.

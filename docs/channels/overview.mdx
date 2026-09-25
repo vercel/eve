@@ -32,7 +32,7 @@ Channels default to `turnPolicy: "steer"`. Before assistant answer output or loc
 
 Reasoning and search progress do not count as answer output. Interrupted provider-managed search may run again; completed local tools are preserved.
 
-In an interactive root session, a steering message that arrives while the turn waits on subagent calls or workflow tools moves those calls to the background, and the turn answers the message right away. Their results arrive later in the same turn as task results. Subagent sessions and turns started by a schedule apply the message after the wait instead. See [Detach a waited call](/docs/concepts/tasks#detach-a-waited-call).
+Subagent calls and most workflow tool calls run as detached tasks, so a steering message never stops them. A steering message from the turn's own principal ends the turn's waits and attached calls, such as `sleep`, and the model answers the message right away; the tasks' results arrive later in the same turn. A message from another person waits until the turn ends. See [Steering during a turn](/docs/concepts/tasks#steering-during-a-turn).
 
 Set `turnPolicy: "queue"` on any built-in or custom channel when each turn must finish before the next message starts, including waiting for its subagent calls and workflow tools:
 

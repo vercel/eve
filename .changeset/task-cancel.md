@@ -2,4 +2,10 @@
 "eve": minor
 ---
 
-`task_cancel` now takes 1 to 50 task IDs and returns `{ cancelled, alreadyFinished, unknown }` instead of task views, and eve advertises it only in sessions that can have background tasks: an interactive root session with an agent or workflow tool, or any session with a `detach: true` tool. A stopped task emits `task.settled` with `status: "cancelled"` and never reports back, while a task that already finished still delivers its result. `session.cancel({ taskId })` stops one background task and leaves the turn running, and `session.cancel({ tasks: true })` cancels the active turn and every working task, on the client, which gains `taskId`, on channel `Session` handles, and on the eve channel's cancel route. When a session ends, each agent it started now ends its own session as well, which stops that agent's tasks and the agents it started; a local agent that was working, or that the request did not reach, is stopped outright if it is still running 30 seconds later, and so is a workflow tool run after 35 seconds.
+`session.cancel()` now stops the active turn, its attached calls, and every working task, whichever turn started it, and the model stops one task with `task_cancel({ taskId })`, which returns `{ status: "cancelled" | "already_finished" }`. Idle agents and resumable tasks stay available after either.
+
+Upgrading:
+
+- `task_cancel` takes one `taskId` instead of `taskIds`, refuses a task another principal started with `TASK_OTHER_PRINCIPAL`, and also stops input queued for the task. eve offers it, with `task_wait`, in every session whose agent can start a detached task.
+- The `tasks` option of the client's `session.cancel()`, and the `taskId` and `tasks` options of channel `Session.cancel()` and `POST /eve/v1/session/:sessionId/cancel`, are removed. The route answers `400` and channel sessions throw a `TypeError` for either option.
+- A turn failure or session expiry cancels the turn's working tasks. When a session ends, every task ends, idle ones included, and each agent it started ends its own session and agents; a local agent or workflow run still running 30 or 35 seconds later is stopped outright. Cancelling no longer waits for a workflow tool run to stop.

@@ -6,9 +6,7 @@ import { startedTaskIds } from "./helpers";
 /**
  * Alice's reminder starts as a detached task, so her turn holds on it and
  * shows its waiting boundary. Her follow-up joins the held turn and sees the
- * working reminder in the `[Tasks]` note. A compaction request waits for the
- * turn to end, so the note after compaction is covered where a turn compacts
- * while it holds.
+ * working reminder in the `[Tasks]` note.
  */
 export default defineEval({
   description: "A follow-up in a held turn sees its working task in the [Tasks] note.",

@@ -144,7 +144,7 @@ file metadata. File parts never include raw bytes or internal sandbox paths; `ur
 client-resolvable `http(s)` and `data:` URLs.
 
 A `message.received` event with `data.kind: "task.result"` is not a user message. eve emits it when
-it delivers [background task results](../../concepts/tasks#how-results-arrive) to the model, and
+it delivers [task results](../../concepts/tasks#how-results-arrive) that no `task_wait` received to the model, and
 `data.taskIds` names the delivered tasks. The default message reducer skips it and never uses it to
 confirm an optimistic submission. A custom renderer should skip it too, and show the assistant reply
 that follows. To check that a custom consumer handles every task event, replay the
@@ -275,13 +275,13 @@ if (started?.type === "task.started") {
 - A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
 - A remote child's path is a proxy route on the parent deployment. The parent checks that the child belongs to this session, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.
 
-The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to detach. A child parks after answering and can be continued later, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn. The matching `task.settled` event on the parent stream reports the call's outcome.
+The child has its own cursor, starting at `0`, and reading it never advances the parent's `streamIndex`. Pass `startIndex` to resume, `follow: false` for a bounded read, and `signal` to stop reading. A child parks after answering and can be continued later with a send, so stop at a turn boundary with `isCurrentTurnBoundaryEvent` when you only need the current turn. The matching `task.settled` event on the parent stream reports the outcome of that generation, and `task.ended` reports that the agent stopped taking input.
 
-If a steering message moves a waiting call to the background, the parent stream emits `task.detached` with the call's `taskId`, `callId`, and `reason` (`"steer"`, or `"timeout"` for a workflow tool's `detach: { timeout }` timer). The call's `action.result` then carries a receipt, `{ status: "working", taskId }`, while the child keeps working, so keep following its stream until `task.settled`. `task.detached` is stamped with the delivery that made the call, so read it from `session.stream()` rather than from the steering message's `MessageResponse`. See [Detach a waited call](../../concepts/tasks#detach-a-waited-call). Passing a `task.started` event that has no `child` throws, and so does passing a remote child's event from another parent session, whose proxy route names that session.
+An agent call returns a receipt, `{ status: "working", taskId }`, on its `action.result` while the child keeps working, and the receipt and `task.started` can arrive in either order, so keep following the child's stream until `task.settled`. A send to the same agent with its `taskId` that starts its next turn emits another `task.started` with the same `child` and the next `generation`. Passing a `task.started` event that has no `child` throws, and so does passing a remote child's event from another parent session, whose proxy route names that session.
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn and the tool calls it waits on, `session.cancel({ taskId })` to stop one background task, or `session.cancel({ tasks: true })` to stop both the turn and every working task. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`, and for `task.settled` with `status: "cancelled"` for each stopped task.
+Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn, its attached calls, and every working task. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`, and for `task.settled` with `status: "cancelled"` for each stopped task.
 
 Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 

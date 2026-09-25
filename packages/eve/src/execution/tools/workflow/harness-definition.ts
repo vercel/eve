@@ -2,7 +2,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
-import { RESUMABLE_TOOL_DESCRIPTION } from "#tasks/render.js";
+import { AGENT_TOOL_CONTEXT_DESCRIPTION, RESUMABLE_TOOL_DESCRIPTION } from "#tasks/render.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { withTaskIdParameter } from "#tools/task-id-schema.js";
 import type { TaskTimeout } from "#shared/task-timeout.js";
@@ -23,7 +23,8 @@ export interface WorkflowToolHarnessDefinitionInput {
 /**
  * The harness definition of a tool whose calls start tasks. Every resumable
  * tool, agents included, gets `taskId` once here and one sentence appended
- * to its description; a call with `taskId` is a send. An agent's input
+ * to its description, after one that tells the model an agent does not see
+ * the conversation; a call with `taskId` is a send. An agent's input
  * schema declares `taskId` itself; an authored workflow tool's schema is
  * wrapped, so the author's schema validates the rest.
  */
@@ -42,10 +43,13 @@ export function createWorkflowToolHarnessDefinition(
     workflowId: input.workflowId,
   };
   if (!resumable) return { ...definition, ...workflow, execute: undefined };
+  const appended = agent
+    ? `${AGENT_TOOL_CONTEXT_DESCRIPTION} ${RESUMABLE_TOOL_DESCRIPTION}`
+    : RESUMABLE_TOOL_DESCRIPTION;
   return {
     ...definition,
     ...workflow,
-    description: `${definition.description.trimEnd()} ${RESUMABLE_TOOL_DESCRIPTION}`,
+    description: `${definition.description.trimEnd()} ${appended}`,
     execute: undefined,
     inputSchema: agent ? definition.inputSchema : withTaskIdParameter(definition.inputSchema),
   };

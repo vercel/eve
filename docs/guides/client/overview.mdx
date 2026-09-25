@@ -153,8 +153,6 @@ const response = await session.send("Continue the analysis.");
 await response.result();
 
 await session.cancel({ turnId: "turn_123" });
-await session.cancel({ taskId: "remind-q4x1ze" });
-await session.cancel({ tasks: true });
 await session.compact();
 await session.clear();
 
@@ -165,7 +163,7 @@ for await (const event of session.stream({ follow: false })) {
 await session.reset({ reason: "User requested a fresh session" });
 ```
 
-`session.cancel()` cancels the active turn and the tool calls it waits on. Pass `taskId`, from a receipt or a `task.started` event, to stop one [background task](../../concepts/tasks#cancel-tasks) and leave the turn running, or `tasks: true` to cancel the active turn and every working task. `taskId` cannot be combined with `tasks` or `turnId`. Cancellation is asynchronous: a stopped task emits `task.settled` with `status: "cancelled"` and never delivers a result.
+`session.cancel()` cancels the active turn, its attached calls, and every working [task](../../concepts/tasks#cancel-tasks), whichever turn started it, then ends the turn. Idle agents and resumable tasks stay available. Pass the observed `turnId` to cancel only while that turn is still active; once no turn is active, it cancels only the tasks that turn started. There is no option to stop a single task from the client; the agent does that with `task_cancel`. Cancellation is asynchronous: a stopped task emits `task.settled` with `status: "cancelled"` and never delivers a result.
 
 `client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
 

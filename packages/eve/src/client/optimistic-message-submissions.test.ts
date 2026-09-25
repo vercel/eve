@@ -48,7 +48,7 @@ describe("OptimisticMessageSubmissions", () => {
     submissions.submit({ message: "Remind me at 10" }, 0);
     const results = createMessageReceivedEvent({
       message:
-        '<task_result id="remind-q4x1ze" name="remind" status="completed">\nDone\n</task_result>',
+        '<task_result id="remind-q4x1ze" tool="remind" status="completed">\nDone\n</task_result>',
       sequence: 1,
       taskIds: ["remind-q4x1ze"],
       turnId: "turn_1",

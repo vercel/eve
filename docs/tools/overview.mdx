@@ -128,25 +128,25 @@ receive only the projected text.
 
 ### Tool calls finish inside the turn
 
-Every tool call resolves inside the turn that made it. The model sees the tool's output as the
-tool result before it continues. A workflow tool defined with `detach: true` is the exception: its
-call resolves at once with a receipt, and the workflow's result arrives later in its own message.
-See [Return a receipt with `detach`](/docs/tools/workflows#return-a-receipt-with-detach). In an
-interactive root session, a new message can also move a waiting workflow tool or subagent call to
-the background, which resolves it with a receipt; see
-[Detach a waited call](/docs/concepts/tasks#detach-a-waited-call). [Tasks](/docs/concepts/tasks)
-describes which calls wait and how background results arrive.
+Every tool call resolves inside the turn that made it. A `defineTool` call runs inside the model
+step, and the model sees its output as the tool result before it continues. A workflow tool call
+starts a [task](/docs/concepts/tasks): by default it resolves at once with a receipt, the workflow
+keeps working, and its result reaches the model later in the same turn, through `task_wait` or a
+`task.result` message, because no turn ends while its tasks are working. A workflow tool defined
+with [`attached: true`](/docs/tools/workflows#hold-the-turn-with-attached) holds the turn instead,
+and its output is the tool result.
 
-| Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
-| -------------------- | -------------------------------------------------------- | ---------------------------------- |
-| `defineTool`         | No; the executor runs inside the initiating step.        | Executor output after it finishes. |
-| `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
+| Definition           | Durable waits inside `execute`                    | Result delivered to the model                                                                                                      |
+| -------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `defineTool`         | No; the executor runs inside the initiating step. | Executor output after it finishes.                                                                                                 |
+| `defineWorkflowTool` | Yes; the task keeps working while it suspends.    | A receipt at once, then the workflow output later in the same turn; with `attached: true`, the workflow output as the tool result. |
 
 Several tool calls in one model step run concurrently, and the turn waits for all of them. A
-message that arrives while a tool call waits follows the channel's turn policy. With `steer` (the
-default), the message is applied after the wait ends, in the same turn. In an interactive root
-session, waiting workflow tool and subagent calls move to the background instead, so the turn
-answers the message right away. With `queue`, the message waits until the turn settles.
+message that arrives while a tool call runs follows the channel's turn policy. With `steer` (the
+default), a message from the turn's principal is applied at the next step boundary, in the same
+turn. It ends an attached workflow tool call and any `task_wait`, but never stops a detached task.
+With `queue`, or from another principal, the message waits until the turn settles. See
+[Steering during a turn](/docs/concepts/tasks#steering-during-a-turn).
 
 ### Yield and return
 

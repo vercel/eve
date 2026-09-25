@@ -178,7 +178,7 @@ Approvals and questions share one protocol:
 
 For `ctx.ask()` questions from workflow tools and questions from subagents, a follow-up message answers the question only when exactly one question is pending and the session has no approval or session-limit prompt of its own pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question this session's workflow tools created with `dismissible: true` resolves as `dismissed`.
 
-In an interactive root session, a follow-up message that answers nothing also moves the calls still waiting to the background, such as a workflow tool whose question is not dismissible or a subagent waiting on an approval. Their requests stay pending and answerable, and each call's result arrives in a later message of the same turn once it finishes. See [Detach a waited call](/docs/concepts/tasks#detach-a-waited-call).
+A follow-up message that answers nothing never stops a detached task, such as a subagent waiting on an approval or a workflow tool without `attached: true` whose question is not dismissible. Their requests stay pending and answerable, and each task's result arrives later in the same turn once it finishes. An attached call waiting on a request that is not dismissible is cancelled instead. See [Steering during a turn](/docs/concepts/tasks#steering-during-a-turn).
 
 Each request includes a `kind` discriminator: `tool-approval`, `question`, or
 `session-limit`. Clients should use `kind` to choose behavior and presentation.

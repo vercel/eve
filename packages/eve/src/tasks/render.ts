@@ -47,6 +47,10 @@ export function renderSendReceipt(record: Pick<TaskRecord, "id">, started: boole
 export const RESUMABLE_TOOL_DESCRIPTION =
   "To correct or continue a task this tool started, call it again with that task's taskId; without taskId, each call starts a new task.";
 
+/** Sentence eve adds to every agent tool's description, before {@link RESUMABLE_TOOL_DESCRIPTION}. */
+export const AGENT_TOOL_CONTEXT_DESCRIPTION =
+  "It does not see this conversation, so put everything it needs in message.";
+
 /** Description of the `taskId` input on every resumable tool. */
 export const TASK_ID_SEND_PARAMETER_DESCRIPTION =
   "Only to correct or continue a task this tool started: that task's id, from its receipt or the latest [Tasks] note. An idle task starts on this input; a working one uses it in its current work or starts on it right after. Omit it to start a new task.";
@@ -103,7 +107,10 @@ export function truncateTaskResultParts(texts: readonly string[]): string[] {
   return parts;
 }
 
-/** One `<task_result>` block per result, truncated like a waited call's result. */
+/**
+ * One `<task_result>` block per result, truncated like a waited call's
+ * result. `tool` names the tool that started the task, the one a send calls.
+ */
 export function renderTaskResults(
   results: readonly {
     readonly record: Pick<TaskRecord, "id" | "name">;
@@ -116,7 +123,7 @@ export function renderTaskResults(
       const code =
         outcome.status === "failed" ? ` code="${escapeAttribute(outcome.error.code)}"` : "";
       const text = body ?? renderOutcomeBody(outcome);
-      return `<task_result id="${escapeAttribute(record.id)}" name="${escapeAttribute(record.name)}" status="${outcome.status}"${code}>\n${escapeResultBody(truncateTaskResult(text))}\n</task_result>`;
+      return `<task_result id="${escapeAttribute(record.id)}" tool="${escapeAttribute(record.name)}" status="${outcome.status}"${code}>\n${escapeResultBody(truncateTaskResult(text))}\n</task_result>`;
     })
     .join("\n");
 }
@@ -202,11 +209,10 @@ export const TASK_CANCEL_DESCRIPTION =
 
 /** Description of the `taskId` input of `task_cancel` and `task_wait`. */
 export const TASK_ID_PARAMETER_DESCRIPTION =
-  "The id of a task or agent, from its receipt or the latest [Tasks] note.";
+  "The task's id, from its receipt or the latest [Tasks] note.";
 
 /** Error message for a `task_cancel` call whose input could not be read. */
-export const TASK_CANCEL_INVALID_INPUT_MESSAGE =
-  "task_cancel needs taskId: the id of one task or agent.";
+export const TASK_CANCEL_INVALID_INPUT_MESSAGE = "task_cancel needs taskId: the id of one task.";
 
 export const TASK_WAIT_DESCRIPTION =
   "Wait for a task's next result. Returns when the task has a result you have not seen, when timeout (in milliseconds) passes, or when a new message arrives. Ending a wait never stops the task. To wait on several tasks, call task_wait once for each in the same step. Omit timeout to wait until the result arrives; a timeout of 0 returns at once with the task's current state.";
@@ -217,7 +223,7 @@ export const TASK_WAIT_TIMEOUT_DESCRIPTION =
 
 /** Error message for a `task_wait` call whose input could not be read. */
 export const TASK_WAIT_INVALID_INPUT_MESSAGE =
-  "task_wait needs taskId, the id of one task or agent, and an optional timeout in milliseconds (0 or more).";
+  "task_wait needs taskId, the id of one task, and an optional timeout in milliseconds (0 or more).";
 
 /** Result of a `task_wait` whose timeout passed first, including a timeout of 0. */
 export function renderWaitTimedOut(
@@ -325,20 +331,20 @@ export function renderTaskAlreadyWaited(taskId: string): string {
  * Static system block, offered with `task_wait` and `task_cancel` in every
  * session whose agent can start a detached task. With agents or resumable
  * workflow tools, it also explains how to continue or correct a task by
- * calling its tool with its `taskId`.
+ * calling its tool with its `taskId`, and that idle tasks are listed.
  */
 export function renderTasksInstruction(options: {
   readonly agents: boolean;
   readonly resumable: boolean;
 }): string {
   const starts = options.agents
-    ? "Every agent call and most workflow tool calls start a task and return its id right away"
-    : "Most workflow tool calls start a task and return its id right away";
+    ? "Every agent call and most workflow tool calls start a task"
+    : "Most workflow tool calls start a task";
   const choices = options.resumable
-    ? "keep the tasks, correct them by calling their tool again with their taskId, or stop them with task_cancel"
+    ? "keep the tasks, correct them with taskId, or stop them with task_cancel"
     : "keep the tasks or stop them with task_cancel";
   const sentences = [
-    `${starts}; the task keeps working while you continue.`,
+    `${starts} and return its id right away; the task keeps working while you continue.`,
     "When the user needs the answer to continue, wait for it with task_wait. Start independent tasks first, then wait on them in the same step, one task_wait per task.",
   ];
   if (options.resumable) {
@@ -349,14 +355,7 @@ export function renderTasksInstruction(options: {
     "You cannot end your turn while tasks you started are working; eve waits for them and gives you their results.",
     `A new message interrupts your waits but not your tasks: decide whether it changes the work, then ${choices}.`,
     "Never use sleep to wait for a task.",
-  );
-  if (options.agents) {
-    sentences.push(
-      "Agents stay available after they answer: call an idle agent's tool with its taskId to give it more work in its existing session. Any agent tool can always be called without taskId to start a new agent, even when the [Tasks] note is empty or absent.",
-    );
-  }
-  sentences.push(
-    `The latest [Tasks] note lists working tasks${options.resumable ? " and idle tasks with their tools" : ""}; eve adds it whenever the listing changes, and it never needs a reply.`,
+    `The latest [Tasks] note lists ${options.resumable ? "working and idle tasks with their tools" : "working tasks"}; eve adds it, and it never needs a reply.`,
   );
   return `Tasks\n${sentences.join(" ")}`;
 }

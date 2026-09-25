@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`connection_search` stays available when the agent has connections because it provides access to their tools. [`task_cancel`](#task_cancel) also stays, because eve advertises it only when the session can have background tasks.
+`connection_search` stays available when the agent has connections because it provides access to their tools. [`task_wait`](#task_wait) and [`task_cancel`](#task_cancel) also stay, because eve advertises them only when the session can start a detached task.
 
 ### `bash`
 
@@ -215,7 +215,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and the call waits for the copy's answer, which becomes the tool result. In an interactive root session, the model can pass `background: true` to get a receipt at once and receive the answer later in a `task.result` message; see [Run a call in the background](../subagents#run-a-call-in-the-background). Passing the `agentId` of a copy that is still working sends it a message instead of starting new work. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only. Each call starts a [task](./tasks) and returns a receipt at once, and the model waits for the copy's answer with [`task_wait`](#task_wait) when it needs it; see [Wait for an agent](../subagents#wait-for-an-agent). Calling `agent` with the `taskId` of a copy it started sends that copy more work or a correction instead of starting a new one. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -233,29 +233,58 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
+### `task_wait`
+
+`task_wait` lets the model wait for a [task](./tasks)'s next result: an agent call or a workflow tool call that returned a receipt. eve advertises it, together with `task_cancel` and a short system prompt block about tasks, only when the session can start a detached task: its agent has an agent tool or a workflow tool without `attached: true`. The decision is fixed for the session.
+
+The model passes one task ID from a receipt or the `[Tasks]` note, and an optional `timeout` in milliseconds:
+
+```json
+{ "taskId": "researcher-7k2m9q", "timeout": 120000 }
+```
+
+`task_wait` is an attached call: the turn waits for it. It returns when the task has a result the model has not seen, when `timeout` passes, or when a new message from the turn's principal arrives. Ending a wait never stops the task. To wait on several tasks, the model calls `task_wait` once for each in the same step. Clients read the outcome on `action.result`:
+
+```json
+{
+  "status": "settled",
+  "taskId": "researcher-7k2m9q",
+  "name": "researcher",
+  "outcome": { "status": "completed", "output": "..." }
+}
+```
+
+The other outcomes are `{ "status": "timed_out" | "interrupted" | "idle", "taskId" }`. The model reads a settled result as a `<task_result>` block, and the other outcomes as a sentence that says what to do next. A second `task_wait` on the same task in one step fails with `TASK_ALREADY_WAITED`, and a task another principal started fails with `TASK_OTHER_PRINCIPAL`. See [Wait for results](./tasks#wait-for-results) for every rule.
+
+```sh
+eve add tool/task_wait
+```
+
+```ts title="agent/tools/task_wait.ts"
+export { default } from "eve/tools/task_wait";
+```
+
+The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it. A disabled `task_wait` leaves the model unable to wait in a step; results still arrive in the turn that started the work, because no turn ends while its tasks are working.
+
+```ts title="agent/tools/task_wait.ts"
+import { disableTool } from "eve/tools";
+
+export default disableTool();
+```
+
 ### `task_cancel`
 
-`task_cancel` lets the model stop [background tasks](./tasks), such as calls to a [`detach: true` workflow tool](../tools/workflows#return-a-receipt-with-detach) and agent calls made with [`background: true`](../subagents#run-a-call-in-the-background). eve advertises it only when the session can have background tasks: a root session in conversation mode whose agent has an agent or workflow tool, or any session whose agent has a `detach: true` tool. The decision is fixed for the session, and it is the same one that adds eve's background-task instructions, which mention `task_cancel`, to the system prompt.
+`task_cancel` lets the model stop one [task](./tasks). eve advertises it with [`task_wait`](#task_wait).
 
-The model passes 1 to 50 IDs from receipts or the `[Tasks]` note:
-
-```json
-{ "taskIds": ["remind-q4x1ze", "digest-9pw2kx"] }
-```
-
-The result lists each ID once:
+The model passes one task ID from a receipt or the `[Tasks]` note:
 
 ```json
-{ "cancelled": ["remind-q4x1ze"], "alreadyFinished": ["digest-9pw2kx"], "unknown": [] }
+{ "taskId": "remind-q4x1ze" }
 ```
 
-- `cancelled` lists tasks that were working in the background. eve records each one as cancelled at once, emits `task.settled` with `status: "cancelled"`, and asks its run or agent to stop without waiting. A cancelled task never reports back, and a turn held on it continues without its result.
-- `alreadyFinished` lists tasks that settled before the call. Their results are still delivered.
-- `unknown` lists IDs that name no background task, including a call the current turn is still waiting on. Cancel the turn to stop such a call.
+The result is `{ "status": "cancelled" }`, or `{ "status": "already_finished" }` when the task had already settled. A cancelled task's current work and every input queued for it stop: eve records the work as cancelled at once, emits `task.settled` with `status: "cancelled"`, and asks its run or agent to stop without waiting. That work never reports back, except to a `task_wait` on it, and a turn held on it continues without its result. A task that already finished still delivers its result.
 
-A cancelled agent usually stays available: pass its ID as `agentId` to give it new work. If a local agent has not stopped 30 seconds after the cancel, eve terminates its session, and a later call with its ID fails with `UNKNOWN_AGENT`. See [Cancel tasks](./tasks#cancel-tasks) for the other ways a task stops.
-
-In a session several people share, `task_cancel` can stop any background task in the session, whichever principal's turn started it, as [`session.cancel({ taskId })`](./sessions-runs-and-streaming#cancel-the-in-flight-turn) can. Access to a session includes the right to cancel its tasks.
+A call fails with `UNKNOWN_TASK` for an ID the session has no open task for, including an attached call the turn still holds, and with `TASK_OTHER_PRINCIPAL` for a task another principal started. Cancelling stops work, not the task: an agent stays available afterward, and the `[Tasks]` note lists it as idle so the model can give it new work with its `taskId`. If a local agent has not stopped 30 seconds after the cancel, eve terminates its session and ends its task, and a later send with its ID fails with `UNKNOWN_TASK`. See [Cancel tasks](./tasks#cancel-tasks) for the other ways a task stops.
 
 ```sh
 eve add tool/task_cancel
@@ -265,7 +294,7 @@ eve add tool/task_cancel
 export { default } from "eve/tools/task_cancel";
 ```
 
-The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it. A disabled `task_cancel` leaves the model unable to stop background tasks; application code can still stop one with [`session.cancel({ taskId })`](./sessions-runs-and-streaming#cancel-the-in-flight-turn).
+The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it. A disabled `task_cancel` leaves the model unable to stop one task; application code can still stop every working task with [`session.cancel()`](./sessions-runs-and-streaming#cancel-the-in-flight-turn).
 
 ```ts title="agent/tools/task_cancel.ts"
 import { disableTool } from "eve/tools";
@@ -389,7 +418,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `grep
 
 ### `sleep`
 
-`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message ends a waited `sleep` early in any session: eve cancels the wait, and the call reports the time it waited, such as `The sleep ended early after 12 s because a new message arrived.` Add it:
+`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. `sleep` is an [attached](./tasks#detached-and-attached-calls) workflow tool, so a steering message from the turn's principal ends it early in any session: eve cancels the wait, and the call reports the time it waited, such as `Stopped after 12 s because a new message arrived.` The system prompt tells the model never to use `sleep` to wait for a task; `task_wait` does that. Add it:
 
 ```sh
 eve add tool/sleep

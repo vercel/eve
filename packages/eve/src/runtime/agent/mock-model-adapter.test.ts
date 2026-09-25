@@ -825,7 +825,7 @@ describe("createMockAuthoredRuntimeModel", () => {
             {
               output: {
                 type: "text",
-                value: `<task_result id="${researcher}" name="researcher" status="completed">\nPricing notes.\n</task_result>`,
+                value: `<task_result id="${researcher}" tool="researcher" status="completed">\nPricing notes.\n</task_result>`,
               },
               toolCallId: "call_task_wait_call_first",
               toolName: "task_wait",
@@ -875,7 +875,7 @@ describe("createMockAuthoredRuntimeModel", () => {
             output: {
               type: "text",
               value: [
-                '<task_result id="deploy_service-a1b2c3" name="deploy_service" status="completed">',
+                '<task_result id="deploy_service-a1b2c3" tool="deploy_service" status="completed">',
                 '{\n  "service": "api"\n}',
                 "</task_result>",
               ].join("\n"),
@@ -914,7 +914,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         },
         {
           content: [
-            '<task_result id="deploy_service-a1b2c3" name="deploy_service" status="completed">',
+            '<task_result id="deploy_service-a1b2c3" tool="deploy_service" status="completed">',
             "ready",
             "</task_result>",
           ].join("\n"),

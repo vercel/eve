@@ -9,7 +9,7 @@ const START_RECEIPT_PATTERN = /^Started task ([\w-]+)\./u;
 const SEND_RECEIPT_PATTERN =
   /^Sent to task ([\w-]+), which is (still working|now working on it)\./u;
 const RESULT_BLOCK_PATTERN =
-  /<task_result id="([^"]*)" name="[^"]*" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
+  /<task_result id="([^"]*)" tool="[^"]*" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
 const WAIT_CALL_PREFIX = "task-wait-for-";
 
 interface SettledResult {

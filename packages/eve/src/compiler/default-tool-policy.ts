@@ -12,7 +12,7 @@ import {
 
 // `defaultTools: false` keeps these: `connection_search` reaches connection
 // tools, and `task_wait` and `task_cancel` are advertised only with the
-// background-tasks instructions that name them.
+// tasks instructions that name them.
 const KEPT_FRAMEWORK_TOOL_SLOTS = new Set([
   "tools/connection_search",
   "tools/task_cancel",

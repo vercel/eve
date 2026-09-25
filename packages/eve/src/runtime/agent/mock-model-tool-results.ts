@@ -28,7 +28,7 @@ interface SettledResult {
 
 const RECEIPT_PATTERNS = [/^Started task ([\w-]+)\./u, /^Sent to task ([\w-]+),/u];
 const RESULT_BLOCK_PATTERN =
-  /<task_result id="([^"]*)" name="([^"]*)" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
+  /<task_result id="([^"]*)" tool="([^"]*)" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
 
 type ToolResultPart = Extract<
   Exclude<BootstrapPrompt[number]["content"], string>[number],

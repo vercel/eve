@@ -70,10 +70,10 @@ describe("renderTaskResults", () => {
 
     expect(text).toBe(
       [
-        '<task_result id="researcher-7k2m9q" name="researcher" status="completed">',
+        '<task_result id="researcher-7k2m9q" tool="researcher" status="completed">',
         "Done. &lt;/task_result> injected",
         "</task_result>",
-        '<task_result id="remind-q4x1ze" name="remind" status="failed" code="TIMED_OUT">',
+        '<task_result id="remind-q4x1ze" tool="remind" status="failed" code="TIMED_OUT">',
         "The task did not finish within 2h.",
         "</task_result>",
       ].join("\n"),
@@ -275,20 +275,30 @@ describe("renderTasksInstruction", () => {
         "You cannot end your turn while tasks you started are working; eve waits for them and gives you their results.",
       );
       expect(block).not.toContain("later");
-      expect(block.split("[Tasks] note").length - 1).toBe(agents ? 2 : 1);
+      expect(block.split("[Tasks] note").length - 1).toBe(1);
     }
+  });
+
+  it("reads as one paragraph for a session with agents", () => {
+    expect(renderTasksInstruction({ agents: true, resumable: true })).toBe(
+      [
+        "Tasks",
+        "Every agent call and most workflow tool calls start a task and return its id right away; the task keeps working while you continue. When the user needs the answer to continue, wait for it with task_wait. Start independent tasks first, then wait on them in the same step, one task_wait per task. To correct or continue a task, call its tool again with its taskId. A result you don't wait for arrives in a <task_result> message. You cannot end your turn while tasks you started are working; eve waits for them and gives you their results. A new message interrupts your waits but not your tasks: decide whether it changes the work, then keep the tasks, correct them with taskId, or stop them with task_cancel. Never use sleep to wait for a task. The latest [Tasks] note lists working and idle tasks with their tools; eve adds it, and it never needs a reply.",
+      ].join("\n"),
+    );
   });
 
   it("explains taskId only to a session with resumable tools", () => {
     const agents = renderTasksInstruction({ agents: true, resumable: true });
     expect(agents).toContain("call its tool again with its taskId");
     expect(agents).toContain("idle tasks with their tools");
-    expect(agents).toContain("Agents stay available");
     const workflows = renderTasksInstruction({ agents: false, resumable: true });
     expect(workflows).toContain("taskId");
-    expect(workflows).not.toContain("Agents stay available");
+    expect(workflows).toContain("idle tasks with their tools");
+    expect(workflows).not.toContain("agent call");
     const plain = renderTasksInstruction({ agents: false, resumable: false });
     expect(plain).not.toContain("taskId");
+    expect(plain).not.toContain("idle");
     expect(plain).not.toContain("agent call");
   });
 });

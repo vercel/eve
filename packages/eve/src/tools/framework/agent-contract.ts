@@ -8,7 +8,7 @@ export const AGENT_TOOL_DESCRIPTION = [
   "Delegate a focused subtask to a copy of yourself.",
   "Use it to isolate complex work or split a large task into independent pieces.",
   "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
-  "A new child has fresh history and state but reuses your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
+  "A new child has fresh history and state but reuses your tools and sandbox, so give parallel writers non-overlapping scopes.",
 ].join(" ");
 
 /** Input of every agent tool; with `taskId`, a call sends to an agent task this tool started. */

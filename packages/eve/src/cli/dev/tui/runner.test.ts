@@ -940,7 +940,7 @@ describe("EveTUIRunner idle session follow", () => {
         data: {
           kind: "task.result",
           message:
-            '<task_result id="review-q4x1ze" name="review" status="completed">\nReady\n</task_result>',
+            '<task_result id="review-q4x1ze" tool="review" status="completed">\nReady\n</task_result>',
           sequence: 1,
           taskIds: ["review-q4x1ze"],
           turnId: "turn_1",

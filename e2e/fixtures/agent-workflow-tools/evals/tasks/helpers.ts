@@ -21,6 +21,13 @@ export function startedTaskIds(events: Events, name: string): readonly string[] 
   );
 }
 
+/** The `task.started` data of every generation of one tool's tasks, in order. */
+export function taskStarts(events: Events, name: string) {
+  return events.flatMap((event) =>
+    event.type === "task.started" && event.data.name === name ? [event.data] : [],
+  );
+}
+
 /** Waits until the live turn has started `count` tasks for one tool. */
 export async function waitForStarts(
   t: EveEvalContext,
