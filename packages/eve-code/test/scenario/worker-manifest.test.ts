@@ -68,8 +68,14 @@ test("built worker keeps explicit read tools without shell or write capabilities
     assert.ok(!toolNames.includes("write_file"));
     assert.ok(!toolNames.includes("apply_patch"));
     assert.equal(worker.agent.config.defaultTools, false);
-    assert.deepEqual(toolNames, ["glob", "grep", "read_file"]);
-    for (const tool of worker.agent.tools) assert.equal(tool.hasExecute, true);
+    // The framework task tools compile in with `defaultTools: false` as
+    // dispatch tools; eve offers them only to a session that can start a
+    // detached task.
+    const taskTools = new Set(["task_cancel", "task_wait"]);
+    assert.deepEqual(toolNames, ["glob", "grep", "read_file", ...taskTools]);
+    for (const tool of worker.agent.tools) {
+      if (!taskTools.has(tool.name)) assert.equal(tool.hasExecute, true);
+    }
     assert.deepEqual(worker.agent.connections, []);
     assert.deepEqual(
       worker.agent.dynamicTools.map((tool) => tool.slug),
