@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Writable } from "node:stream";
 import { finished } from "node:stream/promises";
@@ -13,7 +13,13 @@ import {
   type ProcessResult,
 } from "./docker.ts";
 import type { Harness, HarnessBundle } from "./harness.ts";
-import type { StepResult, TrialResult, Usage } from "./result.ts";
+import {
+  classifyTrial,
+  type InvalidTrial,
+  type StepResult,
+  type TrialResult,
+  type Usage,
+} from "./result.ts";
 import type { Task } from "./task.ts";
 
 export interface TrialInput {
@@ -107,13 +113,15 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
       ),
     );
 
+    const missing: string[] = [];
     for (const logs of ["agent", "verifier"]) {
       if (!(await container.download(`${LOGS_DIR}/${logs}`, input.dir))) {
-        containerLog.write(`[eve-bench] could not download ${LOGS_DIR}/${logs}\n`);
+        missing.push(`${LOGS_DIR}/${logs}`);
       }
     }
     reward = await readReward(join(input.dir, "verifier", "reward.txt"));
-    usage = await readUsage(join(input.dir, "agent", "result.json"));
+    usage = await input.harness.readUsage?.(join(input.dir, "agent"));
+    if (missing.length > 0) error = `could not download ${missing.join(", ")}`;
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
@@ -121,6 +129,14 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
     containerLog.end();
     await finished(containerLog);
   }
+  const invalid = classifyTrial(
+    { agent, verifier, reward, usage, error },
+    input.harness.modelFree === true,
+  );
+  const recorded: { usage?: Usage; error?: string; invalid?: InvalidTrial } = {};
+  if (usage) recorded.usage = usage;
+  if (error) recorded.error = error;
+  if (invalid) recorded.invalid = invalid;
   const result: TrialResult = {
     task: task.name,
     attempt: input.attempt,
@@ -129,12 +145,18 @@ export async function runTrial(input: TrialInput): Promise<TrialResult> {
     reward,
     agent,
     verifier,
-    ...(usage ? { usage } : {}),
-    ...(error ? { error } : {}),
+    ...recorded,
     startedAt,
     finishedAt: new Date().toISOString(),
   };
-  await writeFile(join(input.dir, "trial.json"), `${JSON.stringify(result, null, 2)}\n`);
+  const target = join(input.dir, "trial.json");
+  const temporary = join(input.dir, `trial.${process.pid}.tmp`);
+  try {
+    await writeFile(temporary, `${JSON.stringify(result, null, 2)}\n`, { flag: "wx" });
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true });
+  }
   return result;
 }
 
@@ -193,21 +215,5 @@ async function readReward(path: string): Promise<number | null> {
     return Number.isFinite(value) ? value : null;
   } catch {
     return null;
-  }
-}
-
-async function readUsage(path: string): Promise<Usage | undefined> {
-  try {
-    const parsed = JSON.parse(await readFile(path, "utf8")) as { usage?: Partial<Usage> };
-    const usage = parsed.usage;
-    if (!usage) return undefined;
-    return {
-      inputTokens: usage.inputTokens ?? 0,
-      outputTokens: usage.outputTokens ?? 0,
-      cachedTokens: usage.cachedTokens ?? 0,
-      costUsd: usage.costUsd ?? 0,
-    };
-  } catch {
-    return undefined;
   }
 }

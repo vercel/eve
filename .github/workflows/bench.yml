@@ -57,8 +57,17 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: ${{ github.workspace }}
 
+      # The typecheck and the tool and agent tests import eve's built exports.
+      - name: Build eve package
+        run: pnpm --filter eve run build
+        working-directory: ${{ github.workspace }}
+
       - name: Run tests
         run: pnpm run test
+
+      # Real containers: timeouts, bad images, abort/resume, concurrency, and trial validity.
+      - name: Run Docker stress tests
+        run: pnpm run test:stress
 
       - name: Sync benchmark tasks
         run: pnpm bench tasks sync --json
@@ -66,8 +75,8 @@ jobs:
       - name: Run oracle smoke benchmark
         run: pnpm bench run --harness oracle --cohort smoke --concurrency 5 --job oracle-smoke --format junit > junit.xml
 
-      - name: Print oracle smoke report
-        run: pnpm bench report oracle-smoke
+      - name: Print oracle smoke report and require valid attempts
+        run: pnpm bench report oracle-smoke --fail-on-invalid
 
       - name: Upload oracle smoke artifacts
         if: always()
@@ -130,6 +139,10 @@ jobs:
           MODEL: ${{ inputs.model || 'zai/glm-5.2' }}
           COHORT: ${{ inputs.cohort || 'smoke' }}
         run: pnpm bench run --harness eve --model "$MODEL" --cohort "$COHORT" --attempts 1 --concurrency 5 --job eve-smoke
+
+      # Scores are only meaningful when every attempt reached the model and the verifier.
+      - name: Print eve smoke report and require valid attempts
+        run: pnpm bench report eve-smoke --fail-on-invalid
 
       - name: Download base job artifact
         if: ${{ inputs.base_job_artifact }}

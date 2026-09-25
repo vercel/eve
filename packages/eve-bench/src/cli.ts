@@ -23,9 +23,11 @@ const USAGE = `eve-bench: zero-dependency Terminal-Bench runner for eve
   eve-bench tasks sync [--dataset <name>]        fetch pinned datasets into .generated/datasets
   eve-bench tasks list [--cohort <name>]         print task names
   eve-bench run --model <id> [--cohort <name>] [--task <name>...] [--task-dir <path>...] [--attempts N]
-                [--concurrency N] [--harness eve|oracle] [--eve local|<version>] [--job <name>]
-                [--format console|json|junit]
-  eve-bench report <job> [--format console|json|junit]
+                [--concurrency N] [--harness eve|e0|oracle|pi|opencode|codex] [--job <name>]
+                [--eve local|<version>] [--agent <e0-app>] [--version <cli-version>]
+                [--reasoning <level>] [--base-url <https-url>] [--format console|json|junit]
+  eve-bench prepare --harness <name> --model <id> [harness options]  build/cache without model calls
+  eve-bench report <job> [--format console|json|junit] [--fail-on-invalid]
   eve-bench diff <base-job> <candidate-job> [--json]
 
 Jobs live in .generated/jobs/<job>; re-running with the same --job resumes it.
@@ -38,8 +40,9 @@ try {
     case "tasks":
       await tasks(subcommand, rest);
       break;
+    case "prepare":
     case "run":
-      await run(subcommand === undefined ? [] : [subcommand, ...rest]);
+      await run(subcommand === undefined ? [] : [subcommand, ...rest], command === "prepare");
       break;
     case "report":
       await report(subcommand, rest);
@@ -83,7 +86,7 @@ async function tasks(sub: string | undefined, args: string[]): Promise<void> {
   throw new Error(`unknown tasks subcommand: ${sub ?? "(none)"}\n${USAGE}`);
 }
 
-async function run(args: string[]): Promise<void> {
+async function run(args: string[], prepareOnly = false): Promise<void> {
   const { values } = parseArgs({
     args,
     options: {
@@ -96,14 +99,27 @@ async function run(args: string[]): Promise<void> {
       concurrency: { type: "string", default: "4" },
       eve: { type: "string", default: "local" },
       harness: { type: "string", default: "eve" },
+      agent: { type: "string" },
+      version: { type: "string" },
+      "base-url": { type: "string" },
+      reasoning: { type: "string" },
       job: { type: "string" },
       format: { type: "string", default: "console" },
       json: { type: "boolean" },
     },
   });
-  const harness = selectHarness(values.harness, values.eve);
+  const harness = selectHarness(values.harness, values.eve, {
+    ...values,
+    baseUrl: values["base-url"],
+  });
   const model = values.model ?? (harness.name === "oracle" ? "none" : undefined);
   if (!model) throw new Error("--model is required");
+  if (prepareOnly) {
+    const bundle = await harness.prepare({ model, cacheDir: join(paths.generatedRoot, "cache") });
+    process.stdout.write(`${JSON.stringify(bundle, null, 2)}\n`);
+    return;
+  }
+  const forwardEnv = forwardedEnv(harness);
   const selection = await selectTasks({ ...values, taskDir: values["task-dir"] });
   const datasetTaskDirs = selection.tasks.length
     ? await taskDirs(
@@ -133,14 +149,14 @@ async function run(args: string[]): Promise<void> {
     model,
     attempts: Number(values.attempts),
     concurrency: Number(values.concurrency),
-    forwardEnv: forwardedEnv(),
+    forwardEnv,
     signal: controller.signal,
     onLog: (message) => process.stderr.write(`${message}\n`),
     onTrial: (trial, resumed) => {
       if (format !== "console") return;
       const reward = trial.reward === null ? "-" : trial.reward.toFixed(2);
       process.stderr.write(
-        `${resumed ? "resume" : "trial "} ${trial.task}#${trial.attempt} reward=${reward} agent=${trial.agent.status} verifier=${trial.verifier.status}${trial.error ? ` error=${trial.error}` : ""}\n`,
+        `${resumed ? "resume" : "trial "} ${trial.task}#${trial.attempt} reward=${reward} agent=${trial.agent.status} verifier=${trial.verifier.status}${trial.invalid ? ` INVALID(${trial.invalid.phase}): ${trial.invalid.reason}` : ""}\n`,
       );
     },
   });
@@ -156,14 +172,20 @@ async function report(job: string | undefined, args: string[]): Promise<void> {
       format: { type: "string", default: "console" },
       json: { type: "boolean" },
       out: { type: "string" },
+      "fail-on-invalid": { type: "boolean" },
     },
   });
-  const output = formatReport(
-    await readJobResult(join(paths.generatedRoot, "jobs", job)),
-    reportFormat(values.json ? "json" : values.format),
-  );
+  const result = await readJobResult(join(paths.generatedRoot, "jobs", job));
+  const output = formatReport(result, reportFormat(values.json ? "json" : values.format));
   if (values.out) await writeFile(values.out, output);
   else process.stdout.write(output);
+  const invalid = Object.values(result.summary.invalid).reduce((sum, count) => sum + count, 0);
+  if (values["fail-on-invalid"] && invalid > 0) {
+    process.stderr.write(
+      `${invalid} of ${result.summary.attempts} attempt(s) are invalid and did not measure the harness.\n`,
+    );
+    process.exitCode = 1;
+  }
 }
 
 async function diff(base: string | undefined, args: string[]): Promise<void> {

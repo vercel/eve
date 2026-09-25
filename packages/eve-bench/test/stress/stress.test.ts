@@ -20,11 +20,13 @@ interface TrialResult {
   agent: StepResult;
   verifier: StepResult;
   error?: string;
+  invalid?: { phase: "environment" | "harness" | "verifier"; reason: string };
 }
 
 interface JobResult {
   dataset: { name: string; version: string; commit: string };
   trials: TrialResult[];
+  summary: { scored: number; invalid: Record<string, number>; resolved: number };
 }
 
 interface CliResult {
@@ -154,7 +156,11 @@ test("happy: records completed steps and reward 1", { timeout }, async () => {
   assert.equal(trial.reward, 1);
   assert.equal(trial.agent.status, "completed");
   assert.equal(trial.verifier.status, "completed");
-  assert.deepEqual((await readResult(job)).dataset, { name: "local", version: "0", commit: "" });
+  assert.equal(trial.invalid, undefined);
+  const saved = await readResult(job);
+  assert.deepEqual(saved.dataset, { name: "local", version: "0", commit: "" });
+  assert.equal(saved.summary.scored, 1);
+  assert.equal(saved.summary.resolved, 1);
 });
 
 test("agent-timeout: verifier still runs and the container is removed", { timeout }, async () => {
@@ -167,6 +173,8 @@ test("agent-timeout: verifier still runs and the container is removed", { timeou
   assert.equal(trial.agent.status, "timeout");
   assert.equal(trial.verifier.status, "completed");
   assert.equal(trial.reward, 0);
+  // A timeout is the harness's outcome, so it stays scored.
+  assert.equal(trial.invalid, undefined);
   assert.deepEqual(await dockerNames(job), []);
 });
 
@@ -180,6 +188,8 @@ test("verifier-timeout: records timeout and null reward", { timeout }, async () 
   assert.equal(trial.agent.status, "completed");
   assert.equal(trial.verifier.status, "timeout");
   assert.equal(trial.reward, null);
+  assert.equal(trial.invalid?.phase, "verifier");
+  assert.equal((await readResult(job)).summary.scored, 0);
 });
 
 test(
@@ -195,12 +205,14 @@ test(
     assert.ok(trial.error);
     assert.equal(trial.agent.status, "skipped");
     assert.equal(trial.verifier.status, "skipped");
+    assert.equal(trial.invalid?.phase, "environment");
+    assert.equal((await readResult(job)).summary.invalid.environment, 1);
     assert.deepEqual(await dockerNames(job), []);
   },
 );
 
 test(
-  "abort: exits 130, writes a partial result, cleans up, and resumes with a new task set",
+  "abort: exits 130, cleans up, and rejects a different resume identity",
   { timeout },
   async () => {
     const job = "stress-abort";
@@ -228,11 +240,9 @@ test(
       await waitFor(async () => (await dockerNames(job)).length === 0, 15_000, "abort cleanup");
 
       const resumed = await runCli(job, [taskDir("abort-resume")], [], false);
-      assertPassed(resumed);
-      const result = await readResult(job);
-      assert.equal(result.trials.length, 1);
-      assert.equal(result.trials[0]?.task, "stress-abort-resume");
-      assert.equal(result.trials[0]?.reward, 1);
+      assert.equal(resumed.code, 1);
+      assert.match(resumed.stderr, /resume identity differs/);
+      assert.deepEqual(await dockerNames(job), []);
     } finally {
       if (child.exitCode === null) child.kill("SIGKILL");
       await cleanupContainers(job);

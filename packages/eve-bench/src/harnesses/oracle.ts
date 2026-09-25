@@ -11,6 +11,7 @@ import type { Harness } from "../core/harness.ts";
 export function createOracleHarness(): Harness {
   return {
     name: "oracle",
+    modelFree: true,
     async prepare(ctx) {
       const dir = join(ctx.cacheDir, "bundles", "oracle");
       await mkdir(dir, { recursive: true });

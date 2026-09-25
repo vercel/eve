@@ -4,7 +4,7 @@ import { defineTool } from "eve/tools";
 import { never } from "eve/tools/approval";
 import { z } from "zod";
 
-import { resolveTaskPath } from "../task-path.js";
+import { resolveTaskPath } from "../task-path.ts";
 
 export default defineTool({
   approval: never(),

@@ -5,7 +5,7 @@ import { defineTool } from "eve/tools";
 import { never } from "eve/tools/approval";
 import { z } from "zod";
 
-import { resolveTaskPath, taskRoot } from "../task-path.js";
+import { resolveTaskPath, taskEnv, taskRoot } from "../task-path.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -28,12 +28,19 @@ export default defineTool({
     try {
       const { stdout, stderr } = await execFileAsync("rg", args, {
         cwd: taskRoot(),
+        env: taskEnv(),
         maxBuffer: 10 * 1024 * 1024,
         signal: ctx.abortSignal,
       });
       return { exitCode: 0, stderr, stdout };
     } catch (error) {
-      const result = error as Error & { code?: number; stderr?: string; stdout?: string };
+      const result = error as Error & { code?: number | string; stderr?: string; stdout?: string };
+      // Otherwise a missing binary reads exactly like "no matches".
+      if (result.code === "ENOENT") {
+        throw new Error(
+          "ripgrep (rg) is not installed in this task environment; search with the bash tool (for example grep -rn) instead.",
+        );
+      }
       const exitCode = typeof result.code === "number" ? result.code : 1;
       return {
         exitCode,

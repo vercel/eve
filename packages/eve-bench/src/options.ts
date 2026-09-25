@@ -6,6 +6,8 @@ import { readCohort, readDatasetLock, type DatasetLock } from "./core/dataset.ts
 import type { Harness } from "./core/harness.ts";
 import { createEveHarness } from "./harnesses/eve/index.ts";
 import { createOracleHarness } from "./harnesses/oracle.ts";
+import { createE0Harness } from "./harnesses/e0/index.ts";
+import { createCliHarness } from "./harnesses/cli/index.ts";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -76,7 +78,23 @@ export function defaultJobName(label: string): string {
   return `${stamp}-${label.replaceAll(/[^A-Za-z0-9._-]/gu, "_")}`;
 }
 
-export function selectHarness(name: string, eve: string): Harness {
+export function selectHarness(
+  name: string,
+  eve: string,
+  options: { agent?: string; version?: string; baseUrl?: string; reasoning?: string } = {},
+): Harness {
+  if (name !== "e0" && options.agent) throw new Error("--agent is only supported by --harness e0");
+  if (name === "e0")
+    return createE0Harness({ agent: options.agent ?? "", reasoning: options.reasoning });
+  if (name === "pi" || name === "opencode" || name === "codex" || name === "hermes") {
+    return createCliHarness(name, {
+      version: options.version ?? "",
+      baseUrl: options.baseUrl,
+      reasoning: options.reasoning,
+    });
+  }
+  if (options.version || options.baseUrl || options.reasoning)
+    throw new Error("--version, --base-url and --reasoning require a supporting harness");
   if (name === "oracle") return createOracleHarness();
   if (name === "eve") {
     return createEveHarness(
@@ -86,16 +104,18 @@ export function selectHarness(name: string, eve: string): Harness {
   throw new Error(`unknown harness: ${name}`);
 }
 
-export function forwardedEnv(): Record<string, string> {
+/** Host credentials the harness may receive; fails before any trial when none are exported. */
+export function forwardedEnv(harness: Harness): Record<string, string> {
+  const names = harness.credentials ?? [];
   const env: Record<string, string> = {};
-  for (const key of [
-    "AI_GATEWAY_API_KEY",
-    "VERCEL_OIDC_TOKEN",
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-  ]) {
+  for (const key of names) {
     const value = process.env[key];
     if (value) env[key] = value;
+  }
+  if (names.length > 0 && Object.keys(env).length === 0) {
+    throw new Error(
+      `No model credentials exported for ${harness.name}. Set one of ${names.join(", ")} (AI_GATEWAY_API_KEY for gateway models); use prepare for a model-free build.`,
+    );
   }
   return env;
 }

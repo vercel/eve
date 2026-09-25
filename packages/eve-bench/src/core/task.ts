@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
+import { assertSafeId } from "./id.ts";
 import { parseToml, type TomlTable } from "./toml.ts";
 
 export interface Task {
@@ -33,7 +34,7 @@ export async function loadTask(dir: string): Promise<Task> {
   const dockerfileDir = join(dir, "environment");
   if (dockerImage === undefined) await access(join(dockerfileDir, "Dockerfile"));
   return {
-    name: shortName(str(task, "name") ?? basename(dir)),
+    name: assertSafeId(shortName(str(task, "name") ?? basename(dir)), "task"),
     dir,
     instruction,
     agentTimeoutMs: seconds(agent, "timeout_sec"),

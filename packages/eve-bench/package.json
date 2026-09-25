@@ -9,7 +9,10 @@
   "type": "module",
   "scripts": {
     "bench": "node src/cli.ts",
-    "test": "pnpm run typecheck && node --test src/core/*.test.ts",
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "pnpm run typecheck && node --test src/core/*.test.ts src/harnesses/**/*.test.ts src/tools/*.test.ts",
+    "test:integration": "node --test test/scenarios/*.test.ts",
+    "test:scenario": "node --test test/scenarios/*.test.ts",
     "test:stress": "node --test test/stress/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

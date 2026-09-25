@@ -29,14 +29,24 @@ pnpm bench run --harness oracle --cohort smoke           # reference solutions; 
 pnpm bench run --model zai/glm-5.2 --task fix-git --eve 0.35.0   # benchmark a published eve release
 pnpm bench run --harness oracle --task-dir ./path/to/task # run a local Terminal-Bench task
 
+# Build and cache a local e0 snapshot without calling a model.
+pnpm bench prepare --harness e0 --agent /path/to/internal-agents/agents/e0 \
+  --model openai/gpt-5.6-terra
+
+# Run one e0 smoke task. The source app must have installed workspace dependencies.
+AI_GATEWAY_API_KEY=... pnpm bench run --harness e0 \
+  --agent /path/to/internal-agents/agents/e0 \
+  --model deepseek/deepseek-v4-pro --cohort smoke --task fix-git --job e0-deepseek
+
 pnpm bench report <job> --format junit --out junit.xml
 pnpm bench diff <base-job> <candidate-job>
 ```
 
 Every command accepts `--json` and never prompts. Jobs live in
-`.generated/jobs/<job>/`; re-running with the same `--job` name resumes it,
-skipping trials that already have a `trial.json`. Ctrl-C aborts in-flight
-trials and removes their containers.
+`.generated/jobs/<job>/`. Re-running the same job resumes only when the model,
+harness, bundle provenance, dataset, tasks, and attempt count match. Invalid or
+mismatched trial records fail closed instead of being overwritten. Ctrl-C
+aborts in-flight trials and removes their containers.
 
 Pass `--task-dir <path>` more than once to run one or more local Terminal-Bench
 task directories. A local-only run does not sync a dataset and records its
@@ -51,6 +61,42 @@ dataset as `local`.
    verifier always runs, so the reward reflects what the agent left behind.
 4. Read `/logs/verifier/reward.txt`, copy `/logs/agent` and `/logs/verifier`
    to the trial directory, remove the container, and write `trial.json`.
+
+## Reading results
+
+A trial is scored only when it measured the harness. Otherwise `trial.json`
+records `invalid` with a phase and reason, and the trial is excluded from
+`resolved`, `meanReward`, and `diff`:
+
+- `environment`: runner-owned work failed, such as the image pull or build,
+  container start, uploads, or log download.
+- `harness`: the harness ran but completed no model call (zero or missing token
+  usage). This usually means broken credentials, adapter configuration, or
+  startup, not a weak harness.
+- `verifier`: the verifier wrote no reward, including verifier timeouts.
+
+After one model call completes, crashes, agent timeouts, and wrong answers
+count against the harness. Reports list every invalid attempt, JUnit marks them
+as errors instead of failures, and `diff` shows invalid counts next to each
+task. Resolve invalid attempts before comparing jobs; `pnpm bench report <job>
+--fail-on-invalid` exits 1 when any remain, and CI applies it to every smoke job.
+
+Usage is read on the host from each harness's own event log (`events.ndjson`
+for eve and e0, `<cli>.jsonl` for pi, OpenCode, and Codex), so it survives agent
+timeouts. Input tokens include cache reads and output tokens include reasoning.
+`costUsd` is null when the harness reports no cost; the CLI competitors report
+none for custom Gateway providers, so compare tokens rather than cost across
+harnesses.
+
+## Environment parity
+
+Every harness's tool commands run with the task container's own environment:
+the image's `HOME`, `PATH`, and `ENV`, starting in the task working directory.
+Harness state lives only in harness-owned paths under `/installed-agent`
+(`CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OPENCODE_CONFIG`), so what an agent
+installs or configures in the task survives into verification. The eve runner
+restores the container's own `PORT`, `HOST`, and Nitro variables for agent
+commands.
 
 Each runner-owned log (`container.log`, `agent.log`, and `verifier.log`) is
 capped at 64 MiB. The runner appends a truncation notice when a log exceeds the
@@ -93,6 +139,22 @@ trials.
   `EVE_BENCH_TASK_WORKDIR`; Docker is the isolation boundary, so they bypass
   eve's nested sandbox on purpose.
 
+- `e0`: snapshots an installed local e0 app and its source-backed `eve-code`
+  extension. The bundle records source, dependency, and installed eve hashes.
+  It preserves e0's instructions, coding capabilities, tools, skills, and
+  authored worker model. The adapter replaces production sandbox and transport
+  integrations with the task-container backend and a local eve channel. It
+  removes production Connect configuration, channels, connections, schedules,
+  instrumentation, and sandbox bootstrap. `--model` changes the root model,
+  not e0's authored worker model.
+
+- `pi`, `opencode`, and `codex`: prepare explicitly versioned CLI bundles on the
+  host and route full provider-qualified model IDs through an HTTPS API base.
+  Pass an exact `--version`. The default base is Vercel AI Gateway. Codex uses
+  the Responses protocol; pi and OpenCode use chat completions. Hermes fails
+  explicitly until a pinned Python/uv bundle and verified custom-provider
+  routing are implemented.
+
 - `oracle`: runs each task's `solution/solve.sh`. Use it to check the runner
   and as the reward ceiling.
 
@@ -130,7 +192,7 @@ diff the result against a downloaded base-job artifact.
 
 - `agent/`: harness behavior under evaluation (model binding, instructions, tools)
 - `src/core/`: runner library with no dependency on eve or third parties
-- `src/harnesses/`: `eve` and `oracle`
+- `src/harnesses/`: `eve`, `e0`, CLI competitors, and `oracle`
 - `src/tools/`: eve tool definitions over the runner core
 - `src/options.ts`: run options shared by the CLI and tools
 - `src/cli.ts`: `eve-bench` CLI

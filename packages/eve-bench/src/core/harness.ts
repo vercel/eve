@@ -1,3 +1,5 @@
+import type { Usage } from "./result.ts";
+
 /**
  * A harness is anything that can be placed in a task container and told to
  * solve an instruction. The runner uploads `bundleDir` to `/installed-agent`,
@@ -5,11 +7,20 @@
  */
 export interface Harness {
   readonly name: string;
+  /** Host environment names allowed to cross into this harness process. */
+  readonly credentials?: readonly string[];
+  /** Set when the harness makes no model calls, so missing usage does not invalidate a trial. */
+  readonly modelFree?: boolean;
   prepare(ctx: HarnessPrepareContext): Promise<HarnessBundle>;
   /** Optional per-task host paths uploaded into the install directory before `command` runs. */
   stage?(ctx: { readonly taskDir: string }): readonly string[];
   command(ctx: HarnessRunContext): string;
   env(ctx: HarnessRunContext): Record<string, string>;
+  /**
+   * Reads root-session usage from the downloaded agent logs on the host. It runs
+   * after timeouts too, so harnesses should log usage incrementally.
+   */
+  readUsage?(agentLogsDir: string): Promise<Usage | undefined>;
 }
 
 export interface HarnessPrepareContext {

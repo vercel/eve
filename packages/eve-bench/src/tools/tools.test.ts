@@ -22,6 +22,19 @@ describe("run_bench input", () => {
       true,
     );
     assert.equal(runBenchInput.safeParse({ harness: "oracle" }).success, true);
+    assert.equal(
+      runBenchInput.safeParse({ harness: "e0", agent: "/apps/e0", model: "openai/gpt-5.6-terra" })
+        .success,
+      true,
+    );
+    assert.equal(
+      runBenchInput.safeParse({
+        harness: "pi",
+        version: "0.80.3",
+        model: "deepseek/deepseek-v4-pro",
+      }).success,
+      true,
+    );
   });
 
   it("rejects invalid inputs", () => {
@@ -29,6 +42,14 @@ describe("run_bench input", () => {
     assert.equal(runBenchInput.safeParse({ harness: "other", model: "model" }).success, false);
     assert.equal(runBenchInput.safeParse({ harness: "oracle", attempts: 0 }).success, false);
     assert.equal(runBenchInput.safeParse({ harness: "oracle", tasks: "fix-git" }).success, false);
+    assert.equal(
+      runBenchInput.safeParse({ harness: "e0", model: "openai/gpt-5.6-terra" }).success,
+      false,
+    );
+    assert.equal(
+      runBenchInput.safeParse({ harness: "codex", model: "openai/gpt-5.6-terra" }).success,
+      false,
+    );
   });
 });
 

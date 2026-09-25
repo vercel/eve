@@ -1,9 +1,10 @@
 // Runs inside the task container: boots the built eve server, sends the task
 // instruction as one session, follows the event stream to its boundary, and
-// writes /logs/agent/{events.ndjson,result.json,server.log}. Talks to the
-// server over plain HTTP so the bundle ships no node_modules.
+// writes /logs/agent/{events.ndjson,result.json,server.log}. Events are
+// appended as they arrive so the host can read usage after an agent timeout.
+// Talks to the server over plain HTTP so the bundle ships no node_modules.
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { appendFileSync, createWriteStream, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -28,9 +29,9 @@ try {
 
   const instruction = await readFile(instructionPath, "utf8");
   const sessionId = await createSession(instruction);
+  writeFileSync(eventsPath, "");
   const events = await followStream(sessionId);
 
-  await writeFile(eventsPath, `${events.map((event) => JSON.stringify(event)).join("\n")}\n`);
   const status = statusFromEvents(events);
   const summary = {
     status,
@@ -39,7 +40,6 @@ try {
     inputRequests: events
       .filter((event) => event.type === "input.requested")
       .flatMap((event) => event.data?.requests ?? []),
-    usage: summarizeUsage(events),
     eventCount: events.length,
     failure: failureFromEvents(events) ?? failureFromStatus(status),
   };
@@ -54,7 +54,6 @@ try {
         {
           status: "failed",
           inputRequests: [],
-          usage: {},
           eventCount: 0,
           failure: { type: "runner.error", message: error?.message ?? String(error) },
         },
@@ -77,15 +76,23 @@ function requireEnv(name) {
 function startServer() {
   const log = createWriteStream(serverLogPath, { flags: "a" });
   const entry = join(projectDir, ".output", "server", "index.mjs");
+  const serverEnv = {
+    EVE_DEV: "1",
+    HOST: host,
+    NITRO_HOST: host,
+    NITRO_PORT: String(port),
+    PORT: String(port),
+  };
+  // Agent tools restore these so task commands see the container's own values.
+  const taskEnv = Object.fromEntries(
+    Object.keys(serverEnv).map((key) => [key, process.env[key] ?? null]),
+  );
   const child = spawn(process.execPath, [entry], {
     cwd: projectDir,
     env: {
       ...process.env,
-      EVE_DEV: "1",
-      HOST: host,
-      NITRO_HOST: host,
-      NITRO_PORT: String(port),
-      PORT: String(port),
+      ...serverEnv,
+      EVE_BENCH_TASK_ENV_RESTORE: JSON.stringify(taskEnv),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -141,6 +148,7 @@ async function followStream(sessionId) {
       throw new Error(`stream failed: ${response.status} ${await response.text()}`);
     for await (const event of ndjson(response.body)) {
       events.push(event);
+      appendFileSync(eventsPath, `${JSON.stringify(event)}\n`);
       if (isBoundary(event)) return events;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -205,30 +213,6 @@ function failureFromEvents(events) {
 function failureFromStatus(status) {
   if (status === "waiting" || status === "completed") return null;
   return { type: "session.unsettled", message: `eve run ended with status: ${status}` };
-}
-
-function summarizeUsage(events) {
-  const usage = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0 };
-  for (const event of events) {
-    if (event.type !== "step.completed") continue;
-    const source = event.data?.usage ?? event.data ?? {};
-    usage.inputTokens += numberValue(source.inputTokens, source.input_tokens);
-    usage.outputTokens += numberValue(source.outputTokens, source.output_tokens);
-    usage.cachedTokens += numberValue(
-      source.cacheReadTokens,
-      source.cachedTokens,
-      source.cached_tokens,
-    );
-    usage.costUsd += numberValue(source.costUsd, source.cost_usd);
-  }
-  return usage;
-}
-
-function numberValue(...values) {
-  for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return 0;
 }
 
 async function stopServer(child) {
