@@ -4675,7 +4675,7 @@ describe("EveTUIRunner command outcome rendering", () => {
     await runner.run();
 
     expect(results).toHaveLength(1);
-    expect(results[0]).toContain("--url");
+    expect(results[0]).toContain("remote agent");
     expect(notices).toEqual([]);
   });
 });
