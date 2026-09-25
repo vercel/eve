@@ -1,6 +1,6 @@
-import { updatePendingAuthorizations } from "#client/session-utils.js";
+import { TurnEndTracker, updatePendingAuthorizations } from "#client/session-utils.js";
 import type { MessageStreamEvent, TaskStartedStreamEvent } from "#protocol/message.js";
-import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,
@@ -298,6 +298,7 @@ export class ClientSession {
     let eventCount = 0;
     let started = deliveryId === undefined;
     let reachedBoundary = false;
+    const turnEnd = new TurnEndTracker();
     const pendingAuthorizations = new Set<string>();
     try {
       for await (const event of source ??
@@ -323,7 +324,7 @@ export class ClientSession {
         }
         updatePendingAuthorizations(pendingAuthorizations, event);
         reachedBoundary =
-          isCurrentTurnBoundaryEvent(event) &&
+          turnEnd.observe(event) &&
           (event.type !== "session.waiting" || pendingAuthorizations.size === 0);
         yield event;
         if (reachedBoundary) {

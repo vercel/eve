@@ -10,7 +10,7 @@ import type { RunMode } from "#shared/run-mode.js";
 import { AGENT_SESSION_ENDED_MESSAGE } from "#tasks/render.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
-import { fireSessionCallbackStep } from "#subagents/remote/callback-step.js";
+import type { SessionCallbackResult } from "#subagents/remote/callback-step.js";
 import type { SettledTurnNotification } from "#tasks/child.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { answerOrder } from "#tasks/protocol.js";
@@ -31,17 +31,21 @@ export interface SessionFinalizationContext {
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
-/** How a session ended, and the terminal answer its parked caller is owed, if any. */
+/**
+ * How a session ended, and the terminal answer its caller is owed, if any:
+ * a parked caller's reply, or a task-mode run's session callback. Both are
+ * sent by the session program's one reply site, `replyToCaller`.
+ */
 export interface FinalizedSession {
   readonly result: WorkflowEntryResult;
-  /** Sent by the session program's one reply site, `replyToCaller`. */
   readonly callerReply?: SettledTurnNotification;
+  readonly callback?: SessionCallbackResult;
 }
 
 /**
  * Terminates descendants, emits the terminal protocol event when the turn has
- * not already done so, then settles the task callback in task mode, or
- * returns the answer the parked caller is owed.
+ * not already done so, then returns the task-mode callback or the answer the
+ * parked caller is owed.
  */
 export async function finalizeSession(
   outcome: SessionTerminalOutcome,
@@ -67,14 +71,15 @@ export async function finalizeSession(
 
   const settled = settledResult(outcome, context);
   let callerReply: SettledTurnNotification | undefined;
+  let callback: SessionCallbackResult | undefined;
   if (context.mode === "task") {
-    await fireSessionCallbackStep({
+    callback = {
       error: settled.isError ? settled.output : undefined,
       output: settled.isError ? undefined : settled.output,
       serializedContext,
       status: settled.isError ? "failed" : "completed",
       usage: settled.sessionUsage,
-    });
+    };
   } else if (context.caller !== undefined) {
     const notification: {
       answer?: number;
@@ -111,7 +116,10 @@ export async function finalizeSession(
           usage: settled.sessionUsage,
           usageDelta: settled.turnUsage,
         };
-  return callerReply === undefined ? { result } : { callerReply, result };
+  const finalized: { -readonly [K in keyof FinalizedSession]: FinalizedSession[K] } = { result };
+  if (callerReply !== undefined) finalized.callerReply = callerReply;
+  if (callback !== undefined) finalized.callback = callback;
+  return finalized;
 }
 
 function settledResult(

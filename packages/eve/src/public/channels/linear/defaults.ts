@@ -192,7 +192,8 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls") {
+      // An interim message is not the reply yet: eve calls the model again.
+      if (event.finishReason === "tool-calls" || event.interim === true) {
         channel.state.pendingToolCallMessage = event.message
           ? (firstNonEmptyLine(event.message) ?? null)
           : null;

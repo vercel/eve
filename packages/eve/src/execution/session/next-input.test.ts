@@ -2,7 +2,8 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
-import { nextTurnDelivery } from "#execution/session/next-input.js";
+import { authorizationResumeDelivery, nextTurnDelivery } from "#execution/session/next-input.js";
+import { encodeTaskCreator } from "#tasks/results.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -443,5 +444,54 @@ describe("nextTurnDelivery routing", () => {
       kind: "turn",
     });
     expect(answerTaskInput).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("authorizationResumeDelivery", () => {
+  const alice: SessionAuthContext = {
+    attributes: {},
+    authenticator: "idp",
+    principalId: "alice",
+    principalType: "user",
+  };
+  const callback = (attemptId: string) => ({
+    authorizationCallback: {
+      attemptId,
+      callback: { method: "GET", params: { code: "oauth-code" } },
+      connectionName: "linear",
+    },
+  });
+
+  it("resumes the parked turn for the principal it parked for, whoever wrote in between", () => {
+    const state = {
+      "eve.runtime.pendingAuthorization": {
+        challenges: [],
+        principals: { "linear-1": encodeTaskCreator({ auth: alice }) },
+      },
+    };
+
+    expect(authorizationResumeDelivery(state, [callback("linear-1")])).toEqual({
+      auth: alice,
+      kind: "deliver",
+      payloads: [callback("linear-1")],
+    });
+    expect(
+      authorizationResumeDelivery(
+        {
+          "eve.runtime.pendingAuthorization": {
+            challenges: [],
+            principals: { "linear-1": encodeTaskCreator({ auth: null }) },
+          },
+        },
+        [callback("linear-1")],
+      ),
+    ).toEqual({ auth: null, kind: "deliver", payloads: [callback("linear-1")] });
+  });
+
+  it("carries no auth for an attempt with no recorded principal", () => {
+    expect(authorizationResumeDelivery(undefined, [callback("linear-9")])).toEqual({
+      kind: "deliver",
+      payloads: [callback("linear-9")],
+    });
   });
 });

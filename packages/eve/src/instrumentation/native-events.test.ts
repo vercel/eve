@@ -134,6 +134,55 @@ describe("createInstrumentationHandleEvent", () => {
     ]);
   });
 
+  it("publishes no turn end, session transition, or delivery outcome at a held turn's boundary", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(ActiveChannelDeliveriesKey, [
+      {
+        delivery: { channelKind: "channel:slack", channelName: "slack", deliveryId: "delivery-1" },
+        policyAgentName: "weather",
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn-1",
+      },
+    ]);
+    const order: string[] = [];
+    const handleEvent = createInstrumentationHandleEvent({
+      handleEvent: async (event) => {
+        order.push(`durable:${event.type}`);
+      },
+      hooks: {
+        capturesContent: false,
+        publish: async (event) => {
+          order.push(`lifecycle:${event.type}`);
+        },
+      },
+      sessionId: "session-1",
+      turnId: "turn-1",
+    })!;
+
+    await contextStorage.run(ctx, async () => {
+      await handleEvent(createTurnCompletedEvent({ held: true, sequence: 0, turnId: "turn-1" }));
+      await handleEvent(createSessionWaitingEvent());
+    });
+    expect(order).toEqual(["durable:turn.completed", "durable:session.waiting"]);
+    expect(ctx.get(ActiveChannelDeliveriesKey)).toHaveLength(1);
+
+    // The turn's final end publishes its lifecycle once, with the delivery's outcome.
+    await contextStorage.run(ctx, async () => {
+      await handleEvent(createTurnCompletedEvent({ sequence: 0, turnId: "turn-1" }));
+      await handleEvent(createSessionWaitingEvent());
+    });
+    expect(order.slice(2)).toEqual([
+      "durable:turn.completed",
+      "lifecycle:channel.delivery.completed",
+      "lifecycle:turn.completed",
+      "durable:session.waiting",
+      "lifecycle:session.waiting",
+    ]);
+    expect(ctx.get(ActiveChannelDeliveriesKey)).toBeUndefined();
+  });
+
   it("forwards the source event to the durable handler", async () => {
     const source = createSessionStartedEvent();
     let forwarded: unknown;

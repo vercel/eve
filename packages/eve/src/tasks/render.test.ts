@@ -238,8 +238,24 @@ describe("renderTasksNote", () => {
 
 describe("renderFinalOutputWhileTasksWork", () => {
   it("names the working tasks and what to do before calling final_output again", () => {
-    expect(renderFinalOutputWhileTasksWork(["lookup-a1b2c3", "researcher-7k2m9q"])).toBe(
-      "You can't give your final output while tasks you started are working (lookup-a1b2c3, researcher-7k2m9q). Wait for them with task_wait or stop them with task_cancel, then call final_output again.",
+    expect(
+      renderFinalOutputWhileTasksWork({
+        settled: [],
+        working: ["lookup-a1b2c3", "researcher-7k2m9q"],
+      }),
+    ).toBe(
+      "You can't give your final output yet: tasks you started are still working (lookup-a1b2c3, researcher-7k2m9q). Their results arrive here on their own: wait for them, or stop a task with task_cancel, then call final_output again.",
+    );
+  });
+
+  it("tells settled results apart from working tasks", () => {
+    expect(renderFinalOutputWhileTasksWork({ settled: ["remind-q4x1ze"], working: [] })).toBe(
+      "You can't give your final output yet: results you have not read are arriving (remind-q4x1ze). Read them, then call final_output again.",
+    );
+    expect(
+      renderFinalOutputWhileTasksWork({ settled: ["remind-q4x1ze"], working: ["lookup-a1b2c3"] }),
+    ).toBe(
+      "You can't give your final output yet: tasks you started are still working (lookup-a1b2c3), and results you have not read are arriving (remind-q4x1ze). Their results arrive here on their own: wait for them, or stop a task with task_cancel, then call final_output again.",
     );
   });
 });

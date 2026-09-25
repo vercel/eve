@@ -445,7 +445,8 @@ export function buildTraceTurnsFromTranscript(
 
       if (message !== undefined) {
         step.responseText = message;
-        if (finishReason !== "tool-calls") {
+        // An interim message is not the turn's reply: eve calls the model again.
+        if (finishReason !== "tool-calls" && event.data.interim !== true) {
           turn.assistantMessage = message;
         }
       }
@@ -608,6 +609,10 @@ export function buildTraceTurnsFromTranscript(
     }
 
     if (event.type === "turn.completed") {
+      // A held turn's boundary keeps it open until its tasks settle.
+      if (isRecord(event.data) && event.data.held === true) {
+        continue;
+      }
       if (eventTimestamp !== undefined) {
         turn.endTime = eventTimestamp;
       }

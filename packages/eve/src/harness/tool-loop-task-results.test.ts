@@ -289,7 +289,13 @@ describe("detached result delivery in the tool loop", () => {
       "turn.completed",
       "session.waiting",
     ]);
-    expect(events.at(-2)).toMatchObject({ data: { turnId: "turn_0" } });
+    expect(events.at(-2)).toEqual({
+      data: { held: true, sequence: 0, turnId: "turn_0" },
+      type: "turn.completed",
+    });
+    // The interim message is an ordinary reply; the held boundary tells it apart.
+    const reply = events.find((event) => event.type === "message.completed");
+    expect(reply?.type === "message.completed" && reply.data.interim).toBeUndefined();
     expect(getHarnessEmissionState(session.state)).toMatchObject({
       sequence: 0,
       stepIndex: 2,
@@ -314,6 +320,15 @@ describe("detached result delivery in the tool loop", () => {
     expect(types).not.toContain("turn.completed");
     expect(types).not.toContain("session.waiting");
     expect(types).not.toContain("session.completed");
+    // With no boundary, the message itself says it is not the reply yet.
+    expect(events).toContainEqual({
+      data: expect.objectContaining({
+        finishReason: "stop",
+        interim: true,
+        message: "Started the reminder.",
+      }),
+      type: "message.completed",
+    });
   });
 
   it("ends the turn when only attached calls, workflow-owned agents, or another principal's tasks work", async () => {
@@ -335,19 +350,54 @@ describe("detached result delivery in the tool loop", () => {
     expect(result.settledTurn?.output).toBe("Done.");
   });
 
-  it("answers final_output with an error naming the working tasks, so the model waits first", async () => {
-    const { requests, result } = await runStep({
+  it("answers final_output with an error naming the working tasks and holds, without a boundary", async () => {
+    const { events, requests, result, session } = await runStep({
       auth: ALICE,
-      respond: (request) =>
-        request.toolResults.some((toolResult) => toolResult.name === "final_output")
-          ? {
-              toolCalls: [
-                { id: "call-wait", input: { taskId: "remind-q4x1ze" }, name: "task_wait" },
-              ],
-            }
-          : { toolCalls: [{ id: "call-final", input: { note: "done" }, name: "final_output" }] },
+      interactive: true,
+      respond: () => ({
+        toolCalls: [{ id: "call-final", input: { note: "done" }, name: "final_output" }],
+      }),
       session: openTurn([workingRemind()], { type: "object" }),
       tools: [REMIND, TASK_WAIT],
+    });
+
+    // The model is not called again until a task settles or the principal writes.
+    expect(requests).toHaveLength(1);
+    expect(result.next).toBeNull();
+    expect(result.heldTaskIds).toEqual(["remind-q4x1ze"]);
+    expect(result.settledTurn).toBeUndefined();
+    expect(events.map((event) => event.type)).not.toContain("turn.completed");
+    expect(session.history.at(-1)).toEqual({
+      content: [
+        {
+          output: {
+            type: "error-text",
+            value: renderFinalOutputWhileTasksWork({ settled: [], working: ["remind-q4x1ze"] }),
+          },
+          toolCallId: "call-final",
+          toolName: "final_output",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+  });
+
+  it("answers final_output with an error naming settled results and delivers them at once", async () => {
+    const { requests, result } = await runStep({
+      auth: ALICE,
+      respond: (request) => ({
+        toolCalls: [
+          {
+            id: hasResultMessage(request) ? "call-final-2" : "call-final",
+            input: { note: "done" },
+            name: "final_output",
+          },
+        ],
+      }),
+      // A turn's first step delivers no held result; the model answers anyway.
+      session: { ...sessionWithResult({ creator: ALICE }), outputSchema: { type: "object" } },
+      stepInput: { message: "Remind me about stand-up." },
     });
 
     expect(requests).toHaveLength(2);
@@ -355,16 +405,60 @@ describe("detached result delivery in the tool loop", () => {
       expect.objectContaining({
         id: "call-final",
         isError: true,
-        name: "final_output",
-        output: renderFinalOutputWhileTasksWork(["remind-q4x1ze"]),
+        output: renderFinalOutputWhileTasksWork({ settled: ["remind-q4x1ze"], working: [] }),
       }),
     ]);
-    // The model's task_wait goes to the owner; no final output was taken.
-    expect(result.next).toBeNull();
-    expect(result.settledTurn).toBeUndefined();
-    expect(getPendingCoordinationBatch(result.session.state)?.tasks).toEqual([
-      expect.objectContaining({ callId: "call-wait", toolName: "task_wait" }),
+    expect(hasResultMessage(requests[1]!)).toBe(true);
+    expect(result.heldTaskIds).toBeUndefined();
+    expect(result.settledTurn).toBeDefined();
+  });
+
+  it("calls the model again at once, with no boundary, when a result is waiting as the model ends the turn", async () => {
+    const { events, requests, result } = await runStep({
+      auth: ALICE,
+      interactive: true,
+      respond: (request) =>
+        hasResultMessage(request) ? "Your reminder fired: stand-up at 10." : "On it.",
+      // A turn's first step delivers no held result; the model ends it anyway.
+      session: sessionWithResult({ creator: ALICE }),
+      stepInput: { message: "Remind me about stand-up." },
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(hasResultMessage(requests[0]!)).toBe(false);
+    expect(hasResultMessage(requests[1]!)).toBe(true);
+    expect(result.heldTaskIds).toBeUndefined();
+    expect(result.settledTurn?.output).toBe("Your reminder fired: stand-up at 10.");
+    const completed = events.filter((event) => event.type === "turn.completed");
+    expect(completed).toEqual([
+      { data: { sequence: 0, turnId: "turn_0" }, type: "turn.completed" },
     ]);
+  });
+
+  it("emits a delivered result's message.received before the steering message's, in history order", async () => {
+    const { events, requests } = await runStep({
+      auth: ALICE,
+      respond: () => "Noted, and your reminder fired.",
+      session: sessionWithResult({
+        creator: ALICE,
+        history: [
+          createUserMessage("user", "Remind me about stand-up."),
+          { content: "I set the reminder.", role: "assistant" },
+        ],
+        turnId: "turn_0",
+      }),
+      stepInput: { message: "Also, lunch at noon." },
+    });
+
+    const received = events.flatMap((event) =>
+      event.type === "message.received" ? [event.data.kind ?? "user"] : [],
+    );
+    expect(received).toEqual(["task.result", "user"]);
+    const users = requests[0]!.messages.filter((message) => message.role === "user");
+    const resultIndex = users.findIndex((message) => message.text.startsWith("<task_result"));
+    const steerIndex = users.findIndex((message) => message.text === "Also, lunch at noon.");
+    expect(resultIndex).toBeGreaterThan(-1);
+    expect(steerIndex).toBeGreaterThan(resultIndex);
   });
 
   it("includes the tasks block in a session with a workflow tool that is not attached", async () => {

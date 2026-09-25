@@ -32,7 +32,7 @@ import {
   toTerminalStreamFailureError,
   waitWithSignal,
 } from "#client/eve-agent-store-helpers.js";
-import { updatePendingAuthorizations } from "#client/session-utils.js";
+import { TurnEndTracker, updatePendingAuthorizations } from "#client/session-utils.js";
 import { toError } from "#shared/errors.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 
@@ -247,10 +247,14 @@ export class EveAgentStore<TData> {
       ) {
         this.#publish();
       }
+      const turnEnd = new TurnEndTracker();
       for await (const event of consumeMessageResponse(response, reader)) {
         if (!this.#isActiveTurn(turn)) return;
         turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
         turn.receivedFollowUpEvents.delete(event);
+        // A held turn waits like one parked on an approval: the person can
+        // keep writing, and its later output streams in as server events.
+        if (!turnEnd.observe(event) && event.type === "session.waiting" && turnEnd.held) break;
       }
 
       if (!this.#isActiveTurn(turn)) {

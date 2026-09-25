@@ -221,9 +221,10 @@ export function projectActivityEvents(input: {
       };
     });
   }
+  // A held turn's `turn.completed` is a waiting boundary: its root work keeps running.
   if (
     lineage.kind === "root-turn" &&
-    (event.type === "turn.completed" ||
+    ((event.type === "turn.completed" && event.data.held !== true) ||
       event.type === "turn.failed" ||
       event.type === "turn.cancelled")
   ) {

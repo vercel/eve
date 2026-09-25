@@ -39,6 +39,15 @@ export function readTaskCreator(value: JsonObject | undefined): TaskCreator {
 }
 
 /**
+ * Whether a stored creator names a principal: the anonymous creator
+ * (`auth: null`) or a readable auth. {@link readTaskCreator} would read
+ * anything else as anonymous.
+ */
+export function isReadableTaskCreator(value: JsonObject | undefined): boolean {
+  return value !== undefined && (value.auth === null || decodeAuth(value.auth) !== null);
+}
+
+/**
  * Two principals are the same when their authenticator, type, and id match.
  * Every unauthenticated caller shares one anonymous principal, so they all
  * match each other.
@@ -164,19 +173,44 @@ export function workingTaskIds(
 }
 
 /**
- * The tasks that keep a turn of `principal` open (the turn rule): its
- * working tasks, and those whose held result has not reached history yet.
+ * The tasks whose held result `principal`'s turn has not read yet. Only a
+ * turn's own principal steers it and no turn ends while its tasks work, so
+ * these are results of the running turn's tasks, delivered at its next step.
  */
-export function heldTaskIds(
+export function pendingTaskResultIds(
   session: { readonly state?: SessionStateMap },
   principal: SessionAuthContext | null,
 ): readonly string[] {
-  const undelivered = readPendingTaskResults(session.state).filter((entry) =>
-    sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal),
-  );
   return [
-    ...new Set([...workingTaskIds(session, principal), ...undelivered.map(({ taskId }) => taskId)]),
+    ...new Set(
+      readPendingTaskResults(session.state)
+        .filter((entry) => sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal))
+        .map(({ taskId }) => taskId),
+    ),
   ];
+}
+
+/**
+ * Drops the held results `select` picks and marks their records delivered:
+ * work never outlives its turn, so a turn that is cancelled or fails never
+ * reads the results of its tasks, and a later turn never receives them.
+ */
+export function discardTaskResults<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  select: (result: PendingTaskResult) => boolean,
+): { readonly discarded: readonly PendingTaskResult[]; readonly session: T } {
+  const pending = readPendingTaskResults(session.state);
+  const discarded = pending.filter(select);
+  if (discarded.length === 0) return { discarded, session };
+  let table = getTaskTable(session);
+  for (const entry of discarded) table = markTaskDelivered(table, entry.taskId, entry.generation);
+  return {
+    discarded,
+    session: writePending(
+      setTaskTable(session, table),
+      pending.filter((entry) => !discarded.includes(entry)),
+    ),
+  };
 }
 
 function writePending<T extends { readonly state?: SessionStateMap }>(

@@ -30,9 +30,10 @@ export interface EveMessage {
  */
 export interface EveMessageMetadata {
   /**
-   * A waiting boundary (`turn.completed`) closed this assistant message. A
-   * turn that stays open, held on its tasks, streams its next output into a
-   * new message, so one turn ID can own several.
+   * A turn boundary closed this assistant message: the turn's end, or a
+   * waiting boundary of a turn held on its tasks (`turn.completed` with
+   * `held: true`). Nothing more streams into it; a held turn streams its next
+   * output into a new message, so one turn ID can own several.
    */
   readonly closed?: true;
   readonly optimistic?: true;

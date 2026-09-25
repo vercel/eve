@@ -1,7 +1,6 @@
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import {
   bindTurnCallerContextStep,
@@ -15,11 +14,17 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
 import { answerOrder, reportOrdering } from "#tasks/protocol.js";
 import {
+  authorizationResumeDelivery,
   hasOpenTurnWork,
   nextTurnDelivery,
   type NextTurnInstruction,
 } from "#execution/session/next-input.js";
 import { cancelTasks, closeTaskOwnerInbox, syncTaskTimer } from "#tasks/owner-body.js";
+import { cancelTasksStep } from "#tasks/cancel.js";
+import {
+  fireSessionCallbackStep,
+  type SessionCallbackResult,
+} from "#subagents/remote/callback-step.js";
 import { workingTaskIds } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import {
@@ -27,7 +32,8 @@ import {
   SessionInputQueue,
   withAdmittedOperations,
 } from "#execution/session/input-queue.js";
-import { SessionExecution, sessionPrincipal } from "#execution/session/turn.js";
+import { SessionExecution } from "#execution/session/turn.js";
+import { sessionPrincipal } from "#execution/session/turn-principal.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -196,6 +202,18 @@ export async function failSession(input: {
     // Best effort: when resolution fails again there is no reachable caller to notify.
   }
   const cursor = { serializedContext: input.serializedContext, sessionState: input.sessionState };
+  if (input.sessionState !== undefined) {
+    try {
+      // A failed session ends its tasks too, so its caller's reply follows them.
+      await cancelTasksStep({
+        selector: { kind: "all" },
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      });
+    } catch {
+      // Best effort: the failure is already being reported.
+    }
+  }
   const finalized = await finalizeSession(
     { error: input.error, kind: "failed" },
     { caller, cursor, mode: input.mode, sessionWritable: input.sessionWritable },
@@ -204,42 +222,68 @@ export async function failSession(input: {
   throw createSafeOuterWorkflowError();
 }
 
-/** What a delegated caller learns: its turn's answer, or that the call was cancelled. */
+/**
+ * What a delegated caller learns. A turn's answer and a cancelled call are
+ * checked against the turn rule; a finished session's answer is not, because
+ * the session already ended its tasks.
+ */
 type CallerReply =
-  | {
-      readonly kind: "settled";
-      readonly lifecycle: AgentTurnOutcome["kind"];
-      readonly settled: SettledTurnNotification;
-    }
+  | { readonly kind: "turn"; readonly settled: SettledTurnNotification }
   | { readonly kind: "cancelled"; readonly usage?: TokenUsage };
 
-interface CallerReplyTarget {
+type TerminalReply =
+  | { readonly kind: "terminal"; readonly settled: SettledTurnNotification }
+  /** A task-mode run's result, sent to the remote caller's session callback. */
+  | { readonly kind: "callback"; readonly callback: SessionCallbackResult };
+
+interface CallerReplyTarget<TCursor> {
   readonly caller: TurnCaller | undefined;
-  readonly cursor: {
-    readonly serializedContext: Record<string, unknown>;
-    readonly sessionState: DurableSessionState | undefined;
-  };
+  readonly cursor: TCursor;
   readonly sessionId: string;
 }
+
+type ReplyCursor = {
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState | undefined;
+};
 
 /**
  * The one place this session settles a delegated caller (guard rule 50). A
  * reply follows the settlement of its turn's tasks (the turn rule), so a
- * reply while tasks the turn started still work is a bug: it is refused and
- * reported instead of settling the caller early.
+ * turn's reply while tasks it started still work is a bug: it is logged,
+ * those tasks are cancelled, and then the caller is settled, so no caller
+ * waits on a reply that never comes. Test and development runs fail the
+ * session instead, so the bug surfaces, and the caller still gets the
+ * session's failure.
  */
 export async function replyToCaller(
-  target: CallerReplyTarget & { readonly reply: CallerReply },
+  target:
+    | (CallerReplyTarget<SessionStateCursor> & { readonly reply: CallerReply })
+    | (CallerReplyTarget<ReplyCursor> & { readonly reply: TerminalReply }),
 ): Promise<void> {
-  const { caller, reply, sessionId } = target;
+  const { caller, sessionId } = target;
+  if (target.reply.kind === "callback") {
+    await fireSessionCallbackStep(target.reply.callback);
+    return;
+  }
   if (caller === undefined) return;
-  const working = workingTaskIds(
-    { state: target.cursor.sessionState?.snapshot.session.state },
-    sessionPrincipal(target.cursor.serializedContext),
-  );
+  if (target.reply.kind === "terminal") {
+    await notifyTurnCallerStep({
+      caller,
+      lifecycle: "terminal",
+      sessionId,
+      settled: target.reply.settled,
+    });
+    return;
+  }
+  const { cursor, reply } = target as CallerReplyTarget<SessionStateCursor> & {
+    readonly reply: CallerReply;
+  };
+  const principal = sessionPrincipal(cursor.serializedContext);
+  const working = workingTaskIds(cursor.sessionState.snapshot.session, principal);
   if (working.length > 0) {
     await reportRefusedCallerReplyStep({ callId: caller.callId, sessionId, taskIds: working });
-    return;
+    await cancelTasks(cursor, { kind: "held", principal });
   }
   if (reply.kind === "cancelled") {
     await notifyCancelledTaskCallerStep(
@@ -247,20 +291,18 @@ export async function replyToCaller(
     );
     return;
   }
-  await notifyTurnCallerStep({
-    caller,
-    lifecycle: reply.lifecycle,
-    sessionId,
-    settled: reply.settled,
-  });
+  await notifyTurnCallerStep({ caller, lifecycle: "parked", sessionId, settled: reply.settled });
 }
 
-/** Sends the parked caller the terminal answer a finished session owes it. */
-async function replyTerminal(finalized: FinalizedSession, target: CallerReplyTarget) {
+/** Sends the caller the terminal answer a finished session owes it. */
+async function replyTerminal(finalized: FinalizedSession, target: CallerReplyTarget<ReplyCursor>) {
+  if (finalized.callback !== undefined) {
+    await replyToCaller({ ...target, reply: { callback: finalized.callback, kind: "callback" } });
+  }
   if (finalized.callerReply === undefined) return;
   await replyToCaller({
     ...target,
-    reply: { kind: "settled", lifecycle: "terminal", settled: finalized.callerReply },
+    reply: { kind: "terminal", settled: finalized.callerReply },
   });
 }
 
@@ -453,8 +495,7 @@ async function runSessionLoop(
             caller: progress.caller,
             cursor,
             reply: {
-              kind: "settled",
-              lifecycle: "parked",
+              kind: "turn",
               settled: {
                 ...action.settled,
                 ...reportOrdering(
@@ -481,7 +522,12 @@ async function runSessionLoop(
 
       switch (next.kind) {
         case "authorization-resume":
-          action = await runTurn({ delivery: { kind: "deliver", payloads: next.payloads } });
+          action = await runTurn({
+            delivery: authorizationResumeDelivery(
+              cursor.sessionState.snapshot.session.state,
+              next.payloads,
+            ),
+          });
           continue;
         case "expired":
         case "reset":

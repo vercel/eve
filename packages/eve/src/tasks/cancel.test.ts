@@ -41,7 +41,7 @@ vi.mock("#execution/workflow-runtime.js", async (importOriginal) => ({
   requestWorkflowTurnCancellation: vi.fn(),
 }));
 vi.mock("#internal/logging.js", () => ({
-  createLogger: vi.fn(() => ({ warn: vi.fn() })),
+  createLogger: vi.fn(() => ({ debug: vi.fn(), warn: vi.fn() })),
   logError: vi.fn(),
 }));
 
@@ -394,6 +394,95 @@ describe("cancelTasksStep with the all selector", () => {
       { id: "research-b81d0c", status: "cancelled" },
       { id: "research-3fq8wd", status: "completed" },
     ]);
+  });
+});
+
+describe("cancelTasksStep discards the results of a turn that ended early", () => {
+  const BOB = { ...ALICE, principalId: "U-bob" };
+  const DONE = { output: "Stand-up at 10.", status: "completed" } as const;
+
+  /** A detached reminder whose result settled before its turn read it. */
+  function settledReminder(id: string, auth: typeof ALICE | null, turnId = "turn-0") {
+    return createTaskRecord({
+      callId: `call-${id}`,
+      creator: encodeTaskCreator({ auth }),
+      id,
+      kind: "workflow",
+      mode: "detached",
+      name: "remind",
+      status: "completed",
+      turnId,
+    });
+  }
+
+  function withHeldResults(existing: readonly TaskRecord[]): DurableSessionState {
+    const state = ownerState(existing);
+    let session = state.snapshot.session;
+    for (const record of existing.filter(({ status }) => status === "completed")) {
+      session = holdTaskResult(session, record, DONE);
+    }
+    return { ...state, snapshot: { session } };
+  }
+
+  function pendingIds(state: DurableSessionState): string[] {
+    return readPendingTaskResults(state.snapshot.session.state).map(({ taskId }) => taskId);
+  }
+
+  it("drops every held result on a cancelled turn, with nothing left to cancel", async () => {
+    const update = await cancelTasksStep({
+      selector: { kind: "all" },
+      serializedContext: {},
+      sessionState: withHeldResults([settledReminder("remind-a1", ALICE)]),
+    });
+
+    expect(pendingIds(update.sessionState)).toEqual([]);
+    // Marked delivered, so the record is pruned and never blocks handoff.
+    expect(records(update.sessionState)).toEqual([]);
+    expect(update.events).toEqual([]);
+  });
+
+  it("drops only the failed turn's principal's results and cancels its working tasks", async () => {
+    const working = { ...REMINDER, creator: encodeTaskCreator({ auth: ALICE }) };
+    const update = await cancelTasksStep({
+      selector: { kind: "held", principal: ALICE },
+      serializedContext: {},
+      sessionState: withHeldResults([
+        working,
+        settledReminder("remind-a1", ALICE),
+        settledReminder("remind-b1", BOB),
+      ]),
+    });
+
+    expect(pendingIds(update.sessionState)).toEqual(["remind-b1"]);
+    expect(records(update.sessionState).map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: "remind-q4x1ze", status: "cancelled" },
+      { id: "remind-b1", status: "completed" },
+    ]);
+  });
+
+  it("drops only the results of tasks the named turn started", async () => {
+    const update = await cancelTasksStep({
+      selector: { kind: "turn", turnId: "turn-0" },
+      serializedContext: {},
+      sessionState: withHeldResults([
+        settledReminder("remind-a1", ALICE, "turn-0"),
+        settledReminder("remind-a2", ALICE, "turn-1"),
+      ]),
+    });
+
+    expect(pendingIds(update.sessionState)).toEqual(["remind-a2"]);
+  });
+
+  it("keeps held results for a workflow run's own cancel", async () => {
+    const sessionState = withHeldResults([settledReminder("remind-a1", ALICE)]);
+
+    const update = await cancelTasksStep({
+      selector: { kind: "workflow-run", runId: "run-other" },
+      serializedContext: {},
+      sessionState,
+    });
+
+    expect(update.sessionState).toBe(sessionState);
   });
 });
 

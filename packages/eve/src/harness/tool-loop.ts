@@ -74,7 +74,8 @@ import { resolveTasksAnnouncement } from "#tasks/render.js";
 import { resolveTasksInstruction, withoutTaskTools } from "#tasks/surface.js";
 import { getTaskTable } from "#tasks/state.js";
 import { takeTaskResultMessage } from "#harness/task-results.js";
-import { holdTurnOnTasks } from "#harness/held-turn.js";
+import { takeTaskResults } from "#tasks/results.js";
+import { endsWithInterimReply, holdTurnOnTasks } from "#harness/held-turn.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -645,7 +646,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
       }
 
-      await emit?.(createSessionWaitingEvent());
+      // A turn that holds on its tasks compacts without a boundary: it stays open.
+      if (emissionState.turnId === "") await emit?.(createSessionWaitingEvent());
       return { next: null, session };
     }
 
@@ -1022,6 +1024,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       );
     }
 
+    // Deliver held task results as one message after any tool results, never
+    // between an approval response and its tool call, and ahead of the step's
+    // own input, in history order on the stream too. The records are marked
+    // delivered below, which drops them from the note.
+    const taskResults =
+      withinTurn && !hasUnansweredToolCall(pending.messages)
+        ? await takeTaskResultMessage({
+            principal: store?.get(AuthKey) ?? null,
+            session: pending.session,
+            tools: config.tools,
+          })
+        : undefined;
+    if (taskResults !== undefined) {
+      preparedTurnInput.unshift(taskResults.message);
+      await emit?.(
+        createMessageReceivedEvent({
+          message: taskResults.message.content,
+          sequence: emissionState.sequence,
+          taskIds: taskResults.taskIds,
+          turnId: emissionState.turnId,
+        }),
+      );
+    }
+
     let instructionMessages: UserModelMessage[] = [];
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
     if (emit && (hasStepInput(effectiveStepInput) || hasStepInput(coordinated.stepInput))) {
@@ -1104,27 +1130,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    // Deliver held task results as one message after any tool results, never
-    // between an approval response and its tool call. Marking the records
-    // delivered first drops them from the note below.
-    if (withinTurn && !hasUnansweredToolCall(messages)) {
-      const delivery = await takeTaskResultMessage({
-        principal: store?.get(AuthKey) ?? null,
-        session,
-        tools: config.tools,
-      });
-      if (delivery !== undefined) {
-        session = delivery.session;
-        preparedTurnInput.unshift(delivery.message);
-        await emit?.(
-          createMessageReceivedEvent({
-            message: delivery.message.content,
-            sequence: emissionState.sequence,
-            taskIds: delivery.taskIds,
-            turnId: emissionState.turnId,
-          }),
-        );
-      }
+    if (taskResults !== undefined) {
+      session = takeTaskResults(session, store?.get(AuthKey) ?? null).session;
     }
 
     // Announce the task listing as framework-injected user-role content,
@@ -1641,6 +1648,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             interruptStreamOnFailure(streamResult.fullStream, generation.signal),
             {
               excludedActionToolNames,
+              interimReply: endsWithInterimReply(session, emissionState.sequence),
               tools: advertisedHarnessTools,
             },
           );

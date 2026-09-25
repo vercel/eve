@@ -85,7 +85,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `reasoning.appended`      | A reasoning text delta.                                                                                                                    |
 | `reasoning.completed`     | The finalized reasoning block.                                                                                                             |
 | `message.appended`        | An assistant text delta.                                                                                                                   |
-| `message.completed`       | A finalized assistant text block.                                                                                                          |
+| `message.completed`       | A finalized assistant text block. `interim: true` marks text that is not the turn's reply yet ([held turns](#held-turns)).                 |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                              |
 | `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                                             |
 | `compaction.completed`    | A compaction checkpoint was written to durable history.                                                                                    |
@@ -93,7 +93,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                  |
 | `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                   |
 | `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                                |
-| `turn.completed`          | The turn finished.                                                                                                                         |
+| `turn.completed`          | The turn finished. `held: true` marks a held turn's waiting boundary instead: the turn stays open ([held turns](#held-turns)).             |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                                                    |
 | `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                                             |
 | `session.waiting`         | The session parked and is ready for the next message.                                                                                      |
@@ -122,13 +122,13 @@ When a task explicitly requires conditional delivery and there is nothing new to
 
 Agent calls and workflow tool calls run as [tasks](./tasks). `task.started` announces a task with its `taskId`, the `callId` of the call that started it, its `name`, and `kind` (`agent` or `workflow`). `mode` is `foreground` when the calling turn waits for the result and `background` when the call returned a receipt, such as an agent call with `background: true` or a workflow tool defined with [`detach: true`](/docs/tools/workflows#return-a-receipt-with-detach). A delegated subagent publishes progress on its own child-session stream: its `task.started` carries a `child` with the child `sessionId` and the `streamPath` that a client follows with `session.streamSubagent()`. A workflow tool call has no `child`; its progress stays on `action.partial` and its result on `action.result`. Consumers that only follow delegation should filter `task.*` events by `kind` and `name`.
 
-A waited call that [detaches](./tasks#detach-a-waited-call) emits `task.detached` with its `reason`, and its `action.result` carries the receipt `{ status: "working", taskId }`. Every call that starts a task emits exactly one `task.settled` with its first outcome: `completed` with `output`, `failed` with `error: { code, message }`, or `cancelled`. eve delivers a background result to the model as session input, which appears on the stream as `message.received` with `data.kind: "task.result"` and `data.taskIds`, usually at the start of a result turn. That event is not a user message: the default client reducer, the dev TUI, and the built-in channels do not render it as one, and custom renderers should skip it too.
+A waited call that [detaches](./tasks#detach-a-waited-call) emits `task.detached` with its `reason`, and its `action.result` carries the receipt `{ status: "working", taskId }`. Every call that starts a task emits exactly one `task.settled` with its first outcome: `completed` with `output`, `failed` with `error: { code, message }`, or `cancelled`. eve delivers a background result to the model as session input, which appears on the stream as `message.received` with `data.kind: "task.result"` and `data.taskIds`, inside the turn that started the task. That event is not a user message: the default client reducer, the dev TUI, and the built-in channels do not render it as one, and custom renderers should skip it too.
 
 When the parent proxies a child's `input.requested`, `authorization.required`, or `authorization.completed` event onto its own stream, the event carries that child's `taskId`. An `input.requested` for a workflow tool call's question or approval carries the call's `taskId` too. When a proxied request is resolved or withdrawn, the parent's stream carries `input.resolved`, which has no `taskId`; match it to the request by `requestId`. See [Task stream events](./tasks#task-stream-events) for every field, ordering rule, and error code, and for recorded streams to test a consumer against.
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary.
 
-A turn cannot end while tasks it started are working. In an interactive root session, such a held turn shows a waiting boundary: `turn.completed` and `session.waiting` stream, but the turn stays open, and its later events, including another `turn.completed`, carry the same `turnId` with no new `turn.started`. If a held turn is cancelled, `turn.cancelled` follows the earlier `turn.completed` for the same ID. See [How results arrive](./tasks#how-results-arrive). `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
+A turn cannot end while tasks it started are working. See [How results arrive](./tasks#how-results-arrive). `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
 A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
 `details.semanticErrorId: "model-response-content-filtered"`, and
@@ -137,6 +137,15 @@ A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
 `message.completed` for its partial text; deltas already streamed remain visible.
 Conversation sessions wait for another user message, while task-mode runs return
 a failed result.
+
+### Held turns
+
+A turn held on its tasks marks what it streams, so a consumer can tell it from a finished one:
+
+- **`turn.completed` with `held: true`.** In an interactive root session, the model's message before the hold is an ordinary reply, followed by `turn.completed` with `held: true` and `session.waiting`. The turn stays open: a person can keep writing, and its later events, including the final `turn.completed` without `held`, carry the same `turnId` with no new `turn.started`. If a held turn is cancelled, `turn.cancelled` follows for the same ID. The same boundary appears when a task asks a person a question during the turn.
+- **`message.completed` with `interim: true`.** A scheduled turn, a subagent's turn, and a task-mode run hold without a boundary. The model's text before the hold streams as `message.completed` with `interim: true`: it is not the turn's reply yet, and eve calls the model again once a task settles. The built-in channels post only messages without `interim`, so a schedule posts once.
+
+The TypeScript client's `send(...).result()` and response iterators follow a held turn to its end, past `held` boundaries, unless a request the response streamed, such as a task's question, is still unanswered at the boundary; then they stop there so you can answer it. To stop at every `held` boundary instead, iterate the response yourself. `useEveAgent` returns to `ready` at a `held` boundary and keeps streaming the turn's later output.
 
 ## The event envelope
 
@@ -234,32 +243,15 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-Cancelling the turn also cancels the tool calls it waits on, including subagent calls and workflow tools.
+Cancelling the turn also cancels the tool calls it waits on and every working [task](./tasks#cancel-tasks), whichever turn started it, then ends the turn. A cancelled task emits `task.settled` with `status: "cancelled"` and delivers no result, and a result that settled before the cancel is discarded too, so no later turn receives it. Idle tasks that take more input stay available.
 
-The body also controls [background tasks](./tasks#cancel-tasks), such as calls to a `detach: true` workflow tool:
-
-| Body                  | Cancels                                                                        |
-| --------------------- | ------------------------------------------------------------------------------ |
-| None, or `{ turnId }` | The active turn and the tool calls it waits on. Background tasks keep working. |
-| `{ taskId }`          | One background task. The active turn keeps running.                            |
-| `{ tasks: true }`     | The active turn and every working task, including background tasks.            |
-
-```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel \
-  -H 'content-type: application/json' \
-  -d '{"taskId":"remind-q4x1ze"}'
-```
-
-`taskId` is the ID from the call's receipt or its `task.started` event, and cannot be combined with `tasks` or `turnId`; the route answers `400` for that combination or a malformed option. An unknown or finished task, or a call the turn is waiting on, is ignored. A cancelled task emits `task.settled` with `status: "cancelled"`, delivers no result, and never starts a result turn. With `tasks: true` and a `turnId` that no longer names the active turn, the newer turn keeps running with its calls, and only background tasks are cancelled. The session keeps accepting messages either way. Any caller with access to the session can cancel any of its tasks, including tasks another principal started.
-
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; turn cancellation is a no-op there, while `taskId` and `tasks: true` still cancel tasks. The exception is a parked session that still owes the result of its last turn: a subagent session whose reply waits on its own background tasks, or a task-mode run waiting for its background tasks. Cancelling it cancels every task it started, and a subagent's caller receives the call as cancelled; the subagent stays available for new work. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; turn cancellation is a no-op there, and any working task is still cancelled. The exception is a parked session that still owes the result of its last turn, such as a subagent session parked on an approval: cancelling it cancels every task it started, and its caller receives the call as cancelled; the subagent stays available for new work. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 The HTTP route returns `202` for `"accepted"` and `200` for
 `"no_active_turn"`. Only the accepted result includes `sessionId`.
 
 Custom channel routes request the same cancellation through
-`from(address).cancel()` or `attachSession(sessionId).cancel()`, and `attachSession(sessionId).cancel()`
-accepts the same `taskId` and `tasks` options. See
+`from(address).cancel()` or `attachSession(sessionId).cancel()`. See
 [custom channels](../channels/custom#channel-operations-and-session-handles).
 
 ## Compact, clear, and reset
@@ -274,9 +266,9 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/reset \
   -d '{"reason":"Start over"}'
 ```
 
-Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Attributed [memory](../memory) records are excluded from the summary, canonicalized, and recalled again after the checkpoint. If a turn is active, eve queues the request until that turn settles. A successful compaction emits `compaction.requested` and `compaction.completed`, followed by `session.waiting`; if summarization fails before a checkpoint, the session returns to waiting with its previous history.
+Compaction summarizes context without adding a user message. User-role instructions are ordinary history and may be represented by the summary; system-role instructions remain outside it. Attributed [memory](../memory) records are excluded from the summary, canonicalized, and recalled again after the checkpoint. If a turn is active, eve queues the request until that turn settles, except that a turn [held on its tasks](#held-turns) compacts while it holds, since no model call is in flight; it emits `compaction.requested` and `compaction.completed` without `session.waiting`, and stays open. Otherwise a successful compaction emits `compaction.requested` and `compaction.completed`, followed by `session.waiting`; if summarization fails before a checkpoint, the session returns to waiting with its previous history.
 
-Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. It emits `context.cleared` followed by `session.waiting`.
+Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. It emits `context.cleared` followed by `session.waiting`. A clear request waits for the active turn to end, a held turn included: clearing would drop the history that its tasks' results answer.
 
 Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
 

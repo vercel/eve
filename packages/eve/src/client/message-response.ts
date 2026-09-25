@@ -1,6 +1,6 @@
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import { extractCompletedResult } from "#client/output-schema.js";
-import { summarizeTurnEvents } from "#client/session-utils.js";
+import { summarizeTurnEvents, TurnEndTracker } from "#client/session-utils.js";
 import type { CancelSessionResult, MessageResult } from "#client/types.js";
 
 /**
@@ -69,7 +69,10 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
 
   /**
    * Consumes the full event stream and returns the aggregated
-   * {@link MessageResult}.
+   * {@link MessageResult}. The stream ends at the turn's end: a turn held on
+   * its tasks streams past its waiting boundaries (`turn.completed` with
+   * `held: true`) until its final reply, unless a request this response
+   * streamed is still unanswered at the boundary.
    */
   async result(): Promise<MessageResult<TOutput>> {
     const events: MessageStreamEvent[] = [];
@@ -112,11 +115,13 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   async *#observeStream(
     source?: AsyncIterable<MessageStreamEvent>,
   ): AsyncGenerator<MessageStreamEvent> {
+    const turnEnd = new TurnEndTracker();
     try {
       for await (const event of this.#createStream(source)) {
+        const ended = turnEnd.observe(event);
         if (event.type === "turn.started") {
           this.#turnId.resolve(event.data.turnId);
-        } else if (isCurrentTurnBoundaryEvent(event)) {
+        } else if (ended) {
           this.#settled = true;
           this.#turnId.resolve(undefined);
         }

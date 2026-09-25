@@ -175,10 +175,12 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   // input has no auth; it was seeded by buildRunContext). Only the turn's own
   // principal steers it (`isSteeringDelivery`), and an answer to the
   // session's own request keeps it (`readAnswerer`), so neither changes who
-  // the turn acts for.
-  if (delivery?.auth !== undefined && answerer === undefined) {
-    ctx.set(AuthKey, delivery.auth ?? null);
-    if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
+  // the turn acts for. An authorization resume carries the principal of the
+  // turn that parked, even once its callbacks are matched out of it.
+  const deliveryAuth = rawDelivery?.auth;
+  if (deliveryAuth !== undefined && answerer === undefined) {
+    ctx.set(AuthKey, deliveryAuth ?? null);
+    if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, deliveryAuth ?? null);
   }
   const initialSession = hydrateDurableSession({
     compactionOverrides: {

@@ -610,6 +610,34 @@ describe("applyTaskDeadlines", () => {
     expect(wakeToArm(stateOf(update.sessionState))).toBe(DEADLINE);
   });
 
+  it("discards an unreadable background record's STATE_LOST result when its creator is unreadable", async () => {
+    // No principal can read it, so a held result would block handoff forever.
+    const update = await applyLost(undefined, {
+      callId: "call-9",
+      creator: { auth: { principalId: 7 } },
+      id: "old-abc234",
+      kind: "workflow",
+      mode: "detached",
+      name: "old",
+      v: 0,
+    });
+
+    expect(update.events).toEqual([
+      {
+        data: {
+          callId: "call-9",
+          error: { code: "STATE_LOST", message: STATE_LOST_MESSAGE },
+          status: "failed",
+          taskId: "old-abc234",
+        },
+        type: "task.settled",
+      },
+    ]);
+    expect(update.results).toEqual([]);
+    expect(readPendingTaskResults(stateOf(update.sessionState))).toEqual([]);
+    expect(stateOf(update.sessionState)?.["eve.taskTable"]).toBeUndefined();
+  });
+
   it("gives a task_wait on an unreadable detached record its STATE_LOST failure", async () => {
     const wait = {
       callId: "call-wait",

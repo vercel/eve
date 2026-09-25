@@ -15,6 +15,8 @@ import { applyTaskDeadlinesStep } from "#tasks/deadlines.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
 import { answerTaskInput } from "#tasks/owner-body.js";
 import { flushUnsentCallerEventsStep } from "#subagents/remote/unsent-caller-events-step.js";
+import { holdTaskResult, encodeTaskCreator } from "#tasks/results.js";
+import { getTaskTable } from "#tasks/state.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -931,10 +933,10 @@ describe("SessionExecution turn checkpoints", () => {
   it("holds a turn the model ended while its tasks work and calls the model again once one settles", async () => {
     // Alice's turn started two lookups; the first to settle wakes it.
     const working = withTasks(state(""), [lookup("lookup-a"), lookup("lookup-b")]);
-    const oneSettled = withTasks(state(""), [
-      lookup("lookup-a", { status: "completed" }),
-      lookup("lookup-b"),
-    ]);
+    const oneSettled = withResult(
+      withTasks(state(""), [lookup("lookup-a", { status: "completed" }), lookup("lookup-b")]),
+      "lookup-a",
+    );
     const inbox = holdInbox([DEADLINE]);
     vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(oneSettled));
     vi.mocked(turnStep)
@@ -1015,12 +1017,151 @@ describe("SessionExecution turn checkpoints", () => {
     ]);
   });
 
+  it("wakes a held turn for a waiting result even while its task works on a later generation", async () => {
+    // Alice's lookup settled generation 1 and started generation 2 before the owner applied it.
+    const working = withTasks(state(""), [lookup("lookup-a")]);
+    const workingAgain = withResult(
+      withTasks(state(""), [lookup("lookup-a", { generation: 2 })]),
+      "lookup-a",
+    );
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(workingAgain));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a"]))
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "Generation 1 is in.",
+        serializedContext: {},
+        sessionState: workingAgain,
+      });
+
+    await expect(
+      createExecution({ inbox: holdInbox([DEADLINE]), sessionState: working }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+    expect(turnStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps holding while a task stopped without a result and another works, then wakes once none works", async () => {
+    const working = withTasks(state(""), [lookup("lookup-a"), lookup("lookup-b")]);
+    // An unreadable record's result was discarded: lookup-a is gone, with nothing to deliver.
+    const oneGone = withTasks(state(""), [lookup("lookup-b")]);
+    const bothGone = withTasks(state(""), []);
+    vi.mocked(applyTaskDeadlinesStep)
+      .mockResolvedValueOnce(ownerUpdate(oneGone))
+      .mockResolvedValueOnce(ownerUpdate(bothGone));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a", "lookup-b"]))
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "Nothing came back.",
+        serializedContext: {},
+        sessionState: bothGone,
+      });
+    const inbox = holdInbox([DEADLINE, DEADLINE]);
+
+    await expect(
+      createExecution({ inbox, sessionState: working }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+    expect(inbox.next).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toBeUndefined();
+  });
+
+  it("does not wake a held turn for another principal's message, which waits for the turn to end", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "app",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const working = withTasks(state(""), [
+      lookup("lookup-a", { creator: encodeTaskCreator({ auth: alice }) }),
+    ]);
+    const settled = withResult(
+      withTasks(state(""), [
+        lookup("lookup-a", { creator: encodeTaskCreator({ auth: alice }), status: "completed" }),
+      ]),
+      "lookup-a",
+    );
+    const fromBob: DeliverHookPayload = {
+      auth: bob,
+      kind: "deliver",
+      payloads: [{ message: "Bob here: what is the Q3 number?" }],
+    };
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(settled));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a"]))
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "Alice, Q3 is in.",
+        serializedContext: {},
+        sessionState: settled,
+      });
+    const queue = new SessionInputQueue();
+    const inbox = holdInbox([fromBob, DEADLINE]);
+
+    await expect(
+      createExecution({ inbox, queue, sessionState: working }).runTurn({
+        delivery: { auth: alice, kind: "deliver", payloads: [{ message: "Q3?" }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    // Bob's message woke nothing: only the result did, and his message is still queued.
+    expect(inbox.next).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toBeUndefined();
+    expect(queue.pendingCount).toBe(1);
+  });
+
+  it("compacts a held turn when compaction is requested, and keeps holding", async () => {
+    const working = withTasks(state(""), [lookup("lookup-a")]);
+    const settled = withResult(
+      withTasks(state(""), [lookup("lookup-a", { status: "completed" })]),
+      "lookup-a",
+    );
+    vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(settled));
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce(held(working, ["lookup-a"]))
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        serializedContext: {},
+        sessionState: working,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "The lookup is in.",
+        serializedContext: {},
+        sessionState: settled,
+      });
+    const queue = new SessionInputQueue();
+
+    await expect(
+      createExecution({
+        inbox: holdInbox([{ kind: "compact" }, DEADLINE]),
+        queue,
+        sessionState: working,
+      }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(vi.mocked(turnStep).mock.calls.map(([input]) => input.input)).toEqual([
+      undefined,
+      { control: "compact" },
+      undefined,
+    ]);
+    // Compaction does not wait in line for the turn to end.
+    expect(queue.hasControl("compact")).toBe(false);
+  });
+
   it("cancels the held tasks when the turn fails after a hold", async () => {
     const working = withTasks(state(""), [lookup("lookup-a"), lookup("lookup-b")]);
-    const oneSettled = withTasks(state(""), [
-      lookup("lookup-a", { status: "completed" }),
-      lookup("lookup-b"),
-    ]);
+    const oneSettled = withResult(
+      withTasks(state(""), [lookup("lookup-a", { status: "completed" }), lookup("lookup-b")]),
+      "lookup-a",
+    );
     vi.mocked(applyTaskDeadlinesStep).mockResolvedValueOnce(ownerUpdate(oneSettled));
     vi.mocked(cancelTasksStep).mockClear();
     const settled = { errorCode: "MODEL_CALL_FAILED", isError: true, output: "No." };
@@ -1299,6 +1440,17 @@ function withTasks(
     ...sessionState,
     snapshot: { session: { ...session, state: { ...session.state, ...taskTableState(records) } } },
   };
+}
+
+/** Settles `id` in the table and holds its result, as the owner does for a detached task. */
+function withResult(sessionState: DurableSessionState, id: string, generation = 1) {
+  const { session } = sessionState.snapshot;
+  const record = getTaskTable(session).records.find((candidate) => candidate.id === id);
+  const held = holdTaskResult(session, record ?? lookup(id, { generation }), {
+    output: `${id} done`,
+    status: "completed",
+  });
+  return { ...sessionState, snapshot: { session: held } };
 }
 
 /** A step whose model ended the turn while `taskIds` work. */

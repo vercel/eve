@@ -5,6 +5,7 @@ import type { ClientSession, MessageResponse } from "../../src/client/index.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -205,7 +206,7 @@ export default defineWorkflowTool({
         const { session, response } = await client.sessions.create({
           message: "Please refund order 42.",
         });
-        const first = await response.result();
+        const first = await throughFirstBoundary(response);
         const started = first.events.find((event) => event.type === "task.started");
         const taskId = started?.type === "task.started" ? started.data.taskId : undefined;
         expect(started?.type === "task.started" ? started.data.mode : undefined).toBe("detached");
@@ -220,7 +221,9 @@ export default defineWorkflowTool({
           request?.type === "input.requested" ? request.data.requests[0]?.requestId : undefined;
         expect(requestId).toBeTruthy();
 
-        const unrelated = await (await session.send("What are your support hours?")).result();
+        const unrelated = await throughFirstBoundary(
+          await session.send("What are your support hours?"),
+        );
         expect(lastReply(unrelated.events)).toBe("Hours: 9 to 5.");
         expect(
           unrelated.events.some(

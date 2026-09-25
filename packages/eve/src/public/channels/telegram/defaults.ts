@@ -169,7 +169,7 @@ export const defaultEvents: TelegramChannelEvents = {
   },
 
   async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || !event.message) return;
+    if (event.finishReason === "tool-calls" || event.interim === true || !event.message) return;
     await channel.telegram.post(event.message);
   },
 

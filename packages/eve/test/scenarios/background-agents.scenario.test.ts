@@ -4,6 +4,7 @@ import { Client } from "../../src/client/client.js";
 import type { MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -105,7 +106,7 @@ export default defineWorkflowTool({
         const { session, response } = await client.sessions.create({
           message: "Draft the launch post, no rush.",
         });
-        const first = await response.result();
+        const first = await throughFirstBoundary(response);
 
         // The model does not wait: the turn holds, showing its waiting boundary, and the
         // child's task.started may land after that boundary.
@@ -125,7 +126,7 @@ export default defineWorkflowTool({
         );
         expect(first.events.some((event) => event.type === "task.settled")).toBe(false);
 
-        const second = await (await session.send("Also mention the pricing.")).result();
+        const second = await throughFirstBoundary(await session.send("Also mention the pricing."));
         const steering = second.events.flatMap((event) =>
           event.type === "action.result" &&
           event.data.result.kind === "tool-result" &&

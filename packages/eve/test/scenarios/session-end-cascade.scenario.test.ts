@@ -7,6 +7,7 @@ import { Client } from "../../src/client/client.js";
 import type { MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -137,7 +138,7 @@ export default defineWorkflowTool({
         const { session, response } = await client.sessions.create({
           message: "Draft the note, no rush.",
         });
-        await response.result();
+        await throughFirstBoundary(response);
 
         // A detached child reports task.started on its own, possibly after the turn ended.
         const root = await collectUntil(
@@ -245,7 +246,7 @@ export default defineAgent({
       try {
         const client = new Client({ host: server.url });
         const { session, response } = await client.sessions.create({ message: "Draft the note." });
-        const first = await response.result();
+        const first = await throughFirstBoundary(response);
         const writer = startedTask(first.events, "writer")!;
         expect(first.events).toContainEqual(
           expect.objectContaining({

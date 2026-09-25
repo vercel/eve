@@ -10,7 +10,7 @@
 {"data":{"messageDelta":"I will remind you in ten minutes.","sequence":0,"stepIndex":1,"turnId":"turn-1"},"type":"message.appended","meta":{"at":"2026-01-01T00:00:09.000Z","id":"evt-0010","deliveryIds":["delivery-1"]}}
 {"data":{"finishReason":"stop","message":"I will remind you in ten minutes.","sequence":0,"stepIndex":1,"turnId":"turn-1"},"type":"message.completed","meta":{"at":"2026-01-01T00:00:10.000Z","id":"evt-0011","deliveryIds":["delivery-1"]}}
 {"data":{"finishReason":"stop","sequence":0,"stepIndex":1,"turnId":"turn-1","usage":{"inputTokens":100,"outputTokens":10,"cacheReadTokens":0,"cacheWriteTokens":0}},"type":"step.completed","meta":{"at":"2026-01-01T00:00:11.000Z","id":"evt-0012","deliveryIds":["delivery-1"]}}
-{"data":{"sequence":0,"turnId":"turn-1"},"type":"turn.completed","meta":{"at":"2026-01-01T00:00:12.000Z","id":"evt-0013","deliveryIds":["delivery-1"]}}
+{"data":{"sequence":0,"turnId":"turn-1","held":true},"type":"turn.completed","meta":{"at":"2026-01-01T00:00:12.000Z","id":"evt-0013","deliveryIds":["delivery-1"]}}
 {"data":{"continuationToken":"session-root","wait":"next-user-message"},"type":"session.waiting","meta":{"at":"2026-01-01T00:00:13.000Z","id":"evt-0014","deliveryIds":["delivery-1"]}}
 {"data":{"message":"Actually, cancel that reminder.","parts":[{"text":"Actually, cancel that reminder.","type":"text"}],"sequence":0,"turnId":"turn-1"},"type":"message.received","meta":{"at":"2026-01-01T00:00:14.000Z","id":"evt-0015","deliveryIds":["delivery-1","delivery-2"]}}
 {"data":{"modelId":"eve-mock/model","sequence":0,"stepIndex":2,"turnId":"turn-1"},"type":"step.started","meta":{"at":"2026-01-01T00:00:15.000Z","id":"evt-0016","deliveryIds":["delivery-1","delivery-2"]}}

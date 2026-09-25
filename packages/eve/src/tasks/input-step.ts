@@ -13,6 +13,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { createSessionEventSink } from "#execution/session/event-sink.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { emitTurnHeld, getHarnessEmissionState } from "#harness/emission.js";
+import { showsHeldTurnBoundary } from "#tasks/interactive.js";
 import { getPendingInputRequestIds } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
@@ -155,14 +156,17 @@ async function publishTaskInput(
         await emit(withTaskId(event, taskId));
         // A question or sign-in shows a conversation's waiting boundary, as
         // the session's own do. An open turn stays open under its ID: it waits
-        // or holds on the task that asked.
+        // or holds on the task that asked, and shows the boundary only where
+        // a held turn does (a scheduled or delegated turn shows none).
         if (
           mode === "conversation" &&
           (event.type === "input.requested" || event.type.startsWith("authorization."))
         ) {
           const emission = getHarnessEmissionState(next.state);
           if (emission.turnId === "") await emit(createSessionWaitingEvent());
-          else await emitTurnHeld(emit, emission);
+          else if (showsHeldTurnBoundary(ctx, emission.sequence)) {
+            await emitTurnHeld(emit, emission);
+          }
         }
         next = recordTaskInput(next, event, taskId, now);
       }

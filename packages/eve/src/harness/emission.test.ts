@@ -205,7 +205,7 @@ describe("emitTurnHeld", () => {
     const held = await emitTurnHeld(emit, open);
     expect(held).toEqual(open);
     expect(events).toEqual([
-      { data: { sequence: 2, turnId: "turn_2" }, type: "turn.completed" },
+      { data: { held: true, sequence: 2, turnId: "turn_2" }, type: "turn.completed" },
       expect.objectContaining({ type: "session.waiting" }),
     ]);
 
@@ -215,7 +215,7 @@ describe("emitTurnHeld", () => {
     expect(events.slice(2).map((event) => event.type)).toEqual(["message.received"]);
     expect(events.at(-1)).toMatchObject({ data: { turnId: "turn_2" } });
 
-    // The turn's final boundary closes it and moves to the next turn ID.
+    // The turn's final boundary, unmarked, closes it and moves to the next turn ID.
     const ended = await emitTurnEpilogue(emit, resumed, "conversation");
     expect(ended).toMatchObject({ sequence: 3, stepIndex: 0, turnId: "" });
     expect(events.slice(-2)).toEqual([

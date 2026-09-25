@@ -4,6 +4,7 @@ import { Client } from "../../src/client/client.js";
 import type { MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -96,7 +97,7 @@ export default defineAgent({
           message: "Please set my stand-up and lunch reminders.",
         });
         // Both calls start detached and return receipts; the turn holds on them.
-        const first = (await response.result()).events;
+        const first = (await throughFirstBoundary(response)).events;
         const starts = first.flatMap((event) =>
           event.type === "task.started" ? [event.data] : [],
         );
@@ -107,9 +108,9 @@ export default defineAgent({
           "Both reminders keep running.",
         );
 
-        const second = await (
-          await session.send("Never mind the stand-up reminder, please cancel it.")
-        ).result();
+        const second = await throughFirstBoundary(
+          await session.send("Never mind the stand-up reminder, please cancel it."),
+        );
         const stopped = second.events.flatMap((event) =>
           event.type === "task.settled" && event.data.status === "cancelled"
             ? [event.data.taskId]

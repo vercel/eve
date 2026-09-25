@@ -384,10 +384,11 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMetadata(data, event.data.turnId, { result: event.data.result });
 
     // A turn that stays open, held on its tasks or waiting on a task's
-    // question, shows `turn.completed` at each waiting boundary, and a
-    // cancelled one then ends with `turn.cancelled` for the same turn ID.
-    // Each boundary completes the turn's open assistant message; the turn's
-    // next output starts a new one after whatever arrived in between.
+    // question, shows `turn.completed` marked `held` at each waiting
+    // boundary, and a cancelled one then ends with `turn.cancelled` for the
+    // same turn ID. Each boundary, held or final, closes the turn's open
+    // assistant message; the turn's next output starts a new one after
+    // whatever arrived in between.
     case "turn.completed":
       return closeAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
@@ -534,13 +535,14 @@ function createAssistantMessage(turnId: string, index: number): EveAssistantMess
   };
 }
 
+/** One `step-start` per step since the message's first: a resumed held turn starts mid-turn. */
 function ensureStepStartPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
   const stepStartCount = message.parts.filter((part) => part.type === "step-start").length;
-  if (stepStartCount > stepIndex) {
-    return message;
-  }
-
-  const missingCount = stepIndex - stepStartCount + 1;
+  const steps = message.parts.flatMap((part) =>
+    "stepIndex" in part && typeof part.stepIndex === "number" ? [part.stepIndex] : [],
+  );
+  const missingCount = stepIndex - Math.min(stepIndex, ...steps) - stepStartCount + 1;
+  if (missingCount <= 0) return message;
   return {
     ...message,
     parts: [

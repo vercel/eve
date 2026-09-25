@@ -2,7 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationTokenKey,
+  DelegatedSessionKey,
+  ModeKey,
+  SessionIdKey,
+  TurnScheduleIdKey,
+} from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
@@ -176,7 +183,7 @@ describe("surfaceTaskInputStep", () => {
     expect(events[0]).toMatchObject({
       data: { ...COORDINATES, requests: [QUESTION], taskId: TASK_ID },
     });
-    expect(events[1]).toMatchObject({ data: { turnId: "turn_3" } });
+    expect(events[1]).toMatchObject({ data: { held: true, turnId: "turn_3" } });
     expect(seen).toEqual([TASK_ID]);
     expect(record(result.sessionState)).toMatchObject({
       clockStoppedAt: NOW,
@@ -188,6 +195,23 @@ describe("surfaceTaskInputStep", () => {
     // The boundary keeps the turn open: it resumes, or is cancelled, under the same ID.
     expect(result.sessionState.emissionState).toMatchObject({ sequence: 3, turnId: "turn_3" });
     expect(result.refused).toEqual([]);
+  });
+
+  it.each([
+    ["a delegated child session's turn", DelegatedSessionKey, true as const],
+    ["a turn a schedule started", TurnScheduleIdKey, "daily-report"],
+  ] as const)("shows no waiting boundary for a question in %s", async (_label, key, value) => {
+    setup();
+    ctx.set(key as never, value as never);
+
+    const result = await surface(ownerState([createTaskRecord()]), {
+      data: { ...COORDINATES, requests: [QUESTION] },
+      type: "input.requested",
+    });
+
+    // The question still streams; the turn stays open without a boundary.
+    expect(published().map((event) => event.type)).toEqual(["input.requested"]);
+    expect(result.sessionState.emissionState).toMatchObject({ sequence: 3, turnId: "turn_3" });
   });
 
   it("keeps a turn a session-limit prompt paused open for the boundary its decline streams", async () => {

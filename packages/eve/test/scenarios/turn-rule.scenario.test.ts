@@ -43,8 +43,19 @@ const idOf = (output) => /analyst-[0-9a-z]{6}/u.exec(String(output))?.[0] ?? "mi
 const lookup = (quarter, seconds) => ({ toolCalls: [{ name: "lookup", input: { quarter, seconds } }] });
 
 export default defineAgent({
-  model: mockModel(({ lastUserMessage, toolResults, userMessages }) => {
+  model: mockModel(({ lastUserMessage, messages, toolResults, userMessages }) => {
     if (lastUserMessage?.startsWith("<task_result")) return "Final: " + lastUserMessage;
+    // Asked after the session compacted while the turn held on its lookup.
+    if (lastUserMessage === "Do you still see the lookup?") {
+      const noted = messages.some(
+        (message) => message.role === "user" && message.text.includes("[Tasks]") && message.text.includes("lookup-"),
+      );
+      return noted ? "Tasks note: yes" : "Tasks note: no";
+    }
+    // A scheduled turn's message follows eve's delivery note.
+    if (userMessages.includes("Look up Q1 for the board.")) {
+      return toolResults.length === 0 ? lookup("Q1", 5) : "Started the Q1 lookup.";
+    }
     const outputs = toolResults.map((result) => String(result.output));
     switch (userMessages[0]) {
       case "Ask the analyst about Q3.":
@@ -62,6 +73,8 @@ export default defineAgent({
         return toolResults.length === 0 ? lookup("Q2", 5) : "Started the Q2 lookup.";
       case "Look up Q4.":
         return toolResults.length === 0 ? lookup("Q4", 20) : "Started the Q4 lookup.";
+      case "Look up Q5.":
+        return toolResults.length === 0 ? lookup("Q5", 25) : "Started the Q5 lookup.";
       default:
         return "Unexpected: " + lastUserMessage;
     }
@@ -87,6 +100,79 @@ export default defineAgent({
   modelContextWindowTokens: 32_000,
 });
 `;
+
+// Posts the way the built-in channels do: only a turn's reply, never tool-call
+// narration or an interim message.
+const BOARD_CHANNEL = `import { defineChannel, POST } from "eve/channels";
+
+export default defineChannel<undefined, void, { id: string }>({
+  routes: [POST("/board", async () => new Response("ok"))],
+  receive(input, { from }) {
+    return from(input.target.id).send(input.message, { auth: input.auth });
+  },
+  events: {
+    "message.completed"(event) {
+      if (event.finishReason === "tool-calls" || event.interim === true || !event.message) return;
+      console.log("BOARD_POST " + JSON.stringify(event.message));
+    },
+  },
+});
+`;
+
+const BOARD_SCHEDULE = `import { defineSchedule } from "eve/schedules";
+import board from "../channels/board";
+
+export default defineSchedule({
+  cron: "0 0 * * 0",
+  async run({ appAuth, to }) {
+    await to(board, { id: "q1" }).send("Look up Q1 for the board.", { auth: appAuth });
+  },
+});
+`;
+
+/** Reads `iterator` until `done` holds, without ending it, or until the timeout passes. */
+async function readUntil(
+  iterator: AsyncIterator<MessageStreamEvent>,
+  done: (events: readonly MessageStreamEvent[]) => boolean,
+): Promise<MessageStreamEvent[]> {
+  const events: MessageStreamEvent[] = [];
+  const deadline = Date.now() + EVENT_TIMEOUT_MS;
+  while (!done(events)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`Timed out; saw ${types(events).join(", ")}`);
+    const next = await Promise.race([
+      iterator.next(),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`Timed out; saw ${types(events).join(", ")}`)),
+          remaining,
+        ),
+      ),
+    ]);
+    if (next.done) break;
+    events.push(next.value);
+  }
+  return events;
+}
+
+/** Whether the events end at a held turn's waiting boundary. */
+function atHeldBoundary(events: readonly MessageStreamEvent[]): boolean {
+  const [completed, waiting] = events.slice(-2);
+  return (
+    completed?.type === "turn.completed" &&
+    completed.data.held === true &&
+    waiting?.type === "session.waiting"
+  );
+}
+
+/** The data of each `message.completed` whose text starts with `prefix`. */
+function completedMessages(events: readonly MessageStreamEvent[], prefix: string) {
+  return events.flatMap((event) =>
+    event.type === "message.completed" && event.data.message?.startsWith(prefix) === true
+      ? [event.data]
+      : [],
+  );
+}
 
 /** Collects events from the stream until `done` holds or the timeout passes. */
 async function collectUntil(
@@ -151,6 +237,7 @@ function count(events: readonly MessageStreamEvent[], type: MessageStreamEvent["
   return events.filter((event) => event.type === type).length;
 }
 
+/** Every assistant text that ends a step, interim messages included. */
 function replies(events: readonly MessageStreamEvent[]): string[] {
   return events.flatMap((event) =>
     event.type === "message.completed" &&
@@ -203,6 +290,8 @@ describe("the turn rule", () => {
         "agent/subagents/analyst/agent.ts": ANALYST_AGENT,
         "agent/subagents/analyst/instructions.md": "Look up revenue, then report it.\n",
         "agent/subagents/analyst/tools/lookup.ts": LOOKUP_TOOL,
+        "agent/channels/board.ts": BOARD_CHANNEL,
+        "agent/schedules/board-q1.ts": BOARD_SCHEDULE,
         "agent/tools/lookup.ts": LOOKUP_TOOL,
       },
       installDependencies: true,
@@ -248,6 +337,11 @@ describe("the turn rule", () => {
       expect(count(child, "turn.completed")).toBe(1);
       expect(count(child, "session.waiting")).toBe(1);
       expect(replies(child)).toEqual(["Analyst started a lookup.", "Analyst: Q3 revenue is 4.2M"]);
+      // With no boundary, the child's interim text says it is not the reply yet.
+      expect(completedMessages(child, "Analyst started")).toEqual([
+        expect.objectContaining({ interim: true }),
+      ]);
+      expect(completedMessages(child, "Analyst: Q3")[0]?.interim).toBeUndefined();
       const lookupSettled = indexOf(child, (event) => event.type === "task.settled");
       const answer = indexOf(child, (event) =>
         replies([event]).includes("Analyst: Q3 revenue is 4.2M"),
@@ -264,42 +358,92 @@ describe("the turn rule", () => {
     async () => {
       const client = new Client({ host: server.url });
       const { session, response } = await client.sessions.create({ message: "Look up Q3." });
+      const turn = response[Symbol.asyncIterator]();
 
-      const first = (await response.result()).events;
+      // The response does not end at the held boundary; read up to it.
+      const first = await readUntil(turn, atHeldBoundary);
       const turnStarted = first.find((event) => event.type === "turn.started");
       const id = turnStarted?.type === "turn.started" ? turnStarted.data.turnId : undefined;
       expect(id).toBeTruthy();
-      expect(types(first).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
-      expect(dataOf(first.slice(-2), "turn.completed")).toMatchObject({ turnId: id });
-      expect(replies(first)).toEqual(["Started the Q3 lookup."]);
+      expect(dataOf(first.slice(-2), "turn.completed")).toEqual({
+        held: true,
+        sequence: expect.any(Number),
+        turnId: id,
+      });
+      // In an interactive session the interim message is an ordinary reply.
+      expect(completedMessages(first, "Started the Q3")).toEqual([
+        expect.not.objectContaining({ interim: true }),
+      ]);
       expect(count(first, "task.settled")).toBe(0);
 
-      // The same person writes while the turn holds: it answers within the turn.
-      const second = (await (await session.send("Any update?")).result()).events;
-      expect(count(second, "turn.started")).toBe(0);
-      expect(dataOf(second, "message.received")).toMatchObject({
+      // The same person writes while the turn holds: it answers within the turn,
+      // and that message's result follows the turn to its end.
+      const second = await (await session.send("Any update?")).result();
+      expect(count(second.events, "turn.started")).toBe(0);
+      expect(dataOf(second.events, "message.received")).toMatchObject({
         message: "Any update?",
         turnId: id,
       });
-      expect(replies(second)).toEqual(["Still working on Q3."]);
-      expect(types(second).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
-
+      expect(replies(second.events)[0]).toBe("Still working on Q3.");
+      const heldAgain = indexOf(
+        second.events,
+        (event) => event.type === "turn.completed" && event.data.held === true,
+      );
+      expect(heldAgain).toBeGreaterThan(-1);
       // The result and the final answer arrive in the same turn.
-      const later = await collectUntil(session.stream(), endsWithFinal);
-      expect(count(later, "turn.started")).toBe(0);
-      expect(dataOf(later, "message.received")).toMatchObject({
-        kind: "task.result",
-        turnId: id,
-      });
-      expect(replies(later).at(-1)).toMatch(/^Final: <task_result [^>]*status="completed">/u);
-      expect(replies(later).at(-1)).toContain("4.2M");
-      expect([...turnIds([...first, ...second, ...later])]).toEqual([id]);
-      expect(count([...first, ...second, ...later], "turn.completed")).toBe(3);
+      expect(second.events.slice(heldAgain)).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ kind: "task.result", turnId: id }),
+          type: "message.received",
+        }),
+      );
+      expect(second.message).toMatch(/^Final: <task_result [^>]*status="completed">/u);
+      expect(second.message).toContain("4.2M");
+      expect(types(second.events).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
+      expect(dataOf(second.events.slice(-2), "turn.completed")).not.toHaveProperty("held");
+
+      // The first message's response ends at the same final boundary.
+      const rest = await readUntil(turn, endsWithFinal);
+      expect(replies(rest).at(-1)).toBe(second.message);
+      expect([...turnIds([...first, ...second.events])]).toEqual([id]);
+      await turn.return?.();
 
       // Idle now: nothing wakes the session.
       const idle = await collectFor(session.stream(), 5_000);
       expect(count(idle, "turn.started")).toBe(0);
       expect(count(idle, "message.received")).toBe(0);
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "compacts while a turn holds, and the [Tasks] note still lists its working task",
+    async () => {
+      const client = new Client({ host: server.url });
+      const { session, response } = await client.sessions.create({ message: "Look up Q5." });
+      const turn = response[Symbol.asyncIterator]();
+      await readUntil(turn, atHeldBoundary);
+
+      const compacted = await fetch(
+        new URL(
+          `/eve/v1/session/${encodeURIComponent(session.state.sessionId)}/compact`,
+          server.url,
+        ),
+        { body: "{}", headers: { "content-type": "application/json" }, method: "POST" },
+      );
+      expect(compacted.status).toBe(202);
+      // Compaction runs while the turn holds, without a boundary of its own.
+      const compaction = await readUntil(turn, (events) =>
+        events.some((event) => event.type === "compaction.completed"),
+      );
+      expect(count(compaction, "session.waiting")).toBe(0);
+      expect(count(compaction, "turn.started")).toBe(0);
+
+      // The model's next call re-announces the note that compaction summarized away.
+      await session.send("Do you still see the lookup?");
+      const asked = await readUntil(turn, atHeldBoundary);
+      expect(replies(asked)).toContain("Tasks note: yes");
+      await turn.return?.();
     },
     SCENARIO_TIMEOUT_MS,
   );
@@ -330,8 +474,12 @@ describe("the turn rule", () => {
       );
       expect(settled).toBeGreaterThan(-1);
       expect(result).toBeGreaterThan(settled);
-      // The run's one result is its last message; nothing marks the interim one as an answer.
+      // The run's one result is its last message; the interim one is marked as not the reply.
       expect(replies(events).filter((reply) => reply.startsWith("Final: "))).toHaveLength(1);
+      expect(completedMessages(events, "Started the Q2")).toEqual([
+        expect.objectContaining({ interim: true }),
+      ]);
+      expect(completedMessages(events, "Final: ")[0]?.interim).toBeUndefined();
       expect(replies(events).at(-1)).toContain("3.9M");
       expect(indexOf(events, (event) => event.type === "turn.completed")).toBeGreaterThan(result);
     },
@@ -343,20 +491,23 @@ describe("the turn rule", () => {
     async () => {
       const client = new Client({ host: server.url });
       const { session, response } = await client.sessions.create({ message: "Look up Q4." });
-      const first = (await response.result()).events;
+      const turn = response[Symbol.asyncIterator]();
+      const first = await readUntil(turn, atHeldBoundary);
       const started = first.find((event) => event.type === "task.started");
       const taskId = started?.type === "task.started" ? started.data.taskId : undefined;
       const turnStarted = first.find((event) => event.type === "turn.started");
       const id = turnStarted?.type === "turn.started" ? turnStarted.data.turnId : undefined;
-      expect(types(first).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
 
       await expect(session.cancel()).resolves.toEqual({
         sessionId: session.state.sessionId,
         status: "accepted",
       });
+      // The message's response ends with the cancelled turn.
+      const ended = await readUntil(turn, () => false);
+      expect(types(ended).slice(-2)).toEqual(["turn.cancelled", "session.waiting"]);
 
       // The lookup would finish inside this window; its result must never reach the model.
-      const later = await collectFor(session.stream(), 30_000);
+      const later = [...ended, ...(await collectFor(session.stream(), 30_000))];
       expect(later).toContainEqual(
         expect.objectContaining({
           data: expect.objectContaining({ status: "cancelled", taskId }),
@@ -374,6 +525,46 @@ describe("the turn rule", () => {
       expect(count(later, "message.received")).toBe(0);
       expect(count(later, "turn.started")).toBe(0);
       expect(replies(later)).toEqual([]);
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "holds a scheduled turn without a boundary, so its channel posts exactly one message",
+    async () => {
+      const dispatched = await fetch(new URL("/eve/v1/dev/schedules/board-q1", server.url), {
+        method: "POST",
+      });
+      expect(dispatched.status).toBe(200);
+      const { sessionIds } = (await dispatched.json()) as { readonly sessionIds: string[] };
+      expect(sessionIds).toHaveLength(1);
+
+      const client = new Client({ host: server.url });
+      const events = await collectUntil(
+        client.sessions.attach(sessionIds[0]!).stream({ startIndex: 0 }),
+        endsWithFinal,
+      );
+
+      expect(count(events, "turn.started")).toBe(1);
+      expect(count(events, "turn.completed")).toBe(1);
+      expect(dataOf(events, "turn.completed")).not.toHaveProperty("held");
+      expect(count(events, "session.waiting")).toBe(1);
+      expect(completedMessages(events, "Started the Q1")).toEqual([
+        expect.objectContaining({ interim: true }),
+      ]);
+      const final = completedMessages(events, "Final: ");
+      expect(final).toHaveLength(1);
+      expect(final[0]?.interim).toBeUndefined();
+
+      // The channel posted the turn's reply once, and never the interim message.
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const posts = server
+        .stdout()
+        .split("\n")
+        .filter((line) => line.includes("BOARD_POST "));
+      expect(posts).toHaveLength(1);
+      expect(posts[0]).toContain("Final: ");
+      expect(posts[0]).toContain("3.9M");
     },
     SCENARIO_TIMEOUT_MS,
   );

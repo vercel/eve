@@ -5,9 +5,7 @@ import type {
   SessionAuthContext,
   SessionCapabilities,
 } from "#channel/types.js";
-import { AuthKey } from "#context/keys.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { readAnswerer } from "#execution/session/answerer.js";
 import {
   isSteeringDelivery,
   type SessionInputQueue,
@@ -24,6 +22,7 @@ import {
 } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { turnPrincipal } from "#execution/session/turn-principal.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
@@ -48,9 +47,7 @@ import {
   startPendingAgentTasks,
 } from "#tasks/owner-body.js";
 import { hasPendingTaskInput } from "#tasks/input.js";
-import { isTerminalTaskStatus } from "#tasks/protocol.js";
-import { getTaskTable } from "#tasks/state.js";
-import { readPendingTaskResults } from "#tasks/results.js";
+import { pendingTaskResultIds, workingTaskIds } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import type { TaskWaitRegistration } from "#tasks/wait.js";
 import { DISMISSED_CALL_GRACE_MS, WaitTimers } from "#tasks/wait-timers.js";
@@ -221,41 +218,56 @@ export class SessionExecution {
   }
 
   /**
-   * Holds a turn the model tried to end while `taskIds` work (the turn
-   * rule), and owns the inbox meanwhile. It returns as soon as any of them
-   * settles, with every result that settled with it, so a task waiting on a
-   * person never delays the others, or when the turn's own principal steers
-   * it; the next model step receives the results, then the steering. A
-   * cancel, reset, or the session's expiry ends the hold as a cancelled turn.
+   * Holds a turn the model tried to end while `taskIds` work (the turn rule),
+   * owning the inbox meanwhile. It returns once a result for the turn's
+   * principal waits, with every result that settled with it, or when that
+   * principal steers; the next step gets the results, then the steering. A
+   * task that stops without a result (an unreadable record) ends the hold
+   * only once none of them works. Compaction applies during the hold: no
+   * model call is in flight. A cancel, reset, or expiry cancels the turn.
    */
   private async holdTurn(
     turn: ActiveTurn,
     taskIds: readonly string[],
   ): Promise<{ readonly delivery?: DeliverHookPayload } | "cancelled"> {
-    // A resumable task can start its next generation as one settles; its held result wakes the turn.
-    const settled = () => {
-      const session = this.input.cursor.sessionState.snapshot.session;
-      const { records } = getTaskTable(session);
-      const held = readPendingTaskResults(session.state);
-      return taskIds.some((taskId) => {
-        const record = records.find(({ id }) => id === taskId);
-        return (
-          record === undefined ||
-          isTerminalTaskStatus(record.status) ||
-          held.some((result) => result.taskId === taskId)
-        );
-      });
+    const { cursor, queue } = this.input;
+    const woken = () => {
+      const session = cursor.sessionState.snapshot.session;
+      const working = new Set(workingTaskIds(session, turn.principal));
+      return (
+        pendingTaskResultIds(session, turn.principal).length > 0 ||
+        !taskIds.some((taskId) => working.has(taskId)) ||
+        queue.hasControl("compact")
+      );
     };
     while (true) {
-      const next = await turn.nextRuntimeEvent({ until: settled });
+      const next = await turn.nextRuntimeEvent({ until: woken });
       if (next === "cancelled") return next;
       // No call is pending while a turn holds, so an owner-produced result has no taker.
       if (next.kind === "runtime-action-result" || next.kind === "timeout") continue;
-      if (next.kind === "until") await turn.admitBoundary();
+      if (next.kind === "until") {
+        await turn.admitBoundary();
+        if (queue.takeControl("compact")) {
+          await this.compactHeldTurn(turn);
+          if (turn.signal.aborted) return "cancelled";
+          continue;
+        }
+      }
       const delivery = await turn.takeSteering();
       if (turn.signal.aborted) return "cancelled";
       return delivery === undefined ? {} : { delivery };
     }
+  }
+
+  /** Compacts the history of a turn that holds on its tasks; the turn stays open. */
+  private async compactHeldTurn(turn: ActiveTurn): Promise<void> {
+    const { cursor } = this.input;
+    const signals = { abortSignal: turn.signal, steeringSignal: turn.steeringSignal };
+    const { serializedContext, sessionState } = await turnStep(
+      cursor.createStepInput({ control: "compact" }, signals),
+    );
+    await cursor.apply({ serializedContext, sessionState });
+    await turn.admitBoundary();
   }
 
   /**
@@ -661,32 +673,3 @@ class ActiveTurn {
 
 /** Why a turn stopped before it ended on its own. */
 type StopReason = "cancelled" | "expired";
-
-/**
- * The principal a turn acts for, as `turnStep` decides it: the auth of the
- * delivery that starts it, else the session's current principal. A person's
- * answer to a request the session waits on never changes its principal (see
- * `readAnswerer`).
- */
-function turnPrincipal(
-  payload: TurnStepPayload | undefined,
-  cursor: SessionStateCursor,
-): SessionAuthContext | null {
-  const delivery = payload?.delivery;
-  const { serializedContext } = cursor;
-  const context = {
-    has: (key: { readonly name: string }) => serializedContext[key.name] !== undefined,
-  };
-  const state = cursor.sessionState.snapshot.session.state;
-  if (delivery?.auth !== undefined && readAnswerer(context, delivery, state) === undefined) {
-    return delivery.auth;
-  }
-  return sessionPrincipal(serializedContext);
-}
-
-/** The principal the session acts for now: its last turn's. */
-export function sessionPrincipal(
-  serializedContext: Record<string, unknown>,
-): SessionAuthContext | null {
-  return (serializedContext[AuthKey.name] as SessionAuthContext | null | undefined) ?? null;
-}

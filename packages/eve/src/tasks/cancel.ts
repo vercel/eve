@@ -6,6 +6,7 @@ import {
 import { coordinationTurnId, getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { SessionStateMap } from "#harness/types.js";
+import { createLogger } from "#internal/logging.js";
 import type { TaskSettledStreamEvent } from "#protocol/message.js";
 import type {
   RuntimeToolResultActionResult,
@@ -18,7 +19,13 @@ import { findCallerTask } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { taskToolErrorResult } from "#tasks/receipts.js";
 import type { TaskRecord } from "#tasks/record.js";
-import { heldTaskIds } from "#tasks/results.js";
+import {
+  discardTaskResults,
+  readTaskCreator,
+  sameTaskPrincipal,
+  workingTaskIds,
+  type PendingTaskResult,
+} from "#tasks/results.js";
 import {
   renderInterruptedCall,
   TASK_CANCEL_INVALID_INPUT_MESSAGE,
@@ -34,16 +41,23 @@ import { endTaskWaits, takeLiveWait } from "#tasks/wait.js";
 // confirm in time. A `task_wait` on a cancelled task gets the cancellation as
 // its result; cancelled work otherwise never reaches the model.
 
+const log = createLogger("tasks.cancel");
+
 /**
  * Which working tasks {@link cancelTasksStep} cancels. Idle tasks are not
- * working, so every selector leaves them available.
+ * working, so every selector leaves them available. Work never outlives its
+ * turn: the selectors that end a turn early also discard the results of its
+ * tasks that settled before the turn read them.
  */
 export type TaskCancelSelector =
   /** Every working task: `session.cancel()`, a cancelled turn, or the session's end. */
   | { readonly kind: "all" }
   /** The working tasks one turn started: a cancel named that turn after it ended. */
   | { readonly kind: "turn"; readonly turnId: string }
-  /** The tasks that hold a principal's turn open (see `heldTaskIds`): that turn failed. */
+  /**
+   * The working tasks that hold a principal's turn open (see
+   * `workingTaskIds`): that turn failed, or replied to its caller early.
+   */
   | { readonly kind: "held"; readonly principal: SessionAuthContext | null }
   /** The agent calls a workflow run awaits, once that run ends. */
   | { readonly kind: "workflow-run"; readonly runId: string }
@@ -72,10 +86,14 @@ export async function cancelTasksStep(input: {
   "use step";
 
   const durable = readDurableSession(input.sessionState);
-  const initial = getTaskTable(durable);
-  const selected = initial.records.filter(selectTasks(input.selector, durable));
+  const discarded = discardTaskResults(
+    durable,
+    selectResults(input.selector, getTaskTable(durable)),
+  );
+  const initial = getTaskTable(discarded.session);
+  const selected = initial.records.filter(selectTasks(input.selector, discarded.session));
   const cancelled = cancelRecords(initial, selected, new Date().toISOString());
-  if (cancelled.table === initial) {
+  if (cancelled.table === initial && discarded.discarded.length === 0) {
     return {
       events: [],
       replies: [],
@@ -84,9 +102,17 @@ export async function cancelTasksStep(input: {
       sessionState: input.sessionState,
     };
   }
-  await runCommands(cancelled.commands, await readContext(input.serializedContext));
+  if (discarded.discarded.length > 0) {
+    log.debug("discarded results of tasks whose turn ended early", {
+      sessionId: durable.sessionId,
+      taskIds: discarded.discarded.map(({ taskId }) => taskId),
+    });
+  }
+  if (cancelled.commands.length > 0) {
+    await runCommands(cancelled.commands, await readContext(input.serializedContext));
+  }
   const applied = applyCancelled(
-    durable,
+    discarded.session,
     cancelled.table,
     selected.filter((record) => !isTerminalTaskStatus(record.status)),
   );
@@ -281,14 +307,36 @@ function selectTasks(
     case "turn":
       return (record) => record.turnId === selector.turnId;
     case "held": {
-      const held = new Set(heldTaskIds(session, selector.principal));
-      return (record) => held.has(record.id);
+      const working = new Set(workingTaskIds(session, selector.principal));
+      return (record) => working.has(record.id);
     }
     case "workflow-run":
       return (record) => record.workflowCaller?.runId === selector.runId;
     case "agent-call":
       return (record) =>
         record.workflowCaller?.runId === selector.runId && record.callId === selector.callId;
+  }
+}
+
+/** The held results a selector that ends a turn early discards. */
+function selectResults(
+  selector: TaskCancelSelector,
+  table: TaskTable,
+): (result: PendingTaskResult) => boolean {
+  switch (selector.kind) {
+    case "all":
+      return () => true;
+    case "turn":
+      return (result) =>
+        table.records.some(
+          (record) => record.id === result.taskId && record.turnId === selector.turnId,
+        );
+    case "held":
+      return (result) =>
+        sameTaskPrincipal(readTaskCreator(result.creator).auth, selector.principal);
+    case "workflow-run":
+    case "agent-call":
+      return () => false;
   }
 }
 

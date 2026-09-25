@@ -43,6 +43,7 @@ import {
 import { endTaskWaitsStep, type TaskWaitEnd } from "#tasks/wait.js";
 import { applyWorkflowGenerationStep, settleWorkflowTaskStep } from "#tasks/workflow-task.js";
 import { hasCancellableWork } from "#tasks/table.js";
+import { readPendingTaskResults } from "#tasks/results.js";
 
 // Owner-side helpers that run in the session workflow body. They only
 // sequence steps, and must not import Node.js built-ins.
@@ -216,8 +217,13 @@ export async function cancelTasks(
   cursor: SessionStateCursor,
   selector: TaskCancelSelector,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
-  const table = getTaskTable(cursor.sessionState.snapshot.session);
-  if (!table.records.some(hasCancellableWork)) return [];
+  const session = cursor.sessionState.snapshot.session;
+  if (
+    !getTaskTable(session).records.some(hasCancellableWork) &&
+    readPendingTaskResults(session.state).length === 0
+  ) {
+    return [];
+  }
   return await applyTaskOwnerUpdate(
     cursor,
     await cancelTasksStep({

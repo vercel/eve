@@ -170,6 +170,23 @@ export class SessionInputQueue {
     this.entries.push({ control, kind: "control", sequence: this.nextSequence++ });
   }
 
+  hasControl(control: SessionControl): boolean {
+    return this.entries.some((entry) => entry.kind === "control" && entry.control === control);
+  }
+
+  /**
+   * Takes the first queued `control` ahead of its turn in line: a turn that
+   * holds on its tasks applies a compaction without ending.
+   */
+  takeControl(control: SessionControl): boolean {
+    const index = this.entries.findIndex(
+      (entry) => entry.kind === "control" && entry.control === control,
+    );
+    if (index < 0) return false;
+    this.entries.splice(index, 1);
+    return true;
+  }
+
   /** Keeps one payload per authorization attempt; a repeated callback for the same attempt is dropped. */
   enqueueAuthorization(payloads: readonly DeliverPayload[]): void {
     for (const payload of payloads) {

@@ -28,6 +28,7 @@ import {
   type TaskStreamFixtureManifest,
 } from "../../src/internal/testing/task-stream-fixtures.js";
 import { startEveDev, type RunningEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 // Records the published task stream fixtures from real runs of two eve
 // deployments with scripted mock models, and fails when a fresh recording
@@ -418,8 +419,9 @@ export default defineRemoteAgent({
 
   fixture("task-cancel", async (client) => {
     const { session, response } = await client.sessions.create({ message: MESSAGES.cancel });
-    await response.result();
-    await (await session.send(MESSAGES.cancelFollowUp)).result();
+    // The turn holds on the working task; the follow-up joins it at its waiting boundary.
+    await throughFirstBoundary(response);
+    await throughFirstBoundary(await session.send(MESSAGES.cancelFollowUp));
     const events = await recordUntilReply(session, REPLIES.cancel);
     expect(deriveTaskStreamStates(events)).toMatchObject([
       { delivered: false, kind: "workflow", mode: "detached", status: "cancelled" },

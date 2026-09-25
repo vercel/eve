@@ -24,7 +24,7 @@ import {
   SUBAGENT_ADAPTER_KIND,
   type SubagentAdapterState,
 } from "#subagents/adapter-state.js";
-import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { FatalError, HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { AGENT_CALL_CANCELLED_MESSAGE } from "#tasks/render.js";
 import { createLogger } from "#internal/logging.js";
@@ -136,11 +136,12 @@ export async function notifyCancelledTaskCallerStep(input: {
 }
 
 /**
- * Reports a caller settlement the session refused because tasks its turn
- * started were still working: a reply must follow its turn's tasks, so this
- * is a bug in the turn rule, not a state the caller can recover from. Tests
- * and development fail the run so the bug surfaces; production logs it and
- * leaves the caller unsettled.
+ * Reports a caller reply sent while tasks its turn started were still
+ * working: a reply must follow its turn's tasks, so this is a bug in the turn
+ * rule. Production logs it, and the session cancels those tasks and replies.
+ * Tests and development fail the session with a `FatalError`, which the
+ * runtime never retries, so the bug surfaces and the caller gets the
+ * session's failure instead of waiting.
  */
 export async function reportRefusedCallerReplyStep(input: {
   readonly callId: string;
@@ -149,14 +150,14 @@ export async function reportRefusedCallerReplyStep(input: {
 }): Promise<void> {
   "use step";
 
-  log.error("refused to settle a delegated caller while its turn has working tasks", {
+  log.error("replying to a delegated caller while its turn has working tasks; cancelling them", {
     callId: input.callId,
     sessionId: input.sessionId,
     taskIds: [...input.taskIds],
   });
   if (process.env.NODE_ENV === "test" || process.env.NODE_ENV === "development") {
-    throw new Error(
-      `Refused to settle caller ${input.callId} of session ${input.sessionId} while tasks ${input.taskIds.join(", ")} are working.`,
+    throw new FatalError(
+      `Replied to caller ${input.callId} of session ${input.sessionId} while tasks ${input.taskIds.join(", ")} are working.`,
     );
   }
 }

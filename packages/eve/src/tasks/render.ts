@@ -350,9 +350,26 @@ export function renderTooManyTasks(ids: readonly string[], limit: number): strin
   return `${limit} tasks are already working (${ids.join(", ")}). Wait for one with task_wait or stop one with task_cancel, then try again.`;
 }
 
-/** Tool result for a `final_output` call made while tasks the turn started are working. */
-export function renderFinalOutputWhileTasksWork(taskIds: readonly string[]): string {
-  return `You can't give your final output while tasks you started are working (${taskIds.join(", ")}). Wait for them with task_wait or stop them with task_cancel, then call final_output again.`;
+/**
+ * Tool result for a `final_output` call made while tasks the turn started are
+ * working, or while results the model has not read yet are waiting for it.
+ */
+export function renderFinalOutputWhileTasksWork(tasks: {
+  readonly settled: readonly string[];
+  readonly working: readonly string[];
+}): string {
+  const reasons: string[] = [];
+  if (tasks.working.length > 0) {
+    reasons.push(`tasks you started are still working (${tasks.working.join(", ")})`);
+  }
+  if (tasks.settled.length > 0) {
+    reasons.push(`results you have not read are arriving (${tasks.settled.join(", ")})`);
+  }
+  const next =
+    tasks.working.length > 0
+      ? "Their results arrive here on their own: wait for them, or stop a task with task_cancel, then call final_output again."
+      : "Read them, then call final_output again.";
+  return `You can't give your final output yet: ${reasons.join(", and ")}. ${next}`;
 }
 
 /** Error message for a delegated call whose agent session ended before it replied. */

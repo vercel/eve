@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ActivityObserverKey, ActivityRootTurnIdKey, SessionIdKey } from "#context/keys.js";
+import {
+  ActivityObserverKey,
+  ActivityRootTurnIdKey,
+  AuthKey,
+  SessionIdKey,
+} from "#context/keys.js";
+import { encodeTaskCreator } from "#tasks/results.js";
 import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
@@ -222,6 +228,36 @@ describe("pending authorization attempts", () => {
         setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
       )?.challenges,
     ).toEqual([otherPrincipal, latest]);
+  });
+
+  it("records the principal of the turn that parked on each attempt, until the attempt clears", () => {
+    const alice = {
+      attributes: {},
+      authenticator: "idp",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, alice);
+    const state = contextStorage.run(ctx, () =>
+      setPendingAuthorization(undefined, {
+        challenges: [challenge("linear", "linear-1"), challenge("github", "github-1")],
+      }),
+    );
+
+    const creator = encodeTaskCreator({ auth: alice });
+    expect(getPendingAuthorization(state)?.principals).toEqual({
+      "github-1": creator,
+      "linear-1": creator,
+    });
+    expect(
+      getPendingAuthorization(clearPendingAuthorization(state, ["linear-1"]))?.principals,
+    ).toEqual({ "github-1": creator });
+    // A replaced attempt takes its principal along.
+    const replaced = setPendingAuthorization(state, {
+      challenges: [challenge("linear", "linear-2")],
+    });
+    expect(getPendingAuthorization(replaced)?.principals).toEqual({ "github-1": creator });
   });
 
   it("clears by exact attempt identity", () => {

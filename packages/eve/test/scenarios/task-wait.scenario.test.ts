@@ -5,6 +5,7 @@ import type { ClientSession, MessageResponse } from "../../src/client/index.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 // task_wait end to end over detached agent calls: a settled result, a
 // timeout whose result arrives later in the same held turn, a wait a steering
@@ -212,7 +213,7 @@ describe("task_wait", () => {
 
         // 1. Settled: the wait receives the result as its own tool result, exactly once.
         const d0 = await client.sessions.create({ message: "Research d0." });
-        const first = await d0.response.result();
+        const first = await throughFirstBoundary(d0.response);
         const [d0Task] = researcherTaskIds(first.events);
         const [d0Wait] = waitCallIds(first.events);
         expect(outputOf(first.events, d0Wait)).toEqual({
@@ -223,14 +224,16 @@ describe("task_wait", () => {
         });
         expect(lastReply(first.events)).toContain(`Waited: <task_result id="${d0Task}"`);
         expect(taskResultMessages(first.events)).toBe(0);
-        const followUp = await (await d0.session.send("Did any result arrive twice?")).result();
+        const followUp = await throughFirstBoundary(
+          await d0.session.send("Did any result arrive twice?"),
+        );
         expect(taskResultMessages(followUp.events)).toBe(0);
         expect(lastReply(followUp.events)).toBe("Seen task_result blocks: tool=1 user=0");
 
         // 2. Timed out: the wait ends, the task keeps working, and the turn holds until its
         // result arrives once.
         const sre = await client.sessions.create({ message: "Research sre briefly." });
-        const timed = await sre.response.result();
+        const timed = await throughFirstBoundary(sre.response);
         const [sreTask] = researcherTaskIds(timed.events);
         const [sreWait] = waitCallIds(timed.events);
         expect(outputOf(timed.events, sreWait)).toEqual({ status: "timed_out", taskId: sreTask });
@@ -245,7 +248,7 @@ describe("task_wait", () => {
         const plain = await client.sessions.create({ message: "Research plain." });
         const turn = followTurn(plain.response, (events) => waitCallIds(events).length === 1);
         await turn.reached;
-        await (await plain.session.send("Actually, hold off on plain.")).result();
+        await throughFirstBoundary(await plain.session.send("Actually, hold off on plain."));
         const interrupted = await turn.finished;
         const [plainTask] = researcherTaskIds(interrupted);
         const [plainWait] = waitCallIds(interrupted);
@@ -266,7 +269,7 @@ describe("task_wait", () => {
 
         // 4. Fan-in: two waits in one step; the step ends once both results are in.
         const fan = await client.sessions.create({ message: "Fan in d1 and d2." });
-        const fanned = await fan.response.result();
+        const fanned = await throughFirstBoundary(fan.response);
         const fanCalls = waitCallIds(fanned.events);
         expect(fanCalls).toHaveLength(2);
         for (const callId of fanCalls) {

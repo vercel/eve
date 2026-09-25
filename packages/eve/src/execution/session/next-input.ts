@@ -1,4 +1,4 @@
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   SessionControl,
@@ -12,6 +12,8 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { hasOwnPendingInput } from "#tasks/input.js";
 import { applyTaskDeadline, applyTaskReport, cancelTasks } from "#tasks/owner-body.js";
+import { readTaskCreator } from "#tasks/results.js";
+import type { JsonObject } from "#shared/json.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
@@ -122,6 +124,37 @@ export async function nextTurnDelivery(input: {
 }
 
 // Read raw so the workflow body does not import the harness.
+const PENDING_AUTHORIZATION_STATE_KEY = "eve.runtime.pendingAuthorization";
+
+/**
+ * The delivery that resumes a turn parked on an authorization. A callback
+ * carries no auth, so the delivery carries the principal of the turn that
+ * parked, recorded with its challenge: the resumed turn acts for that
+ * principal, holds on that principal's tasks, and only that principal steers
+ * it, whoever the session served in between.
+ */
+export function authorizationResumeDelivery(
+  state: Record<string, unknown> | undefined,
+  payloads: readonly DeliverPayload[],
+): DeliverHookPayload {
+  const pending = state?.[PENDING_AUTHORIZATION_STATE_KEY] as
+    | { readonly principals?: Readonly<Record<string, JsonObject>> }
+    | undefined;
+  for (const payload of payloads) {
+    const callback = payload["authorizationCallback"] as
+      | { readonly attemptId?: unknown }
+      | undefined;
+    const creator =
+      typeof callback?.attemptId === "string"
+        ? pending?.principals?.[callback.attemptId]
+        : undefined;
+    if (creator !== undefined) {
+      return { auth: readTaskCreator(creator).auth, kind: "deliver", payloads };
+    }
+  }
+  return { kind: "deliver", payloads };
+}
+
 const OPEN_TURN_STATE_KEYS = [
   "eve.runtime.pendingCoordinationBatch",
   "eve.runtime.deferredStepInput",

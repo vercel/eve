@@ -18,6 +18,7 @@ import {
 import type { TaskDeadlineSignal, TaskError, TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { STATE_LOST_MESSAGE } from "#tasks/render.js";
+import { isReadableTaskCreator } from "#tasks/results.js";
 import { getTaskTable, readTaskTimer, setTaskTable, writeTaskTimer } from "#tasks/state.js";
 import { isReportedLoss, markTaskDelivered, readTaskTable } from "#tasks/table.js";
 import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
@@ -40,6 +41,13 @@ const log = createLogger("tasks.deadlines");
 
 /** What a held result needs from its task: a record, or what an unreadable one still says. */
 type HeldRecord = Parameters<typeof routeDetachedResult>[1];
+
+interface HeldResult {
+  /** An unreadable record whose creator is unknown: only a live wait may take its result. */
+  readonly discardUnlessWaited?: boolean;
+  readonly outcome: TaskOutcome;
+  readonly record: HeldRecord;
+}
 
 /** Applies one timer signal. Every signal is re-evaluated, so a stale one does nothing. */
 export async function applyTaskDeadlinesStep(input: {
@@ -77,7 +85,7 @@ export async function applyTaskDeadlines(input: {
   const results: RuntimeToolResultActionResult[] = [...reconciled.results];
   const replies: WorkflowCallerReply[] = [...reconciled.replies];
   // Detached results go to a live wait or a later model step, not to a caller.
-  const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
+  const held: HeldResult[] = [];
   // A hard-stopped workflow run never reports, so the agents it awaits stop with it.
   const stoppedRuns = new Set<string>();
   for (const effect of evaluated.effects) {
@@ -127,8 +135,15 @@ export async function applyTaskDeadlines(input: {
   session = setTaskTable({ ...session, state: writeTaskTimer(session.state, timer) }, table, {
     dropLost: true,
   });
-  for (const { outcome, record } of held) {
+  for (const { discardUnlessWaited, outcome, record } of held) {
     const routed = routeDetachedResult(session, record, outcome);
+    if (routed.result === undefined && discardUnlessWaited === true) {
+      log.warn("discarded the result of an unreadable task record with no readable creator", {
+        taskId: record.id,
+        taskName: record.name,
+      });
+      continue;
+    }
     session = routed.session;
     if (routed.result !== undefined) results.push(routed.result);
   }
@@ -159,10 +174,10 @@ function reportLostTasks(
   },
 ): {
   readonly events: readonly TaskSettledStreamEvent[];
-  readonly held: readonly { readonly outcome: TaskOutcome; readonly record: HeldRecord }[];
+  readonly held: readonly HeldResult[];
 } {
   const events: TaskSettledStreamEvent[] = [];
-  const held: { readonly outcome: TaskOutcome; readonly record: HeldRecord }[] = [];
+  const held: HeldResult[] = [];
   const error: TaskError = { code: "STATE_LOST", message: STATE_LOST_MESSAGE };
   for (const task of readTaskTable(session.state).lost) {
     log.warn("dropped an unreadable task record", {
@@ -190,6 +205,9 @@ function reportLostTasks(
       continue;
     }
     held.push({
+      // Only a wait can take it: with no readable principal no turn would
+      // read a held result, which would block handoff for good.
+      discardUnlessWaited: !isReadableTaskCreator(task.creator),
       outcome: { error, status: "failed" },
       record: {
         creator: task.creator,

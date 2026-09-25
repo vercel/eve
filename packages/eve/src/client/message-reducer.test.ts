@@ -88,6 +88,37 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("starts a resumed message's steps at its own first step, and closes it at any boundary", () => {
+    const reducer = defaultMessageReducer();
+    const turn = { sequence: 0, turnId: "turn_0" };
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageCompletedEvent({ ...turn, message: "I started a lookup.", stepIndex: 2 }),
+      createTurnCompletedEvent({ ...turn, held: true }),
+      createMessageCompletedEvent({
+        ...turn,
+        finishReason: "tool-calls",
+        message: "Checking",
+        stepIndex: 3,
+      }),
+      createMessageCompletedEvent({ ...turn, message: "Q3 was $4.2M.", stepIndex: 4 }),
+      createTurnCompletedEvent(turn),
+    ]);
+
+    const [interim, final] = data.messages;
+    expect(interim?.parts).toEqual([
+      { type: "step-start" },
+      { state: "done", stepIndex: 2, text: "I started a lookup.", type: "text" },
+    ]);
+    expect(final?.parts).toEqual([
+      { type: "step-start" },
+      { state: "done", stepIndex: 3, text: "Checking", type: "text" },
+      { type: "step-start" },
+      { state: "done", stepIndex: 4, text: "Q3 was $4.2M.", type: "text" },
+    ]);
+    // `closed` marks a message a boundary closed: the held one and the turn's end alike.
+    expect(data.messages.map((message) => message.metadata?.closed)).toEqual([true, true]);
+  });
+
   it("ends a held turn cancelled after its waiting boundary without an empty message", () => {
     const reducer = defaultMessageReducer();
     const turn = { sequence: 0, turnId: "turn_0" };

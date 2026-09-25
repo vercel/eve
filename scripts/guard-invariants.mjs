@@ -149,10 +149,12 @@
  *             can be tuned in one place.
  *   rule 50 — One reply site for a delegated caller. Only `replyToCaller`
  *             in `src/execution/session/program.ts` calls
- *             `notifyTurnCallerStep` or `notifyCancelledTaskCallerStep`. It
- *             asserts that the turn has no working tasks before it settles
- *             the caller, so every reply, a subagent's included, follows the
- *             settlement of its turn's tasks (the turn rule).
+ *             `notifyTurnCallerStep`, `notifyCancelledTaskCallerStep`, or
+ *             `fireSessionCallbackStep`, under any imported alias. It checks
+ *             that a turn's reply has no working tasks, and cancels them
+ *             before it settles the caller, so every reply, a subagent's
+ *             included, follows the settlement of its turn's tasks (the turn
+ *             rule).
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -733,7 +735,11 @@ function checkRule49(posix, sourceFile, violations) {
   visit(sourceFile);
 }
 
-const RULE50_NOTIFY_CALLEES = new Set(["notifyTurnCallerStep", "notifyCancelledTaskCallerStep"]);
+const RULE50_NOTIFY_CALLEES = new Set([
+  "notifyTurnCallerStep",
+  "notifyCancelledTaskCallerStep",
+  "fireSessionCallbackStep",
+]);
 const RULE50_REPLY_SITE = `${EVE_SRC}execution/session/program.ts#replyToCaller`;
 
 /**
@@ -742,21 +748,31 @@ const RULE50_REPLY_SITE = `${EVE_SRC}execution/session/program.ts#replyToCaller`
  * @param {Violation[]} violations
  */
 function checkRule50(posix, sourceFile, violations) {
+  // Local names bound to a reply callee, so an aliased import is caught too.
+  /** @type {Map<string, string>} */
+  const aliases = new Map([...RULE50_NOTIFY_CALLEES].map((callee) => [callee, callee]));
+  for (const statement of sourceFile.statements) {
+    const bindings = ts.isImportDeclaration(statement)
+      ? statement.importClause?.namedBindings
+      : undefined;
+    if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      const imported = (element.propertyName ?? element.name).text;
+      if (RULE50_NOTIFY_CALLEES.has(imported)) aliases.set(element.name.text, imported);
+    }
+  }
   const visit = (node, functionName) => {
     let name = functionName;
     if (ts.isFunctionDeclaration(node) && node.name !== undefined) name = node.name.text;
     if (ts.isCallExpression(node)) {
-      const callee = calleeName(node.expression);
-      if (
-        callee !== undefined &&
-        RULE50_NOTIFY_CALLEES.has(callee) &&
-        `${posix}#${name ?? ""}` !== RULE50_REPLY_SITE
-      ) {
+      const called = calleeName(node.expression);
+      const callee = called === undefined ? undefined : aliases.get(called);
+      if (callee !== undefined && `${posix}#${name ?? ""}` !== RULE50_REPLY_SITE) {
         violations.push({
           rule: 50,
           file: posix,
           line: lineOf(sourceFile, node),
-          message: `calls \`${callee}\` outside \`replyToCaller\` in src/execution/session/program.ts. A delegated caller is settled in one place, which refuses to reply while the turn has working tasks; route the settlement through replyToCaller.`,
+          message: `calls \`${callee}\` outside \`replyToCaller\` in src/execution/session/program.ts. A delegated caller is settled in one place, which cancels the turn's working tasks before it replies; route the settlement through replyToCaller.`,
         });
       }
     }

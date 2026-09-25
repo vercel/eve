@@ -72,7 +72,7 @@ export function CouncilApp() {
             }));
           }
 
-          if (event.type === "message.completed" && event.data.message) {
+          if (event.type === "message.completed" && event.data.message && !event.data.interim) {
             setMemberState((current) => ({
               ...current,
               [memberId]: {
@@ -93,7 +93,11 @@ export function CouncilApp() {
             }));
           }
 
-          if (event.type === "turn.completed" || event.type === "session.completed") {
+          // A held turn's boundary (`held`) is not the member's final answer.
+          if (
+            (event.type === "turn.completed" && !event.data.held) ||
+            event.type === "session.completed"
+          ) {
             setMemberState((current) => ({
               ...current,
               [memberId]: { ...current[memberId], status: "complete" },

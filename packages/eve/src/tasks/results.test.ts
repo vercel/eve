@@ -7,9 +7,11 @@ import type { TaskOutcome } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { renderTasksNote } from "#tasks/render.js";
 import {
+  discardTaskResults,
   encodeTaskCreator,
-  heldTaskIds,
   holdTaskResult,
+  isReadableTaskCreator,
+  pendingTaskResultIds,
   readPendingTaskResults,
   readTaskCreator,
   sameTaskPrincipal,
@@ -65,7 +67,7 @@ describe("detached task results", () => {
 
     expect(readPendingTaskResults(twice.state)).toHaveLength(1);
     expect(renderTasksNote(getTaskTable(twice).records)).toContain('id="remind-a1"');
-    expect(heldTaskIds(twice, ALICE)).toEqual(["remind-a1"]);
+    expect(pendingTaskResultIds(twice, ALICE)).toEqual(["remind-a1"]);
   });
 
   it("delivers a creator's results together and marks them delivered", () => {
@@ -99,7 +101,7 @@ describe("detached task results", () => {
     ]);
   });
 
-  it("holds a turn on its principal's working detached tasks and undelivered results", () => {
+  it("reads a principal's working detached tasks and undelivered results apart", () => {
     const records = [
       background("a-1", ALICE),
       background("b-1", ALICE, { kind: "agent", status: "input_required" }),
@@ -112,15 +114,34 @@ describe("detached task results", () => {
     const session = { state: taskTableState(records) };
 
     expect(workingTaskIds(session, ALICE)).toEqual(["a-1", "b-1"]);
-    expect(heldTaskIds(session, ALICE)).toEqual(["a-1", "b-1"]);
-    expect(heldTaskIds(session, BOB)).toEqual(["f-1"]);
-    expect(heldTaskIds(session, null)).toEqual([]);
+    expect(workingTaskIds(session, BOB)).toEqual(["f-1"]);
+    expect(workingTaskIds(session, null)).toEqual([]);
+    expect(pendingTaskResultIds(session, ALICE)).toEqual([]);
 
-    // A settled result holds the turn until a model step delivers it.
+    // A settled result waits for a model step of its principal's turn.
     const settled = settleAll([background("remind-a1", ALICE)], ["remind-a1"]);
     expect(workingTaskIds(settled, ALICE)).toEqual([]);
-    expect(heldTaskIds(settled, ALICE)).toEqual(["remind-a1"]);
-    expect(heldTaskIds(takeTaskResults(settled, ALICE).session, ALICE)).toEqual([]);
+    expect(pendingTaskResultIds(settled, ALICE)).toEqual(["remind-a1"]);
+    expect(pendingTaskResultIds(settled, BOB)).toEqual([]);
+    expect(pendingTaskResultIds(takeTaskResults(settled, ALICE).session, ALICE)).toEqual([]);
+  });
+
+  it("discards the results a selector picks and marks their records delivered", () => {
+    const session = settleAll(
+      [background("remind-a1", ALICE), background("remind-b1", BOB)],
+      ["remind-a1", "remind-b1"],
+    );
+
+    const discarded = discardTaskResults(session, (result) => result.taskId === "remind-a1");
+
+    expect(discarded.discarded.map((result) => result.taskId)).toEqual(["remind-a1"]);
+    expect(pendingTaskResultIds(discarded.session, ALICE)).toEqual([]);
+    expect(pendingTaskResultIds(discarded.session, BOB)).toEqual(["remind-b1"]);
+    // Delivered workflow records leave the table, so neither note nor handoff sees it.
+    expect(getTaskTable(discarded.session).records.map((record) => record.id)).toEqual([
+      "remind-b1",
+    ]);
+    expect(discardTaskResults(discarded.session, () => false).session).toBe(discarded.session);
   });
 
   it("counts working and input_required detached generations toward the cap", () => {
@@ -153,5 +174,13 @@ describe("task principals", () => {
     expect(readTaskCreator(encodeTaskCreator(creator))).toEqual(creator);
     expect(readTaskCreator({ auth: { principalId: 7 } })).toEqual({ auth: null });
     expect(readTaskCreator(undefined)).toEqual({ auth: null });
+  });
+
+  it("tells an anonymous creator from an unreadable one", () => {
+    expect(isReadableTaskCreator(encodeTaskCreator({ auth: ALICE }))).toBe(true);
+    expect(isReadableTaskCreator(encodeTaskCreator({ auth: null }))).toBe(true);
+    expect(isReadableTaskCreator({ auth: { principalId: 7 } })).toBe(false);
+    expect(isReadableTaskCreator({})).toBe(false);
+    expect(isReadableTaskCreator(undefined)).toBe(false);
   });
 });

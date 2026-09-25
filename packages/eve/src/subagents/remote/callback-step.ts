@@ -10,6 +10,15 @@ import { TASK_PROTOCOL_VERSION } from "#tasks/protocol.js";
 
 const log = createLogger("execution.session-callback");
 
+/** A task-mode run's result for its session callback. */
+export interface SessionCallbackResult {
+  readonly error?: unknown;
+  readonly output?: unknown;
+  readonly serializedContext: Record<string, unknown>;
+  readonly status: "completed" | "failed";
+  readonly usage?: TokenUsage;
+}
+
 /**
  * Sends the configured session terminal callback.
  *
@@ -24,13 +33,7 @@ const log = createLogger("execution.session-callback");
  * callbacks so the caller can attribute this agent's spend. Failed
  * callbacks never carry usage.
  */
-export async function fireSessionCallbackStep(input: {
-  readonly error?: unknown;
-  readonly output?: unknown;
-  readonly serializedContext: Record<string, unknown>;
-  readonly status: "completed" | "failed";
-  readonly usage?: TokenUsage;
-}): Promise<void> {
+export async function fireSessionCallbackStep(input: SessionCallbackResult): Promise<void> {
   "use step";
 
   const sessionId = (input.serializedContext["eve.sessionId"] as string | undefined) ?? "";

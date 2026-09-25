@@ -1157,6 +1157,49 @@ describe("ClientSession", () => {
     expect(session.state.streamIndex).toBe(4);
   });
 
+  it("resolves result() at a held turn's end, with its final reply, not at its waiting boundary", async () => {
+    const turn = { sequence: 0, turnId: "turn_0" };
+    const waiting = {
+      type: "session.waiting",
+      data: { continuationToken: "session-id", wait: "next-user-message" },
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") return createAcceptedResponse();
+      return createStreamResponse([
+        { type: "turn.started", data: turn },
+        {
+          type: "message.completed",
+          data: { ...turn, finishReason: "stop", message: "Started the lookup.", stepIndex: 0 },
+        },
+        { type: "turn.completed", data: { ...turn, held: true } },
+        waiting,
+        {
+          type: "message.completed",
+          data: { ...turn, finishReason: "stop", message: "Q3 revenue is 4.2M.", stepIndex: 1 },
+        },
+        { type: "turn.completed", data: turn },
+        waiting,
+      ]);
+    });
+    const session = createSession();
+
+    const response = await session.send("Look up Q3.");
+    const result = await response.result();
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "turn.started",
+      "message.completed",
+      "turn.completed",
+      "session.waiting",
+      "message.completed",
+      "turn.completed",
+      "session.waiting",
+    ]);
+    expect(result).toMatchObject({ message: "Q3 revenue is 4.2M.", status: "waiting" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(session.state.streamIndex).toBe(7);
+  });
+
   it("stops at a non-blocking authorization parking boundary", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if ((init?.method ?? "GET") === "POST") {

@@ -3,6 +3,7 @@ import { Client } from "../../src/client/client.js";
 import { type MessageStreamEvent, isCurrentTurnBoundaryEvent } from "../../src/protocol/message.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 const scenarioApp = useScenarioApp();
 
@@ -50,8 +51,8 @@ export default defineAgent({
       try {
         const client = new Client({ host: server.url });
         const { response } = await client.sessions.create({ message: "Start five work items." });
-        const result = await response.result();
-        const events = result.events;
+        // The turn holds on its five workers; read it to its waiting boundary.
+        const { events } = await throughFirstBoundary(response);
         const steps = events
           .filter((event) => event.type === "step.started")
           .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);

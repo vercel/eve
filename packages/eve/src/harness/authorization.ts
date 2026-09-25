@@ -37,11 +37,12 @@ import {
 
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { ActivityRootTurnIdKey, SessionIdKey } from "#context/keys.js";
+import { ActivityRootTurnIdKey, AuthKey, SessionIdKey } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
-import type { JsonValue } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
+import { encodeTaskCreator } from "#tasks/results.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
 
@@ -312,6 +313,12 @@ const PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
 export interface PendingAuthorizationState {
   readonly activityRootTurnIds?: Readonly<Record<string, string>>;
   readonly challenges: readonly AuthorizationChallenge[];
+  /**
+   * The principal of the turn that parked on each attempt, encoded as a task
+   * creator. A callback carries no auth, so the turn it resumes acts for this
+   * principal (see `authorizationResumeDelivery`).
+   */
+  readonly principals?: Readonly<Record<string, JsonObject>>;
 }
 
 export function setPendingAuthorization(
@@ -322,20 +329,26 @@ export function setPendingAuthorization(
   const pending = getPendingAuthorization(sessionState);
   const previous = pending?.challenges ?? [];
   const superseded = getSupersededAuthorizationChallenges(sessionState, active);
-  const rootTurnId = contextStorage.getStore()?.get(ActivityRootTurnIdKey);
+  const ctx = contextStorage.getStore();
+  const rootTurnId = ctx?.get(ActivityRootTurnIdKey);
+  const auth = ctx?.get(AuthKey);
   const activityRootTurnIds = { ...pending?.activityRootTurnIds };
-  for (const challenge of superseded)
+  const principals = { ...pending?.principals };
+  for (const challenge of superseded) {
     delete activityRootTurnIds[authorizationAttemptKey(challenge)];
-  if (rootTurnId !== undefined) {
-    for (const challenge of active)
-      activityRootTurnIds[authorizationAttemptKey(challenge)] = rootTurnId;
+    delete principals[authorizationAttemptKey(challenge)];
+  }
+  for (const challenge of active) {
+    const key = authorizationAttemptKey(challenge);
+    if (rootTurnId !== undefined) activityRootTurnIds[key] = rootTurnId;
+    if (auth !== undefined) principals[key] = encodeTaskCreator({ auth });
   }
   return {
     ...sessionState,
-    [PENDING_AUTHORIZATION_KEY]: {
-      ...(Object.keys(activityRootTurnIds).length === 0 ? {} : { activityRootTurnIds }),
-      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
-    },
+    [PENDING_AUTHORIZATION_KEY]: pendingAuthorizationValue(
+      { activityRootTurnIds, challenges: [], principals },
+      [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
+    ),
   };
 }
 
@@ -410,21 +423,26 @@ export function clearPendingAuthorization(
   return Object.keys(state).length > 0 ? state : undefined;
 }
 
+/** The pending state for `challenges`, keeping only what belongs to them. */
 function pendingAuthorizationValue(
   pending: PendingAuthorizationState,
   challenges: readonly AuthorizationChallenge[],
 ): PendingAuthorizationState {
-  const activityRootTurnIds = Object.fromEntries(
-    challenges.flatMap((challenge) => {
-      const key = authorizationAttemptKey(challenge);
-      const rootTurnId = pending.activityRootTurnIds?.[key];
-      return rootTurnId === undefined ? [] : [[key, rootTurnId]];
-    }),
-  );
-  return {
-    ...(Object.keys(activityRootTurnIds).length === 0 ? {} : { activityRootTurnIds }),
-    challenges,
-  };
+  const pick = <T>(entries: Readonly<Record<string, T>> | undefined) =>
+    Object.fromEntries(
+      challenges.flatMap((challenge) => {
+        const key = authorizationAttemptKey(challenge);
+        const value = entries?.[key];
+        return value === undefined ? [] : [[key, value]];
+      }),
+    );
+  const value: { -readonly [K in keyof PendingAuthorizationState]: PendingAuthorizationState[K] } =
+    { challenges };
+  const activityRootTurnIds = pick(pending.activityRootTurnIds);
+  if (Object.keys(activityRootTurnIds).length > 0) value.activityRootTurnIds = activityRootTurnIds;
+  const principals = pick(pending.principals);
+  if (Object.keys(principals).length > 0) value.principals = principals;
+  return value;
 }
 
 function authorizationAttemptKey(challenge: AuthorizationChallenge): string {

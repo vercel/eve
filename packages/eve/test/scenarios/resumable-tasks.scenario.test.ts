@@ -7,6 +7,7 @@ import {
   type ScenarioApp,
 } from "../../src/internal/testing/scenario-app.js";
 import { startEveDev, type RunningEveDev } from "./dev-server-harness.js";
+import { throughFirstBoundary } from "./first-boundary.js";
 
 // Resumable tasks end to end, driven by scripted mock models: a resumable
 // workflow tool takes more input through its taskId until its body returns,
@@ -234,7 +235,7 @@ describe("resumable tasks", () => {
         message: "Draft the 0.67 release notes.",
       });
 
-      const first = (await response.result()).events;
+      const first = (await throughFirstBoundary(response)).events;
       const start = resultOf(first, "notes-start");
       const taskId = (start?.output as { readonly taskId?: string } | undefined)?.taskId;
       expect(taskId).toMatch(/^release_notes-[0-9a-z]{6}$/u);
@@ -246,7 +247,7 @@ describe("resumable tasks", () => {
       );
 
       // The task is idle: a send starts its next generation under the send's call.
-      const second = (await (await session.send("Make them shorter.")).result()).events;
+      const second = (await throughFirstBoundary(await session.send("Make them shorter."))).events;
       expect(resultOf(second, "notes-send-1")).toMatchObject({
         output: { status: "working", taskId },
       });
@@ -269,7 +270,7 @@ describe("resumable tasks", () => {
       expect(replies(second).at(-1)).toContain("notes(0.67)>shorter");
 
       // A send the body answers by returning ends the task with that result.
-      const third = (await (await session.send("Publish them.")).result()).events;
+      const third = (await throughFirstBoundary(await session.send("Publish them."))).events;
       expect(settledFor(third, taskId!)).toEqual([
         expect.objectContaining({
           callId: "notes-send-2",
@@ -280,7 +281,8 @@ describe("resumable tasks", () => {
       expect(replies(third).at(-1)).toContain("published notes(0.67)>shorter");
 
       // The ended task takes no more input.
-      const fourth = (await (await session.send("One more tweak, please.")).result()).events;
+      const fourth = (await throughFirstBoundary(await session.send("One more tweak, please.")))
+        .events;
       expect(resultOf(fourth, "notes-send-3")).toMatchObject({
         isError: true,
         output: { code: "UNKNOWN_TASK" },
@@ -299,21 +301,22 @@ describe("resumable tasks", () => {
         message: "Draft the launch post.",
       });
 
-      const first = (await response.result()).events;
+      const first = (await throughFirstBoundary(response)).events;
       const taskId = (resultOf(first, "writer-start")?.output as { readonly taskId?: string })
         ?.taskId;
       expect(taskId).toMatch(/^writer-[0-9a-z]{6}$/u);
       expect(replies(first).at(-1)).toContain("Draft 1: Draft the launch post.");
 
       // Idle: the send is the agent's next piece of work, in the same child session.
-      const second = (await (await session.send("Add a title to it.")).result()).events;
+      const second = (await throughFirstBoundary(await session.send("Add a title to it."))).events;
       expect(resultOf(second, "writer-send-1")).toMatchObject({
         output: { status: "working", taskId },
       });
       expect(replies(second).at(-1)).toContain("Draft 2: Add a title.");
 
       // Working: the pricing page gathers for a while, so the turn holds.
-      const third = (await (await session.send("Now write the pricing page.")).result()).events;
+      const third = (await throughFirstBoundary(await session.send("Now write the pricing page.")))
+        .events;
       expect(resultOf(third, "writer-send-2")).toMatchObject({
         output: { status: "working", taskId },
       });
@@ -321,8 +324,9 @@ describe("resumable tasks", () => {
       expect(types(third).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
 
       // A correction joins the running work and brings the output schema its result takes.
-      const fourth = (await (await session.send("Make the pricing page structured.")).result())
-        .events;
+      const fourth = (
+        await throughFirstBoundary(await session.send("Make the pricing page structured."))
+      ).events;
       expect(resultOf(fourth, "writer-send-3")).toMatchObject({
         output: { status: "working", taskId },
       });

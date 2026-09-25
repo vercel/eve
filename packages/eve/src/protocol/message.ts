@@ -522,6 +522,14 @@ export interface ReasoningAppendedStreamEvent {
 export interface MessageCompletedStreamEvent {
   data: {
     finishReason: AssistantStepFinishReason;
+    /**
+     * The message is not the turn's reply yet: the turn holds on tasks it
+     * started, and eve calls the model again once one settles. Set only where
+     * a held turn shows no waiting boundary (a scheduled turn, a subagent's
+     * turn, or a task-mode run); an interactive session's held turn instead
+     * ends its message with `turn.completed` carrying `held: true`.
+     */
+    interim?: true;
     message: string | null;
     sequence: number;
     stepIndex: number;
@@ -608,10 +616,18 @@ export interface StepFailedStreamEvent {
 }
 
 /**
- * Stream event emitted when one turn reaches a terminal successful outcome.
+ * Stream event emitted when one turn reaches a terminal successful outcome,
+ * or a waiting boundary that keeps it open (`held`).
  */
 export interface TurnCompletedStreamEvent {
   data: {
+    /**
+     * The turn did not end: it holds on tasks it started, or waits on a
+     * task's question, and resumes under the same `turnId` when a result or
+     * the same person's message arrives. The `session.waiting` that follows
+     * is a waiting boundary, not the turn's end.
+     */
+    held?: true;
     sequence: number;
     turnId: string;
   };
@@ -1510,21 +1526,21 @@ export function createReasoningAppendedEvent(input: {
  */
 export function createMessageCompletedEvent(input: {
   readonly finishReason?: AssistantStepFinishReason;
+  readonly interim?: boolean;
   readonly message: string | null;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
 }): MessageCompletedStreamEvent {
-  return {
-    data: {
-      finishReason: input.finishReason ?? "stop",
-      message: input.message,
-      sequence: input.sequence,
-      stepIndex: input.stepIndex,
-      turnId: input.turnId,
-    },
-    type: "message.completed",
+  const data: MessageCompletedStreamEvent["data"] = {
+    finishReason: input.finishReason ?? "stop",
+    message: input.message,
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
   };
+  if (input.interim === true) data.interim = true;
+  return { data, type: "message.completed" };
 }
 
 /**
@@ -1649,19 +1665,17 @@ export function createStepFailedEvent(input: {
 }
 
 /**
- * Creates the `turn.completed` event for one terminal successful turn.
+ * Creates the `turn.completed` event for one terminal successful turn, or for
+ * a held turn's waiting boundary.
  */
 export function createTurnCompletedEvent(input: {
+  readonly held?: boolean;
   readonly sequence: number;
   readonly turnId: string;
 }): TurnCompletedStreamEvent {
-  return {
-    data: {
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
-    type: "turn.completed",
-  };
+  const data: TurnCompletedStreamEvent["data"] = { sequence: input.sequence, turnId: input.turnId };
+  if (input.held === true) data.held = true;
+  return { data, type: "turn.completed" };
 }
 
 /**
