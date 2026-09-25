@@ -5,6 +5,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -128,7 +129,10 @@ export async function emitProxiedSubagentEvent(input: {
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
+      setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+      const stamped = stampMessageStreamEvent(transformed);
+      await writer.write(encodeMessageStreamEvent(stamped));
+      await dispatchStreamEventHooks({ ctx, registry: bundle.hookRegistry, event: stamped });
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
@@ -158,8 +162,6 @@ export async function emitProxiedSubagentEvent(input: {
   } finally {
     writer.releaseLock();
   }
-
-  setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
   if (
     input.recordProxyInputRequests !== false &&
