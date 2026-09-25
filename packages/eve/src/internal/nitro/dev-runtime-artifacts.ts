@@ -3,6 +3,7 @@ import { cp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
+import { notifyDevelopmentRuntimePruned } from "#internal/nitro/dev-runtime-prune-listeners.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { readMaterializedAuthoredModuleIndex } from "#internal/materialized-authored-modules.js";
@@ -318,9 +319,7 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   };
 }
 
-/**
- * Reads a revision token for the latest dev runtime artifact snapshot.
- */
+/** Reads a revision token for the latest dev runtime artifact snapshot. */
 export function readDevelopmentRuntimeArtifactsRevision(
   appRoot: string,
 ): DevelopmentRuntimeArtifactsRevision {
@@ -355,6 +354,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
     retainCount: input.retainCount,
     snapshotsDirectory: resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(input.appRoot),
   });
+  await notifyDevelopmentRuntimePruned(input.appRoot);
 }
 
 /**
