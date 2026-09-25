@@ -1,5 +1,6 @@
 import { createHeadlessPrompter } from "#setup/headless.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 
@@ -25,7 +26,6 @@ export async function runDeclaredSetups(input: {
   setups: readonly RegistrySetupCommand[] | undefined;
   options: DeclaredSetupOptions;
   dependencies: RegistrySetupDependencies;
-  cancelledReminder: string;
   resumeCommand: string;
 }): Promise<RegistrySetupCompletion | false> {
   let completion: RegistrySetupCompletion = { facts: [] };
@@ -60,10 +60,7 @@ export async function runDeclaredSetups(input: {
         input.item,
         { prompter, signal: input.options.signal },
       );
-      if (result.kind === "cancelled") {
-        input.logger.log(input.cancelledReminder);
-        return false;
-      }
+      if (result.kind === "cancelled") return false;
       if (result.kind === "blocked") {
         if (!input.options.nonInteractive) throw new Error("Setup requires more input.");
         input.logger.error(
@@ -92,6 +89,7 @@ export async function runDeclaredSetups(input: {
     }
     return completion;
   } catch (error) {
+    if (error instanceof WizardCancelledError) return false;
     const message = error instanceof Error ? error.message : String(error);
     if (input.options.nonInteractive) {
       input.logger.error(

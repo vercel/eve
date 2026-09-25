@@ -12,7 +12,7 @@ import {
 } from "#internal/nitro/host/dev-watcher-log.js";
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
-import { promptCommandsFor } from "./prompt-commands.js";
+import { PROMPT_COMMANDS, promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -1803,7 +1803,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a command outcome under its invocation with the elbow connector", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("/model dismissed.");
+    renderer.finishCommand({ kind: "result", message: "/model dismissed." });
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
@@ -1811,9 +1811,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("strips complete ANSI styles from command outcomes", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult(
-      "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
-    );
+    renderer.finishCommand({
+      kind: "result",
+      message: "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
+    });
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain(
@@ -1825,42 +1826,119 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult(
-      "Registry items added: channel/photon-imessage.\n" +
+    renderer.finishCommand({
+      kind: "result",
+      message:
+        "Registry items added: channel/photon-imessage.\n" +
         "Text your agent: +15550000000\n" +
         "Photon project: https://app.photon.codes/dashboard/project-id",
-      "success",
-    );
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
-    expect(snapshot).toContain("│ Text your agent: +15550000000");
-    expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
-    expect(screen.rawOutput()).toContain("\u001b[32m✓\u001b[39m");
-    expect(screen.rawOutput()).not.toContain("\u001b[2mText your agent");
+    expect(snapshot).toContain("⎿  Registry items added: channel/photon-imessage.");
+    expect(snapshot).toContain("      Text your agent: +15550000000");
+    expect(snapshot).toContain(
+      "      Photon project: https://app.photon.codes/dashboard/project-id",
+    );
   });
 
   it("keeps a single-line successful command result under the elbow", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("Registry items added: connection/linear.", "success");
+    renderer.finishCommand({ kind: "result", message: "Registry items added: connection/linear." });
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
+    expect(screen.snapshot()).toContain("⎿  Registry items added: connection/linear.");
+  });
+
+  it("pulses a running command's gutter", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/notion");
+
+    expect(screen.snapshot()).toMatch(/^[▪ ] \/add connection\/notion$/m);
+    expect(screen.snapshot()).not.toContain("│ /add connection/notion");
+    renderer.shutdown();
+  });
+
+  it("holds a running command's gutter still while its setup panel pulses", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/deploy");
+    renderer.setupFlow.begin("");
+
+    expect(screen.snapshot()).toMatch(/^▪ \/deploy$/m);
+    expect(screen.rawOutput()).toContain("\u001b[90m▪\u001b[39m /deploy");
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
+  it("keeps a running command pending when an idle session stream closes", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.6 default");
+    await renderer.renderIdleStream(streamOf([]));
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.6 default",
+    });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^\* Model set to anthropic\/claude-opus-4.6 default$/m);
+    expect(snapshot).not.toContain("/model anthropic");
+  });
+
+  it("replaces a settled command with its dimmed summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/notion");
+    renderer.finishCommand({ kind: "result", message: "", summary: "Added connection/notion" });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^\* Added connection\/notion$/m);
+    expect(snapshot).not.toContain("/add connection/notion");
+    expect(snapshot).not.toContain("⎿");
+    expect(screen.rawOutput()).toContain("\u001b[2mAdded connection/notion");
+  });
+
+  it("hangs a settled command's details under its summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add channel/slack");
+    renderer.finishCommand({
+      kind: "result",
+      message: "Finish with `eve add channel/slack --skip-install`",
+      summary: "Added channel/slack · setup not finished",
+    });
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toMatch(
+      /^\* Added channel\/slack · setup not finished\n {3}⎿ {2}Finish with `eve add channel\/slack --skip-install`$/m,
+    );
+  });
+
+  it("keeps the invocation when a settled command has no summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/deploy");
+    renderer.finishCommand({ kind: "result", message: "Deployed: https://example.vercel.app" });
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toMatch(
+      /^\* \/deploy\n {3}⎿ {2}Deployed: https:\/\/example.vercel.app$/m,
+    );
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/deploy", "failed");
-    renderer.renderCommandResult(
-      "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
+    renderer.renderCommandInvocation("/deploy");
+    renderer.finishCommand({
+      kind: "result",
+      message:
+        "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
-      "error",
-    );
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("│ ⨯ /deploy");
+    expect(snapshot).toMatch(/^\* \/deploy$/m);
     expect(snapshot).toContain("⎿  Authentication was refreshed");
     expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
     expect(snapshot).not.toContain("· Authentication was refreshed");
@@ -2156,8 +2234,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await vi.waitFor(() => {
       expect(cancel).toHaveBeenCalledOnce();
-      expect(screen.snapshot()).toContain("/cancel");
-      expect(screen.snapshot()).toContain("Turn cancellation requested.");
+      expect(screen.snapshot()).toContain("* Cancellation requested");
+      expect(screen.snapshot()).not.toContain("/cancel");
       expect(screen.snapshot()).toContain("Cancelling turn…");
     });
 
@@ -2674,7 +2752,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         .split("\n")
         .findIndex((line) => line.includes("Hello"));
       renderer.setStartupPhase("connecting");
-      renderer.setupFlow.begin("Connect a model", "pulse");
+      renderer.setupFlow.begin("Connect a model");
       const interrupt = renderer.setupFlow.waitForInterrupt();
       renderer.setupFlow.setStatus("Connecting with Vercel…");
       expect(screen.snapshot()).toContain("Connecting with Vercel");
@@ -2725,7 +2803,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("restores the startup draft after a masked key question is cancelled", async () => {
     const { renderer, input, screen } = makeRenderer();
     renderer.beginStartupDraft({ initialDraft: "My message", title: "Agent" });
-    renderer.setupFlow.begin("Connect a model", "pulse");
+    renderer.setupFlow.begin("Connect a model");
     const answer = renderer.setupFlow.readText({ message: "API key", mask: true });
     input.type("private-test-key");
     expect(screen.snapshot()).not.toContain("private-test-key");
@@ -3114,13 +3192,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("paints a fully typed known command bold in the input line", async () => {
+  it("leaves a fully typed known command as plain text in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/add");
-    // Bold confirms command dispatch without competing with status color.
-    expect(screen.rawOutput()).toContain("[1m/add");
+    expect(screen.rawOutput()).not.toContain("[1m/add");
     expect(screen.rawOutput()).not.toContain("[34m/add");
     input.enter();
     await prompt;
@@ -4497,7 +4574,7 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("commits toned flow lines to the transcript", () => {
+  it("commits flow lines to the transcript with a shared marker", () => {
     const { screen, renderer } = makeRenderer();
 
     renderer.setupFlow.renderLine("Connected the agent to the Vercel AI Gateway.", "success");
@@ -4505,8 +4582,8 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("✓ Connected the agent to the Vercel AI Gateway.");
-    expect(snapshot).toContain("· visit https://vercel.com/connect");
+    expect(snapshot).toContain("* Connected the agent to the Vercel AI Gateway.");
+    expect(snapshot).toContain("* visit https://vercel.com/connect");
   });
 });
 
@@ -4516,7 +4593,7 @@ describe("TerminalRenderer setup flow session", () => {
     const message =
       "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
 
-    renderer.setupFlow.begin("Add to your agent", "pulse");
+    renderer.setupFlow.begin("Add to your agent");
     const answer = renderer.setupFlow.readSelect({
       kind: "single",
       message,
@@ -4539,7 +4616,7 @@ describe("TerminalRenderer setup flow session", () => {
     vi.useFakeTimers();
     try {
       const { screen, renderer } = makeRenderer();
-      renderer.setupFlow.begin("Add integration", "pulse");
+      renderer.setupFlow.begin("Add integration");
       renderer.beginSubagent({ callId: "background", name: "researcher" });
       renderer.backgroundSubagent({ callId: "background" });
       let release!: () => void;
@@ -4563,7 +4640,7 @@ describe("TerminalRenderer setup flow session", () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.renderNotice("anchor");
-    renderer.setupFlow.begin("Add integration", "pulse");
+    renderer.setupFlow.begin("Add integration");
     let inherited = false;
     await renderer.setupFlow.withInheritedStdio(async () => {
       inherited = true;
@@ -4575,7 +4652,7 @@ describe("TerminalRenderer setup flow session", () => {
     expect(inherited).toBe(true);
     expect(input.resumeCalls).toBe(2);
     expect(screen.snapshot()).toContain("anchor");
-    expect(screen.snapshot()).toContain("Add integration");
+    expect(screen.snapshot()).not.toContain("┃ Add integration");
     expect(screen.snapshot()).not.toContain("temporary OAuth instructions");
     renderer.setupFlow.end();
     renderer.shutdown();
@@ -4583,7 +4660,7 @@ describe("TerminalRenderer setup flow session", () => {
 
   it("discards input without interrupting a non-interruptible flow", async () => {
     const { input, renderer } = makeRenderer();
-    renderer.setupFlow.begin("Add to your agent", "pulse");
+    renderer.setupFlow.begin("Add to your agent");
     const interrupt = renderer.setupFlow.waitForInterrupt({ interruptible: false });
     let interrupted = false;
     void interrupt.promise.then(() => {
@@ -4604,7 +4681,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
 
-      renderer.setupFlow.begin("Configure the agent model", "pulse");
+      renderer.setupFlow.begin("Configure the agent model");
       renderer.setupFlow.setStatus("Checking the project…");
       expect(screen.snapshot()).toContain("▪ Checking the project…");
 
@@ -4622,7 +4699,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
 
-      renderer.setupFlow.begin("Add to your agent", "pulse");
+      renderer.setupFlow.begin("Add to your agent");
       renderer.setupFlow.setStatus("Installing Slack and dependencies…");
       expect(screen.snapshot()).not.toContain("5s");
 
@@ -4634,18 +4711,15 @@ describe("TerminalRenderer setup flow session", () => {
     }
   });
 
-  it("uses the attention color for an external-action pulse", () => {
+  it("keeps a browser wait on the green pulse without highlighting its text", () => {
     const { screen, renderer } = makeRenderer();
 
-    renderer.setupFlow.begin("Agent connections", "pulse");
-    renderer.setupFlow.setStatus({
-      kind: "external-action",
-      text: "Waiting for you to complete setup in the browser…",
-      emphasis: "browser",
-    });
+    renderer.setupFlow.begin("Agent connections");
+    renderer.setupFlow.setStatus("Finish signing in to Vercel in your browser");
 
-    expect(screen.rawOutput()).toContain("\x1b[33m▪\x1b[39m");
-    expect(screen.rawOutput()).toContain("\x1b[33mbrowser\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[32m▪\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[2mFinish signing in to Vercel in your browser");
+    expect(screen.rawOutput()).not.toContain("\x1b[33m");
     renderer.shutdown();
   });
 
@@ -4659,7 +4733,7 @@ describe("TerminalRenderer setup flow session", () => {
       unicode: false,
     });
 
-    renderer.setupFlow.begin("Configure the agent model", "pulse");
+    renderer.setupFlow.begin("Configure the agent model");
     renderer.setupFlow.setStatus("Checking the project...");
 
     expect(screen.snapshot()).toContain("* Checking the project...");
@@ -4677,7 +4751,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.setStatus("Loading teams…");
 
     let snapshot = screen.snapshot();
-    expect(snapshot).toContain("/deploy");
+    expect(snapshot).not.toContain("┃ /deploy");
     expect(snapshot).toContain("Creating Vercel project…");
     expect(snapshot).toContain("Loading teams…");
 
@@ -4702,7 +4776,10 @@ describe("TerminalRenderer setup flow session", () => {
       "warning",
     );
     renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.renderCommandResult("Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.");
+    renderer.finishCommand({
+      kind: "result",
+      message: "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.",
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -4723,7 +4800,9 @@ describe("TerminalRenderer setup flow session", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("┃ /deploy");
+    expect(snapshot).not.toContain("┃ /deploy");
+    expect(snapshot).toContain("Vercel project");
+    expect(snapshot).toMatch(/─{20,}/);
     expect(snapshot).toContain("This directory is not linked yet.");
     expect(snapshot).toContain("Vercel project");
 
@@ -5192,7 +5271,7 @@ describe("TerminalRenderer command echo spacing", () => {
     input.type("/connect");
     input.enter();
     await prompt;
-    renderer.renderCommandResult("Project linked.");
+    renderer.finishCommand({ kind: "result", message: "Project linked." });
     renderer.shutdown();
 
     const lines = screen.snapshot().split("\n");
@@ -5214,8 +5293,8 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
     expect(snapshot).toContain("Choose a model, speed, and reasoning");
-    const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
-    expect(promptLine?.startsWith("❯ /")).toBe(true);
+    const promptLine = snapshot.split("\n").find((line) => line.includes("│ /"));
+    expect(promptLine?.startsWith("│ /")).toBe(true);
 
     input.enter();
     // The highlighted default — /model leads the registry — is what a bare
@@ -5326,7 +5405,7 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/model sol");
     await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-6-sol"));
     input.enter();
-    expect(screen.snapshot()).toContain("❯ /model openai/gpt-6-sol ");
+    expect(screen.snapshot()).toContain("│ /model openai/gpt-6-sol ");
     expect(screen.snapshot()).toContain("high");
     input.enter();
 
@@ -5425,6 +5504,152 @@ describe("TerminalRenderer command typeahead", () => {
     expect(screen.snapshot()).toContain("│ /quit");
   });
 
+  it("keeps a submitted /help invocation above its transient drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("/help");
+    input.enter();
+    expect(await prompt).toBe("/help");
+
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    const open = screen.snapshot().split("\n");
+    expect(open.filter((line) => line.startsWith("│ /help"))).toEqual(["│ /help"]);
+    expect(open.indexOf("│ /help")).toBeLessThan(open.findIndex((line) => /^─{20,}$/.test(line)));
+    input.send("\x1b");
+    expect(await choice).toBeUndefined();
+    expect(screen.snapshot()).not.toContain("Show available commands");
+    expect(screen.snapshot()).not.toContain("│ /help");
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.8",
+    });
+    renderer.shutdown();
+    expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
+    expect(screen.snapshot()).not.toContain("/help");
+  });
+
+  it("lets /help choose a command without retaining the drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+
+    const open = screen.snapshot();
+    expect(open).not.toContain("┃ Commands");
+    expect(open).toContain("/model");
+    expect(open).toContain("↑/↓ move · Enter select · Esc close");
+    expect(open.match(/─{20,}/g)).toHaveLength(2);
+    expect(open).not.toMatch(/\b1\. \/model/);
+    input.down();
+    input.enter();
+    expect(await choice).toBe("/reset");
+    expect(screen.snapshot()).not.toContain("Choose a model, speed, and reasoning");
+    renderer.shutdown();
+  });
+
+  it("restores a help selection as a command-gutter composer with argument suggestions", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => [{ value: "openai/gpt-5", label: "GPT-5" }],
+    });
+    const help = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    input.enter();
+    const selection = await help;
+    expect(selection).toBe("/model ");
+    const prompt = renderer.readPrompt({ initialDraft: selection });
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
+    expect(screen.snapshot()).toContain("│ /model");
+    expect(screen.snapshot()).not.toContain("❯ /model");
+    input.enter();
+    expect(await prompt).toBe("/model openai/gpt-5");
+    renderer.shutdown();
+  });
+
+  it("keeps the selected help command visible on short terminals", async () => {
+    const { input, renderer, screen } = makeRenderer(80, 10);
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    for (let i = 0; i < 8; i += 1) input.down();
+    expect(screen.snapshot()).toContain("/traces");
+    expect(screen.snapshot()).not.toContain("┃ Commands");
+    input.enter();
+    expect(await choice).toBe("/traces ");
+    renderer.shutdown();
+  });
+
+  it("keeps a submitted /info invocation above its transient drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("/info");
+    input.enter();
+    expect(await prompt).toBe("/info");
+
+    const panel = renderer.showInfoPanel("Application");
+    const open = screen.snapshot().split("\n");
+    expect(open.filter((line) => line.includes("/info"))).toEqual(["│ /info"]);
+    expect(open.indexOf("│ /info")).toBeLessThan(open.findIndex((line) => /^─{20,}$/.test(line)));
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Application");
+    expect(screen.snapshot()).not.toContain("│ /info");
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.8",
+    });
+    renderer.shutdown();
+    expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
+    expect(screen.snapshot()).not.toContain("/info");
+  });
+
+  it("closes the transient info panel without retaining its contents", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const panel = renderer.showInfoPanel(
+      "\x1b[36mApplication\x1b[39m\n\x1b[1mAgent\x1b[22m: Weather",
+    );
+
+    const open = screen.snapshot();
+    expect(open).not.toContain("┃ Application info");
+    expect(open).toContain("Application");
+    expect(open).toContain("Agent: Weather");
+    expect(open).toContain("Esc to close");
+    expect(open.match(/─{20,}/g)).toHaveLength(2);
+    expect(open).not.toContain("[36m");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Application");
+    expect(screen.snapshot()).not.toContain("Agent: Weather");
+    renderer.shutdown();
+  });
+
+  it("scrolls long info drawers within the terminal before closing", async () => {
+    const { input, renderer, screen } = makeRenderer(60, 10);
+    const panel = renderer.showInfoPanel(
+      Array.from({ length: 12 }, (_, i) => `Entry ${i}`).join("\n"),
+    );
+    expect(screen.snapshot()).toContain("Entry 0");
+    expect(screen.snapshot()).toContain("↑/↓ scroll · Esc close");
+    for (let i = 0; i < 10; i += 1) input.down();
+    expect(screen.snapshot()).toContain("Entry 11");
+    expect(screen.snapshot()).not.toContain("Entry 0");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Entry 11");
+    renderer.shutdown();
+  });
+
+  it("resolves an open transient drawer on shutdown", async () => {
+    const { renderer } = makeRenderer();
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    renderer.shutdown();
+    expect(await choice).toBeUndefined();
+  });
+
   it("moves the suggestion highlight with arrows instead of recalling history", async () => {
     const { input, renderer } = makeRenderer();
 
@@ -5440,6 +5665,32 @@ describe("TerminalRenderer command typeahead", () => {
     // Down moved /model → /reset; history recall would have submitted the
     // earlier prompt instead.
     expect(await second).toBe("/reset");
+    renderer.shutdown();
+  });
+
+  it("leaves transient commands and setup drawers out of prompt history", async () => {
+    const { input, renderer } = makeRenderer();
+
+    for (const text of [
+      "an earlier prompt",
+      "/model anthropic/claude-opus-4.6 default",
+      "/help",
+      "/info",
+      "/add connection/linear",
+      "/login chatgpt",
+      "/loglevel all",
+      "/traces",
+    ]) {
+      const prompt = renderer.readPrompt();
+      input.type(text);
+      input.enter();
+      await prompt;
+    }
+
+    const recalled = renderer.readPrompt();
+    input.up();
+    input.enter();
+    expect(await recalled).toBe("an earlier prompt");
     renderer.shutdown();
   });
 
@@ -5867,10 +6118,11 @@ describe("setup interaction transitions", () => {
           { value: "linear", label: "Linear" },
         ],
       });
-      expect(titleRow()).toBe(initialRow);
+      const questionRow = titleRow();
+      expect(questionRow).toBeGreaterThan(initialRow);
       expect(screen.snapshot().split("Add to your agent")).toHaveLength(2);
       input.type("sl");
-      expect(titleRow()).toBe(initialRow);
+      expect(titleRow()).toBe(questionRow);
       input.send("\x1b");
       input.send("\x1b");
       await expect(answer).resolves.toBeUndefined();

@@ -1,7 +1,7 @@
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
-import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
@@ -54,12 +54,6 @@ export interface TestAppDescriptor {
    * `runAsSession` for tool dispatch.
    */
   readonly tools?: readonly ResolvedToolDefinition[];
-  /**
-   * Authored skills projected into the compiled manifest. Use `mockSkill`
-   * to describe them declaratively; pass the `.source` field here and
-   * forward it on `runAsSession` when the test reads reference files.
-   */
-  readonly skills?: readonly CompiledSkillDefinition[];
   /** Additional authored modules compiled into the synthetic application. */
   readonly modules?: readonly ProgrammaticAgentModule[];
 }
@@ -102,8 +96,6 @@ export interface TestRuntime {
   readonly moduleMap: CompiledModuleMap;
   /** Descriptor-declared tools. Exposed for test-side registry wiring. */
   readonly tools: readonly ResolvedToolDefinition[];
-  /** Descriptor-declared skills. Exposed for test-side registry wiring. */
-  readonly skills: readonly CompiledSkillDefinition[];
   /**
    * Runs `fn` with this app's runtime session active. Compiled-artifact
    * reads and bundle-cache writes during `fn` target this scoped session,
@@ -205,27 +197,9 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     });
   }
 
-  if (descriptor.skills !== undefined && descriptor.skills.length > 0) {
-    Object.assign(compileInput, {
-      skills: descriptor.skills.map((skill) => {
-        const entry: { name: string; description: string; markdown?: string } = {
-          name: skill.name,
-          description: skill.description,
-        };
-
-        if (skill.markdown !== undefined) {
-          entry.markdown = skill.markdown;
-        }
-
-        return entry;
-      }),
-    });
-  }
-
   const { manifest, moduleMap } = await compileFromMemory(compileInput);
   const session = createRuntimeSession(descriptor.agent?.name ?? DEFAULT_AGENT_NAME);
   const tools = descriptor.tools ?? [];
-  const skills = descriptor.skills ?? [];
 
   function install(): void {
     installBundledCompiledArtifacts({ manifest, moduleMap });
@@ -283,7 +257,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     run,
     runAsSession,
     session,
-    skills,
     tools,
   };
 }

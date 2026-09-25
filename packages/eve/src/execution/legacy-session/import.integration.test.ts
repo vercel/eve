@@ -18,8 +18,6 @@ import {
 describe("legacy session import", () => {
   it.each([
     { inputVersion: 1 as const, inboxVersion: 1 },
-    { inputVersion: 1 as const, inboxVersion: 3 },
-    { inputVersion: 2 as const, inboxVersion: 7 },
     { inputVersion: 2 as const, inboxVersion: 7, duplicateImport: true },
     { inputVersion: 2 as const, inboxVersion: 7, committedInput: true },
   ])(

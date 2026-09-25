@@ -176,6 +176,7 @@ describe("runDeployFlow", () => {
     const result = await runDeployFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
+      traceSampling: false,
       interactive: true,
       deps: {
         detectDeployment: vi.fn(async () => UNLINKED),
@@ -197,6 +198,13 @@ describe("runDeployFlow", () => {
       provisioningDeps.pickTeam.mock.invocationCallOrder[0]!,
     );
     expect(linkDeps.linkProject).toHaveBeenCalled();
+    expect(linkDeps.linkProject).toHaveBeenCalledWith(
+      fake.prompter,
+      APP_ROOT,
+      { kind: "new", project: "my-agent", team: "acme" },
+      expect.anything(),
+      { signal: undefined, traceSampling: false },
+    );
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
       ["deploy", "--prod", "--yes"],
       expect.objectContaining({ cwd: APP_ROOT }),

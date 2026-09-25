@@ -20,11 +20,13 @@ import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
+import { LOGIN_CONNECTION_COMMAND_OPTIONS } from "#setup/flows/model-login-options.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
+import type { ArgumentTypeaheadCommand } from "./prompt-commands.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
@@ -53,16 +55,21 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
 
 function inlineArgumentSuggestions(appRoot: string) {
   return async (
-    command: "model" | "add" | "login",
+    command: ArgumentTypeaheadCommand,
   ): Promise<readonly PromptArgumentSuggestion[]> => {
-    if (command === "login") {
+    if (command === "loglevel") {
       return [
-        { value: "vercel", label: "Vercel account" },
-        { value: "chatgpt", label: "ChatGPT account" },
-        { value: "vercel-api-key", label: "API key (Vercel AI Gateway)" },
-        { value: "openai-api-key", label: "API key (OpenAI)" },
-        { value: "anthropic-api-key", label: "API key (Anthropic)" },
+        { value: "all", label: "all", hint: "Show all captured logs" },
+        { value: "stderr", label: "stderr", hint: "Show stderr logs only" },
+        { value: "sandbox", label: "sandbox", hint: "Show sandbox logs only" },
+        { value: "none", label: "none", hint: "Hide captured logs" },
       ];
+    }
+    if (command === "login") {
+      return LOGIN_CONNECTION_COMMAND_OPTIONS.map((option) => ({
+        value: option.command,
+        label: option.label,
+      }));
     }
     if (command === "model") {
       const { gatewayModelCapabilities } = await import("#setup/boxes/model-capabilities.js");

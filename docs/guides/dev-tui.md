@@ -86,7 +86,7 @@ Pass an item address to install it directly:
 /add @acme/analytics
 ```
 
-Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project.
+Required authorization or deployment setup still runs for the selected item. Press `Esc` to cancel setup; files already installed remain in the project. If dependency installation fails, retry the `eve add` command in a terminal for details; raw installer output is not captured in the TUI.
 
 ## Work with the agent
 

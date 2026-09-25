@@ -52,18 +52,6 @@ export type ApplyModelOutcome =
   | { kind: "unchanged"; model: string }
   | { kind: "rejected"; message: string };
 
-/** The one-line transcript form of an apply outcome (`/model <slug>`'s reply). */
-export function formatApplyModelOutcome(outcome: ApplyModelOutcome): string {
-  switch (outcome.kind) {
-    case "changed":
-      return `Model changed to ${pc.bold(outcome.to)}. Live on your next prompt.`;
-    case "unchanged":
-      return `Model is already \`${outcome.model}\`.`;
-    case "rejected":
-      return outcome.message;
-  }
-}
-
 /** Applies one completed `/model` draft through a single atomic source write. */
 export async function changeAgentModelSettings(input: {
   readonly appRoot: string;

@@ -304,6 +304,50 @@ describe("registry commands", () => {
     ]);
   });
 
+  it("does not expose installer credentials in dependency failures", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "Command failed: pnpm add https://token@example.com\nERR_PNPM_FETCH_404 token=secret",
+        ),
+        {
+          exitCode: 1,
+          stderr: "ERR_PNPM_FETCH_404 token=secret",
+        },
+      ),
+    );
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+    });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
+    ]);
+    expect(logger.errors.join("\n")).not.toContain("secret");
+    expect(logger.errors.join("\n")).not.toContain("example.com");
+  });
+
+  it("does not echo arbitrary installer output", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+    });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
+    ]);
+  });
+
   it("reports only paths that rollback could not restore", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
@@ -809,6 +853,53 @@ describe("registry commands", () => {
       "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
     ]);
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("treats a cancellation thrown by the setup CLI like a returned one", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => {
+      throw new WizardCancelledError();
+    });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(logger.logs).toEqual([
+      "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+    expect(logger.errors).toEqual([]);
+  });
+
+  it("returns unfinished setup to the TUI as a structured resume command", async () => {
+    const fake = createFakePrompter();
+    const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await expect(
+      installRegistryItem(
+        "/project",
+        "channel/slack",
+        { prompter: fake.prompter, silent: true },
+        { loadSetupCommandRunner: async () => runSetup },
+      ),
+    ).resolves.toEqual({
+      output: [],
+      setupIncomplete: { resumeCommand: "eve add channel/slack --skip-install" },
+    });
   });
 
   it("runs setup directly without installing the item", async () => {

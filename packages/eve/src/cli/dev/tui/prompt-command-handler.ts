@@ -1,6 +1,9 @@
 import type { ApplyModelOutcome } from "#setup/flows/model-source-change.js";
+import {
+  LOGIN_CONNECTION_COMMAND_HINT,
+  loginConnectionForCommand,
+} from "#setup/flows/model-login-options.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
-import type { ModelConnectionSelection } from "#shared/model-connection.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -13,14 +16,6 @@ import type { TuiSetupCommandInput, TuiSetupFlows } from "./setup-commands.js";
 import type { DevelopmentTuiTarget } from "./target.js";
 
 type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
-
-const LOGIN_CONNECTIONS: Readonly<Record<string, ModelConnectionSelection>> = {
-  vercel: "vercel",
-  chatgpt: "chatgpt",
-  "vercel-api-key": "ai-gateway-key",
-  "openai-api-key": "openai",
-  "anthropic-api-key": "anthropic",
-};
 
 export interface PromptCommandHandlerOptions {
   readonly target: DevelopmentTuiTarget;
@@ -63,59 +58,53 @@ export function createPromptCommandHandler(
           };
         }
         const appRoot = target.agentRoot ?? target.workspaceRoot;
+        const usage = modelFailure(
+          "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
+        );
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
-          const {
-            changeAgentModel,
-            changeAgentModelSettings,
-            formatApplyModelOutcome,
-            formatApplyModelSettingsOutcome,
-          } = await import("#setup/flows/model-source-change.js");
+          const { changeAgentModel, changeAgentModelSettings } =
+            await import("#setup/flows/model-source-change.js");
           const [slug, reasoning, ...extra] = command.argument.split(/\s+/u);
-          if (slug === undefined || extra.length > 0) {
-            return {
-              message: "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
-            };
-          }
+          if (slug === undefined || extra.length > 0) return usage;
           if (
             reasoning !== undefined &&
             !["default", "none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoning)
           ) {
-            return {
-              message: "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
-            };
+            return usage;
           }
           // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
           const refusal = await checkRefusal(appRoot);
-          if (refusal !== null) {
-            return { message: refusal };
-          }
+          if (refusal !== null) return modelFailure(refusal);
+          const requested = reasoning === undefined ? slug : `${slug} ${reasoning}`;
           if (reasoning !== undefined) {
-            return {
-              message: formatApplyModelSettingsOutcome(
-                await changeAgentModelSettings({
-                  appRoot,
-                  patch: {
-                    model: { kind: "set", value: slug },
-                    reasoning:
-                      reasoning === "default"
-                        ? { kind: "remove" }
-                        : { kind: "set", value: reasoning as AgentReasoningDefinition },
-                    gatewayServiceTier: { kind: "keep" },
-                  },
-                }),
-              ),
-            };
+            const outcome = await changeAgentModelSettings({
+              appRoot,
+              patch: {
+                model: { kind: "set", value: slug },
+                reasoning:
+                  reasoning === "default"
+                    ? { kind: "remove" }
+                    : { kind: "set", value: reasoning as AgentReasoningDefinition },
+                gatewayServiceTier: { kind: "keep" },
+              },
+            });
+            if (outcome.kind === "rejected") return modelFailure(outcome.message);
+            return outcome.kind === "unchanged"
+              ? { message: "", summary: `Model already set to ${requested}` }
+              : { message: "", summary: `Model set to ${requested}` };
           }
           const applyModel = options.applyModel ?? changeAgentModel;
-          return { message: formatApplyModelOutcome(await applyModel({ appRoot, slug })) };
+          const outcome = await applyModel({ appRoot, slug });
+          if (outcome.kind === "rejected") return modelFailure(outcome.message);
+          return outcome.kind === "unchanged"
+            ? { message: "", summary: `Model already set to ${outcome.model}` }
+            : { message: "", summary: `Model set to ${outcome.to}` };
         } catch (error) {
-          return {
-            message: `Couldn't change the model: ${toErrorMessage(error)}`,
-          };
+          return modelFailure(toErrorMessage(error));
         }
       }
 
@@ -125,7 +114,7 @@ export function createPromptCommandHandler(
 
       const loginConnection =
         command.name === "login" && command.argument.length > 0
-          ? LOGIN_CONNECTIONS[command.argument]
+          ? loginConnectionForCommand(command.argument)
           : undefined;
       if (
         command.name === "login" &&
@@ -133,7 +122,7 @@ export function createPromptCommandHandler(
         loginConnection === undefined
       ) {
         return {
-          message: "Use `/login vercel|chatgpt|vercel-api-key|openai-api-key|anthropic-api-key`.",
+          message: `Use \`/login ${LOGIN_CONNECTION_COMMAND_HINT}\`.`,
         };
       }
 
@@ -148,9 +137,8 @@ export function createPromptCommandHandler(
       } catch (error) {
         return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
       }
-      const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
-      const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(flowConfig.title, flowConfig.indicator);
+      const { runTuiSetupCommand } = setupCommands;
+      flow.begin("");
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -180,4 +168,8 @@ export function createPromptCommandHandler(
       }
     },
   };
+}
+
+function modelFailure(message: string): PromptCommandOutcome {
+  return { message, summary: "Couldn't change the model", failed: true };
 }

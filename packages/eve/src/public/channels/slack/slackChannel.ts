@@ -32,6 +32,10 @@ import {
   type SlackWorkspaceHandle,
 } from "#public/channels/slack/api.js";
 import {
+  resolveSlackTransportOptions,
+  type SlackTransportOptions,
+} from "#public/channels/slack/transport.js";
+import {
   buildSlackTurnMessage,
   collectInboundFileParts,
   createSlackFetchFile,
@@ -643,6 +647,8 @@ export type SlackApprovalChannelResolver = (
 ) => SlackApprovalChannel | Promise<SlackApprovalChannel>;
 
 export interface SlackChannelConfig {
+  /** Slack API transport overrides: base URLs and a custom fetch. */
+  readonly api?: SlackTransportOptions;
   readonly credentials?: SlackChannelCredentials;
   readonly botName?: string;
 
@@ -829,9 +835,11 @@ const clearSlackTurnState: NonNullable<SlackChannelEvents["turn.started"]> = asy
 function rebuildSlackContext(
   state: SlackChannelState,
   session: SessionHandle,
+  api: SlackTransportOptions | undefined,
   credentials: SlackChannelCredentials | undefined,
 ): SlackChannelContext {
   const { thread, slack } = buildSlackBinding({
+    api,
     botToken: credentials?.botToken,
     channelId: state.channelId ?? "",
     threadTs: state.threadTs ?? "",
@@ -869,9 +877,14 @@ export interface SlackChannel extends Channel<
  * fields keep their defaults.
  */
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
+  const api = resolveSlackTransportOptions(config.api);
   const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
-  const slackFetchFile = createSlackFetchFile({ botToken: config.credentials?.botToken });
+  const slackFetchFile = createSlackFetchFile({
+    api,
+    botToken: config.credentials?.botToken,
+  });
   const activityRenderers = buildSlackActivityRenderers({
+    api,
     botToken: config.credentials?.botToken,
     renderers: config.activity?.renderers ?? [],
   });
@@ -977,7 +990,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     audience: ({ state }) => state.audience ?? "unknown",
 
     context(state, session) {
-      return rebuildSlackContext(state, session, config.credentials);
+      return rebuildSlackContext(state, session, api, config.credentials);
     },
 
     deliver(payload, channel) {
@@ -1012,10 +1025,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           return handleInteractionPost(
             body,
             { from, resolveSession, waitUntil },
-            { config, onInputResponse },
+            { api, config, onInputResponse },
           );
         }
         return handleEventPost({
+          api,
           body,
           from,
           resolveSession,
@@ -1029,7 +1043,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     ],
 
     receive(input, { from }) {
-      return receiveOnSlack(input, { from, credentials: config.credentials });
+      return receiveOnSlack(input, { from, api, credentials: config.credentials });
     },
 
     events: mergedEvents,
@@ -1068,6 +1082,7 @@ async function receiveOnSlack(
   },
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
+    readonly api: SlackTransportOptions | undefined;
     readonly credentials: SlackChannelCredentials | undefined;
     /** Installation workspace inherited from an inbound trigger. */
     readonly installationTeamId?: string;
@@ -1098,6 +1113,7 @@ async function receiveOnSlack(
   let threadTs = requestedThreadTs;
   if (initialMessage) {
     const { thread } = buildSlackBinding({
+      api: deps.api,
       botToken: deps.credentials?.botToken,
       channelId,
       threadTs: "",
@@ -1181,6 +1197,7 @@ function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {
  * Returns `200 OK` in every case because Slack only requires an immediate ACK.
  */
 async function handleEventPost(input: {
+  readonly api: SlackTransportOptions | undefined;
   readonly body: string;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
@@ -1228,6 +1245,7 @@ async function handleEventPost(input: {
       const dispatchMessageWith =
         (handler: NonNullable<SlackChannelConfig["onAppMention"]>) => () =>
           dispatchSlackMessage({
+            api: input.api,
             appId,
             botUserId,
             receivingBotUserId,
@@ -1246,6 +1264,7 @@ async function handleEventPost(input: {
       if (handler !== undefined) {
         dispatch = () =>
           dispatchSlackMessage({
+            api: input.api,
             appId,
             botUserId,
             receivingBotUserId,
@@ -1275,6 +1294,7 @@ async function handleEventPost(input: {
       if (botUserId === undefined || !message.text.includes(`<@${botUserId}`)) {
         dispatch = () =>
           dispatchSlackMessage({
+            api: input.api,
             appId,
             botUserId,
             receivingBotUserId,
@@ -1298,6 +1318,7 @@ async function handleEventPost(input: {
   if (dispatch === null && onEvent !== undefined) {
     dispatch = () =>
       dispatchSlackEvent({
+        api: input.api,
         from: input.from,
         resolveSession: input.resolveSession,
         credentials: config.credentials,
@@ -1342,6 +1363,7 @@ function isSelfAuthoredSlackMessage(
 }
 
 async function dispatchSlackMessage(input: {
+  readonly api: SlackTransportOptions | undefined;
   readonly appId: string | undefined;
   readonly botUserId: string | undefined;
   readonly receivingBotUserId: string | undefined;
@@ -1357,6 +1379,7 @@ async function dispatchSlackMessage(input: {
 }): Promise<void> {
   const continuationToken = slackContinuationToken(input.message.channelId, input.message.threadTs);
   const { thread, slack } = buildSlackBinding({
+    api: input.api,
     appId: input.appId,
     botToken: input.credentials?.botToken,
     botUserId: input.botUserId,
@@ -1442,6 +1465,7 @@ async function dispatchSlackMessage(input: {
 
 /** Runs a generic Events API handler with an imperative Slack operation surface. */
 async function dispatchSlackEvent(input: {
+  readonly api: SlackTransportOptions | undefined;
   readonly from: ChannelFrom<SlackChannelState>;
   readonly resolveSession: ChannelResolveSession;
   readonly credentials: SlackChannelCredentials | undefined;
@@ -1474,6 +1498,7 @@ async function dispatchSlackEvent(input: {
         { auth, message, target, title, taskDeliveryPolicy },
         {
           from: input.from,
+          api: input.api,
           credentials: input.credentials,
           installationTeamId: input.installationTeamId,
           teamId,
@@ -1483,6 +1508,7 @@ async function dispatchSlackEvent(input: {
         },
       ),
     slack: buildSlackWorkspaceHandle({
+      api: input.api,
       botToken: input.credentials?.botToken,
       installationTeamId: input.installationTeamId,
       teamId,

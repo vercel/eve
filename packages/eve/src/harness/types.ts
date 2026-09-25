@@ -307,6 +307,13 @@ export interface ToolLoopHarnessConfig {
   readonly mode: RunMode;
   /** Whether this node enables framework background-task behavior. */
   readonly tasksEnabled?: boolean;
+  /** Restores runtime resources for the originating turn before approval work. */
+  readonly prepareApprovalTurn?: (event: {
+    readonly sequence: number;
+    readonly turnId: string;
+  }) => Promise<void>;
+  /** Opaque runtime identity retained by a pending approval batch. */
+  readonly toolReplayIdentity?: (toolName: string) => string | undefined;
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

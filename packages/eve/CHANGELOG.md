@@ -1,5 +1,40 @@
 # eve
 
+## 0.66.3
+
+### Patch Changes
+
+- 15ad358: Allow empty-response recovery to request fresh reads when earlier tool results are stale, while continuing to warn against repeating completed writes and other side effects.
+- faab713: `eve dev` now uses a single `*` marker for completed slash commands and excludes picker and drawer commands, including `/loglevel`, from input history. Setup failures keep their invocation visible, and failed registry installs no longer expose installer output in TUI diagnostics.
+- 0aad786: `slackChannel` and `callSlackApi` accept an `api` option, `{ apiBaseUrl?, fileBaseUrl?, fetch? }`, that sends Slack Web API calls and attachment downloads to another host. `fileBaseUrl` defaults to `apiBaseUrl`, `fetch` is called only for URLs on those hosts, each base must be an absolute http or https URL with no query string or fragment, and omitting `api` keeps `https://slack.com/api/` and the global `fetch`.
+- faab713: Keep setup drawer status content inside its temporary surface, and use the same model-login connection catalog for TUI completion and command handling.
+- e148d8f: Upgrade the Workflow SDK beta packages and mark new session handoffs as protocol version 2. Handoffs without a version remain compatible as version 1, so future forced hook claims can be limited to sessions whose previous owner supports them.
+
+## 0.66.2
+
+### Patch Changes
+
+- 306f2ce: Configure 100% Vercel trace sampling across all environments when `eve deploy` creates a new project, with `--no-trace-sampling` to opt out.
+- fdf1364: Ignore JavaScript and TypeScript `*.test.*`/`*.spec.*` modules and `__tests__/` directories during agent discovery.
+- 8565550: Fix `auto()` model selection when a turn resumes after a question or tool approval.
+
+## 0.66.1
+
+### Patch Changes
+
+- 055f1d1: `eve build` and `withEve` during `next build` now build mounted, source-backed workspace extensions before compiling the agent, as `eve dev` already does. Production builds no longer fail when a package manager skips the extension's `prepare` script, such as on a no-op install with a restored `node_modules` cache. An extension whose distribution is already current is not rebuilt, and a failed extension build names the package and the command to run.
+- faacecf: Follow a delegated child's activity from a client with `session.streamSubagent(called, options?)`. Pass a `subagent.called` event from that session. The client reads its `childStreamPath` with the session's host and credentials, so a remote child streams through the parent deployment's proxy route, and the child's cursor stays separate from the parent's. Eval sessions expose the same method with the eval client's credentials.
+- a490d88: `eveChannel({ trustedForwarders })` now receives what the forwarder asserts as a second argument. `assertion.principal` holds the stamped `current` and `initiator` contexts the forwarder asserts, so a receiver can limit a trusted forwarder to the identities it may speak for instead of accepting any principal it asserts.
+- 6e568dc: Allow Web Chat to scaffold as a peer application for standalone agents and agent workspaces, with explicit Next.js or Vercel services hosting. `withEve()` from `eve/next` can discover either project layout from an explicit `eveRoot`, so the peer application does not need to repeat agent paths.
+- d8ddf0d: Add bounded, conversation-scoped trace analysis to self-modification, with filtered search, compact timelines, and batched span payload inspection.
+- d6fc658: Keep a delegated agent task open when its model turn yields while background work started in that turn is still running. Deliver the final result after that work finishes, including usage accumulated across the yielded turns, instead of reporting the interim reply as completion.
+  
+  Propagate task cancellation to a yielded child's nested background work for self, local, and remote delegation, without waking the cancelled child on its nested task notifications. Preserve cancellation across replay and session handoff.
+  
+  Fail an unanswered delegated task when its yielded child session ends, and preserve the unreported usage in that terminal result.
+- 650b309: Use a quieter selected-row treatment and temporary drawer for interactive setup flows in the development TUI. `/add`, `/login`, and `/deploy` now emphasize the focused option with type weight instead of a caret, keep controls below the drawer, and `/login` supports inline connection completion such as `/login openai-api-key`.
+- d6fc658: Keep durable MCP invocations open for pending background subagents so clients receive the delegated result.
+
 ## 0.66.0
 
 ### Minor Changes

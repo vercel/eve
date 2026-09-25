@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+import { isAuthoredTestPath } from "#discover/filesystem.js";
+
 const INSTRUMENTATION_EXTENSIONS = [".ts", ".mts", ".js", ".mjs"] as const;
 
 const INSTRUMENTATION_DIRECTORY = "instrumentation";
@@ -52,7 +54,7 @@ function collectInstrumentationProviderModules(
   const modulePathsBySlot = new Map<string, string>();
 
   for (const entry of readdirSync(directoryPath, { withFileTypes: true })) {
-    if (!entry.isFile()) continue;
+    if (!entry.isFile() || isAuthoredTestPath(entry.name)) continue;
 
     const extension = INSTRUMENTATION_EXTENSIONS.find((candidate) =>
       entry.name.endsWith(candidate),

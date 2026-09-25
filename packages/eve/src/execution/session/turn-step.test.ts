@@ -3641,7 +3641,10 @@ describe("runProxySubagentEventStep", () => {
    */
   function buildSerializedContextForAdapter(
     adapter: ChannelAdapter,
-    options: { readonly acceptedForwardedTracePolicy?: boolean } = {},
+    options: {
+      readonly acceptedForwardedTracePolicy?: boolean;
+      readonly hookRegistry?: ReturnType<typeof createRuntimeHookRegistry>;
+    } = {},
   ): Record<string, unknown> {
     const bundle = {
       adapterRegistry: {
@@ -3655,7 +3658,7 @@ describe("runProxySubagentEventStep", () => {
           turnAgent: TestTurnAgent,
         },
       },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: options.hookRegistry ?? createEmptyHookRegistry(),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -3721,6 +3724,62 @@ describe("runProxySubagentEventStep", () => {
       subagentName: "linear",
     };
   }
+
+  it.each(["direct", "proxied"] as const)(
+    "dispatches the parent input hook once after %s channel delivery",
+    async (delivery) => {
+      const order: string[] = [];
+      const hook = vi.fn(() => {
+        order.push("hook");
+      });
+      const adapter: ChannelAdapter = {
+        kind: "input-hook-parity",
+        "input.requested"() {
+          order.push("channel");
+        },
+      };
+      const hookRegistry = createRuntimeHookRegistry([
+        {
+          events: { "input.requested": hook },
+          logicalPath: "hooks/audit.ts",
+          slug: "audit",
+          sourceId: "hooks/audit.ts",
+          sourceKind: "module",
+        },
+      ]);
+      const serializedContext = buildSerializedContextForAdapter(adapter, { hookRegistry });
+      const session = createStubSession({
+        sessionId: "parent-session",
+        continuationToken: "http:proxy-test",
+      });
+      installSessionStoreMocks([session]);
+      const sessionState = createStubSessionState({
+        sessionId: "parent-session",
+        continuationToken: "http:proxy-test",
+      });
+      const hookPayload = buildHookPayload();
+      const sessionWritable = createTestWritable();
+      if (delivery === "proxied") {
+        await runProxySubagentEventStep({
+          hookPayload,
+          sessionWritable,
+          serializedContext,
+          sessionState,
+        });
+      } else {
+        vi.mocked(createExecutionNodeStep).mockImplementation((input) => async (session) => {
+          await input.handleEvent?.(createInputRequestedEvent(hookPayload.event));
+          return { next: null, session };
+        });
+        await turnStep({ sessionWritable, serializedContext, sessionState });
+      }
+      expect(order).toEqual(["channel", "hook"]);
+      expect(hook).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ type: "input.requested", data: hookPayload.event }),
+        expect.objectContaining({ session: expect.objectContaining({ id: "parent-session" }) }),
+      );
+    },
+  );
 
   it("persists adapter-state mutations from the input.requested handler onto the returned serializedContext", async () => {
     // The stub adapter mirrors Slack's contract: its `input.requested`

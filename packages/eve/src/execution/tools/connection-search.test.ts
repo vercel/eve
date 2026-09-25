@@ -199,6 +199,47 @@ describe("connection dynamic tools", () => {
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
   });
 
+  it("keeps the connection identity in durable callback closures without separate call state", async () => {
+    let instanceId = "account-a";
+    const executeTool = vi.fn(async () => ({ ok: true }));
+    const base = registry({
+      connections: [{ ...connection("linear"), instanceId }],
+      loadTools: {
+        linear: async () => [
+          { name: "list_issues", description: "List issues", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, {
+      ...base,
+      getConnections: () => [{ ...connection("linear"), instanceId }],
+      getClient: (name) => ({ ...base.getClient(name), executeTool }),
+    });
+    await contextStorage.run(ctx, async () => {
+      const resolve = getConnectionSearchResolver().events["step.started"]!;
+      const context = {
+        channel: {},
+        model: null,
+        messages: [],
+        session: { auth: { current: null, initiator: null }, id: "identity-test" },
+      } satisfies DynamicResolveContext;
+      const initial = (await resolve({}, context)) as DynamicToolSet;
+      await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
+      const tools = (await resolve({}, context)) as DynamicToolSet;
+      const callback = readDurableDynamicToolCallbacks(tools["linear__list_issues"]!)!.execute!;
+      expect(callback.closure).toMatchObject({ connectionName: "linear", instanceId: "account-a" });
+      instanceId = "account-b";
+      await expect(
+        callback.callback(callback.closure, {} as never, { callId: "call-1" } as never),
+      ).rejects.toThrow("connection for this tool call changed or is unavailable");
+      expect(executeTool).not.toHaveBeenCalled();
+      expect([...ctx.entries()].some(([key]) => key.name === "eve.pendingConnectionCalls")).toBe(
+        false,
+      );
+    });
+  });
+
   it("forwards the authored tool call ID to connection execution", async () => {
     const linear = connection("linear");
     const executeTool = vi.fn(

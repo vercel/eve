@@ -4,11 +4,11 @@ import { initialSelectState } from "#setup/cli/select-state.js";
 import { lineOf } from "./line-editor.js";
 import {
   renderAcknowledgeQuestion,
-  renderFlowDrawer,
   renderFlowPanel,
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
+import { renderFlowDrawer } from "./flow-drawer.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -105,7 +105,7 @@ describe("renderFlowPanel", () => {
             tone: "error",
           },
         ],
-        content: { kind: "idle", indicator: { glyph: "▪", color: "green" } },
+        content: { kind: "idle", indicator: { glyph: "▪" } },
       },
       theme,
       60,
@@ -125,7 +125,7 @@ describe("renderFlowPanel", () => {
       {
         title: "/channels",
         lines,
-        content: { kind: "idle", indicator: { glyph: "⠏", color: "yellow" } },
+        content: { kind: "idle", indicator: { glyph: "⠏" } },
       },
       theme,
       60,
@@ -144,9 +144,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Loading teams…",
-            indicator: { glyph: "⠼", color: "yellow" },
+            indicator: { glyph: "⠼" },
           },
         },
       },
@@ -165,9 +164,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "status",
           status: {
-            kind: "progress",
             text: "Checking the project…",
-            indicator: { glyph: "▪", color: "green" },
+            indicator: { glyph: "▪" },
           },
         },
       },
@@ -187,9 +185,8 @@ describe("renderFlowPanel", () => {
         content: {
           kind: "question",
           status: {
-            kind: "progress",
             text: "Creating a Slackbot through Vercel Connect…",
-            indicator: { glyph: "▪", color: "green" },
+            indicator: { glyph: "▪" },
           },
           rows: ["    Try again", "    Cancel"],
         },
@@ -207,7 +204,7 @@ describe("renderFlowPanel", () => {
 });
 
 describe("renderFlowDrawer", () => {
-  it("frames an active flow while keeping its title out of the body", () => {
+  it("frames an active flow without repeating its command title", () => {
     const rows = renderFlowDrawer(
       {
         title: "add to your agent",
@@ -224,7 +221,7 @@ describe("renderFlowDrawer", () => {
 
     expect(rows.rows[0]).toBe("─".repeat(60));
     expect(rows.rows[1]).toBe("");
-    expect(rows.rows[2]).toBe(" ┃ add to your agent");
+    expect(rows.rows[2]).toBe("   add to your agent");
     expect(rows.rows.at(-2)).toBe("");
     expect(rows.rows.at(-1)).toBe("─".repeat(60));
     expect(rows.rows.join("\n").split("add to your agent")).toHaveLength(2);
@@ -248,7 +245,7 @@ describe("renderFlowDrawer", () => {
     expect(drawer.controls).toEqual(["↑/↓ move · Enter select · Esc close"]);
   });
 
-  it("omits the drawer header for a titleless flow", () => {
+  it("frames a flow without a redundant header", () => {
     const rows = renderFlowDrawer(
       {
         title: "",
@@ -263,6 +260,27 @@ describe("renderFlowDrawer", () => {
       rows: ["─".repeat(60), "", "   Vercel account", "", "─".repeat(60)],
       controls: [],
     });
+  });
+
+  it("keeps a live status inside the drawer after flow progress", () => {
+    const drawer = renderFlowDrawer(
+      {
+        title: "",
+        lines: [{ text: "Checked credentials", tone: "success" }],
+        content: {
+          kind: "status",
+          status: {
+            text: "Loading teams…",
+            indicator: { glyph: "⠼" },
+          },
+        },
+      },
+      theme,
+      60,
+    );
+
+    expect(drawer.rows.join("\n")).toContain("Loading teams…");
+    expect(drawer.controls).toEqual([]);
   });
 });
 

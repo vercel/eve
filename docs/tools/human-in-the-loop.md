@@ -121,6 +121,8 @@ The `response` policy receives:
 
 Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it.
 
+When a response is refused without starting a turn, the session returns to `session.waiting`. The client finishes the submission and keeps the approval prompt answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision. You can inspect `approval.candidate` events for the response policy's refusal reason.
+
 ### Skipping approval for schedule-dispatched turns
 
 `session.auth.current` identifies the caller of this turn. Markdown schedules use the app principal (`authenticator: "app"`, `principalId: "eve:app"`, `principalType: "runtime"`) automatically. A `run` schedule must pass its `appAuth` to `send(...)` for the child session to use that principal. Match all three fields to skip approval for automated turns while still prompting when a person calls the same tool:
@@ -196,6 +198,8 @@ See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for
 Channels turn requests into native UI: the Slack adapter renders approvals as buttons and questions as select menus, and writes the user's choice back as the answer. You get this for free on every [channel](/docs/channels/overview).
 
 From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
+
+The default message reducer waits for server confirmation before marking any input request answered. Use the store's `submitted` or `streaming` status to show that a response is being processed; submitting a response alone does not resolve an approval, question, or session-limit prompt. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
 
 ## What to read next
 

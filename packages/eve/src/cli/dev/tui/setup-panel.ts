@@ -143,21 +143,16 @@ export interface FlowPanelLine {
   evidence?: boolean;
 }
 
-/** One already-resolved animation frame and its active color. */
+/** One already-resolved animation frame. */
 export interface FlowPanelIndicator {
   glyph: string;
-  color: "green" | "yellow";
 }
 
-/** One live flow status after its animation frame and visual intent are resolved. */
-export type FlowPanelStatus =
-  | { kind: "progress"; text: string; indicator: FlowPanelIndicator }
-  | {
-      kind: "external-action";
-      text: string;
-      emphasis: string;
-      indicator: FlowPanelIndicator;
-    };
+/** One live flow status after its animation frame is resolved. */
+export interface FlowPanelStatus {
+  text: string;
+  indicator: FlowPanelIndicator;
+}
 
 export type FlowPanelContent =
   | {
@@ -225,24 +220,11 @@ function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
 }
 
 function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
-  return indicator.color === "green"
-    ? theme.colors.green(indicator.glyph)
-    : theme.colors.yellow(indicator.glyph);
-}
-
-function renderStatusText(status: FlowPanelStatus, theme: Theme): string {
-  if (status.kind === "progress") return theme.colors.dim(status.text);
-
-  const start = status.text.indexOf(status.emphasis);
-  if (start === -1) return theme.colors.dim(status.text);
-  const end = start + status.emphasis.length;
-  return `${theme.colors.dim(status.text.slice(0, start))}${theme.colors.yellow(
-    status.text.slice(start, end),
-  )}${theme.colors.dim(status.text.slice(end))}`;
+  return theme.colors.green(indicator.glyph);
 }
 
 function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
-  return `${renderIndicator(status.indicator, theme)} ${renderStatusText(status, theme)}`;
+  return `${renderIndicator(status.indicator, theme)} ${theme.colors.dim(status.text)}`;
 }
 
 export function flowMessageRows(lines: readonly FlowPanelLine[], theme: Theme): string[] {
@@ -327,43 +309,6 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
   // One breathable left margin for everything under the rule; blank rows
   // stay empty so spacing assertions and trailing-whitespace trims hold.
   return rows.map((row) => (row.length === 0 ? clip(row, width) : clip(` ${row}`, width)));
-}
-
-/**
- * Frames an active setup flow as a drawer above the terminal footer. The
- * command echo remains in the transcript; this surface owns only temporary
- * setup state and disappears when the flow settles.
- */
-export interface FlowDrawer {
-  /** Temporary content enclosed by the drawer boundaries. */
-  rows: string[];
-  /** Interaction hints placed below the drawer so they do not compete with its content. */
-  controls: string[];
-}
-
-export function renderFlowDrawer(state: FlowPanelState, theme: Theme, width: number): FlowDrawer {
-  const divider = theme.colors.dim(theme.glyph.dash.repeat(Math.max(1, width)));
-  const drawerMark = theme.unicode ? "┃" : "|";
-  // The drawer owns the flow title. Keep it out of the panel body so a status
-  // or question never repeats its context immediately below the header.
-  const content =
-    state.content.kind === "question" && state.content.title === state.title
-      ? { ...state.content, title: undefined }
-      : state.content;
-  const body = renderFlowPanel({ ...state, title: "", content }, theme, width);
-  // Every interactive question ends with an empty row and one or more wrapped
-  // hints. Put that affordance under the drawer boundary instead of making it
-  // compete with the active selection inside.
-  const footerStart = body.lastIndexOf("");
-  const controls = footerStart === -1 ? [] : body.slice(footerStart + 1);
-  const drawerBody = footerStart === -1 ? body : body.slice(0, footerStart);
-  const header =
-    state.title.length === 0 ? [] : [` ${theme.colors.dim(`${drawerMark} ${state.title}`)}`, ""];
-  const leftAlignedControls = controls.map((row) => row.trimStart());
-  return {
-    rows: [divider, "", ...header, ...drawerBody, "", divider],
-    controls: leftAlignedControls,
-  };
 }
 
 function optionRow(input: {

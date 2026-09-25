@@ -1,14 +1,13 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
+import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
 import { ScheduleIdKey, TurnDeliveryIdsKey, TurnTaskDeliveryKey } from "#context/keys.js";
 import * as activityCohort from "#execution/activity-cohort.js";
-import { setChannelContext } from "#execution/channel-context.js";
+import { writeChannelEvent } from "#execution/publish-channel-event.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { scheduledLaunchDeliveryEvent } from "#execution/scheduled-launch-delivery.js";
 import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
 import {
-  encodeMessageStreamEvent,
   type MessageStreamEvent,
   stampMessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -61,10 +60,14 @@ export function createSessionEventSink(input: SessionEventSinkInput): SessionEve
         suppressed: true,
       };
     }
-    const toEmit = await callAdapterEventHandler(adapter, deliverableEvent, adapterCtx);
-    setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-    const stamped = stampMessageStreamEvent(toEmit, ctx.get(TurnDeliveryIdsKey));
-    await writer.write(encodeMessageStreamEvent(stamped));
+    const stamped = await writeChannelEvent({
+      adapter,
+      adapterCtx,
+      ctx,
+      writer,
+      event: deliverableEvent,
+      deliveryIds: ctx.get(TurnDeliveryIdsKey),
+    });
     return { event: stamped, suppressed: false };
   };
 

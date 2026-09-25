@@ -186,6 +186,7 @@ describe("session owner starts", () => {
           activationToken: "owner-1:handoff",
           checkpoint,
           delivery,
+          handoffVersion: 2,
           kind: "handoff",
           ownerDeploymentId: "deployment-b",
           sessionWritable,

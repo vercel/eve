@@ -409,6 +409,11 @@ export function isTypeScriptDeclarationFileName(name: string): boolean {
   return /\.d\.(?:cts|mts|ts)$/.test(name);
 }
 
+/** Identifies colocated tests to omit from automatic agent source discovery. */
+export function isAuthoredTestPath(path: string): boolean {
+  return /(?:^|[/\\])__tests__(?:[/\\]|$)/.test(path) || /\.(?:test|spec)\.[cm]?[jt]s$/.test(path);
+}
+
 /** Returns whether a filename is a source map for a generated module or declaration. */
 export function isGeneratedSourceMapFileName(name: string): boolean {
   if (!name.endsWith(".map")) return false;

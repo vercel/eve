@@ -122,6 +122,8 @@ eve deploy
 
 `eve deploy` installs dependencies, runs `vercel deploy --prod`, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
+When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
+
 For non-interactive use, confirm the production deploy up front. `--project` links first, so a new project needs no separate `eve link`:
 
 ```bash

@@ -11,7 +11,10 @@ import {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { createLogger } from "#internal/logging.js";
-import { isSlackResponseError } from "#public/channels/slack/api-errors.js";
+import {
+  isSlackResponseError,
+  type SlackTransportOptions,
+} from "#public/channels/slack/transport.js";
 import {
   buildSlackBinding,
   buildSlackWorkspaceHandle,
@@ -231,6 +234,7 @@ function readInstallationTeamId(value: unknown): string | undefined {
 
 /** Channel-supplied dependencies for {@link handleInteractionPost}. */
 export interface InteractionHandlerDeps {
+  readonly api: SlackTransportOptions | undefined;
   readonly config: SlackChannelConfig;
   readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
 }
@@ -269,7 +273,7 @@ export async function handleInteractionPost(
   }
 
   if (payload.kind === "slash_command") {
-    dispatchSlashCommand(payload, ctx, deps.config);
+    dispatchSlashCommand(payload, ctx, deps);
     return new Response(null, { status: 200 });
   }
 
@@ -328,6 +332,7 @@ export async function handleInteractionPost(
     if (customActions.length > 0) {
       const actionUser = customActions[0]!.user;
       const { thread, slack } = buildSlackBinding({
+        api: deps.api,
         botToken: deps.config.credentials?.botToken,
         channelId: interaction.channelId,
         threadTs: interaction.threadTs,
@@ -439,26 +444,15 @@ function dispatchShortcut(
     return;
   }
 
-  const shortcutCtx: SlackShortcutContext = buildShortcutContext({
-    config: deps.config,
-    installationTeamId,
-    teamId: shortcut.teamId,
-  });
-  dispatchInteractionHook(() => onShortcut(shortcut, shortcutCtx), ctx, "shortcut handler failed");
-}
-
-function buildShortcutContext(input: {
-  readonly config: SlackChannelConfig;
-  readonly installationTeamId: string | undefined;
-  readonly teamId: string | undefined;
-}): SlackShortcutContext {
-  return {
+  const shortcutCtx: SlackShortcutContext = {
     slack: buildSlackWorkspaceHandle({
-      botToken: input.config.credentials?.botToken,
-      installationTeamId: input.installationTeamId,
-      teamId: input.teamId,
+      api: deps.api,
+      botToken: deps.config.credentials?.botToken,
+      installationTeamId,
+      teamId: shortcut.teamId,
     }),
   };
+  dispatchInteractionHook(() => onShortcut(shortcut, shortcutCtx), ctx, "shortcut handler failed");
 }
 
 function dispatchInteractionHook(
@@ -574,6 +568,7 @@ async function openFreeformModal(input: {
   // above resolves outside the try so a throwing resolver joins that case.
   try {
     await callSlackApi({
+      api: input.deps.api,
       botToken: token,
       operation: "views.open",
       body: { trigger_id: triggerId, view },

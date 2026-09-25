@@ -28,11 +28,6 @@ export interface ChannelSetupChoice {
 /** Optional interaction capability for a long-running setup operation. */
 export type ChannelSetupAwaitChoice = (options: ChannelSetupChoiceOptions) => ChannelSetupChoice;
 
-/** Why a live setup indicator is waiting. */
-export type SetupSpinnerIntent =
-  | { kind: "progress" }
-  | { kind: "external-action"; emphasis: string };
-
 /** Status and subprocess output operations used by shared setup flows. */
 export interface ChannelSetupLog {
   message(text: string): void;
@@ -49,7 +44,7 @@ export interface ChannelSetupLog {
    * (which have no live status surface) can omit it and callers fall back to
    * a persisted message.
    */
-  spinner?(message: string, intent?: SetupSpinnerIntent): { stop(): void };
+  spinner?(message: string): { stop(): void };
 }
 
 /**
@@ -62,9 +57,8 @@ export async function withPhase<T>(
   log: ChannelSetupLog,
   message: string,
   task: () => Promise<T>,
-  intent?: SetupSpinnerIntent,
 ): Promise<T> {
-  const spinner = log.spinner?.(message, intent);
+  const spinner = log.spinner?.(message);
   if (!spinner) log.message(message);
   try {
     return await task();
