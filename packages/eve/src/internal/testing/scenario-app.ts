@@ -4,6 +4,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   rm,
   writeFile,
@@ -219,6 +220,31 @@ function resolvePackageVersion(packageName: string): string {
   }
 
   return manifest.version;
+}
+
+export async function resolveScenarioPackageVersion(packageName: string): Promise<string> {
+  let currentPath = dirname(require.resolve(packageName));
+
+  while (true) {
+    try {
+      const manifest = JSON.parse(await readFile(join(currentPath, "package.json"), "utf8")) as {
+        name?: unknown;
+        version?: unknown;
+      };
+
+      if (manifest.name === packageName && typeof manifest.version === "string") {
+        return manifest.version;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath) {
+      throw new Error(`Could not find the installed package manifest for ${packageName}.`);
+    }
+    currentPath = parentPath;
+  }
 }
 
 async function writeDescriptorDirectories(input: {
