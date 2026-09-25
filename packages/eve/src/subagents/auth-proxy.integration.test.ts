@@ -4,15 +4,18 @@ import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js"
 import type {
   SubagentAuthorizationEvent,
   SubagentAuthorizationEventHookPayload,
+  SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
+import { setHarnessEmissionState } from "#harness/emission.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createEmptyHookRegistry, createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   BundleKey,
   ChannelKey,
@@ -47,7 +50,10 @@ const turnAgent = {
   workspaceSpec: {} as never,
 };
 
-function buildBundle(adapter: ChannelAdapter): CompiledBundle {
+function buildBundle(
+  adapter: ChannelAdapter,
+  hookRegistry = createEmptyHookRegistry(),
+): CompiledBundle {
   return {
     adapterRegistry: {
       adaptersByKind: new Map([[adapter.kind, adapter]]),
@@ -60,7 +66,7 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
         turnAgent,
       },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry,
     resolvedAgent: { config: {} },
     subagentRegistry: {},
     toolRegistry: {},
@@ -68,11 +74,15 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
   } as never;
 }
 
-function buildContext(input: { readonly adapter: ChannelAdapter; readonly sessionId: string }): {
+function buildContext(input: {
+  readonly adapter: ChannelAdapter;
+  readonly hookRegistry?: CompiledBundle["hookRegistry"];
+  readonly sessionId: string;
+}): {
   readonly bundle: ReturnType<typeof buildBundle>;
   readonly ctx: ContextContainer;
 } {
-  const bundle = buildBundle(input.adapter);
+  const bundle = buildBundle(input.adapter, input.hookRegistry);
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, bundle);
@@ -138,6 +148,99 @@ function decodeEvent(chunk: Uint8Array): MessageStreamEvent {
 }
 
 describe("subagent authorization proxy", () => {
+  it("dispatches parent input.requested hooks after channel delivery and keeps the response route", async () => {
+    const parentSessionId = "parent-input-session";
+    let channelCalls = 0;
+    let hookCalls = 0;
+    const adapter: ChannelAdapter = {
+      kind: "input-request-proxy-test",
+      "input.requested"() {
+        channelCalls += 1;
+      },
+    };
+    const hookRegistry = createRuntimeHookRegistry([
+      {
+        events: {
+          "input.requested": async (event, hookContext) => {
+            if (event.type !== "input.requested") throw new Error("unexpected hook event");
+            expect(channelCalls).toBe(1);
+            expect(event.data.turnId).toBe("child-turn");
+            expect(hookContext.session.id).toBe(parentSessionId);
+            expect(hookContext.session.turn.id).toBe("parent-turn");
+            expect(hookContext.channel.kind).toBe(adapter.kind);
+            hookCalls += 1;
+          },
+        },
+        exportName: undefined,
+        logicalPath: "hooks/input-requested.ts",
+        slug: "input-requested",
+        sourceId: "hooks/input-requested.ts",
+        sourceKind: "module",
+      },
+    ]);
+    const { ctx } = buildContext({ adapter, hookRegistry, sessionId: parentSessionId });
+    const chunks: Uint8Array[] = [];
+    const sessionWritable = createCapturingWritable(chunks);
+    const session = setHarnessEmissionState(createSession(parentSessionId), {
+      sessionStarted: true,
+      sequence: 1,
+      stepIndex: 2,
+      turnId: "parent-turn",
+    });
+    const hookPayload: SubagentInputRequestHookPayload = {
+      callId: "call-child",
+      childContinuationToken: "subagent:parent:call-child",
+      childSessionId: "child-session",
+      event: {
+        requests: [
+          {
+            action: {
+              callId: "tool-call",
+              input: {},
+              kind: "tool-call",
+              toolName: "test",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [{ id: "approve", label: "Approve" }],
+            prompt: "Approve?",
+            requestId: "request-1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child-turn",
+      },
+      kind: "subagent-input-request",
+      subagentName: "worker",
+    };
+
+    const result = await emitProxiedSubagentEvent({
+      ctx,
+      durableSession: projectToDurableSession(session),
+      hookPayload,
+      sessionWritable,
+    });
+
+    expect(channelCalls).toBe(1);
+    expect(hookCalls).toBe(1);
+    expect(chunks.map(decodeEvent).map((event) => event.type)).toEqual([
+      "input.requested",
+      "turn.completed",
+      "session.waiting",
+    ]);
+    const routed = routeDeliverPayload({
+      payload: { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+      state: result.sessionState.snapshot.session.state,
+    });
+    expect(routed.forChildren).toMatchObject([
+      {
+        childContinuationToken: "subagent:parent:call-child",
+        payload: { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
+      },
+    ]);
+  });
+
   it("preserves approval candidate and settlement events", async () => {
     const parentSessionId = "parent-approval-session";
     const session = createSession(parentSessionId);
