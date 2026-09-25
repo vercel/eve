@@ -556,11 +556,7 @@ function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output
   };
 }
 
-function toMutableJsonValue(value: RuntimeActionResult["output"] | undefined): MutableJsonValue {
-  if (value === undefined) {
-    return null;
-  }
-
+function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonValue {
   if (
     value === null ||
     typeof value === "string" ||
