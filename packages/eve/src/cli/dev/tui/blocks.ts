@@ -562,13 +562,12 @@ function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
 }
 
 /**
- * The end-of-turn coda: `└ Done in 3min 24s ── ↑ 32.4K ↓ 682`, dim,
- * closing the turn under the assistant's final prose. The corner is the
- * settled form of the live `▪ Working… <duration> ── <flow>` turn bar; the
- * body arrives fully composed from the renderer's shared stats builder.
+ * The end-of-turn coda: `Done in 3min 24s (↑ 32.4K ↓ 682)`, dim and
+ * standalone beneath the assistant's final prose. The body arrives fully
+ * composed from the renderer's shared stats builder.
  */
 function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
-  const line = `${theme.glyph.corner} ${block.body ?? ""}`;
+  const line = block.body ?? "";
   return [theme.colors.dim(truncatePlain(line, Math.max(1, width)))];
 }
 

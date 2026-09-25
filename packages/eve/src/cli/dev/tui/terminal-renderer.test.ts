@@ -1671,12 +1671,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderSessionBoundary();
     const snapshot = screen.snapshot();
     // The dead turn's stats close before the boundary, not after it.
-    expect(snapshot.indexOf("└ Done in")).toBeGreaterThan(-1);
-    expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
+    expect(snapshot.indexOf("Done in")).toBeGreaterThan(-1);
+    expect(snapshot.indexOf("Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
 
     // Control returning to the prompt must not add a second coda.
     const second = renderer.readPrompt();
-    expect(countOccurrences(screen.snapshot(), "└ Done in")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "Done in")).toBe(1);
     input.ctrlC();
     expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
@@ -2029,7 +2029,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const second = renderer.readPrompt();
     // Tokens are the turn's summed step usage, not the last report; the sum
     // crossing the 20K input threshold is what earns the row.
-    expect(screen.snapshot()).toContain("└ Done in 1s ── ↑ 20.5K ↓ 43");
+    expect(screen.snapshot()).toContain("Done in 1s (↑ 20.5K ↓ 43)");
     input.ctrlC();
     expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
@@ -2058,7 +2058,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     // Under 10s and under 20K turn input: no coda row.
     const second = renderer.readPrompt();
-    expect(screen.snapshot()).not.toContain("\n└ ");
+    expect(screen.snapshot()).not.toContain("\nDone in ");
     input.ctrlC();
     expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
@@ -2163,7 +2163,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       // 12s of wall clock qualifies the coda; the thought itself leaves no
       // separate transcript bar.
       const second = renderer.readPrompt();
-      expect(screen.snapshot()).toContain("└ Done in 12s");
+      expect(screen.snapshot()).toContain("Done in 12s");
       expect(screen.snapshot()).not.toContain("Thought for");
       input.ctrlC();
       input.ctrlC();
@@ -2950,10 +2950,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Every option's description rides its own row, cursor or not.
     expect(lines).toContain("        Managed access");
     expect(lines).toContain("        Direct access");
-    // The panel carries its one quiet hint; no status hint row beneath it.
-    expect(snapshot).toContain("Esc to dismiss");
-    expect(snapshot).not.toContain("Enter to select");
-    expect(countOccurrences(snapshot, "Esc to")).toBe(1);
+    // The drawer carries the question's navigation controls; no status row
+    // appears beneath it.
+    expect(snapshot).toContain("Esc dismiss");
+    expect(snapshot).toContain("Enter select");
+    expect(countOccurrences(snapshot, "Esc dismiss")).toBe(1);
 
     input.send("j");
     const unselected = screen
@@ -2989,7 +2990,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         { id: "external", label: "Other providers", description: "Direct access" },
       ],
     });
-    expect(screen.snapshot()).toContain("Esc to dismiss");
+    expect(screen.snapshot()).toContain("Esc dismiss");
 
     await escape();
     // No answer travels; the runner returns to the prompt and the question
@@ -3025,7 +3026,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     expect(screen.snapshot()).not.toContain("draft answer");
-    expect(screen.snapshot()).toContain("Esc to dismiss");
+    expect(screen.snapshot()).toContain("Esc dismiss");
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
@@ -3141,8 +3142,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("New York");
     await escape();
-    // First Esc only clears the draft; the question is still answerable.
-    expect(screen.snapshot()).toContain("? What city are you in?");
+    // First Esc only clears the draft; the question drawer stays open.
+    expect(screen.snapshot()).toContain("What city are you in?");
+    expect(screen.snapshot()).toContain("Enter submit · Esc dismiss");
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
@@ -4033,6 +4035,27 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     expect(screen.snapshot()).toContain("│ [eve:dev] rebuild failed");
     expect(screen.snapshot()).toContain("missing export");
+    renderer.shutdown();
+  });
+
+  it("renders tool approval in a drawer", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a1",
+      toolCallId: "c1",
+      toolName: "random_color",
+      input: {},
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Approve random_color?");
+    expect(snapshot).toContain("Yes");
+    expect(snapshot).toContain("No");
+    expect(snapshot).toContain("y yes · n no · Ctrl-C cancel");
+    expect(snapshot).not.toContain("(y/n)");
+    input.type("y");
+
+    await expect(approval).resolves.toEqual({ approved: true });
     renderer.shutdown();
   });
 

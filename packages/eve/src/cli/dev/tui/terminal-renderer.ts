@@ -80,7 +80,6 @@ import {
   selectValueAtCursor,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import { renderCursorRow } from "#setup/cli/option-row.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -589,8 +588,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
-  /** The open HITL question overlay, painted above the input area. */
-  #questionPanel?: (width: number) => string[];
+  /** The open HITL drawer, painted above the input area. */
+  #questionPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
   #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
   #transientPanelClose?: () => void;
   /** The active setup flow's bordered panel: progress, question, status. */
@@ -1290,8 +1289,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#stopTicker();
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
-    this.#status = `Approve ${formatToolApprovalTitle(request)}?  (y/n)`;
     this.#interrupted = false;
+    this.#questionPanel = (width) =>
+      renderTransientDrawer(
+        [`  Approve ${formatToolApprovalTitle(request)}?`, "", "  Yes", "  No"],
+        ["y yes · n no · Ctrl-C cancel"],
+        this.#theme,
+        width,
+      );
     this.#paint();
 
     return await new Promise((resolve, reject) => {
@@ -1304,12 +1309,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
             if (key.framing !== "unframed") break;
             const value = key.value.toLowerCase();
             if (value === "y") {
+              this.#questionPanel = undefined;
               this.#startWorking();
               this.#status = STATUS.processing;
               this.#detachInput();
               this.#paint();
               resolve({ approved: true });
             } else if (value === "n") {
+              this.#questionPanel = undefined;
               this.#startWorking();
               this.#status = STATUS.processing;
               this.#markToolDenied(request.toolCallId);
@@ -1324,6 +1331,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
           case "ctrl-c":
             this.#interrupted = true;
+            this.#questionPanel = undefined;
             this.#stop();
             reject(interruptedError());
             break;
@@ -1354,8 +1362,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const totalRows = optionList.length + (hasFreeformRow ? 1 : 0);
     const sectionKey = questionSectionId(question.requestId);
 
-    // The overlay is the primary surface for option questions; text mode
-    // serves prompts without options. Esc (with nothing to clear) dismisses
+    // Both question shapes use a drawer. Esc (with nothing to clear) dismisses
     // the question: it resolves `undefined`, the runner returns to the
     // prompt, and the server records the still-parked request as `ignored`
     // when the user's next message resumes the turn.
@@ -1367,29 +1374,46 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The panel closure reads the mutable interaction state at paint time,
     // so key handlers only update it and repaint.
-    const overlayPanel = (width: number): string[] =>
-      renderQuestionPanel(
-        {
-          prompt: stripTerminalControls(question.prompt),
-          options: optionList,
-          cursor: cursorIndex,
-          allowFreeform: hasFreeformRow,
-          editor,
-          caretVisible: this.#caretVisible,
-        },
+    const overlayPanel = (width: number) =>
+      renderTransientDrawer(
+        renderQuestionPanel(
+          {
+            prompt: stripTerminalControls(question.prompt),
+            options: optionList,
+            cursor: cursorIndex,
+            allowFreeform: hasFreeformRow,
+            editor,
+            caretVisible: this.#caretVisible,
+          },
+          this.#theme,
+          width,
+        ),
+        ["↑/↓ move · Enter select · Esc dismiss"],
         this.#theme,
         width,
       );
 
-    const renderTextSection = () => {
-      this.#upsertBlock({
-        id: sectionKey,
-        kind: "question",
-        title: stripTerminalControls(question.prompt),
-        body: formatQuestionContent(question, undefined, this.#theme),
-        preformatted: true,
-        live: true,
+    const textPanel = (width: number) => {
+      const inputRows = promptInputRows({
+        text: editor.text,
+        cursor: editor.cursor,
+        width: Math.max(1, width - 2),
+        theme: this.#theme,
+        caretVisible: this.#caretVisible,
+        ghost: "",
+        maxRows: 3,
       });
+      if (inputRows.at(-1) === "") inputRows.pop();
+      return renderTransientDrawer(
+        [
+          `  ${this.#theme.colors.bold(stripTerminalControls(question.prompt))}`,
+          "",
+          ...inputRows.map((row) => `  ${row}`),
+        ],
+        ["Enter submit · Esc dismiss"],
+        this.#theme,
+        width,
+      );
     };
 
     const syncFreeformCaret = () => {
@@ -1413,8 +1437,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const enterTextMode = () => {
       mode = "text";
-      this.#questionPanel = undefined;
-      renderTextSection();
+      this.#questionPanel = textPanel;
       this.#inputActive = true;
       this.#syncInput(editor);
       this.#status = "";
@@ -1422,11 +1445,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#paint();
     };
 
-    if (mode === "overlay") {
-      enterOverlay();
-    } else {
-      enterTextMode();
-    }
+    if (mode === "overlay") enterOverlay();
+    else enterTextMode();
 
     const finalize = (resolved: {
       optionId?: string;
@@ -4465,9 +4485,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The HITL question overlay owns the footer down to the status bar —
     // no indicator or hint row beneath it (the panel carries its own).
     if (this.#questionPanel !== undefined) {
-      rows.push(...this.#questionPanel(width), "");
-      this.#pushStatusLine(rows, width);
-      return rows;
+      const drawer = this.#questionPanel(width);
+      rows.length = 0;
+      return [...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;
@@ -4681,20 +4701,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return clip(`${marker} ${label}${tokens}`, width);
   }
 
-  /**
-   * The settled coda: `3min 24s ── ↑ 32.4K ↓ 682`, with token flow only once
-   * the turn has moved a token.
-   */
+  /** The settled coda's duration and optional token flow. */
   #turnStatsBody(elapsedMs: number): string {
-    return `${formatTurnDuration(elapsedMs)}${this.#turnFlowSuffix()}`;
-  }
-
-  /** ` ── ↑ 32.4K ↓ 682` once the turn has moved a token; empty before. */
-  #turnFlowSuffix(): string {
     const { inputTokens, outputTokens } = this.#turnClock.usage;
-    if (inputTokens === 0 && outputTokens === 0) return "";
-    const seg = this.#theme.glyph.dash.repeat(2);
-    return ` ${seg} ${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)}`;
+    const flow =
+      inputTokens === 0 && outputTokens === 0
+        ? ""
+        : ` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`;
+    return `${formatTurnDuration(elapsedMs)}${flow}`;
   }
 
   /**
@@ -5541,42 +5555,6 @@ function formatConnectionAuthContent(
     const reason = stripTerminalControls(update.reason);
     if (reason.length > 0) lines.push(`Reason: ${reason}`);
   }
-  return lines.join("\n");
-}
-
-function formatQuestionContent(
-  question: AgentTUIInputQuestion,
-  highlight: number | undefined,
-  theme: Theme,
-): string {
-  const c = theme.colors;
-  const lines: string[] = [];
-  const options = question.options ?? [];
-
-  if (options.length > 0) {
-    for (const [index, option] of options.entries()) {
-      const labelText = stripTerminalControls(option.label);
-      const descriptionText =
-        option.description === undefined ? "" : stripTerminalControls(option.description);
-      const selected = highlight === index;
-      const description =
-        descriptionText.length > 0
-          ? `${selected ? " " : "  "}${c.dim(`— ${descriptionText}`)}`
-          : "";
-      const content = selected ? `${theme.glyph.selectedPointer} ${labelText}` : `  ${labelText}`;
-      const selection = renderCursorRow(content, selected, c);
-      lines.push(`${selection}${description}`);
-    }
-    if (question.allowFreeform === true) {
-      const selected = highlight === options.length;
-      const label = "Type your own answer";
-      const content = selected ? `${theme.glyph.selectedPointer} ${label}` : `  ${c.dim(label)}`;
-      lines.push(renderCursorRow(content, selected, c));
-    }
-  } else {
-    lines.push(c.dim("  (type your answer)"));
-  }
-
   return lines.join("\n");
 }
 

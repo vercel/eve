@@ -31,7 +31,7 @@ function render(state: {
 }
 
 describe("renderQuestionPanel", () => {
-  it("opens with a borderless prompt and closes on the dismiss hint", () => {
+  it("renders a prompt and options for its enclosing drawer", () => {
     const rows = render({ cursor: 0 });
 
     expect(rows[0]).toBe("  What type of options would you like to see?");
@@ -40,7 +40,7 @@ describe("renderQuestionPanel", () => {
     expect(rows).toContain("        See 4 tools I can use");
     expect(rows).toContain("     2. Connected Services");
     expect(rows[1]).toBe("");
-    expect(rows.at(-1)).toBe("  Esc to dismiss");
+    expect(rows.at(-1)).toBe("     3. Type your own answer");
   });
 
   it("marks only the cursor row with the pointer and enter badge", () => {

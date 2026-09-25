@@ -256,9 +256,9 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["  ▪ Ran pnpm test"]);
   });
 
-  it("renders the end-of-turn stats as a dim cornered coda", () => {
-    expect(render({ kind: "turn-stats", body: "Done in 3min 24s ── ↑ 32.4K ↓ 682" })).toEqual([
-      "└ Done in 3min 24s ── ↑ 32.4K ↓ 682",
+  it("renders the end-of-turn stats as a standalone dim coda", () => {
+    expect(render({ kind: "turn-stats", body: "Done in 3min 24s (↑ 32.4K ↓ 682)" })).toEqual([
+      "Done in 3min 24s (↑ 32.4K ↓ 682)",
     ]);
   });
 

@@ -1,8 +1,7 @@
 /**
- * Pure rendering for the HITL question panel — the overlay a pending question
- * request (such as one from `ask_question` or `ctx.ask()`) opens above the
- * input area. A full-width rule separates
- * it from the transcript, options render as numbered rows with their
+ * Pure rendering for the HITL question drawer — a pending question request
+ * (such as one from `ask_question` or `ctx.ask()`) opens above the input area.
+ * Options render as numbered rows with their
  * descriptions always visible, and the trailing "Type your own answer" row
  * carries an inline elbow editor that receives focus the moment the cursor
  * rests on it (the provider-key grammar from the setup panel). The renderer
@@ -67,9 +66,6 @@ export function renderQuestionPanel(
     }
   }
 
-  // One quiet hint; arrow/enter affordances are carried by the cursor row
-  // itself. The overlay suppresses the footer's status hint row entirely.
-  rows.push("", `  ${c.dim("Esc to dismiss")}`);
   return rows.map((row) => clipVisible(row, width));
 }
 
