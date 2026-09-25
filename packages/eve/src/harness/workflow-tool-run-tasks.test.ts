@@ -5,6 +5,7 @@ import {
   recordWorkflowTaskView,
   registerWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
+import { resolveTaskDeliveryContext } from "#tasks/delivery-context.js";
 import { deriveTaskId } from "#tasks/task-id.js";
 import type { TaskView } from "#tasks/types.js";
 import type { BackgroundTask } from "#harness/workflow-tool-runs.js";
@@ -38,6 +39,54 @@ describe("session task index", () => {
     name: "research",
   };
   const dispatchContext = { auth: { current: null, initiator: null } } as const;
+  it("separates overlapping requests and preserves ownership through chained background work and replay", () => {
+    const owned = (id: string, turnId: string, requestId: string) => {
+      const run = task(id, turnId);
+      return { ...run, task: { ...run.task, requestId } };
+    };
+    let session = createSession();
+    session = registerWorkflowToolRun(session, owned("a1", "A", "A"));
+    session = registerWorkflowToolRun(session, owned("b1", "B", "B"));
+    session = registerWorkflowToolRun(session, owned("a2", "C", "A"));
+    session = createSession(JSON.parse(JSON.stringify(session.state)));
+    session = registerWorkflowToolRun(session, owned("a2", "C", "other"));
+    expect(
+      getBackgroundTasks(session.state)
+        .query({ requestId: "A" })
+        .map((task) => task.taskId),
+    ).toEqual(["a1", "a2"]);
+    expect(
+      getBackgroundTasks(session.state)
+        .query()
+        .map((task) => task.cohortId),
+    ).toEqual(["a1", "b1", "a1"]);
+    session = {
+      ...session,
+      state: recordWorkflowTaskView(session.state, terminal("a1", "completed")).state,
+    };
+    expect(
+      resolveTaskDeliveryContext({
+        state: session.state,
+        taskDeliveryIds: ["a1:ready:completed"],
+        taskDeliveryPolicy: "auto",
+      }),
+    ).toMatchObject({ rootTurnId: "A", phase: "pending" });
+    session = {
+      ...session,
+      state: recordWorkflowTaskView(session.state, terminal("a2", "completed")).state,
+    };
+    expect(
+      resolveTaskDeliveryContext({
+        state: session.state,
+        taskDeliveryIds: ["a2:ready:completed"],
+        taskDeliveryPolicy: "auto",
+      }),
+    ).toMatchObject({ rootTurnId: "A", phase: "settled" });
+    expect(
+      getBackgroundTasks(session.state).query({ requestId: "B", state: "working" }),
+    ).toHaveLength(1);
+  });
+
   it("returns an empty index when the key is absent", () => {
     expect(getBackgroundTasks({}).query()).toEqual([]);
     expect(getBackgroundTasks(undefined).query()).toEqual([]);

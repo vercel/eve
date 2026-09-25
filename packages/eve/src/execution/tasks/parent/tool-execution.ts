@@ -5,7 +5,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
-import { ActivityObserverKey, CapabilitiesKey } from "#context/keys.js";
+import { ActivityObserverKey, ActivityRootTurnIdKey, CapabilitiesKey } from "#context/keys.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -379,6 +379,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       ...prepared,
       task: {
         ...prepared.task,
+        requestId: input.ctx.get(ActivityRootTurnIdKey) ?? parentTurnId,
         activityWorkIdentity: taskInput.activityObserver?.workIdentity,
       },
     };

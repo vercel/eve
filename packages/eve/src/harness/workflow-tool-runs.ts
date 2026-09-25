@@ -23,6 +23,7 @@ export interface WorkflowTaskPayload {
   readonly dispatchContext: TaskAgentDispatchContext;
   readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly cohortId?: string;
+  readonly requestId?: string;
   /** Parent-owned outcome. Read through readWorkflowTaskView before consuming it. */
   readonly outcome?: unknown;
 }
@@ -151,6 +152,7 @@ function isWorkflowToolRun(value: unknown): value is WorkflowToolRun {
     isTaskMetadata(task.metadata) &&
     isTaskAgentDispatchContext(task.dispatchContext) &&
     (task.cohortId === undefined || isNonEmptyString(task.cohortId)) &&
+    (task.requestId === undefined || isNonEmptyString(task.requestId)) &&
     (task.activityWorkIdentity === undefined ||
       parseActivityWorkIdentityV1(task.activityWorkIdentity) !== undefined)
   );
@@ -291,6 +293,7 @@ export type BackgroundTask = TaskView & {
 export interface BackgroundTaskFilter {
   readonly state?: BackgroundTaskState | readonly BackgroundTaskState[];
   readonly cohortId?: string;
+  readonly requestId?: string;
   readonly turnId?: string;
 }
 
@@ -320,6 +323,11 @@ export function getBackgroundTasks(state: SessionStateMap | undefined): Backgrou
       return runs.flatMap((run) => {
         if (filter.cohortId !== undefined && cohortIdOf(run) !== filter.cohortId) return [];
         if (filter.turnId !== undefined && run.origin.turnId !== filter.turnId) return [];
+        if (
+          filter.requestId !== undefined &&
+          (run.task.requestId ?? run.origin.turnId) !== filter.requestId
+        )
+          return [];
         if (run.task.outcome !== undefined && !admitsOutcomes) return [];
         const task = toBackgroundTask(run);
         return states === undefined || states.includes(task.status) ? [task] : [];
@@ -399,14 +407,19 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
               ? previous.task.activityWorkIdentity
               : { ...previous.task.activityWorkIdentity, ...entry.task.activityWorkIdentity },
           cohortId: previous.task.cohortId,
+          requestId: previous.task.requestId,
           dispatchContext: previous.task.dispatchContext,
           outcome: previous.task.outcome ?? entry.task.outcome,
         },
       };
     } else {
+      const requestId = entry.task.requestId;
       const pending = runs.find(
         (candidate): candidate is BackgroundWorkflowToolRun =>
-          candidate.lifetime === "session" && candidate.task.outcome === undefined,
+          candidate.lifetime === "session" &&
+          candidate.task.outcome === undefined &&
+          (requestId === undefined ||
+            (candidate.task.requestId ?? candidate.origin.turnId) === requestId),
       );
       entry = {
         ...entry,

@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 
 /**
  * Smoke-test eval for `eve eval`.
@@ -13,9 +14,15 @@ export default defineEval({
   // Instructing an exact echo keeps the smoke test stable regardless of how
   // the model would otherwise phrase its reply.
   async test(t) {
-    await t.send('Reply with exactly the text "smoke ping" and nothing else.');
+    const turn = await t.send('Reply with exactly the text "smoke ping" and nothing else.');
     t.succeeded();
     t.messageIncludes("smoke ping");
     t.usedNoTools();
+    const started = turn.events.find((event) => event.type === "turn.started");
+    const terminal = turn.events.find((event) => event.type === "turn.completed");
+    t.check(
+      terminal?.meta.request,
+      equals({ id: started?.data.turnId, phase: "none", outcome: "completed" }),
+    );
   },
 });

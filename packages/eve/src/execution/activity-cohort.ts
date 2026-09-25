@@ -2,11 +2,7 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { MatchedAuthorizationCallback } from "#execution/authorization-callback-match.js";
 import type { PendingAuthorizationState } from "#harness/authorization.js";
 import type { ContextContainer } from "#context/container.js";
-import {
-  ActivityObserverKey,
-  ActivityPendingBlockersKey,
-  ActivityRootTurnIdKey,
-} from "#context/keys.js";
+import { ActivityPendingBlockersKey, ActivityRootTurnIdKey } from "#context/keys.js";
 import {
   activityRequestIdsForRootTurn,
   activityRootTurnIdForInputResponses,
@@ -21,13 +17,20 @@ export function updateActivityRootForDelivery(input: {
   readonly sessionState: SessionStateMap | undefined;
   readonly taskRootTurnId?: string;
 }): void {
-  if (!input.ctx.has(ActivityObserverKey)) return;
   if (input.taskRootTurnId !== undefined) {
     input.ctx.set(ActivityRootTurnIdKey, input.taskRootTurnId);
+    input.ctx.set(
+      ActivityPendingBlockersKey,
+      activityRequestIdsForRootTurn(input.sessionState, input.taskRootTurnId),
+    );
     return;
   }
   const delivery = input.delivery;
   if (delivery === undefined) return;
+  if (delivery.taskDeliveryId !== undefined) {
+    input.ctx.delete(ActivityRootTurnIdKey);
+    return;
+  }
   const hasMessage = delivery.payloads.some((payload) => payload.message !== undefined);
   if (hasMessage && delivery.taskDeliveryId === undefined) {
     input.ctx.set(ActivityRootTurnIdKey, input.activeTurnId);
@@ -75,7 +78,6 @@ export function updateActivityBlockers(
   ctx: ContextContainer,
   event: UnstampedMessageStreamEvent,
 ): void {
-  if (!ctx.has(ActivityObserverKey)) return;
   if (event.type === "input.requested") {
     addActivityBlockers(
       ctx,

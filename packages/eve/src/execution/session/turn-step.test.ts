@@ -2828,7 +2828,7 @@ describe("turnStep", () => {
     });
 
     expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
-    expect(observedActivityRoots).toEqual(["turn-parent", "turn-parent", "turn_0"]);
+    expect(observedActivityRoots).toEqual(["turn-parent", undefined, "turn_0"]);
     expect(observedInputs[0]).toMatchObject({
       frameworkMessageKind: "execution.background_task",
     });

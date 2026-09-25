@@ -250,6 +250,7 @@ export async function callAdapterEventHandler(
   adapter: ChannelAdapter,
   event: UnstampedMessageStreamEvent,
   ctx: ChannelAdapterContext,
+  onError?: () => void,
 ): Promise<UnstampedMessageStreamEvent> {
   const eventForHandler = withWaitingContinuationToken(event, ctx);
   const handler = adapter[event.type] as
@@ -260,6 +261,7 @@ export async function callAdapterEventHandler(
     try {
       await handler("data" in eventForHandler ? eventForHandler.data : undefined, ctx);
     } catch (error) {
+      onError?.();
       log.error("adapter event handler threw — event swallowed", {
         adapterKind: getAdapterKind(adapter),
         eventType: event.type,

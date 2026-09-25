@@ -34,6 +34,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
   TurnTaskDeliveryKey,
+  ActivityRootTurnIdKey,
   TaskDeliveryPolicyKey,
   TurnDeliveryIdsKey,
 } from "#context/keys.js";
@@ -358,13 +359,24 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     });
 
     const taskDeliveryPhase = ctx.get(TurnTaskDeliveryKey);
-    if (taskDeliveryPhase === "none" || taskDeliveryPhase === "initiating") {
+    if (
+      taskDeliveryPhase === "none" ||
+      taskDeliveryPhase === "initiating" ||
+      taskDeliveryPhase === "settled" ||
+      taskDeliveryPhase === "pending"
+    ) {
       const taskContext = resolveInitiatingTaskContext({
         state: durableSession.state,
         turnId: activeTurnId(initialEmissionState),
       });
       if (taskContext !== undefined) {
-        ctx.set(TurnTaskDeliveryKey, taskContext.phase);
+        ctx.set(
+          TurnTaskDeliveryKey,
+          (ctx.get(ActivityRootTurnIdKey) ?? activeTurnId(initialEmissionState)) ===
+            activeTurnId(initialEmissionState)
+            ? taskContext.phase
+            : "pending",
+        );
       }
     }
 

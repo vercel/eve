@@ -5,6 +5,8 @@ import {
 } from "#channel/adapter.js";
 import type { ContextContainer } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
+import { TurnDeliveryFailedKey } from "#context/keys.js";
+import { requestEventMetadata } from "#execution/request-event-metadata.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   encodeMessageStreamEvent,
@@ -43,9 +45,19 @@ export async function publishChannelEvent(input: ChannelEventInput): Promise<Mes
  * writer before hooks. Both dispatch hooks themselves after `sink.emit`.
  */
 export async function writeChannelEvent(input: ChannelEventInput): Promise<MessageStreamEvent> {
-  const event = await callAdapterEventHandler(input.adapter, input.event, input.adapterCtx);
+  if (input.event.type === "turn.started") input.ctx.delete(TurnDeliveryFailedKey);
+  let delivered = true;
+  const event = await callAdapterEventHandler(input.adapter, input.event, input.adapterCtx, () => {
+    delivered = false;
+    if (input.event.type === "message.completed" || input.event.type === "turn.completed")
+      input.ctx.set(TurnDeliveryFailedKey, true);
+  });
   setChannelContext(input.ctx, { ...input.adapter, state: { ...input.adapterCtx.state } });
-  const stamped = stampMessageStreamEvent(event, input.deliveryIds);
+  const stamped = stampMessageStreamEvent(
+    event,
+    input.deliveryIds,
+    requestEventMetadata(input.ctx, event, delivered),
+  );
   await input.writer.write(encodeMessageStreamEvent(stamped));
   return stamped;
 }

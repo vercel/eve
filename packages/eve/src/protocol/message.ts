@@ -69,7 +69,16 @@ export interface StepCompletedProviderMetadata {
  * stream, and stored with it. Re-reading the stream — reconnecting, rewinding,
  * or replaying a finished session — yields the same values every time.
  */
+/** Request ownership and delivery phase, with an outcome only after its terminal delivery. */
+export interface RequestEventMetadata {
+  readonly delivered?: false;
+  readonly id: string;
+  readonly phase: "none" | "initiating" | "pending" | "settled";
+  readonly outcome?: "completed" | "failed" | "cancelled";
+}
+
 export interface MessageStreamEventMeta {
+  readonly request?: RequestEventMetadata;
   /** Server-issued message delivery identities, retained across the turn's workflow steps. */
   readonly deliveryIds?: readonly string[];
   /** ISO-8601 emission time. */
@@ -1739,12 +1748,19 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
 export function stampMessageStreamEvent(
   event: UnstampedMessageStreamEvent,
   deliveryIds?: readonly string[],
+  request?: RequestEventMetadata,
 ): MessageStreamEvent {
-  const meta: { at: string; id: string; deliveryIds?: readonly string[] } = {
+  const meta: {
+    at: string;
+    id: string;
+    deliveryIds?: readonly string[];
+    request?: RequestEventMetadata;
+  } = {
     at: new Date().toISOString(),
     id: createEventId(),
   };
   if (deliveryIds !== undefined && deliveryIds.length > 0) meta.deliveryIds = deliveryIds;
+  if (request !== undefined) meta.request = request;
   return {
     ...event,
     meta,

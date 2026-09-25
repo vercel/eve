@@ -58,7 +58,7 @@ export function resolveTaskDeliveryContext(input: {
       tasks.query({ cohortId: delivered.cohortId }),
       input.taskDeliveryPolicy === "auto",
     ),
-    rootTurnId: delivered.turnId,
+    rootTurnId: delivered.run.task.requestId ?? delivered.turnId,
   };
 }
 

@@ -327,3 +327,13 @@ The order is structural, not incidental. By the time a resolver or hook reads ch
 - [Channels](../channels/overview): how platform addresses map to durable sessions.
 - [Client SDK](../guides/client/overview): call these routes from scripts and server-side code.
 - [Frontend](../guides/frontend/overview): `useEveAgent` instead of raw routes.
+
+## Request completion in the durable trace
+
+`event.meta.request` supplies structured ownership for a user request across runtime turns. Its `id` is the originating runtime turn ID, while `event.data.turnId` identifies the current execution unit. Background tools and background subagents retain this request ID in their existing task records, including work launched by a continuation. Overlapping requests with distinct turn IDs have separate reporting cohorts.
+
+The `phase` is `none` for ordinary delivery, `initiating` for a background launch acknowledgment, `pending` while a background report still has outstanding work, and `settled` for its settled report. Consumers collecting delivered answer segments should exclude `initiating` text and tool-call narration. Useful text in `pending` reports remains part of the answer even when the settled report is silent. Framework-authored task inputs remain marked `data.kind = execution.background_task`.
+
+The optional `outcome` is `completed`, `failed`, or `cancelled`. Successful runtime-turn completion supplies `completed` only after its channel handler has delivered the response, background work has settled, and outstanding input blockers have cleared. Failed and cancelled requests retain their explicit outcomes. A thrown channel handler marks that event with `delivered: false`; a failed answer delivery makes the request outcome `failed` instead of claiming successful completion. Intermediate runtime turns and individual task notifications are not successful request completion signals. Unknown task ownership omits request metadata rather than reusing the previous request.
+
+Stream hooks receive the same stamped metadata as the persisted event, after the channel handler and durable write. Queue consumers should key by session, request ID, and evaluation version, and retain the terminal event's `meta.id` as their immutable evidence boundary. Read the stream asynchronously and stop at that event; later follow-ups are not evidence for the earlier request. Streams recorded before this contract may omit request metadata and cannot establish this completion boundary.

@@ -1,3 +1,5 @@
+import { requestEventMetadata } from "#execution/request-event-metadata.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler } from "#channel/adapter.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -60,7 +62,18 @@ export async function emitTerminalSessionEvent(input: {
     try {
       const writer = input.sessionWritable.getWriter();
       try {
-        await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
+        const stamped = stampMessageStreamEvent(
+          event,
+          undefined,
+          ctx === undefined ? undefined : requestEventMetadata(ctx, event),
+        );
+        await writer.write(encodeMessageStreamEvent(stamped));
+        if (ctx !== undefined)
+          await dispatchStreamEventHooks({
+            ctx,
+            registry: ctx.require(BundleKey).hookRegistry,
+            event: stamped,
+          });
       } finally {
         writer.releaseLock();
       }

@@ -108,6 +108,8 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 export const TaskDeliveryPolicyKey = new ContextKey<TaskDeliveryPolicy>(
   TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME,
 );
+export const TurnDeliveryFailedKey = new ContextKey<boolean>("eve.turnDeliveryFailed");
+
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
   "eve.turnTaskDelivery",

@@ -55,14 +55,7 @@ correct. The enlarged fixture context window prevents this metered probe from
 triggering compaction. B's terminal failure and original 211/37 token step are
 also asserted on its real child stream.
 
-`task.parent.wake.emitted-ready.cross-turn-cohort.eval.ts` launches A, acknowledges
-its pending gate, then launches B in a different user turn. Both task-owner
-creating-turn IDs must match their respective launch events and be distinct. The
-two cases release A first and B first respectively. After the first owner's
-completion acknowledgment, an independent user checkpoint must run without any
-completion delivery while the other gate remains active. The final delivery is
-exactly the union, never one report per creating turn. The mock reports received
-notifications immediately; it does not implement its own cohort barrier.
+`task.parent.wake.emitted-ready.cross-turn-cohort.eval.ts` launches A and B in separate user requests, then completes them in either order. Each reports independently while the other remains gated. The durable terminal metadata must name the originating request, and neither launch acknowledgment may complete its request.
 
 The `/eve/v1/task-lifecycle/:sessionId/:action` channel is fixture-only and stays
 inside the fixture's Vercel service route prefix. Random per-eval
