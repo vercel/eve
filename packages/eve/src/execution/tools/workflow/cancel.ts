@@ -8,15 +8,18 @@ const log = createLogger("execution.workflow-tool-run");
 
 /**
  * Asks the run to cancel itself and returns without waiting: the run cleans
- * up and reports its cancelled outcome to the owner. A run whose control hook
- * cannot be reached is cancelled outright. Failures are logged, because the
- * owner has already recorded the cancellation.
+ * up and reports its cancelled outcome to the owner. A resumable run cancels
+ * only its current generation unless `end` is set, which ends its task. A run
+ * whose control hook cannot be reached is cancelled outright. Failures are
+ * logged, because the owner has already recorded the cancellation.
  */
 export async function cancelWorkflowToolRun(
   run: WorkflowToolRunAddress,
   reason: string,
+  options: { readonly end?: boolean } = {},
 ): Promise<void> {
-  const cancel: WorkflowToolRunControlMessage = { kind: "cancel", reason };
+  const cancel: WorkflowToolRunControlMessage =
+    options.end === true ? { end: true, kind: "cancel", reason } : { kind: "cancel", reason };
   try {
     await resumeHook(run.hookToken, cancel);
     return;

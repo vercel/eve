@@ -96,15 +96,15 @@ describe("the task surface", () => {
       "task_cancel",
       "task_wait",
     ]);
-    expect(system).toContain(renderTasksInstruction({ agents: true }));
+    expect(system).toContain(renderTasksInstruction({ agents: true, resumable: true }));
     // Agent tools keep their one input schema; there is no per-session parameter.
     const schema = request.tools.find((tool) => tool.name === "researcher")?.inputSchema as {
       readonly properties?: Record<string, unknown>;
     };
     expect(Object.keys(schema.properties ?? {}).toSorted()).toEqual([
-      "agentId",
       "message",
       "outputSchema",
+      "taskId",
     ]);
   });
 
@@ -118,7 +118,7 @@ describe("the task surface", () => {
     });
 
     expect(request.tools.map((tool) => tool.name).toSorted()).toEqual(["task_cancel", "task_wait"]);
-    expect(system).toContain(renderTasksInstruction({ agents: true }));
+    expect(system).toContain(renderTasksInstruction({ agents: true, resumable: true }));
   });
 
   it("offers neither when every workflow tool is attached", async () => {

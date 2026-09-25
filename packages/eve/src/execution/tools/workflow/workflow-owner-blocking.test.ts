@@ -11,6 +11,7 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep
 
 const from = {
   callId: "call-1",
+  generation: 1,
   input: {},
   runId: "run-1",
   sequence: 0,

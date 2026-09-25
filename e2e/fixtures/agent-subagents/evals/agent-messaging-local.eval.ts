@@ -5,7 +5,7 @@ const MEMORABLE_FACT = "The observatory locker code is ORBIT-CEDAR-7319.";
 /**
  * Cross-turn continuation of a local child: turn one delegates a fact to the
  * built-in agent subagent, which answers and stays available; turn two
- * re-messages the same child via its agentId. The fact can only come back if
+ * re-messages the same child via its taskId. The fact can only come back if
  * the child's session survived the parent turn boundary.
  */
 export default defineEval({

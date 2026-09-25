@@ -6,7 +6,8 @@ import type { MockModelRequest, MockModelResponder, MockModelToolResult } from "
 // and shows the responder the settled result under the call that started it.
 
 const START_RECEIPT_PATTERN = /^Started task ([\w-]+)\./u;
-const STEER_RECEIPT_PATTERN = /^Sent your message to agent ([\w-]+),/u;
+const SEND_RECEIPT_PATTERN =
+  /^Sent to task ([\w-]+), which is (still working|now working on it)\./u;
 const RESULT_BLOCK_PATTERN =
   /<task_result id="([^"]*)" name="[^"]*" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
 const WAIT_CALL_PREFIX = "task-wait-for-";
@@ -17,10 +18,10 @@ interface SettledResult {
 }
 
 /**
- * One unit of a task's work: the call that started it and any messages sent
- * to it while it worked. An agent resumed with its `agentId` keeps its task
- * ID, so each start opens a new generation and results pair with them in
- * call order.
+ * One unit of a task's work: the call that started it and any input sent to
+ * it while it worked. A send keeps the task's ID, so each start, and each
+ * send to an idle task, opens a new generation, and results pair with them
+ * in call order.
  */
 interface Generation {
   readonly taskId: string;
@@ -117,8 +118,8 @@ export function waitForTasks(respond: MockModelResponder): MockModelResponder {
 
 /**
  * The task generations the receipts in `toolResults` stand for, in call
- * order. A start opens a generation; a message sent to a working agent joins
- * that agent's latest generation.
+ * order. A start, or a send to an idle task, opens a generation; a send to a
+ * working task joins that task's latest generation.
  */
 function readGenerations(toolResults: readonly MockModelToolResult[]): Generation[] {
   const generations: Generation[] = [];
@@ -129,10 +130,14 @@ function readGenerations(toolResults: readonly MockModelToolResult[]): Generatio
       generations.push({ callIds: [result.id], taskId: started });
       continue;
     }
-    const steered = STEER_RECEIPT_PATTERN.exec(result.output)?.[1];
-    if (steered === undefined) continue;
-    const joined = generations.filter((generation) => generation.taskId === steered).at(-1);
-    if (joined === undefined) generations.push({ callIds: [result.id], taskId: steered });
+    const sent = SEND_RECEIPT_PATTERN.exec(result.output);
+    const taskId = sent?.[1];
+    if (taskId === undefined) continue;
+    const joined =
+      sent?.[2] === "still working"
+        ? generations.filter((generation) => generation.taskId === taskId).at(-1)
+        : undefined;
+    if (joined === undefined) generations.push({ callIds: [result.id], taskId });
     else joined.callIds.push(result.id);
   }
   return generations;

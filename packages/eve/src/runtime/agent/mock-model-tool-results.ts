@@ -26,7 +26,7 @@ interface SettledResult {
   readonly toolName: string;
 }
 
-const RECEIPT_PATTERNS = [/^Started task ([\w-]+)\./u, /^Sent your message to agent ([\w-]+),/u];
+const RECEIPT_PATTERNS = [/^Started task ([\w-]+)\./u, /^Sent to task ([\w-]+),/u];
 const RESULT_BLOCK_PATTERN =
   /<task_result id="([^"]*)" name="([^"]*)" status="(\w+)"[^>]*>\n([\s\S]*?)\n<\/task_result>/gu;
 

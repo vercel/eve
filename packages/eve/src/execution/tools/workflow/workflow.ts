@@ -4,11 +4,21 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import {
   createWorkflowBodyRef,
   executeWorkflowBody,
+  firstGenerationCall,
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
+import {
+  createGenerations,
+  type GenerationCall,
+  type GenerationEvent,
+  type Generations,
+} from "#execution/tools/workflow/generations.js";
 import type {
+  WorkflowToolRunControlMessage,
+  WorkflowToolRunGenerationMessage,
   WorkflowToolRunOutcome,
   WorkflowToolRunOutcomeMessage,
+  WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import {
   createChannelReader,
@@ -21,14 +31,19 @@ import {
 } from "#execution/tools/workflow/owner.js";
 import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner-blocking.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
-import { logUndeliveredWorkflowOutcomeStep } from "#execution/tools/workflow/undelivered-outcome-step.js";
+import {
+  logIgnoredWorkflowResultStep,
+  logUndeliveredWorkflowOutcomeStep,
+} from "#execution/tools/workflow/undelivered-outcome-step.js";
 
 /**
- * Owns command intake, body execution, and settlement for one turn-owned tool
- * call. The run returns the outcome it reported, so the owner's deadline for a
- * call with a time limit can read it once if the report never arrived,
- * including a report whose delivery failed for good; a duplicate start
- * returns nothing.
+ * Owns command intake, body execution, and settlement for one workflow tool
+ * call. A resumable run stays alive between generations: its command hook
+ * carries sends as well as cancels, it reports each generation, and it ends
+ * with the task. The run returns the outcome it reported, so the owner's
+ * deadline for a call with a time limit can read it once if the report never
+ * arrived, including a report whose delivery failed for good; a duplicate
+ * start returns nothing.
  */
 export async function workflowToolRunWorkflow(
   input: WorkflowToolRunInput,
@@ -39,6 +54,11 @@ export async function workflowToolRunWorkflow(
   if (!(await owner.claim())) return undefined;
   const definition = input;
   const { signal } = owner;
+  const generations: Generations | undefined =
+    definition.resumable === true ? createGenerations(firstGenerationCall(definition)) : undefined;
+  const wakes =
+    generations === undefined ? undefined : createChannelReader("generation", generations.wakes);
+  const { input: _input, ...base } = createWorkflowBodyRef(definition);
   let commandsOpen = true;
   let body:
     | {
@@ -50,8 +70,17 @@ export async function workflowToolRunWorkflow(
   let bodyResult: WorkflowBodyResult | undefined;
   let cleanupDeadline: Promise<"cancel"> | undefined;
   let outcome: WorkflowToolRunOutcome | undefined;
+  // A reply waits until the progress reports the body sent before it reach the owner.
+  const relayGenerations = async (): Promise<void> => {
+    let event = generations?.next(consumedReports);
+    while (event !== undefined) {
+      await owner.handleMessage(generationMessage(base, event));
+      event = generations?.next(consumedReports);
+    }
+  };
 
   while (true) {
+    await relayGenerations();
     if (signal.aborted) {
       if (body === undefined) break;
       cleanupDeadline ??= sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
@@ -77,7 +106,9 @@ export async function workflowToolRunWorkflow(
           inbox,
           reader: createChannelReader(
             "body",
-            awaitBodyResult(executeWorkflowBody({ ...definition, owner: inbox.owner }, signal)),
+            awaitBodyResult(
+              executeWorkflowBody({ ...definition, owner: inbox.owner }, signal, generations),
+            ),
           ),
         };
       }
@@ -85,8 +116,10 @@ export async function workflowToolRunWorkflow(
         | typeof owner.commands
         | WorkflowToolRunOwnerInbox["reader"]
         | ChannelReader<"body", WorkflowBodyResult>
+        | ChannelReader<"generation", void>
       > = [];
       if (commandsOpen) readers.push(owner.commands);
+      if (wakes !== undefined) readers.push(wakes);
       if (body !== undefined) {
         readers.push(body.inbox.reader);
         if (bodyResult === undefined) readers.push(body.reader);
@@ -98,6 +131,7 @@ export async function workflowToolRunWorkflow(
       break;
     }
     if (read === "cancel") break;
+    if (read.channel === "generation") continue;
     if (read.next.done) {
       if (read.channel === "control") {
         commandsOpen = false;
@@ -111,15 +145,27 @@ export async function workflowToolRunWorkflow(
       return undefined;
     }
     if (read.channel === "control") {
-      owner.handleCommand(read.next.value);
+      const command = read.next.value;
+      if (generations !== undefined) {
+        if (command.kind === "input") {
+          generations.deliver(command.seq, command.input, sendCall(command));
+          continue;
+        }
+        if (command.end !== true) {
+          generations.cancel(command.reason);
+          continue;
+        }
+        generations.end(command.reason);
+      }
+      owner.handleCommand(command);
       continue;
     }
     if (read.channel === "body") {
       bodyResult = read.next.value;
       continue;
     }
-    if (read.next.value.kind === "outcome") continue;
     if (read.next.value.kind === "report") consumedReports += 1;
+    else if (read.next.value.kind !== "request") continue;
     await owner.handleMessage(read.next.value);
   }
   // Cleanup cannot undo cancellation, even when the body returns success.
@@ -130,8 +176,8 @@ export async function workflowToolRunWorkflow(
     };
   }
   if (outcome === undefined) return undefined;
-  const { input: _input, ...from } = createWorkflowBodyRef(definition);
-  const message: WorkflowToolRunOutcomeMessage = { from, result: outcome };
+  const message: WorkflowToolRunOutcomeMessage = { from: base, result: outcome };
+  if (generations !== undefined) return await endGenerations(message, generations);
   let delivered: boolean;
   try {
     delivered = await owner.handleMessage({ ...message, kind: "outcome" });
@@ -151,6 +197,62 @@ export async function workflowToolRunWorkflow(
     await logUndeliveredWorkflowOutcomeStep({ message });
   }
   return message;
+
+  /**
+   * The body finished, which ends a resumable task: its last generation
+   * settles, then the run reports the sends the body never read. A value
+   * returned, or an error thrown, after a reply would be a second result, so
+   * it is logged and dropped.
+   */
+  async function endGenerations(
+    ended: WorkflowToolRunOutcomeMessage,
+    state: Generations,
+  ): Promise<WorkflowToolRunOutcomeMessage> {
+    const finished = state.finish(ended.result);
+    for (let event = state.next(Infinity); event !== undefined; event = state.next(Infinity)) {
+      await owner.handleMessage(generationMessage(base, event));
+    }
+    const from = { ...base, ...generationFrom(state.call), generation: state.generation };
+    await owner.handleMessage({ from, kind: "ended", unread: finished.unread });
+    const ignored = finished.ignored;
+    if (
+      ignored !== undefined &&
+      (ignored.status === "failed" ||
+        (ignored.status === "completed" && ignored.output !== undefined && ignored.output !== null))
+    ) {
+      await logIgnoredWorkflowResultStep({ from, result: ignored });
+    }
+    return { from, result: ended.result };
+  }
+}
+
+type RunBase = Omit<WorkflowToolRunRef, "input">;
+
+function generationMessage(
+  base: RunBase,
+  event: GenerationEvent,
+): WorkflowToolRunGenerationMessage {
+  const from = { ...base, ...generationFrom(event.call), generation: event.generation };
+  return event.kind === "started"
+    ? { from, kind: "started", send: event.send }
+    : { from, kind: "reply", read: event.read, result: event.result };
+}
+
+function generationFrom(
+  call: GenerationCall,
+): Pick<WorkflowToolRunRef, "callId" | "sequence" | "stepIndex" | "turnId"> {
+  return {
+    callId: call.callId,
+    sequence: call.turn.sequence,
+    stepIndex: call.stepIndex,
+    turnId: call.turn.id,
+  };
+}
+
+function sendCall(
+  command: Extract<WorkflowToolRunControlMessage, { readonly kind: "input" }>,
+): GenerationCall {
+  return { ...command.call, input: command.input };
 }
 
 async function* awaitBodyResult(

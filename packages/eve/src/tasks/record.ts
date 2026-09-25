@@ -18,9 +18,9 @@ export interface TaskRecord {
   readonly v: typeof TASK_RECORD_VERSION;
   /** `<name>-<6 base32>`, assigned by the owner before start and unique in its table. */
   readonly id: string;
-  /** One unit of work: a new call on an idle agent starts the next generation. */
+  /** One unit of work: a send to a resumable task starts its next generation. */
   readonly generation: number;
-  /** The tool call that started the current generation. */
+  /** The tool call that started the current generation: the start, or a send. */
   readonly callId: string;
   /** The owner turn that started the current generation. */
   readonly turnId: string;
@@ -48,14 +48,29 @@ export interface TaskRecord {
   readonly pendingCommands?: readonly TaskCommand[];
   /** The `input.requested` batches the task waits on; present exactly while `input_required`. */
   readonly input?: readonly TaskInputBatch[];
-  /** One-line summary of an idle agent's last answer. */
+  /** One-line summary of the latest result, listed with idle tasks in the `[Tasks]` note. */
   readonly lastStatus?: string;
+  /** The task takes more input by `taskId`: every agent, and a `resumable: true` workflow tool. */
+  readonly resumable?: true;
+  /** The task stopped taking input. A send to it fails `UNKNOWN_TASK`. */
+  readonly ended?: true;
   /**
-   * Steering messages sent to an agent's current generation that the
-   * agent has not yet reported receiving. Any still missing when it answers
-   * start its next generation.
+   * Sends the child has not read yet, oldest first. When a generation ends,
+   * the oldest starts the next one. An agent counts the send that starts its
+   * next turn among the messages it reads, so that send stays listed until
+   * the agent answers.
    */
-  readonly steers?: number;
+  readonly sends?: readonly TaskSend[];
+  /** The last send number the owner assigned. */
+  readonly lastSeq?: number;
+  /** The send that started the current generation. */
+  readonly startedBy?: number;
+  /**
+   * The call an agent answers under, when it differs from `callId`: a
+   * generation started by a send the agent read after answering continues
+   * the call it was answering.
+   */
+  readonly childCallId?: string;
   /**
    * The place of the last child answer applied to this agent. The child's
    * answers only grow, so a report at or below it repeats an answer already
@@ -68,6 +83,41 @@ export interface TaskRecord {
   readonly delivered: boolean;
   /** The `task_wait` call that takes the current generation's result, while it waits. */
   readonly wait?: { readonly callId: string; readonly startedAt: string };
+}
+
+/** One send to a resumable task, with the call and turn a generation it starts belongs to. */
+export interface TaskSend {
+  readonly seq: number;
+  readonly callId: string;
+  readonly turnId: string;
+  /** Cancelled with the task's work: its generation settles `cancelled`, unseen by the model. */
+  readonly cancelled?: true;
+}
+
+/** A resumable task that has not ended: sends can reach it. */
+export function isOpenResumableTask(record: TaskRecord): boolean {
+  return record.resumable === true && record.ended !== true;
+}
+
+/**
+ * A resumable task whose latest generation settled, whose result reached
+ * history, and whose child still runs: it takes its next generation from a
+ * send. A task still confirming a cancel, or with sends queued, is not idle.
+ */
+export function isIdleTask(record: TaskRecord): boolean {
+  return (
+    isOpenResumableTask(record) &&
+    record.child !== undefined &&
+    record.delivered &&
+    record.cancelConfirmBy === undefined &&
+    record.sends === undefined &&
+    (record.status === "completed" || record.status === "failed" || record.status === "cancelled")
+  );
+}
+
+/** The call an agent's child reports under for the current generation. */
+export function childCallId(record: Pick<TaskRecord, "callId" | "childCallId">): string {
+  return record.childCallId ?? record.callId;
 }
 
 /**
@@ -151,8 +201,8 @@ function isTaskCommand(value: unknown): value is TaskCommand {
       return true;
     case "answer":
       return Array.isArray(value.responses);
-    case "message":
-      return typeof value.message === "string" && isString(value.key);
+    case "input":
+      return isCount(value.seq) && isRecordObject(value.input);
     default:
       return false;
   }
@@ -160,6 +210,16 @@ function isTaskCommand(value: unknown): value is TaskCommand {
 
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isTaskSend(value: unknown): value is TaskSend {
+  return (
+    isRecordObject(value) &&
+    isCount(value.seq) &&
+    isString(value.callId) &&
+    isString(value.turnId) &&
+    (value.cancelled === undefined || value.cancelled === true)
+  );
 }
 
 // The shape the owner routes answers by; the child validates each answer.
@@ -233,7 +293,16 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
     return fail("invalid input");
   if (value.lastStatus !== undefined && typeof value.lastStatus !== "string")
     return fail("invalid lastStatus");
-  if (value.steers !== undefined && !isCount(value.steers)) return fail("invalid steers");
+  if (value.resumable !== undefined && value.resumable !== true) return fail("invalid resumable");
+  if (value.ended !== undefined && value.ended !== true) return fail("invalid ended");
+  if (
+    value.sends !== undefined &&
+    (!Array.isArray(value.sends) || value.sends.length === 0 || !value.sends.every(isTaskSend))
+  )
+    return fail("invalid sends");
+  if (value.lastSeq !== undefined && !isCount(value.lastSeq)) return fail("invalid lastSeq");
+  if (value.startedBy !== undefined && !isCount(value.startedBy)) return fail("invalid startedBy");
+  if (!isOptionalString(value.childCallId)) return fail("invalid childCallId");
   if (value.answerSeq !== undefined && !isCount(value.answerSeq)) return fail("invalid answerSeq");
   if (
     value.workflowCaller !== undefined &&

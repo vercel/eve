@@ -3,7 +3,10 @@ import {
   replaceDurableSessionSnapshot,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
+import type {
+  WorkflowToolRunGenerationMessage,
+  WorkflowToolRunOutcomeMessage,
+} from "#execution/tools/workflow/messages.js";
 import { workflowToolRunOutcomeToToolResult } from "#execution/tools/workflow/owner-inbox.js";
 import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
@@ -15,15 +18,29 @@ import type {
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import { toError } from "#shared/errors.js";
-import { settledEvents, taskStartedEvent } from "#tasks/events.js";
+import { settledEvents, taskEvents, taskStartedEvent } from "#tasks/events.js";
 import { toTaskError } from "#tasks/outcome.js";
-import type { TaskOwnerUpdate } from "#tasks/owner.js";
-import type { ChildAddress, TaskOutcome } from "#tasks/protocol.js";
+import { cancelRunAgents } from "#tasks/cancel.js";
+import { readContext, type TaskOwnerUpdate, type WorkflowCallerReply } from "#tasks/owner.js";
+import {
+  isTerminalTaskStatus,
+  type ChildAddress,
+  type TaskMessage,
+  type TaskOutcome,
+} from "#tasks/protocol.js";
+import { AGENT_CALL_CANCELLED_MESSAGE } from "#tasks/render.js";
 import type { TaskRecord } from "#tasks/record.js";
 import { startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
 import { encodeTaskCreator, type TaskCreator } from "#tasks/results.js";
 import { findWorkflowTask, getTaskTable, setTaskTable } from "#tasks/state.js";
-import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
+import {
+  applyTaskMessage,
+  findTask,
+  markTaskDelivered,
+  startTask,
+  type TaskEffect,
+} from "#tasks/table.js";
+import { runCommands } from "#tasks/transport.js";
 import { routeDetachedResult } from "#tasks/wait.js";
 
 // Owner-side lifecycle of workflow tool calls: each call is a task whose
@@ -66,6 +83,7 @@ export async function startWorkflowTask<
     name: request.toolName,
     now,
     ownerId: session.sessionId,
+    resumable: request.resumable === true,
     // Workflow tools have no default limit beyond the session lifetime.
     timeoutMs: request.timeout,
     turnId: input.turnId,
@@ -76,9 +94,6 @@ export async function startWorkflowTask<
     return receipt === undefined
       ? { events: [], session }
       : { events: [], result: receipt, session };
-  }
-  if (started.kind !== "started") {
-    throw new Error(`Workflow tool call "${request.callId}" cannot continue an agent.`);
   }
   const rejected = detached
     ? tooManyTasksResult({ callId: request.callId, table, toolName: request.toolName })
@@ -149,7 +164,9 @@ export async function startWorkflowTask<
  * working task settles it: an attached call's tool result, or a detached
  * result for a live `task_wait` or a later `task.result` message. The
  * outcome of a task the owner cancelled only confirms the stop. An outcome
- * that matches no task is dropped.
+ * that matches no task is dropped. A resumable run reports its generations
+ * instead (see `applyWorkflowGeneration`); the deadline's read of its ended
+ * run arrives here, and ends the task.
  */
 export async function settleWorkflowTaskStep(input: {
   readonly message: WorkflowToolRunOutcomeMessage;
@@ -171,46 +188,56 @@ export function settleWorkflowTask(input: {
   const session = readDurableSession(input.sessionState);
   const table = getTaskTable(session);
   const record = findWorkflowTask(table, from);
-  if (record === undefined) {
-    return {
-      events: [],
-      replies: [],
-      results: [],
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    };
-  }
+  const unchanged = {
+    events: [],
+    replies: [],
+    results: [],
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  };
+  if (record === undefined) return unchanged;
 
   const result = workflowToolRunOutcomeToToolResult(input.message);
-  const applied = applyTaskMessage(
+  const settledGeneration = applyTaskMessage(
     table,
     {
-      generation: record.generation,
+      generation: from.generation,
       kind: "task.settled",
       outcome: toWorkflowTaskOutcome(input.message, result),
       taskId: record.id,
     },
     input.now,
   );
+  const ended =
+    record.resumable === true
+      ? applyTaskMessage(
+          settledGeneration.table,
+          { kind: "task.ended", taskId: record.id, unread: [] },
+          input.now,
+        )
+      : { effects: [], table: settledGeneration.table };
+  const applied = {
+    effects: [...settledGeneration.effects, ...ended.effects],
+    table: ended.table,
+  };
+  if (applied.effects.length === 0) return unchanged;
   const settled = applied.effects.find((effect) => effect.kind === "settled");
-  const detached = settled !== undefined && record.mode === "detached";
+  const attached = settled !== undefined && record.mode === "attached";
   // An attached call's result goes straight to the turn, so it is delivered
   // now; a detached result goes to a live `task_wait`, or is held until a
   // model step delivers it.
   let next = setTaskTable(
     session,
-    settled !== undefined && !detached
-      ? markTaskDelivered(applied.table, record.id, record.generation)
-      : applied.table,
+    attached ? markTaskDelivered(applied.table, record.id, record.generation) : applied.table,
   );
-  const results = settled !== undefined && !detached ? [result] : [];
-  if (detached) {
-    const routed = routeDetachedResult(next, settled.record, settled.outcome);
+  const results = attached ? [result] : [];
+  if (!attached) {
+    const routed = routeGenerationResults(next, applied.effects);
     next = routed.session;
-    if (routed.result !== undefined) results.push(routed.result);
+    results.push(...routed.results);
   }
   return {
-    events: settledEvents(applied.effects),
+    events: taskEvents(applied.effects, session.sessionId),
     replies: [],
     results,
     serializedContext: input.serializedContext,
@@ -230,4 +257,113 @@ function toWorkflowTaskOutcome(
     case "cancelled":
       return { status: "cancelled" };
   }
+}
+
+/**
+ * Applies one generation message of a resumable run: a generation it started
+ * (a consistency check), a reply, or the task's end. A reply or the end
+ * first cancels the tasks the run still owns, such as an un-awaited
+ * `ctx.agent` call, so their results precede the generation's own: its
+ * result could no longer reflect them. Each cancelled call's awaiting body
+ * gets the cancellation. Results are detached: each goes to a live
+ * `task_wait` or to a later model step.
+ */
+export async function applyWorkflowGenerationStep(input: {
+  readonly message: WorkflowToolRunGenerationMessage;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<TaskOwnerUpdate> {
+  "use step";
+
+  const now = new Date().toISOString();
+  const { message } = input;
+  const session = readDurableSession(input.sessionState);
+  const table = getTaskTable(session);
+  const record = findWorkflowTask(table, message.from);
+  if (record === undefined) {
+    return {
+      events: [],
+      replies: [],
+      results: [],
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    };
+  }
+  const { runId } = message.from;
+  const ownedCalls =
+    message.kind === "started"
+      ? []
+      : table.records.filter(
+          (owned) => owned.workflowCaller?.runId === runId && !isTerminalTaskStatus(owned.status),
+        );
+  const owned =
+    ownedCalls.length === 0
+      ? { commands: [], events: [], table }
+      : cancelRunAgents(table, new Set([runId]), now);
+  const applied = applyTaskMessage(owned.table, generationTaskMessage(record, message), now);
+  if (owned.commands.length > 0) {
+    await runCommands(owned.commands, await readContext(input.serializedContext));
+  }
+  const routed = routeGenerationResults(setTaskTable(session, applied.table), applied.effects);
+  return {
+    events: [...owned.events, ...taskEvents(applied.effects, session.sessionId)],
+    replies: ownedCalls.map(cancelledCallReply),
+    results: routed.results,
+    serializedContext: input.serializedContext,
+    sessionState: replaceDurableSessionSnapshot({
+      session: routed.session,
+      state: input.sessionState,
+    }),
+  };
+}
+
+function generationTaskMessage(
+  record: TaskRecord,
+  message: WorkflowToolRunGenerationMessage,
+): Exclude<TaskMessage, { readonly kind: "task.deadline" }> {
+  const { generation } = message.from;
+  switch (message.kind) {
+    case "started":
+      return { generation, kind: "task.started", send: message.send, taskId: record.id };
+    case "ended":
+      return { kind: "task.ended", taskId: record.id, unread: message.unread };
+    case "reply": {
+      const outcome = toWorkflowTaskOutcome(
+        { from: message.from, result: message.result },
+        workflowToolRunOutcomeToToolResult({ from: message.from, result: message.result }),
+      );
+      return { generation, kind: "task.settled", outcome, read: message.read, taskId: record.id };
+    }
+  }
+}
+
+/** What a body still awaiting a `ctx.agent` call gets when the owner cancels its task. */
+function cancelledCallReply(record: TaskRecord): WorkflowCallerReply {
+  return {
+    replyTo: record.workflowCaller!.replyTo,
+    result: {
+      callId: record.callId,
+      isError: true,
+      kind: "subagent-result",
+      origin: "dispatch",
+      output: AGENT_CALL_CANCELLED_MESSAGE,
+      subagentName: record.name,
+    },
+  };
+}
+
+/** Sends each detached result among the effects to a live `task_wait` or holds it. */
+function routeGenerationResults<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  effects: readonly TaskEffect[],
+): { readonly session: T; readonly results: readonly RuntimeToolResultActionResult[] } {
+  let next = session;
+  const results: RuntimeToolResultActionResult[] = [];
+  for (const effect of effects) {
+    if (effect.kind !== "settled") continue;
+    const routed = routeDetachedResult(next, effect.record, effect.outcome);
+    next = routed.session;
+    if (routed.result !== undefined) results.push(routed.result);
+  }
+  return { results, session: next };
 }

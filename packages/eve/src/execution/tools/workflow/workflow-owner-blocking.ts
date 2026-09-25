@@ -32,7 +32,7 @@ export interface BlockingWorkflowOwner {
   handleMessage(message: WorkflowToolRunMessage): Promise<boolean>;
 }
 
-/** Routes invocation messages to the waiting turn and accepts cancellation. */
+/** Routes invocation messages to the owner and accepts its commands; only a cancel aborts the run. */
 export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWorkflowOwner {
   const controller = new AbortController();
   const hook = createHook<WorkflowToolRunControlMessage>({ token: input.hookToken });
@@ -49,11 +49,14 @@ export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWor
       }
     },
     handleCommand(message: WorkflowToolRunControlMessage) {
-      if (isWorkflowToolRunControlMessage(message))
+      if (isWorkflowToolRunControlMessage(message) && message.kind === "cancel")
         controller.abort(new WorkflowToolRunCancelledError(message.reason));
     },
     handleMessage(message: WorkflowToolRunMessage) {
-      return resumeHookStep(input.owner.inbox, message, { ifPresent: message.kind === "outcome" });
+      // A lifecycle message for an owner that ended has no taker.
+      return resumeHookStep(input.owner.inbox, message, {
+        ifPresent: message.kind !== "report" && message.kind !== "request",
+      });
     },
   };
 }

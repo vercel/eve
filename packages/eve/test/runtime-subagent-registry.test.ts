@@ -12,10 +12,10 @@ import { AGENT_TASK_WORKFLOW_ID } from "../src/tasks/agent-tool.js";
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    agentId: {
+    taskId: {
       type: ["string", "null"],
       description:
-        "The id of an agent from the latest [Tasks] note or a receipt. An idle agent gets more work in the same child session; an agent that is still working receives this message as a correction to its current work, keeps the output format it was given, and still returns one result. Omit this field (or pass null or an empty string) to start a new agent.",
+        "Only to correct or continue a task this tool started: that task's id, from its receipt or the latest [Tasks] note. An idle task starts on this input; a working one uses it in its current work or starts on it right after. Omit it to start a new task.",
     },
     message: {
       type: "string",
@@ -28,13 +28,13 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
-  it("accepts null as an omitted agentId", () => {
+  it("accepts null as an omitted taskId", () => {
     expect(
       subagentToolInputSchema["~standard"].validate({
-        agentId: null,
         message: "Investigate this",
+        taskId: null,
       }),
-    ).toEqual({ value: { agentId: null, message: "Investigate this" } });
+    ).toEqual({ value: { message: "Investigate this", taskId: null } });
   });
 
   it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {

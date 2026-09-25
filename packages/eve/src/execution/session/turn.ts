@@ -50,6 +50,7 @@ import {
 import { hasPendingTaskInput } from "#tasks/input.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { getTaskTable } from "#tasks/state.js";
+import { readPendingTaskResults } from "#tasks/results.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
 import type { TaskWaitRegistration } from "#tasks/wait.js";
 import { DISMISSED_CALL_GRACE_MS, WaitTimers } from "#tasks/wait-timers.js";
@@ -212,7 +213,7 @@ export class SessionExecution {
 
   async handleWorkflowMessage(
     message: WorkflowToolRunMessage,
-  ): Promise<RuntimeActionResult | undefined> {
+  ): Promise<readonly RuntimeActionResult[]> {
     return await handleWorkflowToolRunMessage({
       cursor: this.input.cursor,
       message,
@@ -231,11 +232,18 @@ export class SessionExecution {
     turn: ActiveTurn,
     taskIds: readonly string[],
   ): Promise<{ readonly delivery?: DeliverHookPayload } | "cancelled"> {
+    // A resumable task can start its next generation as one settles; its held result wakes the turn.
     const settled = () => {
-      const { records } = getTaskTable(this.input.cursor.sessionState.snapshot.session);
+      const session = this.input.cursor.sessionState.snapshot.session;
+      const { records } = getTaskTable(session);
+      const held = readPendingTaskResults(session.state);
       return taskIds.some((taskId) => {
         const record = records.find(({ id }) => id === taskId);
-        return record === undefined || isTerminalTaskStatus(record.status);
+        return (
+          record === undefined ||
+          isTerminalTaskStatus(record.status) ||
+          held.some((result) => result.taskId === taskId)
+        );
       });
     };
     while (true) {
@@ -575,13 +583,12 @@ class ActiveTurn {
       case "workflow": {
         // Handled on admission, even between model steps: a detached run's
         // outcome, question, or progress must not wait for a runtime wait.
-        const result = await handleWorkflowToolRunMessage({
-          cursor: this.input.cursor,
-          message: admitted.message,
-        });
-        if (result !== undefined) {
-          this.runtimeResults.push({ kind: "runtime-action-result", results: [result] });
-        }
+        this.acceptOwnResults(
+          await handleWorkflowToolRunMessage({
+            cursor: this.input.cursor,
+            message: admitted.message,
+          }),
+        );
         return;
       }
       case "task-report":

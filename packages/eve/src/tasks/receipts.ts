@@ -5,8 +5,8 @@ import type {
 import type { TaskError } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
+  renderSendReceipt,
   renderStartReceipt,
-  renderSteeringReceipt,
   renderTooManyTasks,
   type TaskReceipt,
 } from "#tasks/render.js";
@@ -17,23 +17,24 @@ import { MAX_WORKING_TASKS, workingDetachedTaskIds, type TaskTable } from "#task
 
 /** Receipt of a call that started a detached task. */
 export function startReceiptResult(
-  record: Pick<TaskRecord, "callId" | "id">,
+  record: Pick<TaskRecord, "callId" | "id" | "name" | "resumable">,
   toolName: string,
 ): RuntimeToolResultActionResult {
-  return receiptResult(record.callId, record.id, toolName, renderStartReceipt(record));
+  return receiptResult(record.callId, record.id, toolName, renderStartReceipt(record, toolName));
 }
 
-/** Receipt of a call that sent a message to a working agent. */
-export function steeringReceiptResult(input: {
+/** Receipt of a send: to a working task, or to an idle one it started again (`started`). */
+export function sendReceiptResult(input: {
   readonly callId: string;
   readonly record: Pick<TaskRecord, "id">;
+  readonly started: boolean;
   readonly toolName: string;
 }): RuntimeToolResultActionResult {
   return receiptResult(
     input.callId,
     input.record.id,
     input.toolName,
-    renderSteeringReceipt(input.record),
+    renderSendReceipt(input.record, input.started),
   );
 }
 

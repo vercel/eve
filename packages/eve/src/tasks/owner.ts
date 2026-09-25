@@ -20,7 +20,6 @@ import {
   startSubagent,
 } from "#tasks/start.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { createLogger, logError } from "#internal/logging.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import {
   accumulateSessionUsage,
@@ -28,18 +27,18 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { reportedEvents, settledEvents, taskStartedEvent } from "#tasks/events.js";
+import { settledEvents, taskEvents, taskStartedEvent } from "#tasks/events.js";
 import type {
   RuntimeAgentDispatchRequest,
   RuntimeSubagentResult,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
-import type { JsonValue } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { AGENT_UNREACHABLE, EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
-import { renderAgentUnreachable } from "#tasks/render.js";
-import { startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
-import { flushHeldCommands, steerWorkingAgent } from "#tasks/steer.js";
+import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
+import { renderUnknownSendTask } from "#tasks/render.js";
+import { sendReceiptResult, startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
+import { deliverSends, flushHeldCommands, retireIdleTaskChildren } from "#tasks/send.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
@@ -53,6 +52,7 @@ import {
   reportedAnswer,
   reportedSteers,
   type ChildAddress,
+  type TaskError,
 } from "#tasks/protocol.js";
 import {
   createFailedResult,
@@ -64,18 +64,15 @@ import {
 import {
   cancelOrphanedChild,
   deliverToChild,
-  RETIRED_IDLE_AGENT_REASON,
-  retireIdleAgent,
   runCommands,
   type CommandEffect,
 } from "#tasks/transport.js";
 import {
+  checkSend,
   findReportedTask,
-  readAgentId,
   readDynamicRemoteAgent,
-  rejectOtherPrincipal,
+  readSendTaskId,
   resolveFailedCall,
-  retireIdleAgents,
 } from "#tasks/owner-calls.js";
 import {
   getTaskTable,
@@ -92,14 +89,12 @@ import {
   findTask,
   markTaskDelivered,
   startTask,
-  TASK_CANCEL_CONFIRM_MS,
   type TaskEffect,
   type TaskTable,
 } from "#tasks/table.js";
-import { armChildHardStop, syncTaskTimerInStep } from "#tasks/timer-steps.js";
+import { sendTask } from "#tasks/table-generations.js";
+import { syncTaskTimerInStep } from "#tasks/timer-steps.js";
 import { routeDetachedResult } from "#tasks/wait.js";
-
-const log = createLogger("tasks.owner");
 
 /** One agent call: from the model, or from `ctx.agent` inside a workflow tool body. */
 export interface AgentTaskCall {
@@ -231,7 +226,7 @@ export async function startAgentTasks(input: {
   }
 
   const freshLocalStarts = actions.filter(
-    ({ action }) => action.kind === "subagent-call" && readAgentId(action) === undefined,
+    ({ action }) => action.kind === "subagent-call" && readSendTaskId(action) === undefined,
   ).length;
   const prepared = await prepareActionDispatch({
     batch: { event: { ...emission, turnId }, requests: actions.map(({ action }) => action) },
@@ -240,7 +235,7 @@ export async function startAgentTasks(input: {
     fanoutSize: Math.max(1, freshLocalStarts),
     plan: ({ bundle, ctx: planContext, session }) =>
       actions.map(({ action }) =>
-        readAgentId(action) === undefined
+        readSendTaskId(action) === undefined
           ? classifyFreshStart({ action, bundle, ctx: planContext, session })
           : { kind: "resume" as const, action },
       ),
@@ -261,71 +256,98 @@ export async function startAgentTasks(input: {
     }
     const action = entry.kind === "start" ? entry.target.action : entry.action;
     const name = action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
-    const agentId = readAgentId(action);
+    const taskId = readSendTaskId(action);
     const toolName = call.toolName ?? call.input.target;
     const detached = call.workflowCaller === undefined;
+    const mode = detached ? ("detached" as const) : ("attached" as const);
+    const timeoutMs = resolveAgentTaskTimeout({ action, bundle: prepared.bundle, ctx });
     let table = getTaskTable(session);
-    const otherPrincipal = rejectOtherPrincipal({ agentId, caller: prepared.auth, table });
-    if (otherPrincipal !== undefined) {
-      fail(call, action, otherPrincipal);
-      continue;
-    }
-    const started = startTask(table, {
-      agentId,
-      callId: call.callId,
-      creator: encodeTaskCreator(prepared.creator),
-      kind: "agent",
-      mode: detached ? "detached" : "attached",
-      name,
-      nodeId: action.nodeId,
-      now: input.now,
-      ownerId: session.sessionId,
-      timeoutMs: resolveAgentTaskTimeout({ action, bundle: prepared.bundle, ctx }),
-      turnId,
-      workflowCaller: call.workflowCaller,
-    });
-    if (started.kind === "existing") {
-      // A replayed call already started its child; a detached call still owes its receipt.
-      if (started.record.mode === "detached" && detached) {
-        results.push(startReceiptResult(started.record, toolName));
-      }
-      continue;
-    }
-    if (started.kind === "rejected") {
-      fail(call, action, { code: started.error.code, message: started.error.message });
-      continue;
-    }
-    if (started.kind === "steered") {
-      const steered = await steerWorkingAgent({
-        callbackAlias,
+    let record: TaskRecord;
+    if (taskId === undefined) {
+      const started = startTask(table, {
         callId: call.callId,
-        ctx,
-        fromWorkflow: call.workflowCaller !== undefined,
-        message: call.input.message,
-        ownerSessionId: session.sessionId,
-        record: started.record,
-        table,
-        toolName,
+        creator: encodeTaskCreator(prepared.creator),
+        kind: "agent",
+        mode,
+        name,
+        nodeId: action.nodeId,
+        now: input.now,
+        ownerId: session.sessionId,
+        resumable: true,
+        timeoutMs,
         turnId,
+        workflowCaller: call.workflowCaller,
       });
-      if (steered.kind === "rejected") {
-        fail(call, action, steered.output);
+      if (started.kind === "existing") {
+        // A replayed call already started its child; a detached call still owes its receipt.
+        if (started.record.mode === "detached" && detached) {
+          results.push(startReceiptResult(started.record, toolName));
+        }
         continue;
       }
-      session = setTaskTable(session, steered.table);
-      results.push(steered.result);
-      continue;
+      // Over the cap, the start commits nothing.
+      const rejected = detached
+        ? tooManyTasksResult({ callId: call.callId, table, toolName })
+        : undefined;
+      if (rejected !== undefined) {
+        results.push(rejected);
+        continue;
+      }
+      ({ record, table } = started);
+    } else {
+      const refused = checkSend({
+        caller: prepared.auth,
+        fromWorkflow: !detached,
+        nodeId: action.nodeId,
+        table,
+        taskId,
+        toolName: name,
+      });
+      const sent =
+        refused === undefined
+          ? sendTask(table, {
+              callId: call.callId,
+              input: agentSendInput(action),
+              mode,
+              now: input.now,
+              taskId,
+              timeoutMs,
+              turnId,
+              workflowCaller: call.workflowCaller,
+            })
+          : undefined;
+      if (sent === undefined) {
+        fail(call, action, { ...(refused ?? unknownSend(taskId, name)) });
+        continue;
+      }
+      const receipt = (started: boolean) =>
+        detached &&
+        results.push(
+          sendReceiptResult({ callId: call.callId, record: sent.record, started, toolName }),
+        );
+      // A replayed send already reached the agent; a detached call still owes its receipt.
+      if (sent.kind === "existing") {
+        if (sent.record.mode === "detached") receipt(sent.record.callId === call.callId);
+        continue;
+      }
+      if (!sent.started) {
+        // A working agent takes the input now; one still starting gets it once it reports.
+        const failure = await deliverSends({
+          callbackAlias,
+          ctx,
+          effects: commandEffects(sent.effects),
+          ownerSessionId: session.sessionId,
+        });
+        if (failure !== undefined) {
+          fail(call, action, failure.output);
+          continue;
+        }
+        session = setTaskTable(session, sent.table);
+        receipt(false);
+        continue;
+      }
+      ({ record, table } = sent);
     }
-    // Over the cap, the start commits nothing, whether a new agent or an idle one.
-    const rejected = detached
-      ? tooManyTasksResult({ callId: call.callId, table, toolName })
-      : undefined;
-    if (rejected !== undefined) {
-      results.push(rejected);
-      continue;
-    }
-    const { record } = started;
-    table = started.table;
     session = setTaskTable(session, table);
 
     const tracing = prepareAgentInvocationTrace({
@@ -349,10 +371,10 @@ export async function startAgentTasks(input: {
 
     let child: ChildAddress | undefined;
     let failure: JsonValue | undefined;
+    // A send the child cannot take for good ends the task.
+    let childEnded: true | undefined;
     if (entry.kind === "resume") {
-      if (record.child === undefined) {
-        failure = { code: AGENT_UNREACHABLE, message: renderAgentUnreachable(record.id, "ended") };
-      } else {
+      if (record.child !== undefined) {
         const delivered = await deliverToChild({
           action,
           activityObserver: prepared.activityObserver,
@@ -367,7 +389,10 @@ export async function startAgentTasks(input: {
           replyToken,
         });
         if (delivered === undefined) child = record.child;
-        else failure = delivered;
+        else {
+          failure = delivered.output;
+          if (delivered.permanent) childEnded = true;
+        }
       }
     } else {
       const outcome = await startSubagent({
@@ -397,6 +422,7 @@ export async function startAgentTasks(input: {
       const settled = applyTaskMessage(
         table,
         {
+          childEnded,
           generation: record.generation,
           kind: "task.settled",
           outcome: { error: toTaskError(failure), status: "failed" },
@@ -436,32 +462,20 @@ export async function startAgentTasks(input: {
         }),
       );
     }
-    if (detached) results.push(startReceiptResult(record, toolName));
+    if (!detached) continue;
+    results.push(
+      taskId === undefined
+        ? startReceiptResult(record, toolName)
+        : sendReceiptResult({ callId: call.callId, record, started: true, toolName }),
+    );
   }
 
-  // New agents are the only way idle agents accumulate, so retiring here bounds them.
-  const retired = retireIdleAgents(getTaskTable(session), prepared.auth);
-  if (retired.retired.length > 0) {
-    session = setTaskTable(session, retired.table);
-    const unreached = (
-      await Promise.all(retired.retired.map((record) => retireIdleAgent(record, ctx)))
-    ).filter((child) => child !== undefined);
-    // The records are gone, so no later deadline or session end can stop these.
-    if (unreached.length > 0) {
-      try {
-        await armChildHardStop({
-          endReason: RETIRED_IDLE_AGENT_REASON,
-          ownerSessionId: session.sessionId,
-          targets: unreached,
-          wakeAt: new Date(Date.parse(input.now) + TASK_CANCEL_CONFIRM_MS).toISOString(),
-        });
-      } catch (error) {
-        logError(log, "failed to arm the hard stop for retired idle agents", error, {
-          ownerSessionId: session.sessionId,
-        });
-      }
-    }
-  }
+  session = await retireIdleTaskChildren({
+    caller: prepared.auth,
+    ctx,
+    now: input.now,
+    session,
+  });
 
   return {
     events,
@@ -567,34 +581,21 @@ export async function applyTaskReport(input: {
         },
         input.now,
       );
-      if (applied.effects.some((effect) => effect.kind === "confirmed")) {
-        // A cancelled child confirmed it stopped: count its spend, report nothing.
-        session = setTurnUsageState(
-          setTaskTable(session, applied.table),
-          accumulateSessionUsage({
-            previous: getTurnUsageState(session.state),
-            usage: result.outcome.usageDelta,
-          }),
-        );
-        serializedContext = await flushAgentInvocationTraces(
-          settleAgentInvocationTrace({
-            acceptedAtMs: Date.parse(input.now),
-            result,
-            serializedContext,
-            sessionId: session.sessionId,
-          }),
-        );
-        continue;
-      }
-      if (!applied.effects.some((effect) => effect.kind === "settled")) continue;
-      events.push(...reportedEvents(applied.effects, session.sessionId));
+      if (applied.effects.length === 0) continue;
+      // The report's own generation settled; a cancelled child only confirmed it stopped.
+      const settled = applied.effects.some(
+        (effect) => effect.kind === "settled" && effect.record.generation === record.generation,
+      );
+      events.push(...taskEvents(applied.effects, session.sessionId));
       // An awaited call's result is delivered now; a detached one goes to a
-      // live `task_wait`, or is held for delivery. So does the result of a
-      // continued generation that failed at once, over the working-task cap.
+      // live `task_wait`, or is held for delivery. So does each generation the
+      // report started, such as one for a send the agent read too late.
       const detached = record.mode === "detached" && record.workflowCaller === undefined;
       let next = setTaskTable(
         session,
-        detached ? applied.table : markTaskDelivered(applied.table, record.id, record.generation),
+        settled && !detached
+          ? markTaskDelivered(applied.table, record.id, record.generation)
+          : applied.table,
       );
       for (const effect of applied.effects) {
         if (effect.kind !== "settled") continue;
@@ -620,6 +621,7 @@ export async function applyTaskReport(input: {
           sessionId: session.sessionId,
         }),
       );
+      if (!settled) continue;
       if (record.workflowCaller !== undefined) {
         replies.push({ replyTo: record.workflowCaller.replyTo, result });
       } else if (!detached) {
@@ -655,6 +657,17 @@ function adoptChild(
     now,
   );
   return { commands: commandEffects(applied.effects), table: applied.table };
+}
+
+/** A send's input for an agent: its message, and the output schema its reply must match. */
+function agentSendInput(action: RuntimeAgentDispatchRequest): JsonObject {
+  const { message, outputSchema } = action.input;
+  const input: JsonObject = { message: message ?? "" };
+  return outputSchema === undefined ? input : { ...input, outputSchema };
+}
+
+function unknownSend(taskId: string, name: string): TaskError {
+  return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, name) };
 }
 
 /** An unguessable alias: remote children present it as their callback token. */

@@ -41,12 +41,18 @@ function withDynamicSubagents(ctx: ContextContainer): void {
 describe("resolveTasksInstruction", () => {
   it("offers the block with an agent tool or a workflow tool that is not attached", () => {
     expect(resolveTasksInstruction({ ctx: context(), tools: tools(RESEARCHER) })).toBe(
-      renderTasksInstruction({ agents: true }),
+      renderTasksInstruction({ agents: true, resumable: true }),
     );
     expect(resolveTasksInstruction({ ctx: context(), tools: tools(DEPLOY) })).toBe(
-      renderTasksInstruction({ agents: false }),
+      renderTasksInstruction({ agents: false, resumable: false }),
     );
     expect(resolveTasksInstruction({ ctx: context(), tools: tools() })).toBeUndefined();
+  });
+
+  it("explains taskId with a resumable workflow tool and no agents", () => {
+    expect(
+      resolveTasksInstruction({ ctx: context(), tools: tools({ ...DEPLOY, resumable: true }) }),
+    ).toBe(renderTasksInstruction({ agents: false, resumable: true }));
   });
 
   it("does not count attached workflow tools, which never start a detached task", () => {
@@ -61,11 +67,11 @@ describe("resolveTasksInstruction", () => {
         ctx: context(withDynamicSubagents),
         tools: tools(TASK_CANCEL, TASK_WAIT),
       }),
-    ).toBe(renderTasksInstruction({ agents: true }));
+    ).toBe(renderTasksInstruction({ agents: true, resumable: true }));
   });
 
   it("offers the same block in every session kind", () => {
-    const block = renderTasksInstruction({ agents: true });
+    const block = renderTasksInstruction({ agents: true, resumable: true });
     for (const ctx of [
       context((next) => next.set(DelegatedSessionKey, true)),
       context((next) => next.set(ModeKey, "task")),

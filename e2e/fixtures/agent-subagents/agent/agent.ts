@@ -70,7 +70,7 @@ const workspaceDispatcher = mockModel({
       (result) =>
         result.id === callId &&
         result.isError &&
-        JSON.stringify(result.output).includes("AGENT_OTHER_PRINCIPAL"),
+        JSON.stringify(result.output).includes("TASK_OTHER_PRINCIPAL"),
     );
     if (refused && !request.toolResults.some((result) => result.id === `${callId}-new`)) {
       return {
@@ -95,7 +95,7 @@ const workspaceDispatcher = mockModel({
         {
           id: callId,
           name: "remote-loopback",
-          input: { agentId, message: WORKSPACE_LOOKUP_MESSAGE },
+          input: { message: WORKSPACE_LOOKUP_MESSAGE, taskId: agentId },
         },
       ],
     };
@@ -128,12 +128,12 @@ const scheduledRemoteModel = mockModel({
 
 /**
  * Reads the oldest continuable child's id from the latest framework-injected
- * `[Tasks]` note, which lists idle agents most recent first. Every caller
+ * `[Tasks]` note, which lists idle tasks most recent first. Every caller
  * then names the first user's agent, so a later caller's refusal proves it
  * could not reach that agent.
  */
 function listedAgentId(messages: readonly MockModelMessage[], name: string): string | undefined {
-  const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`, "gu");
+  const pattern = new RegExp(`<task id="([^"]+)" tool="${name}">`, "gu");
   for (const message of [...messages].reverse()) {
     if (message.role !== "user" || !message.text.startsWith("[Tasks]")) continue;
     return [...message.text.matchAll(pattern)].at(-1)?.[1];

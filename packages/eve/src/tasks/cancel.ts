@@ -25,7 +25,7 @@ import {
   type TaskCancelOutput,
 } from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { cancelTask, type TaskTable } from "#tasks/table.js";
+import { cancelTask, hasCancellableWork, type TaskTable } from "#tasks/table.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 import { endTaskWaits, takeLiveWait } from "#tasks/wait.js";
 
@@ -46,7 +46,9 @@ export type TaskCancelSelector =
   /** The tasks that hold a principal's turn open (see `heldTaskIds`): that turn failed. */
   | { readonly kind: "held"; readonly principal: SessionAuthContext | null }
   /** The agent calls a workflow run awaits, once that run ends. */
-  | { readonly kind: "workflow-run"; readonly runId: string };
+  | { readonly kind: "workflow-run"; readonly runId: string }
+  /** One `ctx.agent` call of a workflow run, whose `signal` aborted. */
+  | { readonly kind: "agent-call"; readonly runId: string; readonly callId: string };
 
 /** The owner's table after cancelling tasks, and what it must send and publish. */
 interface CancelledTasks {
@@ -193,9 +195,9 @@ export function interruptAttachedCalls<T extends Session>(input: {
 }
 
 /**
- * Applies one model call that stops a detached task. A working task is
- * cancelled and never reports, except to a `task_wait` on it; a finished one
- * keeps its result. A call its turn still waits on is unknown, and a task
+ * Applies one model call that stops a detached task: its working generation
+ * and the sends queued for it. That work never reports, except to a
+ * `task_wait` on it; a finished generation keeps its result. A call its turn still waits on is unknown, and a task
  * another principal started is refused. The caller sends the commands and
  * publishes the events.
  */
@@ -225,7 +227,7 @@ export function applyTaskCancelCall<T extends Session>(input: {
   const found = findCallerTask({ caller: input.caller, table, taskId });
   if ("error" in found) return unchanged(taskToolErrorResult(request, found.error));
   const { record } = found;
-  if (isTerminalTaskStatus(record.status)) {
+  if (!hasCancellableWork(record)) {
     return unchanged(cancelResult(request, { status: "already_finished" }));
   }
   const cancelled = cancelRecords(table, [record], input.now);
@@ -284,6 +286,9 @@ function selectTasks(
     }
     case "workflow-run":
       return (record) => record.workflowCaller?.runId === selector.runId;
+    case "agent-call":
+      return (record) =>
+        record.workflowCaller?.runId === selector.runId && record.callId === selector.callId;
   }
 }
 
@@ -329,11 +334,14 @@ function cancelRecords(
   const commands: CommandEffect[] = [];
   const events: TaskSettledStreamEvent[] = [];
   for (const record of records) {
-    if (isTerminalTaskStatus(record.status)) continue;
+    if (!hasCancellableWork(record)) continue;
     const cancelled = cancelTask(next, record.id, now);
     next = cancelled.table;
     commands.push(...commandEffects(cancelled.effects));
-    events.push(taskSettledEvent({ outcome: { status: "cancelled" }, record }));
+    // Queued sends settle as their generations come up.
+    if (!isTerminalTaskStatus(record.status)) {
+      events.push(taskSettledEvent({ outcome: { status: "cancelled" }, record }));
+    }
   }
   return { commands, events, table: next };
 }

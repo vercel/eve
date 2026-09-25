@@ -3,7 +3,7 @@ import type { ModelMessage } from "ai";
 import { truncateHead } from "#execution/sandbox/truncate-output.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskKind, TaskOutcome } from "#tasks/protocol.js";
-import type { TaskRecord } from "#tasks/record.js";
+import { isIdleTask, type TaskRecord } from "#tasks/record.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
 // Every string the model reads about tasks lives in this module.
@@ -11,16 +11,10 @@ import type { ToolModelOutput } from "#tools/model-output.js";
 /** Label prefixing the framework-authored `[Tasks]` note. */
 export const TASKS_NOTE_LABEL = "[Tasks]";
 
-/** Idle agents listed in the `[Tasks]` note, most recent first. */
-const MAX_IDLE_AGENTS = 10;
+/** Idle tasks listed in the `[Tasks]` note, most recent first. */
+const MAX_IDLE_TASKS = 10;
 
-const EMPTY_TASKS_NOTE = [
-  TASKS_NOTE_LABEL,
-  "<tasks>",
-  "</tasks>",
-  "<idle_agents>",
-  "</idle_agents>",
-].join("\n");
+const EMPTY_TASKS_NOTE = [TASKS_NOTE_LABEL, "<tasks>", "</tasks>", "<idle>", "</idle>"].join("\n");
 
 /** Structured receipt returned to clients for a detached call. */
 export interface TaskReceipt {
@@ -32,15 +26,40 @@ function noun(kind: TaskKind): "agent" | "task" {
   return kind === "agent" ? "agent" : "task";
 }
 
-/** Receipt text for a call that started a detached task. */
-export function renderStartReceipt(record: Pick<TaskRecord, "id">): string {
-  return `Started task ${record.id}. Use task_wait for its result.`;
+/** Receipt text for a call that started a detached task; a resumable task also takes sends. */
+export function renderStartReceipt(
+  record: Pick<TaskRecord, "id" | "name" | "resumable">,
+  toolName: string,
+): string {
+  return record.resumable === true
+    ? `Started task ${record.id}. Call ${toolName} again with taskId ${record.id} to send it more input; use task_wait for its result.`
+    : `Started task ${record.id}. Use task_wait for its result.`;
 }
 
-/** Tool result for a call that sent a message to an agent that is still working. */
-export function renderSteeringReceipt(record: Pick<TaskRecord, "id">): string {
-  return `Sent your message to agent ${record.id}, which is still working. Use task_wait for its result.`;
+/** Receipt text for a send: to a working task, or to an idle one it started again. */
+export function renderSendReceipt(record: Pick<TaskRecord, "id">, started: boolean): string {
+  return started
+    ? `Sent to task ${record.id}, which is now working on it. Use task_wait for its result.`
+    : `Sent to task ${record.id}, which is still working. It uses your input in its current work or starts on it right after; use task_wait for its next result.`;
 }
+
+/** Sentence eve appends to the description of every resumable tool. */
+export const RESUMABLE_TOOL_DESCRIPTION =
+  "To correct or continue a task this tool started, call it again with that task's taskId; without taskId, each call starts a new task.";
+
+/** Description of the `taskId` input on every resumable tool. */
+export const TASK_ID_SEND_PARAMETER_DESCRIPTION =
+  "Only to correct or continue a task this tool started: that task's id, from its receipt or the latest [Tasks] note. An idle task starts on this input; a working one uses it in its current work or starts on it right after. Omit it to start a new task.";
+
+/** Error message for a send whose input does not match the tool's input schema. */
+export const SEND_INPUT_SCHEMA_HINT =
+  "A call with taskId sends input, so it uses this tool's input schema too.";
+
+/** Result of a generation started for a send the task never read before it ended. */
+export const TASK_ENDED_BEFORE_READ_MESSAGE = "The task ended before it read this input.";
+
+/** Result of a generation still working when its task ended. */
+export const TASK_ENDED_BEFORE_REPLY_MESSAGE = "The task ended before it replied.";
 
 /** Tool result for an attached call that a new message ended. */
 export function renderInterruptedCall(waitedMs: number): string {
@@ -138,22 +157,16 @@ export function resolveTasksAnnouncement(input: {
 
 /**
  * The `[Tasks]` note: every detached task whose result has not reached
- * history, plus idle agents. Returns `undefined` when there is nothing to list.
+ * history, plus the most recent idle tasks, agents and resumable workflow
+ * tools alike, each with the tool that takes its `taskId`. Returns
+ * `undefined` when there is nothing to list.
  */
 export function renderTasksNote(records: readonly TaskRecord[]): string | undefined {
   const tasks = records.filter((record) => record.mode === "detached" && !record.delivered);
   const idle = records
-    .filter(
-      (record) =>
-        record.kind === "agent" &&
-        record.child !== undefined &&
-        record.delivered &&
-        (record.status === "completed" ||
-          record.status === "failed" ||
-          record.status === "cancelled"),
-    )
+    .filter(isIdleTask)
     .toSorted((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))
-    .slice(0, MAX_IDLE_AGENTS);
+    .slice(0, MAX_IDLE_TASKS);
   if (tasks.length === 0 && idle.length === 0) return undefined;
   const lines = [TASKS_NOTE_LABEL, "<tasks>"];
   for (const task of tasks) {
@@ -161,23 +174,19 @@ export function renderTasksNote(records: readonly TaskRecord[]): string | undefi
       `<task id="${escapeAttribute(task.id)}" name="${escapeAttribute(task.name)}" status="${task.status}" started="${formatMinute(task.startedAt)}"/>`,
     );
   }
-  lines.push("</tasks>", "<idle_agents>");
-  for (const agent of idle) {
+  lines.push("</tasks>", "<idle>");
+  for (const task of idle) {
     lines.push(
-      `<agent id="${escapeAttribute(agent.id)}" name="${escapeAttribute(agent.name)}">${escapeText(agent.lastStatus ?? "")}</agent>`,
+      `<task id="${escapeAttribute(task.id)}" tool="${escapeAttribute(task.name)}">${escapeText(task.lastStatus ?? "")}</task>`,
     );
   }
-  lines.push("</idle_agents>");
+  lines.push("</idle>");
   return lines.join("\n");
 }
 
-/** Description of the `agentId` input on every agent tool. */
-export const AGENT_ID_PARAMETER_DESCRIPTION =
-  "The id of an agent from the latest [Tasks] note or a receipt. An idle agent gets more work in the same child session; an agent that is still working receives this message as a correction to its current work, keeps the output format it was given, and still returns one result. Omit this field (or pass null or an empty string) to start a new agent.";
-
 /** How a model-written workflow program calls agents with `ctx.agent`. */
 export const WORKFLOW_PROGRAM_AGENT_CONTRACT =
-  "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an idle agent's id from the conversation's [Tasks] note to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
+  "Call ctx.agent(name, { message: string, taskId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Pass an idle agent's task id from the conversation's [Tasks] note as taskId to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";
 
 /** Output of `task_cancel`. */
 export interface TaskCancelOutput {
@@ -185,7 +194,7 @@ export interface TaskCancelOutput {
 }
 
 export const TASK_CANCEL_DESCRIPTION =
-  "Stop a task's current work. That work never reports back; if it already finished, its result is still delivered. Agents stay available afterwards: if the [Tasks] note lists the agent as idle, pass its id as agentId to its tool to give it new work.";
+  "Stop a task's current work and any input queued for it. That work never reports back; if it already finished, its result is still delivered. Agents, and some other tasks, stay available afterwards: if the [Tasks] note lists the task as idle, call its tool with its taskId to give it new work.";
 
 /** Description of the `taskId` input of `task_cancel` and `task_wait`. */
 export const TASK_ID_PARAMETER_DESCRIPTION =
@@ -216,12 +225,12 @@ export function renderWaitTimedOut(
 
 /** Result of a `task_wait` that a new message ended. */
 export function renderWaitInterrupted(
-  record: Pick<TaskRecord, "id" | "kind" | "name" | "status">,
+  record: Pick<TaskRecord, "id" | "name" | "resumable" | "status">,
   waitedMs: number,
 ): string {
   const choices =
-    record.kind === "agent"
-      ? `keep the task, pass its id as agentId to ${record.name} to correct it, or stop it with task_cancel`
+    record.resumable === true
+      ? `keep the task, call ${record.name} again with its taskId to correct it, or stop it with task_cancel`
       : "keep the task or stop it with task_cancel";
   return `A new message arrived, so the wait ended after ${formatDuration(waitedMs)}; ${describeOpenTask(record)}. Read the message and decide whether it changes this work: ${choices}.`;
 }
@@ -233,9 +242,9 @@ function describeOpenTask(record: Pick<TaskRecord, "id" | "status">): string {
     : `${record.id} is still working`;
 }
 
-/** Result of a `task_wait` on an idle agent with nothing new. */
+/** Result of a `task_wait` on an idle task with nothing new. */
 export function renderWaitIdle(record: Pick<TaskRecord, "id" | "name">): string {
-  return `${record.id} is idle and has no new result. Pass its id as agentId to ${record.name} to give it more work.`;
+  return `${record.id} is idle and has no new result. Call ${record.name} with its taskId to give it more work.`;
 }
 
 /** `UNKNOWN_TASK` error message for `task_wait` and `task_cancel`. */
@@ -245,7 +254,50 @@ export function renderUnknownTask(taskId: string): string {
 
 /** `TASK_OTHER_PRINCIPAL` error message for a task a different caller started. */
 export function renderTaskOtherPrincipal(taskId: string): string {
-  return `Task "${taskId}" was started by a different caller, so you can't use it. Start a new one by calling its tool.`;
+  return `Task "${taskId}" was started by a different caller, so you can't use it. Start a new one by calling its tool without taskId.`;
+}
+
+/** `UNKNOWN_TASK` error message for a send to a task that is gone or never took input. */
+export function renderUnknownSendTask(taskId: string, toolName: string): string {
+  return `No open task "${taskId}" in this session; it may have ended. Start a new one by calling ${toolName} without taskId.`;
+}
+
+/** `TASK_MISMATCH` error message for a send to another tool's task. */
+export function renderTaskMismatch(record: Pick<TaskRecord, "id" | "name">): string {
+  return `Task "${record.id}" belongs to ${record.name}; call ${record.name} with it.`;
+}
+
+/**
+ * `TASK_BUSY` error for a send a task cannot take: a model's send to an agent
+ * whose current work a workflow body awaits (`workflow-owned`), or a
+ * workflow body's send to an agent that is still working (`workflow-caller`).
+ * A workflow body awaits the result of the work it started.
+ */
+export function renderTaskBusy(
+  taskId: string,
+  toolName: string,
+  reason: "workflow-caller" | "workflow-owned",
+): string {
+  switch (reason) {
+    case "workflow-caller":
+      return `Task "${taskId}" is still working on another call, so a workflow can't give it more input until it answers. Omit taskId to start a new one.`;
+    case "workflow-owned":
+      return `Task "${taskId}" is working for a workflow tool call and can't take input until it answers. Start a new one by calling ${toolName} without taskId.`;
+  }
+}
+
+/**
+ * `TASK_UNREACHABLE` error message for a send the task's child could not
+ * take. `ended`: the child is gone for good; `temporary`: a later send may
+ * reach it.
+ */
+export function renderTaskUnreachable(
+  record: Pick<TaskRecord, "id" | "kind" | "name">,
+  reason: "ended" | "temporary",
+): string {
+  if (reason === "temporary") return `Task "${record.id}" is temporarily unreachable. Try again.`;
+  const why = record.kind === "agent" ? "its agent session ended" : "its workflow run ended";
+  return `Task "${record.id}" can no longer take input: ${why}. Start a new one by calling ${record.name} without taskId.`;
 }
 
 /** `TASK_ALREADY_WAITED` error message for a second `task_wait` on one task in a step. */
@@ -255,31 +307,40 @@ export function renderTaskAlreadyWaited(taskId: string): string {
 
 /**
  * Static system block, offered with `task_wait` and `task_cancel` in every
- * session whose agent can start a detached task. With agents, it also
- * explains how to continue or correct one by `agentId`.
+ * session whose agent can start a detached task. With agents or resumable
+ * workflow tools, it also explains how to continue or correct a task by
+ * calling its tool with its `taskId`.
  */
-export function renderTasksInstruction(options: { readonly agents: boolean }): string {
+export function renderTasksInstruction(options: {
+  readonly agents: boolean;
+  readonly resumable: boolean;
+}): string {
   const starts = options.agents
     ? "Every agent call and most workflow tool calls start a task and return its id right away"
     : "Most workflow tool calls start a task and return its id right away";
-  const choices = options.agents
-    ? "keep the tasks, correct an agent by passing its id as agentId to its tool, or stop them with task_cancel"
+  const choices = options.resumable
+    ? "keep the tasks, correct them by calling their tool again with their taskId, or stop them with task_cancel"
     : "keep the tasks or stop them with task_cancel";
   const sentences = [
     `${starts}; the task keeps working while you continue.`,
     "When the user needs the answer to continue, wait for it with task_wait. Start independent tasks first, then wait on them in the same step, one task_wait per task.",
+  ];
+  if (options.resumable) {
+    sentences.push("To correct or continue a task, call its tool again with its taskId.");
+  }
+  sentences.push(
     "A result you don't wait for arrives in a <task_result> message.",
     "You cannot end your turn while tasks you started are working; eve waits for them and gives you their results.",
     `A new message interrupts your waits but not your tasks: decide whether it changes the work, then ${choices}.`,
     "Never use sleep to wait for a task.",
-  ];
+  );
   if (options.agents) {
     sentences.push(
-      "Agents stay available after they answer: pass an idle agent's id as agentId to its tool to give it more work in its existing session. Any agent tool can always be called without agentId to start a new agent, even when the [Tasks] note is empty or absent.",
+      "Agents stay available after they answer: call an idle agent's tool with its taskId to give it more work in its existing session. Any agent tool can always be called without taskId to start a new agent, even when the [Tasks] note is empty or absent.",
     );
   }
   sentences.push(
-    `The latest [Tasks] note lists working tasks${options.agents ? " and idle agents" : ""}; eve adds it whenever the listing changes, and it never needs a reply.`,
+    `The latest [Tasks] note lists working tasks${options.resumable ? " and idle tasks with their tools" : ""}; eve adds it whenever the listing changes, and it never needs a reply.`,
   );
   return `Tasks\n${sentences.join(" ")}`;
 }
@@ -317,72 +378,10 @@ export function renderTimedOut(kind: TaskKind, timeoutMs: number | undefined): s
   return `The ${noun(kind)} did not finish within ${limit} and was stopped.`;
 }
 
-/** `UNKNOWN_AGENT` error message for an `agentId` that names nothing in the session. */
-export function renderUnknownAgent(agentId: string): string {
-  return `No agent with id "${agentId}" exists in this session. Omit agentId to start a new agent.`;
-}
-
-/** `UNKNOWN_AGENT` error message for an `agentId` that names a workflow task. */
-export function renderNotAnAgent(taskId: string): string {
-  return `"${taskId}" is a task, not an agent. Use task_cancel to stop it.`;
-}
-
-/** `AGENT_MISMATCH` error message for an `agentId` passed to another agent's tool. */
-export function renderAgentMismatch(record: Pick<TaskRecord, "id" | "name">): string {
-  return `Agent "${record.id}" is a ${record.name} agent. Call the ${record.name} tool to continue it.`;
-}
-
-/**
- * `AGENT_BUSY` error for a call that names a working agent it may not send a
- * message to: a `ctx.agent` call (`workflow-caller`), or a model call when a
- * workflow body started the agent's current work (`workflow-owned`). A
- * workflow body awaits the output of the work it started.
- */
-export function renderAgentBusy(
-  agentId: string,
-  reason: "workflow-caller" | "workflow-owned",
-): string {
-  switch (reason) {
-    case "workflow-caller":
-      return `Agent "${agentId}" is still working on another call, so a workflow cannot give it more work until it answers. Omit agentId to start a new agent.`;
-    case "workflow-owned":
-      return `Agent "${agentId}" is working for a workflow tool call, so it cannot take your message until it answers. Omit agentId to start a new agent.`;
-  }
-}
-
-/**
- * `AGENT_UNREACHABLE` error message. `ended`: the owner knows the agent's
- * session is gone; `gone`: delivery found no session; `temporary`: delivery
- * may succeed on a later call.
- */
-export function renderAgentUnreachable(
-  agentId: string,
-  reason: "ended" | "gone" | "temporary",
-): string {
-  switch (reason) {
-    case "ended":
-      return `Agent "${agentId}" can no longer be given more work. Omit agentId to start a new agent.`;
-    case "gone":
-      return `Agent "${agentId}" is no longer reachable. Omit agentId to start a new agent.`;
-    case "temporary":
-      return `Agent "${agentId}" is temporarily unreachable. Try again.`;
-  }
-}
-
-/**
- * `AGENT_OTHER_PRINCIPAL` error for a call that names an agent a different
- * caller started: another user, a schedule, or an app principal. The agent
- * acts with its starter's credentials and keeps their conversation, so only
- * that caller may give it more work or redirect it.
- */
-export function renderAgentOtherPrincipal(agentId: string): string {
-  return `Agent "${agentId}" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.`;
-}
-
 /**
  * Message for a remote agent whose deployment speaks another task protocol
  * version, or reports none because it runs an older eve: `START_FAILED` at
- * start, `AGENT_UNREACHABLE` for a message to a working agent.
+ * start, `TASK_UNREACHABLE` for a send to a working agent.
  */
 export function renderTaskProtocolMismatch(input: {
   readonly name: string;
@@ -408,7 +407,7 @@ export function renderRemoteAgentRequestTimedOut(input: {
 
 /** `EMPTY_RESULT` error for an agent whose answer has no text. */
 export function renderEmptyResult(name: string): string {
-  return `Agent "${name}" finished without a reply. If you still need its answer, give it more work with its agentId.`;
+  return `Agent "${name}" finished without a reply. If you still need its answer, call its tool again with its taskId.`;
 }
 
 /** Error for a `ctx.agent` call whose child closed its reply channel without answering. */
@@ -418,7 +417,7 @@ export function renderAgentClosedWithoutResult(target: string): string {
 
 const LAST_STATUS_MAX_LENGTH = 200;
 
-/** One-line summary of an agent's last answer, listed with idle agents in the `[Tasks]` note. */
+/** One-line summary of a task's latest result, listed with idle tasks in the `[Tasks]` note. */
 export function renderLastStatus(outcome: TaskOutcome): string {
   const text =
     outcome.status === "completed"

@@ -1,18 +1,19 @@
 import type { JsonObject } from "#shared/json.js";
-import { AGENT_ID_PARAMETER_DESCRIPTION } from "#tasks/render.js";
+import { TASK_ID_SEND_PARAMETER_DESCRIPTION } from "#tasks/render.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export const AGENT_TOOL_NAME = "agent";
 
 export const AGENT_TOOL_DESCRIPTION = [
-  "Delegate a focused subtask to a copy of yourself. Pass `agentId` to give an idle copy more work, or to send a correction to a copy that is still working.",
+  "Delegate a focused subtask to a copy of yourself.",
   "Use it to isolate complex work or split a large task into independent pieces.",
   "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
   "A new child has fresh history and state but reuses your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
 ].join(" ");
 
+/** Input of every agent tool; with `taskId`, a call sends to an agent task this tool started. */
 export interface SubagentToolInput {
-  agentId?: string | null;
+  taskId?: string | null;
   message: string;
   outputSchema?: JsonObject;
 }
@@ -20,9 +21,9 @@ export interface SubagentToolInput {
 export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
   type: "object",
   properties: {
-    agentId: {
+    taskId: {
       type: ["string", "null"],
-      description: AGENT_ID_PARAMETER_DESCRIPTION,
+      description: TASK_ID_SEND_PARAMETER_DESCRIPTION,
     },
     message: {
       type: "string",
@@ -32,7 +33,7 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
     outputSchema: {
       type: "object",
       description:
-        "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the task's result.",
+        "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the task's result. With taskId, a schema replaces the one the task's current work was given.",
     },
   },
   required: ["message"],

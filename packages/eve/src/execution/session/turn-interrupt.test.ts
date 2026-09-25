@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.mocked(handleWorkflowToolRunMessage)
     .mockReset()
     .mockImplementation(async ({ message }) =>
-      message.kind === "outcome" ? result(message.from.callId) : undefined,
+      message.kind === "outcome" ? [result(message.from.callId)] : [],
     );
 });
 
@@ -423,6 +423,7 @@ function outcome(callId: string): SessionInboxPayload {
   return {
     from: {
       callId,
+      generation: 1,
       runId: `run-${callId}`,
       sequence: 0,
       stepIndex: 0,

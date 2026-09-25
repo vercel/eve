@@ -65,6 +65,7 @@ describe("agent invocation input", () => {
 
 const from: WorkflowToolRunRef = {
   callId: "call-1",
+  generation: 1,
   input: { message: "Find it" },
   runId: "run-1",
   sequence: 0,

@@ -230,7 +230,7 @@ export function deriveRunFacts(
 
 /**
  * Every agent tool (declared, remote, or built-in `agent`) shares one input
- * contract: a `message`, plus optional `agentId` and `outputSchema`.
+ * contract: a `message`, plus optional `taskId` and `outputSchema`.
  */
 function isAgentToolInput(input: JsonObject): boolean {
   return (
@@ -239,7 +239,7 @@ function isAgentToolInput(input: JsonObject): boolean {
   );
 }
 
-const AGENT_TOOL_INPUT_KEYS = new Set(["agentId", "message", "outputSchema"]);
+const AGENT_TOOL_INPUT_KEYS = new Set(["message", "outputSchema", "taskId"]);
 
 /**
  * Returns empty derived facts, used when a case produced no events

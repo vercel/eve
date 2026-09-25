@@ -56,7 +56,7 @@ export interface EveEvalToolCall {
 export interface EveEvalSubagentCall {
   /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
   readonly callId?: string;
-  /** Agent ID from `task.started`; pass it as `agentId` to continue the agent. */
+  /** Task ID from `task.started`; pass it as `taskId` to the agent's tool to continue it. */
   readonly taskId?: string;
   /** Durable child session id for local and remote delegations. */
   readonly childSessionId?: string;

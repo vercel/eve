@@ -216,7 +216,7 @@ export class RemoteAgentContinueRequestError extends Error {
  * no longer exists (404 / SESSION_NOT_RESUMABLE) and a remote on another task
  * protocol version are permanent; transient HTTP and network failures stay
  * retryable so the owner keeps the agent and the model decides whether to
- * try the same agentId again.
+ * send to the same task again.
  */
 export function isRetryableRemoteAgentContinueError(error: unknown): boolean {
   if (error instanceof RemoteTaskProtocolError) return false;

@@ -1,6 +1,7 @@
 import {
   isWorkflowToolDefinition,
   normalizeWorkflowToolAttached,
+  normalizeWorkflowToolResumable,
 } from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { normalizeTaskTimeout, type TaskTimeout } from "#shared/task-timeout.js";
@@ -41,6 +42,7 @@ import {
 type NormalizedAuthoredTool = Readonly<
   Omit<InternalToolDefinition, "name"> & {
     readonly attached?: boolean;
+    readonly resumable?: boolean;
     readonly behavior?: CompiledToolBehavior;
     readonly execute?: ToolExecuteFn;
     readonly timeout?: TaskTimeout;
@@ -126,12 +128,13 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "approval",
       "approvalKey",
       "outputSchema",
+      "resumable",
       "timeout",
       "toModelOutput",
     ],
     message,
   );
-  for (const key of ["attached", "timeout"] as const) {
+  for (const key of ["attached", "resumable", "timeout"] as const) {
     if (record[key] !== undefined && !isWorkflowToolDefinition(value)) {
       throw new Error(
         `${message} "${key}" is only supported on defineWorkflowTool(); other tools run inside the model step that calls them.`,
@@ -139,6 +142,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     }
   }
   const attached = normalizeWorkflowToolAttached(record.attached, message);
+  const resumable = normalizeWorkflowToolResumable(record, message);
   const timeout = normalizeTaskTimeout(record.timeout, message);
   const inputSchema =
     record.inputSchema === undefined
@@ -167,6 +171,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (attached !== undefined) {
     definition.attached = attached;
+  }
+  if (resumable !== undefined) {
+    definition.resumable = resumable;
   }
   if (timeout !== undefined) {
     definition.timeout = timeout;

@@ -4,7 +4,7 @@ import { defineEval } from "eve/evals";
 export default defineEval({
   tags: ["real-model"],
   description:
-    "Generated workflow-program agent calls return inline, reuse agentId, and enforce maxSubagents.",
+    "Generated workflow-program agent calls return inline, reuse taskId, and enforce maxSubagents.",
   async test(t) {
     const started = await t.send(
       [
@@ -26,7 +26,7 @@ export default defineEval({
       [
         "Use the workflow tool exactly once. In its JavaScript, call the same echo-marker child three times sequentially with ctx.agent",
         "using the agent id shown in the latest [Tasks] note, with messages 'blocking second', 'blocking third', and 'blocking fourth'.",
-        "Then attempt a fourth call with that agentId and message 'blocking over limit'.",
+        "Then attempt a fourth call with that taskId and message 'blocking over limit'.",
         "Catch the fourth call's error, return all three inline results followed by its message, and reply with that four-element array verbatim as JSON. Do not call echo-marker outside workflow.",
       ].join(" "),
     );

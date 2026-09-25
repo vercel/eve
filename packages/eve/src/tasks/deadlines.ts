@@ -8,7 +8,7 @@ import { createLogger } from "#internal/logging.js";
 import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { cancelRunAgents } from "#tasks/cancel.js";
-import { settledEvents } from "#tasks/events.js";
+import { taskEvents } from "#tasks/events.js";
 import {
   commandEffects,
   readContext,
@@ -135,7 +135,7 @@ export async function applyTaskDeadlines(input: {
   return {
     events: [
       ...reconciled.events,
-      ...settledEvents(evaluated.effects),
+      ...taskEvents(evaluated.effects, session.sessionId),
       ...runAgents.events,
       ...lost.events,
     ],

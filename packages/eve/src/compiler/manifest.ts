@@ -825,6 +825,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .object({
             attached: z.boolean().optional(),
             kind: z.literal("workflow-tool"),
+            resumable: z.literal(true).optional(),
             timeout: taskTimeoutSchema.optional(),
             workflowId: z.string(),
           })

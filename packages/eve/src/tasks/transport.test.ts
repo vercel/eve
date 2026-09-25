@@ -31,7 +31,7 @@ import {
   deliverToChild,
   readRemoteTaskReport,
   runCommands,
-  sendAgentMessage,
+  sendTaskInput,
 } from "#tasks/transport.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({
@@ -131,9 +131,9 @@ describe("deliverToChild", () => {
   });
 
   it.each([
-    [{ status: "session_not_active" }, "is no longer reachable"],
+    [{ status: "session_not_active" }, "can no longer take input"],
     [{ retryable: true, status: "busy" }, "is temporarily unreachable"],
-  ])("reports an undelivered message as AGENT_UNREACHABLE (%j)", async (result, message) => {
+  ])("reports an undelivered message as TASK_UNREACHABLE (%j)", async (result, message) => {
     dispatchSession.mockResolvedValueOnce(result);
 
     const failure = await deliverToChild({
@@ -146,8 +146,7 @@ describe("deliverToChild", () => {
     });
 
     expect(failure).toMatchObject({
-      code: "AGENT_UNREACHABLE",
-      message: expect.stringContaining(message),
+      output: { code: "TASK_UNREACHABLE", message: expect.stringContaining(message) },
     });
     expect(dispatchSession).toHaveBeenCalledOnce();
   });
@@ -199,10 +198,13 @@ describe("deliverToChild", () => {
     });
 
     expect(failure).toEqual({
-      code: "START_FAILED",
-      message: expect.stringContaining(
-        "Upgrade so both deployments use the same task protocol version.",
-      ),
+      output: {
+        code: "START_FAILED",
+        message: expect.stringContaining(
+          "Upgrade so both deployments use the same task protocol version.",
+        ),
+      },
+      permanent: true,
     });
     error.mockRestore();
   });
@@ -357,7 +359,7 @@ describe("runCommands", () => {
   });
 });
 
-describe("sendAgentMessage", () => {
+describe("sendTaskInput", () => {
   const ALICE = {
     attributes: {},
     authenticator: "slack",
@@ -365,14 +367,14 @@ describe("sendAgentMessage", () => {
     principalType: "user",
   } as const;
   const command = {
-    key: "turn-1:call-2",
-    kind: "message" as const,
-    message: "Also cover the pricing change.",
+    input: { message: "Also cover the pricing change." },
+    kind: "input" as const,
+    seq: 2,
   };
 
   it("steers a local agent for its current call, with the owner's key and no new principal", async () => {
     await expect(
-      sendAgentMessage({
+      sendTaskInput({
         callbackAlias: "eve:task-callback:alias",
         command,
         ctx: contextWithBundle(),
@@ -392,7 +394,7 @@ describe("sendAgentMessage", () => {
           subagentName: "research",
         },
         kind: "send",
-        operationId: "turn-1:call-2",
+        operationId: "research-abc234:2",
         payload: { message: "Also cover the pricing change." },
         turnPolicy: "steer",
       },
@@ -402,7 +404,7 @@ describe("sendAgentMessage", () => {
 
   it("steers a remote agent for its current call where it runs, with the owner's key and callback", async () => {
     await expect(
-      sendAgentMessage({
+      sendTaskInput({
         callbackAlias: "eve:task-callback:alias",
         command,
         ctx: contextWithBundle(),
@@ -425,7 +427,8 @@ describe("sendAgentMessage", () => {
         url: "https://parent.example/eve/v1/callback/eve%3Ainbox%3Av1%3Aeve%3Atask-callback%3Aalias",
       },
       message: "Also cover the pricing change.",
-      operationId: "turn-1:call-2",
+      operationId: "research-abc234:2",
+      outputSchema: undefined,
       remote: { name: "research", url: "https://child.example" },
       sessionId: "remote-child",
       turnPolicy: "steer",
@@ -434,14 +437,14 @@ describe("sendAgentMessage", () => {
   });
 
   it.each([
-    ["a local session that ended", localChild, "is no longer reachable"],
+    ["a local session that ended", localChild, "can no longer take input"],
     ["a remote session that is unavailable", remoteChild, "is temporarily unreachable"],
-  ])("reports %s as AGENT_UNREACHABLE", async (_label, child, message) => {
+  ])("reports %s as TASK_UNREACHABLE", async (_label, child, message) => {
     dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
     vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(new Error("HTTP 503"));
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const failure = await sendAgentMessage({
+    const failure = await sendTaskInput({
       callbackAlias: "eve:task-callback:alias",
       command,
       ctx: contextWithBundle(),
@@ -450,18 +453,17 @@ describe("sendAgentMessage", () => {
     });
 
     expect(failure).toMatchObject({
-      code: "AGENT_UNREACHABLE",
-      message: expect.stringContaining(message),
+      output: { code: "TASK_UNREACHABLE", message: expect.stringContaining(message) },
     });
     error.mockRestore();
   });
 
-  it("reports a remote agent on another task protocol version as AGENT_UNREACHABLE", async () => {
+  it("reports a remote agent on another task protocol version as TASK_UNREACHABLE", async () => {
     const mismatch = new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 });
     vi.mocked(continueRemoteAgentSession).mockRejectedValueOnce(mismatch);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const failure = await sendAgentMessage({
+    const failure = await sendTaskInput({
       callbackAlias: "eve:task-callback:alias",
       command,
       ctx: contextWithBundle(),
@@ -469,12 +471,38 @@ describe("sendAgentMessage", () => {
       record: createTaskRecord({ child: remoteChild }),
     });
 
-    expect(failure).toEqual({ code: "AGENT_UNREACHABLE", message: mismatch.message });
+    expect(failure).toEqual({
+      output: { code: "TASK_UNREACHABLE", message: mismatch.message },
+      permanent: true,
+    });
     expect(mismatch.message).toContain("uses task protocol version 2");
     error.mockRestore();
   });
 
-  it("leaves held messages to flushHeldCommands and runs only cancels", async () => {
+  it("sends a workflow run its input on its command hook, with the send's call", async () => {
+    const call = { callId: "call-2", stepIndex: 1, turn: { id: "turn-2", sequence: 3 } };
+    await expect(
+      sendTaskInput({
+        call,
+        callbackAlias: undefined,
+        command: { input: { request: "shorter" }, kind: "input", seq: 1 },
+        ctx: undefined,
+        ownerSessionId: "owner-session",
+        record: createTaskRecord({
+          child: { commandToken: "cmd", kind: "workflow", runId: "run" },
+          kind: "workflow",
+        }),
+      }),
+    ).resolves.toBeUndefined();
+    expect(resumeHook).toHaveBeenCalledExactlyOnceWith("cmd", {
+      call,
+      input: { request: "shorter" },
+      kind: "input",
+      seq: 1,
+    });
+  });
+
+  it("leaves sends to sendTaskInput and runs only cancels", async () => {
     await runCommands(
       [{ commands: [command], kind: "send", record: createTaskRecord({ child: localChild }) }],
       contextWithBundle(),
@@ -566,11 +594,11 @@ describe("answerTask", () => {
       { code: "AGENT_SESSION_ENDED", message: "The agent's session ended before it replied." },
     ],
     [
-      "AGENT_UNREACHABLE when the agent speaks another task protocol",
+      "TASK_UNREACHABLE when the agent speaks another task protocol",
       new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 }),
       "parked",
       {
-        code: "AGENT_UNREACHABLE",
+        code: "TASK_UNREACHABLE",
         message: new RemoteTaskProtocolError({ name: "research", remoteVersion: 2 }).message,
       },
     ],

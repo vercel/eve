@@ -17,11 +17,11 @@ const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
 function createScriptedParentAgentSource(subagentName: string): string {
-  const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
+  const agentIdPattern = `<task id="([^"]+)" tool="${subagentName}"(?: [^>]*)?>`;
   const toolName = "run-program";
   const firstProgram = `return ctx.agent(${JSON.stringify(subagentName)}, { message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`;
   const secondProgram = (agentIdExpression: string) =>
-    `return ctx.agent(${JSON.stringify(subagentName)}, { agentId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
+    `return ctx.agent(${JSON.stringify(subagentName)}, { taskId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
@@ -67,7 +67,7 @@ const model = mockModel((request) => {
     const agentsSnippet = request.messages.map((message) => message.text).join("\\n");
     const agentId = AGENT_ID_PATTERN.exec(agentsSnippet)?.[1];
     if (agentId === undefined) {
-      throw new Error(\`Parent model did not receive a \${SUBAGENT_NAME} agent id.\`);
+      throw new Error(\`Parent model did not receive a \${SUBAGENT_NAME} task id.\`);
     }
     return {
       toolCalls: [

@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
-import { readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
+import { readWorkflowToolRunAgentContext } from "#execution/tools/workflow/ask.js";
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), agent: vi.fn(), ask: vi.fn() }));
 vi.mock("#execution/workflow-registry.js", () => ({ readRegisteredWorkflow: () => mocks.execute }));
@@ -61,7 +61,10 @@ it("binds workflow-only methods to the run context", async () => {
   mocks.ask.mockResolvedValue({ optionId: "yes" });
   mocks.agent.mockResolvedValue("reviewed");
   mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
-    expect(readWorkflowToolRunRef(ctx).runId).toBe("run");
+    expect(readWorkflowToolRunAgentContext(ctx).from).toMatchObject({
+      generation: 1,
+      runId: "run",
+    });
     expect(ctx.abortSignal).toBe(signal);
     expect(ctx.agents).toEqual({ reviewer: { description: "Review deployments." } });
     expect(Object.isFrozen(ctx.agents)).toBe(true);
@@ -69,7 +72,7 @@ it("binds workflow-only methods to the run context", async () => {
     const answer = await ctx.ask(question);
     const result = await ctx.agent(target, invocation);
     expect(mocks.ask).toHaveBeenCalledWith(ctx, question);
-    expect(mocks.agent).toHaveBeenCalledWith(ctx, target, invocation);
+    expect(mocks.agent).toHaveBeenCalledWith(ctx, target, invocation, undefined);
     return { answer, result };
   });
   await expect(executeWorkflowBody(input, signal)).resolves.toEqual({

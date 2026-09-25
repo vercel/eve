@@ -323,16 +323,23 @@ export function createCoordinationRequestFromToolCall(input: {
     toolName: input.toolCall.toolName,
   });
   if (definition?.workflowId !== undefined) {
-    return {
+    // A resumable tool's `taskId` names the task a call sends to; the rest is the tool's input.
+    const { taskId, ...toolInput } = inputObject;
+    const taskInput = definition.resumable === true ? toolInput : inputObject;
+    const request: RuntimeWorkflowTaskRequest = {
       attached: definition.attached,
       callId: input.toolCall.toolCallId,
-      executeInput: definition.executeInput?.(inputObject),
-      input: inputObject,
+      executeInput: definition.executeInput?.(taskInput),
+      input: taskInput,
       kind: "workflow-task",
       timeout: definition.timeout,
       toolName: input.toolCall.toolName,
       workflowId: definition.workflowId,
     };
+    if (definition.resumable !== true) return request;
+    return typeof taskId === "string" && taskId.trim() !== ""
+      ? { ...request, resumable: true, taskId }
+      : { ...request, resumable: true };
   }
   throw new Error(`Deferred tool "${input.toolCall.toolName}" has no workflow task.`);
 }

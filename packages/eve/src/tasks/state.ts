@@ -162,17 +162,17 @@ export function hasStartingChildren(session: { readonly state?: SessionStateMap 
 
 /** The identity a workflow tool run reports with. */
 export interface WorkflowRunReference {
-  readonly callId: string;
   readonly taskId: string;
   readonly toolName: string;
-  readonly turnId: string;
 }
 
 /**
  * The workflow task a run reports for. It matches by task, not run: a
- * retried start can leave a second run, but only the run that claimed the
- * task's command hook executes the body and reports. A task the owner
- * stopped still matches until the run confirms it.
+ * retried start can leave the record naming a second run, but only the run
+ * that claimed the task's command hook executes the body and reports. Nor by
+ * call: a resumable run's later generations carry the calls of the sends
+ * that started them. The table decides whether a message still applies to
+ * the task's current generation.
  */
 export function findWorkflowTask(
   table: TaskTable,
@@ -182,10 +182,7 @@ export function findWorkflowTask(
     (record) =>
       record.kind === "workflow" &&
       record.id === from.taskId &&
-      record.callId === from.callId &&
-      record.turnId === from.turnId &&
       record.name === from.toolName &&
-      record.child?.kind === "workflow" &&
-      (!isTerminalTaskStatus(record.status) || record.cancelConfirmBy !== undefined),
+      record.child?.kind === "workflow",
   );
 }

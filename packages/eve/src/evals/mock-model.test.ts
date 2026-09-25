@@ -68,7 +68,7 @@ describe("mockModel", () => {
 
   it("keeps framework scaffolding out of authored user messages", async () => {
     const requests: MockModelRequest[] = [];
-    const agents = "[Tasks]\n<tasks>\n</tasks>\n<idle_agents>\n</idle_agents>";
+    const agents = "[Tasks]\n<tasks>\n</tasks>\n<idle>\n</idle>";
     const notice = [
       "[Pending approvals]",
       "The following tool calls are awaiting approval and have not executed:",

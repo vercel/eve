@@ -119,9 +119,11 @@ it("emits every persisted report before the terminal outcome", async () => {
     },
     { ifPresent: true },
   );
+  // A run that is not resumable has no generations.
   expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
     expect.objectContaining({ owner: { inbox: "invocation-owner" } }),
     expect.any(AbortSignal),
+    undefined,
   );
 });
 
@@ -198,6 +200,7 @@ it("preserves the pending inbox read across cancellation and drains the report b
   const report: WorkflowToolRunMessage = {
     from: {
       callId: input.callId,
+      generation: 1,
       input: input.input,
       runId: "run-1",
       sequence: 0,
@@ -281,6 +284,7 @@ it("applies cancellation buffered during the last report delivery before publish
   const report: WorkflowToolRunMessage = {
     from: {
       callId: input.callId,
+      generation: 1,
       input: {},
       runId: "run-1",
       sequence: 0,
@@ -304,7 +308,7 @@ it("applies cancellation buffered during the last report delivery before publish
     signal: controller.signal,
     handleMessage: deliver,
     handleCommand(message: WorkflowToolRunControlMessage) {
-      controller.abort(new Error(message.reason));
+      if (message.kind === "cancel") controller.abort(new Error(message.reason));
     },
   });
   mocks.sleep.mockReturnValue(new Promise<void>(() => {}));

@@ -38,7 +38,7 @@ async function collectUntil(
 
 describe("detached agent calls", () => {
   it(
-    "returns a receipt, steers the working agent with agentId, and reports one result in the held turn",
+    "returns a receipt, sends to the working agent with taskId, and reports one result in the held turn",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -51,9 +51,9 @@ export default defineAgent({
     if (lastUserMessage?.startsWith("<task_result")) return "Relayed: " + lastUserMessage;
     const texts = toolResults.map((result) => String(result.output));
     if (lastUserMessage?.includes("pricing")) {
-      if (texts.some((text) => text.startsWith("Sent your message"))) return "Sent the pricing note.";
-      const agentId = /writer-[0-9a-z]{6}/u.exec(texts.join(" "))?.[0];
-      return { toolCalls: [{ name: "writer", input: { agentId, message: "Also mention the pricing." } }] };
+      if (texts.some((text) => text.startsWith("Sent to task"))) return "Sent the pricing note.";
+      const taskId = /writer-[0-9a-z]{6}/u.exec(texts.join(" "))?.[0];
+      return { toolCalls: [{ name: "writer", input: { message: "Also mention the pricing.", taskId } }] };
     }
     if (toolResults.length === 0) {
       return { toolCalls: [{ name: "writer", input: { message: "Draft the launch post." } }] };

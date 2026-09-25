@@ -35,3 +35,32 @@ export async function logUndeliveredWorkflowOutcomeStep(input: {
     fields,
   );
 }
+
+/**
+ * Logs the result of a resumable body that returned a value or threw after
+ * its generation's reply. The reply was that generation's one result, so the
+ * value or error reaches no one; the task still ends.
+ */
+export async function logIgnoredWorkflowResultStep(input: {
+  readonly from: WorkflowToolRunOutcomeMessage["from"];
+  readonly result: WorkflowToolRunOutcomeMessage["result"];
+}): Promise<void> {
+  "use step";
+
+  const { from, result } = input;
+  const log = createLogger("execution.workflow-tool-run");
+  const fields = { callId: from.callId, runId: from.runId, taskId: from.taskId };
+  if (result.status === "failed") {
+    logError(
+      log,
+      "a resumable workflow tool threw after its reply; the task ended",
+      rebuildSerializableError(result.error),
+      fields,
+    );
+    return;
+  }
+  log.warn(
+    "a resumable workflow tool returned a value after its reply; the value was dropped and the task ended",
+    fields,
+  );
+}

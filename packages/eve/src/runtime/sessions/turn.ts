@@ -18,6 +18,8 @@ export interface PreparedRuntimeWorkflowTask {
   readonly workflowId: string;
   /** Authored workflow tools only: the call holds its turn instead of starting a detached task. */
   readonly attached?: boolean;
+  /** Authored workflow tools only: the task takes more input by `taskId`. */
+  readonly resumable?: true;
   /** Authored workflow tools only: the time limit for each call. */
   readonly timeout?: TaskTimeout;
 }

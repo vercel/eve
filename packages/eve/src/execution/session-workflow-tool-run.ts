@@ -7,6 +7,7 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import {
+  applyWorkflowGeneration,
   cancelTasks,
   settleWorkflowTask,
   startAgentTasks,
@@ -24,34 +25,41 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
+/**
+ * Applies one message from a workflow tool run and returns the tool results
+ * the turn accepts: an attached call's result, or a `task_wait`'s.
+ */
 export async function handleWorkflowToolRunMessage(
   input: HandlerInput<WorkflowToolRunMessage>,
-): Promise<RuntimeActionResult | undefined> {
+): Promise<readonly RuntimeActionResult[]> {
   const { message } = input;
   switch (message.kind) {
     case "outcome":
       return await handleWorkflowToolRunOutcome({ ...input, message });
+    case "started":
+    case "reply":
+    case "ended":
+      return await applyWorkflowGeneration(input.cursor, message);
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
-      return undefined;
+      return [];
     case "report":
       await emitWorkflowToolRunReportStep({
         from: message.from,
         sessionWritable: input.cursor.sessionWritable,
         update: message.update,
       });
-      return undefined;
+      return [];
   }
 }
 
 /**
  * Settles the workflow task a run's outcome reports and returns the tool
- * result the waiting turn accepts, or `undefined` when the outcome settles
- * no working task.
+ * result the waiting turn accepts, if the outcome settles a working task.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
-): Promise<RuntimeActionResult | undefined> {
+): Promise<readonly RuntimeActionResult[]> {
   const { cursor, message } = input;
   // A workflow run that ends cancels the agent tasks it still owns, even
   // when the owner no longer waits on the run. Usually its calls all
@@ -64,8 +72,7 @@ async function handleWorkflowToolRunOutcome(
   ) {
     await cancelTasks(cursor, { kind: "workflow-run", runId });
   }
-  const [result] = await settleWorkflowTask(cursor, message);
-  return result;
+  return await settleWorkflowTask(cursor, message);
 }
 
 async function handleWorkflowToolRunRequest(
@@ -73,9 +80,23 @@ async function handleWorkflowToolRunRequest(
 ): Promise<void> {
   const { cursor, message } = input;
   const task = findWorkflowTask(getTaskTable(cursor.sessionState.snapshot.session), message.from);
-  // A cancelled or orphaned run keeps running until it unwinds; nothing it
-  // asks for reaches the user or starts more work.
-  const taskId = task !== undefined && !isTerminalTaskStatus(task.status) ? task.id : undefined;
+  // A cancelled or orphaned run keeps running until it unwinds, and a
+  // resumable run's generation that replied owns no more work: nothing
+  // either asks for reaches the user or starts more work.
+  const taskId =
+    task !== undefined &&
+    task.generation === message.from.generation &&
+    !isTerminalTaskStatus(task.status)
+      ? task.id
+      : undefined;
+  if (message.request.kind === "agent-cancel") {
+    await cancelTasks(cursor, {
+      callId: message.request.invocationId,
+      kind: "agent-call",
+      runId: message.from.runId,
+    });
+    return;
+  }
   if (message.request.kind === "agent-invoke") {
     if (taskId === undefined) {
       await resumeHookStep(message.replyTo, {

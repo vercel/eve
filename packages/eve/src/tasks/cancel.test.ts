@@ -30,7 +30,8 @@ import {
   takeTaskResults,
 } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
-import { applyTaskMessage, startTask, type TaskTable } from "#tasks/table.js";
+import { applyTaskMessage, type TaskTable } from "#tasks/table.js";
+import { sendTask } from "#tasks/table-generations.js";
 import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { settleWorkflowTask } from "#tasks/workflow-task.js";
 
@@ -127,6 +128,7 @@ describe("applyTaskCancelCall", () => {
       message: {
         from: {
           callId: "call-remind",
+          generation: 1,
           runId: "run-remind",
           sequence: 1,
           stepIndex: 0,
@@ -313,26 +315,36 @@ describe("applyTaskCancelCall", () => {
       child: LOCAL_CHILD,
       id: "research-7k2m9q",
       mode: "detached",
+      resumable: true,
     });
 
-    const table = getTaskTable(cancel([agent], "research-7k2m9q").session);
-
-    expect(renderTasksNote(table.records)).toContain(
-      '<agent id="research-7k2m9q" name="research">',
+    const cancelled = getTaskTable(cancel([agent], "research-7k2m9q").session);
+    // Idle once the agent confirms the stop.
+    expect(renderTasksNote(cancelled.records)).toBeUndefined();
+    const { table } = applyTaskMessage(
+      cancelled,
+      {
+        generation: 1,
+        kind: "task.settled",
+        outcome: { status: "cancelled" },
+        taskId: "research-7k2m9q",
+      },
+      NOW,
     );
-    const continued = startTask(table, {
-      agentId: "research-7k2m9q",
+
+    expect(renderTasksNote(table.records)).toContain('<task id="research-7k2m9q" tool="research">');
+    const continued = sendTask(table, {
       callId: "call-2",
-      kind: "agent",
+      input: { message: "Try again." },
       mode: "attached",
-      name: "research",
       now: NOW,
-      ownerId: "parent",
+      taskId: "research-7k2m9q",
       turnId: "turn-2",
     });
     expect(continued).toMatchObject({
-      kind: "started",
+      kind: "sent",
       record: { generation: 2, id: "research-7k2m9q", status: "working" },
+      started: true,
     });
   });
 });

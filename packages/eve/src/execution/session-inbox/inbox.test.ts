@@ -113,6 +113,7 @@ describe("createSessionInbox", () => {
       kind: "report",
       from: {
         callId: "call",
+        generation: 1,
         input: {},
         runId: "tool-run",
         sequence: 0,

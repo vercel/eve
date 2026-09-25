@@ -39,6 +39,7 @@ beforeEach(() => {
 
 const from = {
   callId: "call",
+  generation: 1,
   input: {},
   runId: "run",
   sequence: 0,
@@ -225,12 +226,14 @@ it("settles the run's task and returns the outcome as a tool result", async () =
 
   // Every agent call the run made already settled, so nothing is left to cancel.
   expect(cancelTasksStep).not.toHaveBeenCalled();
-  expect(outcome).toEqual({
-    callId: "call",
-    kind: "tool-result",
-    output: "done",
-    toolName: "research",
-  });
+  expect(outcome).toEqual([
+    {
+      callId: "call",
+      kind: "tool-result",
+      output: "done",
+      toolName: "research",
+    },
+  ]);
   expect(emitSubagentEventStep).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({
       event: {
@@ -270,7 +273,7 @@ it("still cancels the tasks of a run the owner no longer waits on, but ignores i
     message: { from, kind: "outcome", result: { output: "done", status: "completed" } },
   });
 
-  expect(outcome).toBeUndefined();
+  expect(outcome).toEqual([]);
   expect(emitSubagentEventStep).not.toHaveBeenCalled();
   expect(cancelTasksStep).toHaveBeenCalledWith({
     selector: { kind: "workflow-run", runId: "run" },

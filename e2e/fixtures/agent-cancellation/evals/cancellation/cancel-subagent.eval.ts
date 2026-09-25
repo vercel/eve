@@ -76,7 +76,7 @@ export default defineEval({
     const resumed = await session.send(
       [
         "Use the workflow tool exactly once.",
-        `In its JavaScript, call ctx.agent for sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
+        `In its JavaScript, call ctx.agent for sleeper with taskId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
         "Return the inline result and reply with it verbatim. Do not call sleeper outside workflow.",
       ].join(" "),
     );

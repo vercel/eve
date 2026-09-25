@@ -17,6 +17,11 @@ export interface HarnessToolDefinition {
   readonly description: string;
   /** Workflow tools only: the call holds its turn instead of starting a detached task. */
   readonly attached?: boolean;
+  /**
+   * Workflow and agent tools only: the task takes more input by `taskId`.
+   * The tool's input schema offers `taskId`, and a call with one is a send.
+   */
+  readonly resumable?: boolean;
   /** Workflow tools only: the time limit for each call. */
   readonly timeout?: TaskTimeout;
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;

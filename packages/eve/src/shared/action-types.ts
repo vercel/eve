@@ -135,6 +135,10 @@ export const runtimeWorkflowTaskRequestSchema = z
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
     nodeId: z.string().optional(),
+    /** The tool takes sends; with `taskId`, the call is one. */
+    resumable: z.literal(true).optional(),
+    /** A send's task, taken out of `input`, which holds the tool's own input. */
+    taskId: z.string().optional(),
     timeout: z.union([z.number().positive(), z.literal(false)]).optional(),
     toolName: z.string(),
     workflowId: z.string(),
@@ -294,8 +298,8 @@ export const runtimeSubagentChildResultWithCostSchema: z.ZodType<RuntimeSubagent
 
 /**
  * Subagent failure synthesized on the parent side when no child produced a
- * result: dispatch rejections, start failures, and agentId-continuation
- * delivery errors. Always an error. Enters the harness only through the
+ * result: dispatch rejections, start failures, and delivery errors of a
+ * send to an agent task. Always an error. Enters the harness only through the
  * trusted step-result path, never through the shared callback inbox.
  */
 export type RuntimeSubagentDispatchFailure = z.infer<typeof runtimeSubagentDispatchFailureSchema>;

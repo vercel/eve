@@ -8,7 +8,10 @@ import type {
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { emitSubagentEventStep } from "#tasks/emit-event-step.js";
-import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
+import type {
+  WorkflowToolRunGenerationMessage,
+  WorkflowToolRunOutcomeMessage,
+} from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { flushUnsentCallerEvents } from "#subagents/remote/unsent-caller-events.js";
@@ -23,11 +26,7 @@ import {
   type TaskInputPublication,
 } from "#tasks/input.js";
 import { answerTaskStep, publishTaskInputStep, surfaceTaskInputStep } from "#tasks/input-step.js";
-import {
-  isTerminalTaskStatus,
-  type TaskDeadlineSignal,
-  type TaskInputEvent,
-} from "#tasks/protocol.js";
+import type { TaskDeadlineSignal, TaskInputEvent } from "#tasks/protocol.js";
 import { getTaskTable, hasStartingChildren, planTaskTimer } from "#tasks/state.js";
 import { armTaskTimerStep, cancelTaskTimerStep } from "#tasks/timer-steps.js";
 import {
@@ -42,7 +41,8 @@ import {
   type TaskOwnerUpdate,
 } from "#tasks/owner.js";
 import { endTaskWaitsStep, type TaskWaitEnd } from "#tasks/wait.js";
-import { settleWorkflowTaskStep } from "#tasks/workflow-task.js";
+import { applyWorkflowGenerationStep, settleWorkflowTaskStep } from "#tasks/workflow-task.js";
+import { hasCancellableWork } from "#tasks/table.js";
 
 // Owner-side helpers that run in the session workflow body. They only
 // sequence steps, and must not import Node.js built-ins.
@@ -189,6 +189,24 @@ export async function settleWorkflowTask(
 }
 
 /**
+ * Applies one generation message of a resumable workflow run and returns the
+ * results of `task_wait` calls it settled.
+ */
+export async function applyWorkflowGeneration(
+  cursor: SessionStateCursor,
+  message: WorkflowToolRunGenerationMessage,
+): Promise<readonly RuntimeToolResultActionResult[]> {
+  return await applyTaskOwnerUpdate(
+    cursor,
+    await applyWorkflowGenerationStep({
+      message,
+      serializedContext: cursor.serializedContext,
+      sessionState: cursor.sessionState,
+    }),
+  );
+}
+
+/**
  * Cancels the selected working tasks, without waiting for their children to
  * stop, and publishes their `task.settled` events. Returns the results of
  * `task_wait` calls on the cancelled tasks. With no working task it takes no
@@ -199,7 +217,7 @@ export async function cancelTasks(
   selector: TaskCancelSelector,
 ): Promise<readonly RuntimeToolResultActionResult[]> {
   const table = getTaskTable(cursor.sessionState.snapshot.session);
-  if (table.records.every((record) => isTerminalTaskStatus(record.status))) return [];
+  if (!table.records.some(hasCancellableWork)) return [];
   return await applyTaskOwnerUpdate(
     cursor,
     await cancelTasksStep({

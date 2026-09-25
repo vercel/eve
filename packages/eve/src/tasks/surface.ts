@@ -24,12 +24,16 @@ export function resolveTasksInstruction(input: {
   const dynamicResolvers = input.ctx?.get(BundleKey)?.subagentRegistry?.dynamicResolvers ?? [];
   let agents = dynamicResolvers.some((resolver) => resolver.tool !== false);
   let workflows = false;
+  let resumable = false;
   for (const tool of input.tools.values()) {
     if (isTaskCancelTool(tool) || isTaskWaitTool(tool)) continue;
     if (tool.workflowId === AGENT_TASK_WORKFLOW_ID) agents = true;
     else if (tool.workflowId !== undefined && tool.attached !== true) workflows = true;
+    if (tool.resumable === true) resumable = true;
   }
-  return agents || workflows ? renderTasksInstruction({ agents }) : undefined;
+  return agents || workflows
+    ? renderTasksInstruction({ agents, resumable: agents || resumable })
+    : undefined;
 }
 
 /** The tools without `task_wait` and `task_cancel`, for a session that cannot start a detached task. */

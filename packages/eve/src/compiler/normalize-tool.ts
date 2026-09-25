@@ -122,6 +122,7 @@ export async function compileToolEntry(
                   ? {}
                   : { attached: entry.definition.attached }),
                 kind: "workflow-tool",
+                resumable: entry.definition.resumable === true ? true : undefined,
                 ...(entry.definition.timeout === undefined
                   ? {}
                   : { timeout: entry.definition.timeout }),

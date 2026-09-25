@@ -15,7 +15,7 @@ import type { TaskOwnerUpdate } from "#tasks/owner.js";
 import { findCallerTask } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus, type TaskOutcome } from "#tasks/protocol.js";
 import { taskToolErrorResult } from "#tasks/receipts.js";
-import type { TaskRecord } from "#tasks/record.js";
+import { isOpenResumableTask, type TaskRecord } from "#tasks/record.js";
 import {
   renderTaskAlreadyWaited,
   renderUnknownTask,
@@ -51,7 +51,7 @@ type WaitingCall = Pick<RuntimeWorkflowTaskRequest, "callId" | "toolName">;
 
 /**
  * Applies one `task_wait` call. It resolves at once when the answer is known
- * now: an error, a result the model has not seen, an idle agent, or a zero
+ * now: an error, a result the model has not seen, an idle task, or a zero
  * timeout. Otherwise it points the task at this call, and the turn holds.
  * `waitedTaskId` names the task the call waited on; a later call in the same
  * step that names it again fails `TASK_ALREADY_WAITED`, even when this call
@@ -95,7 +95,7 @@ export function applyTaskWaitCall<T extends Session>(input: {
     };
   }
   if (isTerminalTaskStatus(record.status)) {
-    if (record.kind !== "agent" || record.child === undefined) {
+    if (!isOpenResumableTask(record) || record.child === undefined) {
       const error = { code: "UNKNOWN_TASK", message: renderUnknownTask(record.id) };
       return { result: taskToolErrorResult(request, error), session };
     }
@@ -212,7 +212,7 @@ export function endTaskWaits<T extends Session>(
 
 function endedWaitResult(
   call: WaitingCall,
-  record: Pick<TaskRecord, "id" | "kind" | "name" | "status">,
+  record: Pick<TaskRecord, "id" | "name" | "resumable" | "status">,
   reason: Exclude<TaskWaitEnd, "turn-cancelled">,
   waitedMs: number,
 ): RuntimeToolResultActionResult {

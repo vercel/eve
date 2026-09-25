@@ -12,6 +12,7 @@ export type CompiledToolHandling =
       readonly kind: "workflow-tool";
       readonly workflowId: string;
       readonly attached?: boolean;
+      readonly resumable?: true;
       readonly timeout?: TaskTimeout;
     };
 

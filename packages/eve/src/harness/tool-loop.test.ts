@@ -1228,9 +1228,7 @@ describe("createToolLoopHarness", () => {
     // rides history as a labeled, framework-injected user message.
     expect(instructions).toBe("You are a test assistant.");
     expect(messages).toContainEqual({
-      content: expect.stringContaining(
-        '<agent id="research-abc234" name="research">waiting</agent>',
-      ),
+      content: expect.stringContaining('<task id="research-abc234" tool="research">waiting</task>'),
       kind: "context.state",
       role: "user",
     });
@@ -1243,7 +1241,7 @@ describe("createToolLoopHarness", () => {
     });
     expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
     expect(result.session.history).toContainEqual({
-      content: expect.stringContaining('<agent id="research-abc234"'),
+      content: expect.stringContaining('<task id="research-abc234" tool='),
       kind: "context.state",
       role: "user",
     });
@@ -1326,13 +1324,13 @@ describe("createToolLoopHarness", () => {
     const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
     // The request ends user-final: the announcement trails the tool results.
     expect(messages.at(-1)).toEqual({
-      content: expect.stringContaining('<agent id="research-abc234"'),
+      content: expect.stringContaining('<task id="research-abc234" tool='),
       kind: "context.state",
       role: "user",
     });
     expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
     // The volatile listing never rides the system prompt (prompt cache).
-    expect(JSON.stringify(instructions ?? "")).not.toContain("<idle_agents>");
+    expect(JSON.stringify(instructions ?? "")).not.toContain("<idle>");
     // The announcement persists append-only so the next step's diff gate
     // sees it and does not re-announce an unchanged listing.
     expect(result.session.history.at(-2)).toEqual({

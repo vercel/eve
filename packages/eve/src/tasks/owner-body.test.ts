@@ -424,6 +424,7 @@ describe("withdrawn task input", () => {
   const outcome = {
     from: {
       callId: "call-1",
+      generation: 1,
       input: {},
       runId: "run-1",
       sequence: 0,
@@ -532,6 +533,7 @@ describe("settleWorkflowTask", () => {
     const message = {
       from: {
         callId: "call-1",
+        generation: 1,
         input: {},
         runId: "run-1",
         sequence: 0,

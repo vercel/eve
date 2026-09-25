@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 61,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 61],
+    current: 62,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 62],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -64,6 +64,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       58: "Workflow tools accept detach, and background task results arrive as task.result messages.",
       59: "Workflow tools accept timeout, the time limit for each call.",
       60: "Workflow tools replace detach with attached, which keeps a call attached to its turn.",
+      61: "P6 stage 5: resumable workflow tools (defineWorkflowTool resumable overloads, ResumableWorkflowToolContext receive/reply, ctx.agent signal) and agent input agentId renamed to taskId",
     },
   },
   dynamicTool: {

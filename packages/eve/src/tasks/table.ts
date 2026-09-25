@@ -16,18 +16,18 @@ import {
 } from "#tasks/protocol.js";
 import {
   decodeTaskRecord,
+  isOpenResumableTask,
   TASK_RECORD_VERSION,
   type RecoveredTaskFields,
   type TaskRecord,
 } from "#tasks/record.js";
+import { renderLastStatus } from "#tasks/render.js";
 import {
-  renderAgentMismatch,
-  renderAgentUnreachable,
-  renderLastStatus,
-  renderNotAnAgent,
-  renderTooManyTasks,
-  renderUnknownAgent,
-} from "#tasks/render.js";
+  continueWithSends,
+  endTask,
+  readSendSeqs,
+  withoutSends,
+} from "#tasks/table-generations.js";
 
 /** Session state key holding the owner's task records. */
 export const TASK_TABLE_STATE_KEY = "eve.taskTable";
@@ -105,12 +105,22 @@ export type TaskEffect =
       readonly commands: readonly TaskCommand[];
     }
   | {
+      /** A resumable task started its next generation, for the send `record.callId` names. */
+      readonly kind: "started";
+      readonly record: TaskRecord;
+    }
+  | {
       /**
-       * An agent answered before steering messages reached it, and runs them
-       * as its next turn for the same call: `record` is that new detached
-       * generation, already working.
+       * A generation the owner cancelled with its task's work before it began:
+       * a send `task_cancel` stopped. It starts and settles `cancelled` at
+       * once, and nothing reaches the model.
        */
-      readonly kind: "continued";
+      readonly kind: "cancelled";
+      readonly record: TaskRecord;
+    }
+  | {
+      /** The task stopped taking input, after its last generation settled. */
+      readonly kind: "ended";
       readonly record: TaskRecord;
     }
   | {
@@ -222,13 +232,7 @@ export function findTask(table: TaskTable, taskId: string): TaskRecord | undefin
 export type StartTaskResult =
   | { readonly kind: "started"; readonly table: TaskTable; readonly record: TaskRecord }
   /** A replayed call whose record already exists; its side effects already ran. */
-  | { readonly kind: "existing"; readonly record: TaskRecord }
-  | {
-      /** The call named a working agent; the owner decides whether its message may join. */
-      readonly kind: "steered";
-      readonly record: TaskRecord;
-    }
-  | { readonly kind: "rejected"; readonly error: TaskError };
+  | { readonly kind: "existing"; readonly record: TaskRecord };
 
 export interface StartTaskInput {
   readonly callId: string;
@@ -242,8 +246,8 @@ export interface StartTaskInput {
   /** Per-call time limit. `false` leaves only the session lifetime. */
   readonly timeoutMs?: number | false;
   readonly creator?: JsonObject;
-  /** Continue this agent instead of starting a new one. */
-  readonly agentId?: string;
+  /** The task takes more input by `taskId`. */
+  readonly resumable?: boolean;
   readonly workflowCaller?: TaskRecord["workflowCaller"];
 }
 
@@ -257,71 +261,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
   );
   if (existing !== undefined) return { kind: "existing", record: existing };
 
-  const deadlineMs =
-    input.timeoutMs === false || input.timeoutMs === undefined
-      ? undefined
-      : Date.parse(input.now) + input.timeoutMs;
-  // A limit past the last representable date can never expire before the session does.
-  const deadlineAt =
-    deadlineMs === undefined || deadlineMs > MAX_DATE_MS
-      ? undefined
-      : new Date(deadlineMs).toISOString();
-  const timeoutMs =
-    deadlineAt === undefined || typeof input.timeoutMs !== "number" ? undefined : input.timeoutMs;
-
-  if (input.agentId !== undefined) {
-    const agent = findTask(table, input.agentId);
-    if (agent === undefined) {
-      return {
-        kind: "rejected",
-        error: { code: "UNKNOWN_AGENT", message: renderUnknownAgent(input.agentId) },
-      };
-    }
-    if (agent.kind !== "agent") {
-      return {
-        kind: "rejected",
-        error: { code: "UNKNOWN_AGENT", message: renderNotAnAgent(input.agentId) },
-      };
-    }
-    if (
-      agent.name !== input.name ||
-      (input.nodeId !== undefined && agent.nodeId !== input.nodeId)
-    ) {
-      return {
-        kind: "rejected",
-        error: { code: "AGENT_MISMATCH", message: renderAgentMismatch(agent) },
-      };
-    }
-    if (isTerminalTaskStatus(agent.status) && agent.child === undefined) {
-      return {
-        kind: "rejected",
-        error: { code: "AGENT_UNREACHABLE", message: renderAgentUnreachable(agent.id, "ended") },
-      };
-    }
-    if (!isTerminalTaskStatus(agent.status)) return { kind: "steered", record: agent };
-    const next: TaskRecord = withoutUndefined({
-      ...agent,
-      callId: input.callId,
-      cancelConfirmBy: undefined,
-      clockStoppedAt: undefined,
-      creator: input.creator ?? agent.creator,
-      deadlineAt,
-      delivered: false,
-      generation: agent.generation + 1,
-      input: undefined,
-      mode: input.mode,
-      pendingCommands: undefined,
-      startedAt: input.now,
-      status: "working",
-      steers: undefined,
-      timeoutMs,
-      turnId: input.turnId,
-      wait: undefined,
-      workflowCaller: input.workflowCaller,
-    });
-    return { kind: "started", record: next, table: replaceRecord(table, next) };
-  }
-
+  const { deadlineAt, timeoutMs } = generationDeadline(input.timeoutMs, input.now);
   const id = deriveTaskId({
     callId: input.callId,
     name: input.name,
@@ -340,6 +280,7 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     mode: input.mode,
     name: input.name,
     nodeId: input.nodeId,
+    resumable: input.resumable === true ? true : undefined,
     startedAt: input.now,
     status: "working",
     timeoutMs,
@@ -348,32 +289,6 @@ export function startTask(table: TaskTable, input: StartTaskInput): StartTaskRes
     workflowCaller: input.workflowCaller,
   });
   return { kind: "started", record, table: toTable([...table.records, record]) };
-}
-
-/**
- * Sends a working agent a message that joins its current generation. The
- * agent, local or remote, reports how many such messages reached it when it
- * answers, so each one sent to it is counted.
- */
-export function steerTask(
-  table: TaskTable,
-  taskId: string,
-  command: Extract<TaskCommand, { readonly kind: "message" }>,
-): TaskTransition {
-  const record = findTask(table, taskId);
-  if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
-  const counted = { ...record, steers: (record.steers ?? 0) + 1 };
-  return issueCommand(replaceRecord(table, counted), counted, command);
-}
-
-/** Stops counting a steering message that could not be delivered, so the owner does not wait for it. */
-export function withdrawSteer(table: TaskTable, taskId: string, generation: number): TaskTable {
-  const record = findTask(table, taskId);
-  if (record?.generation !== generation || record.steers === undefined) return table;
-  return replaceRecord(
-    table,
-    withoutUndefined({ ...record, steers: record.steers > 1 ? record.steers - 1 : undefined }),
-  );
 }
 
 /**
@@ -386,12 +301,18 @@ export function applyTaskMessage(
   now: string,
 ): TaskTransition {
   const record = findTask(table, message.taskId);
+  if (message.kind === "task.ended") {
+    return record === undefined || record.ended === true
+      ? { effects: [], table }
+      : endTask(table, record, now, message.unread);
+  }
   if (record === undefined || record.generation !== message.generation) {
     return { effects: [], table };
   }
   switch (message.kind) {
     case "task.started": {
-      if (record.child !== undefined) return { effects: [], table };
+      // A later generation's start confirms what the owner derived from its sends.
+      if (record.child !== undefined || message.child === undefined) return { effects: [], table };
       const pending = record.pendingCommands ?? [];
       const next = withoutUndefined({
         ...record,
@@ -427,56 +348,36 @@ export function applyTaskMessage(
         return { effects: [], table };
       }
       const answerSeq = message.answer ?? record.answerSeq;
-      // A child the owner stopped (cancelled or timed out) confirms here.
+      // Sends the child read during this generation, and the one that started it.
+      const sends = withoutSends(record, readSendSeqs(record, message));
+      const effects: TaskEffect[] = [];
+      let next: TaskRecord;
       if (isTerminalTaskStatus(record.status) && record.cancelConfirmBy !== undefined) {
-        const confirmed = withoutUndefined({
-          ...record,
-          answerSeq,
-          cancelConfirmBy: undefined,
-          child: message.childEnded === true ? undefined : record.child,
-        });
-        return {
-          effects: [
-            withoutUndefined({
-              kind: "confirmed" as const,
-              record: confirmed,
-              usage: message.usage,
-            }),
-          ],
-          table: replaceRecord(table, confirmed),
-        };
+        // A child the owner stopped (cancelled or timed out) confirms here.
+        next = withoutUndefined({ ...record, answerSeq, cancelConfirmBy: undefined, sends });
+        effects.push(
+          withoutUndefined({ kind: "confirmed" as const, record: next, usage: message.usage }),
+        );
+      } else if (isTerminalTaskStatus(record.status)) {
+        return { effects: [], table };
+      } else {
+        next = withoutUndefined({ ...settleRecord(record, message.outcome), answerSeq, sends });
+        effects.push(
+          withoutUndefined({
+            kind: "settled" as const,
+            outcome: message.outcome,
+            record: next,
+            usage: message.usage,
+          }),
+        );
       }
-      if (isTerminalTaskStatus(record.status)) return { effects: [], table };
-      const settled = withoutUndefined({ ...settleRecord(record, message.outcome), answerSeq });
-      const next =
-        message.childEnded === true ? withoutUndefined({ ...settled, child: undefined }) : settled;
-      const effects: TaskEffect[] = [
-        withoutUndefined({
-          kind: "settled" as const,
-          outcome: message.outcome,
-          record: next,
-          usage: message.usage,
-        }),
-      ];
-      const missed = (record.steers ?? 0) - (message.steers ?? 0);
-      if (missed <= 0 || message.childEnded === true) {
-        return { effects, table: replaceRecord(table, next) };
-      }
-      // The agent answered before these messages reached it. It runs them as
-      // its next turn for the same call, so they become its next generation.
-      const continued = continueAfterMissedSteers(record, next, missed, now);
-      effects.push({ kind: "continued", record: continued });
-      const working = workingDetachedTaskIds(table).filter((id) => id !== record.id);
-      if (working.length < MAX_WORKING_TASKS) {
-        return { effects, table: replaceRecord(table, continued) };
-      }
-      // Like any detached start over the cap, the generation fails at once,
-      // and the agent is asked to stop working on it.
-      const failed = failTask(replaceRecord(table, continued), continued.id, now, {
-        code: "TOO_MANY_TASKS",
-        message: renderTooManyTasks(working, MAX_WORKING_TASKS),
-      });
-      return { effects: [...effects, ...failed.effects], table: failed.table };
+      const settled = replaceRecord(table, next);
+      // An agent whose session ended with this answer takes no more input.
+      const continued =
+        message.childEnded === true
+          ? endTask(settled, next, now)
+          : continueWithSends(settled, next, now);
+      return { effects: [...effects, ...continued.effects], table: continued.table };
     }
   }
 }
@@ -494,9 +395,11 @@ export function failTask(
   const record = findTask(table, taskId);
   if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
   const outcome: TaskOutcome = { error, status: "failed" };
+  // The child drops the input queued for work it stops, as for a cancel.
   const failed = withoutUndefined({
     ...settleRecord(record, outcome),
     cancelConfirmBy: cancelConfirmBy(record, now),
+    sends: record.sends?.map((send) => ({ ...send, cancelled: true as const })),
   });
   const commanded = issueCommand(replaceRecord(table, failed), failed, { kind: "cancel" });
   return {
@@ -518,24 +421,39 @@ export function workingDetachedTaskIds(table: TaskTable): readonly string[] {
 }
 
 /**
- * Records cancellation immediately and asks the child to stop. The child's
- * own `cancelled` report is dropped as a duplicate, so it never wakes the model.
+ * Records cancellation immediately and asks the child to stop: the working
+ * generation, and every send queued for the task, whose generations settle
+ * `cancelled` as they come up. The child's own `cancelled` report is
+ * dropped as a duplicate, so it never wakes the model.
  */
 export function cancelTask(table: TaskTable, taskId: string, now: string): TaskTransition {
   const record = findTask(table, taskId);
-  if (record === undefined || isTerminalTaskStatus(record.status)) return { effects: [], table };
-  const cancelled = withoutUndefined({
-    ...record,
-    cancelConfirmBy: cancelConfirmBy(record, now),
-    clockStoppedAt: undefined,
-    deadlineAt: undefined,
-    // The owner already knows the outcome; there is nothing left to deliver.
-    delivered: true,
-    input: undefined,
-    lastStatus: renderLastStatus({ status: "cancelled" }),
-    status: "cancelled" as const,
-  });
+  if (record === undefined || !hasCancellableWork(record)) return { effects: [], table };
+  const sends = record.sends?.map((send) => ({ ...send, cancelled: true as const }));
+  const cancelled = isTerminalTaskStatus(record.status)
+    ? { ...record, sends }
+    : withoutUndefined({
+        ...record,
+        cancelConfirmBy: cancelConfirmBy(record, now),
+        clockStoppedAt: undefined,
+        deadlineAt: undefined,
+        // The owner already knows the outcome; there is nothing left to deliver.
+        delivered: true,
+        input: undefined,
+        lastStatus: renderLastStatus({ status: "cancelled" }),
+        sends,
+        status: "cancelled" as const,
+      });
   return issueCommand(replaceRecord(table, cancelled), cancelled, { kind: "cancel" });
+}
+
+/** A working generation, or a send queued for the task that no cancel has stopped yet. */
+export function hasCancellableWork(record: TaskRecord): boolean {
+  return (
+    record.ended !== true &&
+    (!isTerminalTaskStatus(record.status) ||
+      record.sends?.some((send) => send.cancelled !== true) === true)
+  );
 }
 
 /** Marks the current generation's result as present in history. */
@@ -566,16 +484,16 @@ export function removeTasks(table: TaskTable, taskIds: ReadonlySet<string>): Tas
 }
 
 /**
- * Drops finished workflow tasks whose results reached history, and agents
- * whose session can no longer be continued. Idle agents stay listed. No
- * window is kept for late duplicates: every report names the call it
- * answers, so one that matches no record is dropped and settles nothing.
+ * Drops finished tasks whose results reached history: non-resumable tasks,
+ * and resumable ones that ended or whose child never started. Idle tasks stay
+ * listed. No window is kept for late duplicates: every report names the task
+ * it answers, so one that matches no record is dropped and settles nothing.
  */
 export function pruneTaskTable(table: TaskTable): TaskTable {
   const records = table.records.filter((record) => {
     if (!isTerminalTaskStatus(record.status) || !record.delivered) return true;
-    if (record.cancelConfirmBy !== undefined) return true;
-    return record.kind === "agent" && record.child !== undefined;
+    if (record.cancelConfirmBy !== undefined || record.sends !== undefined) return true;
+    return isOpenResumableTask(record) && record.child !== undefined;
   });
   return records.length === table.records.length ? table : toTable(records);
 }
@@ -593,36 +511,6 @@ export function issueCommand(
   return { effects: [], table: replaceRecord(table, next) };
 }
 
-/**
- * The detached generation an agent starts when it answered before steering
- * messages reached it. It keeps the call and the time limit of the generation
- * it follows, and its result arrives as a `task.result`.
- */
-function continueAfterMissedSteers(
-  record: TaskRecord,
-  settled: TaskRecord,
-  missed: number,
-  now: string,
-): TaskRecord {
-  const limitMs =
-    record.deadlineAt === undefined
-      ? undefined
-      : Date.parse(record.deadlineAt) - Date.parse(record.startedAt);
-  return withoutUndefined({
-    ...settled,
-    delivered: false,
-    deadlineAt:
-      limitMs === undefined ? undefined : new Date(Date.parse(now) + limitMs).toISOString(),
-    generation: record.generation + 1,
-    mode: "detached" as const,
-    startedAt: now,
-    status: "working" as const,
-    steers: missed,
-    wait: undefined,
-    workflowCaller: undefined,
-  });
-}
-
 /** For `tasks/table*.ts` only. */
 export function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
   return withoutUndefined({
@@ -633,6 +521,21 @@ export function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskReco
     lastStatus: renderLastStatus(outcome),
     status: outcome.status,
   });
+}
+
+/**
+ * One generation's deadline and limit. `false` or no limit leaves only the
+ * session lifetime, and so does a limit past the last representable date.
+ */
+export function generationDeadline(
+  timeoutMs: number | false | undefined,
+  now: string,
+): { readonly deadlineAt?: string; readonly timeoutMs?: number } {
+  if (timeoutMs === false || timeoutMs === undefined) return {};
+  const deadlineMs = Date.parse(now) + timeoutMs;
+  return deadlineMs > MAX_DATE_MS
+    ? {}
+    : { deadlineAt: new Date(deadlineMs).toISOString(), timeoutMs };
 }
 
 /** For `tasks/table*.ts` only. */

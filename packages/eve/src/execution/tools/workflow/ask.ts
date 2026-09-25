@@ -14,8 +14,11 @@ const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
 export interface WorkflowToolRunContext {
   readonly canRequestInput?: boolean;
+  /** The run and the call coordinates of its current generation. */
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
+  /** A resumable body replied and has not read again, so no generation owns new work. */
+  readonly replied?: boolean;
 }
 
 type WorkflowToolRunContextCarrier = {
@@ -49,12 +52,9 @@ export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunConte
     : undefined;
 }
 
-export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
-  return readWorkflowToolRunContext(ctx, "agent").from;
-}
-
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
-  return readWorkflowToolRunContext(ctx, "agent").owner;
+/** The run context `ctx.agent` sends its requests with. */
+export function readWorkflowToolRunAgentContext(ctx: ToolContext): WorkflowToolRunContext {
+  return readWorkflowToolRunContext(ctx, "agent");
 }
 
 /** Returns an answer which may be awaited or raced with another workflow operation. */

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { createTaskRecord, taskTable } from "#internal/testing/task-records.js";
-import { MAX_RETAINED_IDLE_AGENTS, retireIdleAgents } from "#tasks/owner-calls.js";
+import { checkSend, MAX_RETAINED_IDLE_TASKS, retireIdleTasks } from "#tasks/owner-calls.js";
+import { MAX_WORKING_TASKS } from "#tasks/table.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 
 const NOW = "2026-09-24T14:02:00.000Z";
@@ -11,7 +12,7 @@ function principal(principalId: string): SessionAuthContext {
   return { attributes: {}, authenticator: "test", principalId, principalType: "user" };
 }
 
-describe("retireIdleAgents", () => {
+describe("retireIdleTasks", () => {
   const idle = (index: number, starter: SessionAuthContext | null = null) =>
     createTaskRecord({
       callId: `call-${String(index)}`,
@@ -27,14 +28,30 @@ describe("retireIdleAgents", () => {
       status: "completed",
     });
 
+  it("counts idle resumable workflow tasks with idle agents, and never working ones", () => {
+    const agents = Array.from({ length: MAX_RETAINED_IDLE_TASKS }, (_, index) => idle(index + 1));
+    const notes = createTaskRecord({
+      child: { commandToken: "cmd", kind: "workflow", runId: "run" },
+      delivered: true,
+      id: "release_notes-000000",
+      kind: "workflow",
+      name: "release_notes",
+      resumable: true,
+      startedAt: NOW,
+      status: "completed",
+    });
+    const { retired } = retireIdleTasks(taskTable([notes, ...agents]), null);
+    expect(retired.map((record) => record.id)).toEqual([notes.id]);
+  });
+
   it("keeps the most recently started idle agents and retires the rest, oldest first", () => {
-    const agents = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 2 }, (_, index) => idle(index));
+    const agents = Array.from({ length: MAX_RETAINED_IDLE_TASKS + 2 }, (_, index) => idle(index));
     const working = createTaskRecord({ id: "research-working", startedAt: NOW });
 
-    const { retired, table } = retireIdleAgents(taskTable([...agents, working]), null);
+    const { retired, table } = retireIdleTasks(taskTable([...agents, working]), null);
 
     expect(retired.map((record) => record.id)).toEqual([agents[0]!.id, agents[1]!.id]);
-    expect(table.records).toHaveLength(MAX_RETAINED_IDLE_AGENTS + 1);
+    expect(table.records).toHaveLength(MAX_RETAINED_IDLE_TASKS + 1);
     expect(table.records).toContainEqual(working);
   });
 
@@ -42,28 +59,106 @@ describe("retireIdleAgents", () => {
     const alice = principal("alice");
     const bob = principal("bob");
     // Bob's agents are the oldest, but Alice's new agent retires one of her own.
-    const agents = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 1 }, (_, index) =>
+    const agents = Array.from({ length: MAX_RETAINED_IDLE_TASKS + 1 }, (_, index) =>
       idle(index, index < 10 ? bob : alice),
     );
 
-    const { retired } = retireIdleAgents(taskTable(agents), alice);
+    const { retired } = retireIdleTasks(taskTable(agents), alice);
 
     expect(retired.map((record) => record.id)).toEqual([agents[10]!.id]);
   });
 
   it("retires another principal's agents once the caller has none idle", () => {
     const alice = principal("alice");
-    const agents = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 1 }, (_, index) =>
+    const agents = Array.from({ length: MAX_RETAINED_IDLE_TASKS + 1 }, (_, index) =>
       idle(index, principal("bob")),
     );
 
-    const { retired } = retireIdleAgents(taskTable(agents), alice);
+    const { retired } = retireIdleTasks(taskTable(agents), alice);
 
     expect(retired.map((record) => record.id)).toEqual([agents[0]!.id]);
   });
 
   it("leaves a table within the limit untouched", () => {
     const table = taskTable([idle(0), idle(1)]);
-    expect(retireIdleAgents(table, null)).toEqual({ retired: [], table });
+    expect(retireIdleTasks(table, null)).toEqual({ retired: [], table });
+  });
+});
+
+describe("checkSend", () => {
+  const alice = principal("alice");
+  const agent = createTaskRecord({
+    child: { continuationToken: "t", kind: "local", sessionId: "s" },
+    creator: encodeTaskCreator({ auth: alice }),
+    delivered: true,
+    id: "research-7k2m9q",
+    mode: "detached",
+    status: "completed",
+  });
+  const check = (
+    records: readonly ReturnType<typeof createTaskRecord>[],
+    overrides: Partial<Parameters<typeof checkSend>[0]> = {},
+  ) =>
+    checkSend({
+      caller: alice,
+      table: taskTable(records),
+      taskId: agent.id,
+      toolName: "research",
+      ...overrides,
+    });
+
+  it("accepts a send from the task's own principal to its own tool", () => {
+    expect(check([agent])).toBeUndefined();
+    expect(check([{ ...agent, status: "working" }])).toBeUndefined();
+  });
+
+  it("refuses a task the session does not have, one that ended, and one that cannot take input", () => {
+    expect(check([])).toMatchObject({
+      code: "UNKNOWN_TASK",
+      message: expect.stringContaining("calling research without taskId"),
+    });
+    expect(check([{ ...agent, ended: true }])).toMatchObject({ code: "UNKNOWN_TASK" });
+    expect(check([{ ...agent, resumable: undefined }])).toMatchObject({ code: "UNKNOWN_TASK" });
+    const neverStarted = { ...agent, child: undefined };
+    expect(check([neverStarted])).toMatchObject({ code: "UNKNOWN_TASK" });
+    // An agent still starting holds the send until it reports.
+    expect(check([{ ...neverStarted, status: "working" }])).toBeUndefined();
+  });
+
+  it("refuses another tool's task and another principal's", () => {
+    expect(check([agent], { toolName: "reviewer" })).toMatchObject({
+      code: "TASK_MISMATCH",
+      message: 'Task "research-7k2m9q" belongs to research; call research with it.',
+    });
+    expect(check([agent], { caller: principal("bob") })).toMatchObject({
+      code: "TASK_OTHER_PRINCIPAL",
+    });
+  });
+
+  it("refuses work a workflow body awaits, and a body's send to a working agent", () => {
+    const owned = {
+      ...agent,
+      status: "working" as const,
+      workflowCaller: { replyTo: "hook", runId: "run" },
+    };
+    expect(check([owned])).toMatchObject({ code: "TASK_BUSY" });
+    expect(check([{ ...agent, status: "working" }], { fromWorkflow: true })).toMatchObject({
+      code: "TASK_BUSY",
+    });
+    expect(check([agent], { fromWorkflow: true })).toBeUndefined();
+  });
+
+  it("counts a send to an idle task against the working-task cap, but not one to a working task", () => {
+    const busy = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
+      createTaskRecord({
+        callId: `call-busy-${String(index)}`,
+        id: `lookup-${String(index).padStart(6, "0")}`,
+        kind: "workflow",
+        mode: "detached",
+        name: "lookup",
+      }),
+    );
+    expect(check([...busy, agent])).toMatchObject({ code: "TOO_MANY_TASKS" });
+    expect(check([...busy, { ...agent, status: "working" }])).toBeUndefined();
   });
 });

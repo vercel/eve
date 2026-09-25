@@ -44,8 +44,8 @@ interface Relay {
 const PARENT_AGENT = `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
-const AGENT_ID = /<agent id="([^"]+)" name="billing"/u;
-const RECEIPT = /^(?:Started task|Sent your message to agent) ([\\w-]+)[.,]/u;
+const TASK_ID = /<task id="([^"]+)" tool="billing"/u;
+const RECEIPT = /^(?:Started task|Sent to task) ([\\w-]+)[.,]/u;
 
 // One call per user message, keyed by its id: a [Tasks] note may follow the result.
 // A plan that waits reads its result with task_wait; the refund's arrives in its held turn.
@@ -54,7 +54,7 @@ const PLANS = {
   "Ask billing for the refund status.": {
     id: "status-call",
     name: "billing",
-    input: (text) => ({ agentId: AGENT_ID.exec(text)?.[1], message: "What is the refund status?" }),
+    input: (text) => ({ message: "What is the refund status?", taskId: TASK_ID.exec(text)?.[1] }),
     wait: true,
   },
   "Summarize the ledger.": { id: "ledger-call", name: "ledger", input: () => ({ message: "Summarize the ledger." }), wait: true },

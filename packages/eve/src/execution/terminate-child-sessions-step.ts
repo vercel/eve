@@ -8,7 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
-import type { TaskRecord } from "#tasks/record.js";
+import { isOpenResumableTask, type TaskRecord } from "#tasks/record.js";
 import { getTaskTable, readTaskTimer } from "#tasks/state.js";
 import { TASK_CANCEL_CONFIRM_MS, WORKFLOW_TASK_CANCEL_CONFIRM_MS } from "#tasks/table.js";
 import { armChildHardStop, cancelTaskTimer, type HardStopTarget } from "#tasks/timer-steps.js";
@@ -23,9 +23,10 @@ const PARENT_SESSION_ENDED = "Parent session ended";
  * and stops its task timer. Each child ends the way its own session would, so
  * its finalization runs: it cancels its turn and its tasks and ends its own
  * children in turn. A local agent is asked to end its session, a remote agent
- * is retired through the authenticated session-reset route, and a working
- * workflow tool run is asked to cancel. A task whose child never reported its
- * address has nothing to stop.
+ * is retired through the authenticated session-reset route, and a workflow
+ * tool run that is working or idle (a resumable task waiting for input) is
+ * asked to end. A task whose child never reported its address has nothing to
+ * stop.
  *
  * The ending owner cannot wait for its children, so it arms one last timer
  * that hard-stops each local agent or workflow run still running when its
@@ -93,12 +94,17 @@ export async function terminateChildSessionsStep(input: {
 }
 
 /**
- * A child that may still be running work: a working task, or a cancelled one
- * whose child has not confirmed it stopped. An idle agent's session runs
- * nothing, so the request to end it is enough.
+ * A child that may still be running: a working task, a cancelled one whose
+ * child has not confirmed it stopped, or an idle resumable workflow run,
+ * parked for its next input. An idle agent's session runs nothing, so the
+ * request to end it is enough.
  */
 function hasWorkInFlight(record: TaskRecord): boolean {
-  return !isTerminalTaskStatus(record.status) || record.cancelConfirmBy !== undefined;
+  return (
+    !isTerminalTaskStatus(record.status) ||
+    record.cancelConfirmBy !== undefined ||
+    (record.child?.kind === "workflow" && isOpenResumableTask(record))
+  );
 }
 
 function hardStopTargets(
@@ -140,10 +146,12 @@ async function endChild(record: TaskRecord, bundle: CompiledBundle | undefined):
       await requestWorkflowSessionEnd({ reason: PARENT_SESSION_ENDED, sessionId: child.sessionId });
       return;
     case "workflow":
-      if (isTerminalTaskStatus(record.status)) return;
+      // A stopped run that is not resumable already got its cancel.
+      if (isTerminalTaskStatus(record.status) && !isOpenResumableTask(record)) return;
       await cancelWorkflowToolRun(
         { hookToken: child.commandToken, runId: child.runId },
         PARENT_SESSION_ENDED,
+        { end: true },
       );
   }
 }

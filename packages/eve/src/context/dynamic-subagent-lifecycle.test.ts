@@ -333,7 +333,7 @@ describe("dynamic subagent lifecycle", () => {
       kind: "remote",
       prepared: {
         inputSchema: {
-          properties: { agentId: expect.any(Object) },
+          properties: { taskId: expect.any(Object) },
         },
       },
       remoteAgent: {

@@ -25,7 +25,7 @@ describe("failEmptyResult", () => {
       error: {
         code: "EMPTY_RESULT",
         message:
-          'Agent "researcher" finished without a reply. If you still need its answer, give it more work with its agentId.',
+          'Agent "researcher" finished without a reply. If you still need its answer, call its tool again with its taskId.',
       },
       status: "failed",
     });

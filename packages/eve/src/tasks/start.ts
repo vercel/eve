@@ -116,11 +116,11 @@ export function resolveAgentInvocationAction(input: {
     throw new Error(`Agent target "${input.input.target}" is not available to this agent.`);
   }
   const actionInput: {
-    agentId?: string;
+    taskId?: string;
     message: string;
     outputSchema?: JsonObject;
   } = { message: input.input.message };
-  if (input.input.agentId !== undefined) actionInput.agentId = input.input.agentId;
+  if (input.input.taskId !== undefined) actionInput.taskId = input.input.taskId;
   if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;
   const common = {
     callId: input.invocationId,

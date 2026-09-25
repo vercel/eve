@@ -1,18 +1,18 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type { RuntimeActionResultHookPayload } from "#channel/types.js";
-import { readWorkflowToolRunOwner, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
+import { readWorkflowToolRunAgentContext } from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import { renderAgentClosedWithoutResult } from "#tasks/render.js";
-import type { AgentInput } from "#tools/workflow-definition.js";
+import type { AgentInput, AgentOptions } from "#tools/workflow-definition.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export type InternalAgentInput = {
-  readonly agentId?: string;
+  readonly taskId?: string;
   readonly message: string;
   readonly outputSchema?: JsonObject;
   readonly target: string;
@@ -32,22 +32,31 @@ export interface AgentInvocationRequest {
 /**
  * Invokes an agent from a workflow tool and waits for its result. The child
  * reports to the owning session, which forwards only the settled result
- * here; human input goes to the session.
+ * here; human input goes to the session. Aborting `options.signal` asks the
+ * owner to cancel the call's task, and the call rejects with the signal's
+ * reason. A resumable body that replied owns no work until it reads again.
  */
 export async function agent(
   ctx: ToolContext,
   target: string,
   agentInput: AgentInput,
+  options: AgentOptions = {},
 ): Promise<JsonValue> {
   const input: InternalAgentInput = {
-    agentId: agentInput.agentId,
     message: agentInput.message,
     outputSchema: agentInput.outputSchema,
     target,
+    taskId: agentInput.taskId,
   };
-  const run = readWorkflowToolRunRef(ctx);
+  const context = readWorkflowToolRunAgentContext(ctx);
+  if (context.replied === true) {
+    throw new Error(
+      `ctx.agent("${target}") was called after ctx.reply(). The generation that replied owns no more work; call ctx.receive() first, or start the agent before replying.`,
+    );
+  }
   validateAgentInput(input);
-  const owner = readWorkflowToolRunOwner(ctx);
+  const { from: run, owner } = context;
+  options.signal?.throwIfAborted();
   const replies = createHook<RuntimeActionResultHookPayload>();
   // Replay-stable: the hook token is deterministic in the workflow body.
   const invocationId = `${ctx.callId}:${replies.token}`;
@@ -61,7 +70,20 @@ export async function agent(
 
     const iterator = replies[Symbol.asyncIterator]();
     while (true) {
-      const next = await nextAgentReply(iterator, ctx.abortSignal);
+      let next: IteratorResult<RuntimeActionResultHookPayload>;
+      try {
+        next = await nextAgentReply(iterator, ctx.abortSignal, options.signal);
+      } catch (error) {
+        if (options.signal?.aborted === true) {
+          await resumeHookStep(owner.inbox, {
+            kind: "request",
+            from: run,
+            replyTo: replies.token,
+            request: { invocationId, kind: "agent-cancel" },
+          });
+        }
+        throw error;
+      }
       if (next.done) break;
       const result = next.value.results.find(
         (candidate): candidate is RuntimeSubagentResult =>
@@ -81,22 +103,27 @@ export async function agent(
   throw new Error(renderAgentClosedWithoutResult(input.target));
 }
 
+/** The next reply, or the reason of whichever signal aborts first. */
 async function nextAgentReply(
   iterator: AsyncIterator<RuntimeActionResultHookPayload>,
-  signal: AbortSignal | undefined,
+  ...signals: readonly (AbortSignal | undefined)[]
 ): Promise<IteratorResult<RuntimeActionResultHookPayload>> {
-  if (signal === undefined) return await iterator.next();
-  if (signal.aborted) throw signal.reason;
+  const live = signals.filter((signal): signal is AbortSignal => signal !== undefined);
+  for (const signal of live) if (signal.aborted) throw signal.reason;
+  if (live.length === 0) return await iterator.next();
   let rejectAbort: ((reason: unknown) => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {
     rejectAbort = reject;
   });
-  const abort = (): void => rejectAbort?.(signal.reason);
-  signal.addEventListener("abort", abort, { once: true });
+  const listeners = live.map((signal) => {
+    const abort = (): void => rejectAbort?.(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    return () => signal.removeEventListener("abort", abort);
+  });
   try {
     return await Promise.race([iterator.next(), aborted]);
   } finally {
-    signal.removeEventListener("abort", abort);
+    for (const remove of listeners) remove();
   }
 }
 

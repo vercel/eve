@@ -14,6 +14,7 @@ describe("ask", () => {
       canRequestInput: false,
       from: {
         callId: "call",
+        generation: 1,
         input: {},
         runId: "run",
         sequence: 1,

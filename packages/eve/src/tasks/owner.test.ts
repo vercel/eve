@@ -37,9 +37,9 @@ import {
 } from "#tasks/state.js";
 import { cancelTask, MAX_WORKING_TASKS, pruneTaskTable } from "#tasks/table.js";
 import { evaluateTaskDeadlines } from "#tasks/table-deadlines.js";
-import { MAX_RETAINED_IDLE_AGENTS } from "#tasks/owner-calls.js";
+import { MAX_RETAINED_IDLE_TASKS } from "#tasks/owner-calls.js";
 import { armChildHardStop } from "#tasks/timer-steps.js";
-import { renderStartReceipt, renderSteeringReceipt } from "#tasks/render.js";
+import { renderSendReceipt, renderStartReceipt, renderTaskOtherPrincipal } from "#tasks/render.js";
 import { encodeTaskCreator, readPendingTaskResults } from "#tasks/results.js";
 
 vi.mock("#context/serialize.js", () => ({ deserializeContext: vi.fn() }));
@@ -258,10 +258,10 @@ describe("startAgentTasks", () => {
   it.each([
     ["fresh start", undefined],
     ["continuation", "research-abc234"],
-  ])("repeats no side effects for a replayed %s", async (_name, agentId) => {
+  ])("repeats no side effects for a replayed %s", async (_name, taskId) => {
     const existing = createTaskRecord();
 
-    const update = await start([modelCall({ agentId })], [existing]);
+    const update = await start([modelCall({ taskId })], [existing]);
 
     expect(update).toMatchObject({ events: [], replies: [], results: [] });
     expect(startSubagent).not.toHaveBeenCalled();
@@ -311,7 +311,7 @@ describe("startAgentTasks", () => {
       },
     ]);
     expect(update.results).toEqual([
-      expect.objectContaining({ modelOutput: renderStartReceipt(record!) }),
+      expect.objectContaining({ modelOutput: renderStartReceipt(record!, "billing") }),
     ]);
     // Remote children call back on the owner's unguessable alias, never its stable inbox.
     expect(startSubagent).toHaveBeenCalledWith(
@@ -404,14 +404,14 @@ describe("startAgentTasks", () => {
     expect(prepareActionDispatch).not.toHaveBeenCalled();
   });
 
-  it("rejects an agentId the session does not know instead of starting a new agent", async () => {
-    const update = await start([modelCall({ agentId: "research-zzzzzz" })]);
+  it("rejects a taskId the session does not know instead of starting a new agent", async () => {
+    const update = await start([modelCall({ taskId: "research-zzzzzz" })]);
 
     expect(update.results).toEqual([
       expect.objectContaining({
         callId: "call-1",
         isError: true,
-        output: expect.objectContaining({ code: "UNKNOWN_AGENT" }),
+        output: expect.objectContaining({ code: "UNKNOWN_TASK" }),
       }),
     ]);
     expect(update.events).toEqual([]);
@@ -426,13 +426,13 @@ describe("startAgentTasks", () => {
       NOW,
     );
 
-    const update = await start([modelCall({ agentId: "research-abc234" })], table.records);
+    const update = await start([modelCall({ taskId: "research-abc234" })], table.records);
 
     expect(update.results).toEqual([
       expect.objectContaining({
         callId: "call-1",
         isError: true,
-        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+        output: expect.objectContaining({ code: "UNKNOWN_TASK" }),
       }),
     ]);
     // The rejection neither created nor advanced a generation.
@@ -448,7 +448,7 @@ describe("startAgentTasks", () => {
     const update = await start(
       [
         {
-          ...modelCall({ agentId: working.id }),
+          ...modelCall({ taskId: working.id }),
           workflowCaller: { replyTo: "reply", runId: "run-1" },
         },
       ],
@@ -459,7 +459,7 @@ describe("startAgentTasks", () => {
       expect.objectContaining({
         result: expect.objectContaining({
           isError: true,
-          output: expect.objectContaining({ code: "AGENT_BUSY" }),
+          output: expect.objectContaining({ code: "TASK_BUSY" }),
         }),
       }),
     ]);
@@ -478,7 +478,7 @@ describe("startAgentTasks", () => {
     });
 
     const update = await start(
-      [modelCall({ agentId: idle.id, message: "Summarize them." })],
+      [modelCall({ taskId: idle.id, message: "Summarize them." })],
       [idle],
     );
 
@@ -547,7 +547,7 @@ describe("detached agent calls", () => {
       {
         callId: "call-1",
         kind: "tool-result",
-        modelOutput: renderStartReceipt(record!),
+        modelOutput: renderStartReceipt(record!, "research"),
         output: { status: "working", taskId: record?.id },
         toolName: "research",
       },
@@ -558,7 +558,7 @@ describe("detached agent calls", () => {
 
   it("retires the idle agent that started least recently once too many are idle", async () => {
     vi.mocked(startSubagent).mockResolvedValue({ kind: "started" });
-    const idle = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 1 }, (_, index) =>
+    const idle = Array.from({ length: MAX_RETAINED_IDLE_TASKS + 1 }, (_, index) =>
       createTaskRecord({
         callId: `call-idle-${String(index)}`,
         child: {
@@ -577,10 +577,10 @@ describe("detached agent calls", () => {
 
     const oldest = idle.at(-1)!;
     expect(records(update.sessionState).map((record) => record.id)).not.toContain(oldest.id);
-    expect(records(update.sessionState)).toHaveLength(MAX_RETAINED_IDLE_AGENTS + 1);
+    expect(records(update.sessionState)).toHaveLength(MAX_RETAINED_IDLE_TASKS + 1);
     expect(requestWorkflowSessionEnd).toHaveBeenCalledExactlyOnceWith({
-      reason: "The parent retired this idle agent.",
-      sessionId: `idle-session-${String(MAX_RETAINED_IDLE_AGENTS)}`,
+      reason: "The parent retired this idle task.",
+      sessionId: `idle-session-${String(MAX_RETAINED_IDLE_TASKS)}`,
     });
     // The request reached the agent, so nothing needs a hard stop.
     expect(armChildHardStop).not.toHaveBeenCalled();
@@ -592,7 +592,7 @@ describe("detached agent calls", () => {
     vi.mocked(requestWorkflowSessionEnd).mockRejectedValue(
       new Error("moving to another deployment"),
     );
-    const idle = Array.from({ length: MAX_RETAINED_IDLE_AGENTS + 1 }, (_, index) =>
+    const idle = Array.from({ length: MAX_RETAINED_IDLE_TASKS + 1 }, (_, index) =>
       createTaskRecord({
         callId: `call-idle-${String(index)}`,
         child: {
@@ -611,7 +611,7 @@ describe("detached agent calls", () => {
       await start([modelCall()], idle);
 
       expect(armChildHardStop).toHaveBeenCalledExactlyOnceWith({
-        endReason: "The parent retired this idle agent.",
+        endReason: "The parent retired this idle task.",
         ownerSessionId: "parent",
         targets: [idle.at(-1)!.child],
         wakeAt: "2026-09-24T14:00:30.000Z",
@@ -738,8 +738,8 @@ describe("detached agent calls", () => {
 
     const update = await start(
       [
-        modelCall({ agentId: idle.id, callId: "call-more", message: "Now the FAQ." }),
-        modelCall({ agentId: busy.id, callId: "call-steer", message: "Shorter, please." }),
+        modelCall({ taskId: idle.id, callId: "call-more", message: "Now the FAQ." }),
+        modelCall({ taskId: busy.id, callId: "call-steer", message: "Shorter, please." }),
       ],
       [...working, busy, idle],
     );
@@ -750,7 +750,10 @@ describe("detached agent calls", () => {
         isError: true,
         output: expect.objectContaining({ code: "TOO_MANY_TASKS" }),
       }),
-      expect.objectContaining({ callId: "call-steer", modelOutput: renderSteeringReceipt(busy) }),
+      expect.objectContaining({
+        callId: "call-steer",
+        modelOutput: renderSendReceipt(busy, false),
+      }),
     ]);
     expect(records(update.sessionState).find((record) => record.id === idle.id)).toEqual(idle);
   });
@@ -764,7 +767,7 @@ describe("detached agent calls", () => {
       turnId: "turn-0",
     });
 
-    const update = await start([modelCall({ agentId: idle.id, message: "Now the FAQ." })], [idle]);
+    const update = await start([modelCall({ taskId: idle.id, message: "Now the FAQ." })], [idle]);
 
     expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
       command: expect.objectContaining({
@@ -777,12 +780,12 @@ describe("detached agent calls", () => {
       expect.objectContaining({ generation: 2, id: idle.id, mode: "detached" }),
     ]);
     expect(update.results).toEqual([
-      expect.objectContaining({ modelOutput: renderStartReceipt(idle) }),
+      expect.objectContaining({ modelOutput: renderSendReceipt(idle, true) }),
     ]);
   });
 });
 
-describe("steering a working agent", () => {
+describe("sends to a working agent", () => {
   const working = createTaskRecord({
     callId: "call-0",
     child: LOCAL_CHILD,
@@ -796,7 +799,7 @@ describe("steering a working agent", () => {
     principalType: "user",
   } as const;
   const BOB = { ...ALICE, principalId: "U-bob" } as const;
-  const steer = (message: string, callId = "call-1") => ({
+  const steer = (message: string, seq = 1) => ({
     command: {
       caller: {
         callId: "call-0",
@@ -804,12 +807,13 @@ describe("steering a working agent", () => {
         subagentName: "research",
       },
       kind: "send",
-      operationId: `turn-1:${callId}`,
+      operationId: `${working.id}:${String(seq)}`,
       payload: { message },
       turnPolicy: "steer",
     },
     sessionId: "child-session",
   });
+  const sent = { callId: "call-1", seq: 1, turnId: "turn-1" };
   const answer = (output: string, steers?: number) => {
     const result: ChildTaskReport = {
       ...childResult({
@@ -831,9 +835,9 @@ describe("steering a working agent", () => {
     }));
   };
 
-  it("sends the message for the generation's own call and returns the steering receipt", async () => {
+  it("sends the input for the call the agent is answering and returns the send receipt", async () => {
     const update = await start(
-      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [modelCall({ taskId: working.id, message: "Also cover pricing." })],
       [working],
     );
 
@@ -842,19 +846,46 @@ describe("steering a working agent", () => {
       {
         callId: "call-1",
         kind: "tool-result",
-        modelOutput: renderSteeringReceipt(working),
+        modelOutput: renderSendReceipt(working, false),
         output: { status: "working", taskId: working.id },
         toolName: "research",
       },
     ]);
-    // No new generation and no task.started; the owner counts the message it sent.
+    // No new generation and no task.started; the owner records the send it numbered.
     expect(update.events).toEqual([]);
-    expect(records(update.sessionState)).toEqual([{ ...working, steers: 1 }]);
+    expect(records(update.sessionState)).toEqual([{ ...working, lastSeq: 1, sends: [sent] }]);
     expect(startSubagent).not.toHaveBeenCalled();
   });
 
-  it("resends the same key when a retried step steers again, so the agent admits it once", async () => {
-    const call = modelCall({ agentId: working.id, message: "Also cover pricing." });
+  it("sends a new output schema with the input, which the agent's turn takes", async () => {
+    const outputSchema = { properties: { items: { type: "array" } }, type: "object" };
+    await start(
+      [
+        {
+          ...modelCall({ taskId: working.id, message: "Return a list instead." }),
+          input: {
+            message: "Return a list instead.",
+            outputSchema,
+            target: "research",
+            taskId: working.id,
+          },
+        },
+      ],
+      [working],
+    );
+
+    const expected = steer("Return a list instead.");
+    expect(dispatchSession).toHaveBeenCalledExactlyOnceWith({
+      ...expected,
+      command: {
+        ...expected.command,
+        payload: { message: "Return a list instead.", outputSchema },
+      },
+    });
+  });
+
+  it("resends the same key when a retried step sends again, so the agent admits it once", async () => {
+    const call = modelCall({ taskId: working.id, message: "Also cover pricing." });
     await start([call], [working]);
     await start([call], [working]);
 
@@ -864,21 +895,21 @@ describe("steering a working agent", () => {
     ]);
   });
 
-  it("holds the message for an agent that has not started, and sends it when it starts", async () => {
+  it("holds the send for an agent that has not started, and sends it when it starts", async () => {
     const unstarted = createTaskRecord({ callId: "call-0", mode: "detached", turnId: "turn-0" });
 
     const update = await start(
-      [modelCall({ agentId: unstarted.id, message: "Also cover pricing." })],
+      [modelCall({ taskId: unstarted.id, message: "Also cover pricing." })],
       [unstarted],
     );
 
     expect(dispatchSession).not.toHaveBeenCalled();
     expect(update.results).toEqual([
-      expect.objectContaining({ modelOutput: renderSteeringReceipt(unstarted) }),
+      expect.objectContaining({ modelOutput: renderSendReceipt(unstarted, false) }),
     ]);
-    const held = { key: "turn-1:call-1", kind: "message", message: "Also cover pricing." };
+    const held = { input: { message: "Also cover pricing." }, kind: "input", seq: 1 };
     expect(records(update.sessionState)).toEqual([
-      { ...unstarted, pendingCommands: [held], steers: 1 },
+      { ...unstarted, lastSeq: 1, pendingCommands: [held], sends: [sent] },
     ]);
 
     const adopted = await applyTaskReport({
@@ -894,13 +925,13 @@ describe("steering a working agent", () => {
 
     expect(dispatchSession).toHaveBeenCalledExactlyOnceWith(steer("Also cover pricing."));
     expect(records(adopted.sessionState)).toEqual([
-      { ...unstarted, child: LOCAL_CHILD, steers: 1 },
+      { ...unstarted, child: LOCAL_CHILD, lastSeq: 1, sends: [sent] },
     ]);
   });
 
-  it("stops counting a held message it cannot deliver when the agent starts", async () => {
+  it("forgets a held send it cannot deliver when the agent starts", async () => {
     const unstarted = createTaskRecord({ callId: "call-0", mode: "detached", turnId: "turn-0" });
-    const update = await start([modelCall({ agentId: unstarted.id })], [unstarted]);
+    const update = await start([modelCall({ taskId: unstarted.id })], [unstarted]);
     dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -915,9 +946,11 @@ describe("steering a working agent", () => {
       sessionState: update.sessionState,
     });
 
-    expect(records(adopted.sessionState)).toEqual([{ ...unstarted, child: LOCAL_CHILD }]);
+    expect(records(adopted.sessionState)).toEqual([
+      { ...unstarted, child: LOCAL_CHILD, lastSeq: 1 },
+    ]);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("a held steering message did not reach its agent"),
+      expect.stringContaining("a held send did not reach its task"),
       expect.objectContaining({ taskId: unstarted.id }),
     );
     error.mockRestore();
@@ -925,7 +958,7 @@ describe("steering a working agent", () => {
 
   it("delivers exactly one result when the agent answered after receiving the message", async () => {
     const steered = await start(
-      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [modelCall({ taskId: working.id, message: "Also cover pricing." })],
       [working],
     );
 
@@ -954,7 +987,7 @@ describe("steering a working agent", () => {
     // Alice's writer answers while the owner is mid-step; its answer waits in
     // the owner's inbox as the model sends the writer a correction.
     const steered = await start(
-      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
+      [modelCall({ taskId: working.id, message: "Also cover pricing." })],
       [working],
     );
 
@@ -966,19 +999,22 @@ describe("steering a working agent", () => {
     });
 
     // The answer settles its generation and is held for the model. The
-    // correction became the agent's next turn for the same call, now tracked
-    // as a detached generation whose result arrives later.
+    // correction became the agent's next turn, which answers the same call
+    // and is tracked as the send's generation, whose result arrives later.
     expect(answered.events.map((event) => event.type)).toEqual(["task.settled", "task.started"]);
     expect(answered.events[1]).toMatchObject({
-      data: { callId: "call-0", mode: "detached", taskId: working.id },
+      data: { callId: "call-1", mode: "detached", taskId: working.id, turnId: "turn-1" },
     });
     expect(records(answered.sessionState)).toEqual([
       expect.objectContaining({
+        callId: "call-1",
+        childCallId: "call-0",
         delivered: false,
         generation: 2,
         mode: "detached",
+        sends: [sent],
+        startedBy: 1,
         status: "working",
-        steers: 1,
       }),
     ]);
     const held = readDurableSession(answered.sessionState).state;
@@ -1001,74 +1037,29 @@ describe("steering a working agent", () => {
         outcome: { output: "Draft with pricing.", status: "completed" },
       }),
     ]);
+    expect(records(continued.sessionState)[0]?.sends).toBeUndefined();
   });
 
-  it("fails a missed message's generation at once when the session is at the working-task cap", async () => {
-    // Alice's other tasks fill the cap by the time the writer's answer shows it missed her message.
-    const others = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
-      createTaskRecord({
-        callId: `call-other-${index}`,
-        id: `lookup-${String(index).padStart(6, "0")}`,
-        kind: "workflow",
-        mode: "detached",
-        name: "lookup",
-      }),
-    );
-    const steered = await start(
-      [modelCall({ agentId: working.id, message: "Also cover pricing." })],
-      [working, ...others],
-    );
-    vi.mocked(requestWorkflowTurnCancellation).mockClear();
-
-    const answered = await applyTaskReport({
-      now: NOW,
-      payload: answer("Draft without pricing."),
-      serializedContext: {},
-      sessionState: steered.sessionState,
-    });
-
-    // The next generation opens and fails in order, and the writer is asked to stop it.
-    expect(answered.events.map((event) => event.type)).toEqual([
-      "task.settled",
-      "task.started",
-      "task.settled",
-    ]);
-    expect(answered.events[2]).toMatchObject({
-      data: { error: { code: "TOO_MANY_TASKS" }, status: "failed", taskId: working.id },
-    });
-    expect(requestWorkflowTurnCancellation).toHaveBeenCalledExactlyOnceWith({
-      sessionId: "child-session",
-    });
-    expect(
-      readPendingTaskResults(readDurableSession(answered.sessionState).state).map(
-        ({ generation, outcome }) => ({ generation, status: outcome.status }),
-      ),
-    ).toEqual([
-      { generation: 1, status: "completed" },
-      { generation: 2, status: "failed" },
-    ]);
-  });
-
-  it("returns AGENT_UNREACHABLE instead of a receipt when the message does not arrive", async () => {
+  it("returns TASK_UNREACHABLE instead of a receipt when the input does not arrive", async () => {
     dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
 
-    const update = await start([modelCall({ agentId: working.id })], [working]);
+    const update = await start([modelCall({ taskId: working.id })], [working]);
 
     expect(update.results).toEqual([
       expect.objectContaining({
         isError: true,
-        output: expect.objectContaining({ code: "AGENT_UNREACHABLE" }),
+        output: expect.objectContaining({ code: "TASK_UNREACHABLE" }),
       }),
     ]);
     expect(records(update.sessionState)).toEqual([working]);
   });
 
-  it("lets only the principal that started the agent's work steer it", async () => {
+  it("lets only the principal that started the agent's work send to it", async () => {
     // Alice started the writer in a shared thread; Bob's turn names it.
     const alices = { ...working, creator: encodeTaskCreator({ auth: ALICE }) };
     asPrincipal(BOB);
 
-    const update = await start([modelCall({ agentId: alices.id, message: "Drop it." })], [alices]);
+    const update = await start([modelCall({ taskId: alices.id, message: "Drop it." })], [alices]);
 
     expect(dispatchSession).not.toHaveBeenCalled();
     expect(update.results).toEqual([
@@ -1076,19 +1067,16 @@ describe("steering a working agent", () => {
         callId: "call-1",
         isError: true,
         kind: "tool-result",
-        output: {
-          code: "AGENT_OTHER_PRINCIPAL",
-          message: `Agent "${alices.id}" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.`,
-        },
+        output: { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(alices.id) },
         toolName: "research",
       },
     ]);
     expect(records(update.sessionState)).toEqual([alices]);
 
     asPrincipal(ALICE);
-    const own = await start([modelCall({ agentId: alices.id, message: "Shorter." })], [alices]);
+    const own = await start([modelCall({ taskId: alices.id, message: "Shorter." })], [alices]);
     expect(own.results).toEqual([
-      expect.objectContaining({ modelOutput: renderSteeringReceipt(alices) }),
+      expect.objectContaining({ modelOutput: renderSendReceipt(alices, false) }),
     ]);
   });
 
@@ -1107,7 +1095,7 @@ describe("steering a working agent", () => {
     asPrincipal(BOB);
 
     const update = await start(
-      [modelCall({ agentId: idle.id, message: "Summarize them for me." })],
+      [modelCall({ taskId: idle.id, message: "Summarize them for me." })],
       [idle],
     );
 
@@ -1116,26 +1104,23 @@ describe("steering a working agent", () => {
     expect(update.results).toEqual([
       expect.objectContaining({
         isError: true,
-        output: {
-          code: "AGENT_OTHER_PRINCIPAL",
-          message: `Agent "${idle.id}" was started by a different caller, so it cannot take this message. Omit agentId to start a new agent.`,
-        },
+        output: { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(idle.id) },
       }),
     ]);
     expect(update.events).toEqual([]);
     expect(records(update.sessionState)).toEqual([idle]);
 
     asPrincipal(ALICE);
-    const own = await start([modelCall({ agentId: idle.id, message: "Summarize them." })], [idle]);
+    const own = await start([modelCall({ taskId: idle.id, message: "Summarize them." })], [idle]);
     expect(own.results).toEqual([
-      expect.objectContaining({ modelOutput: renderStartReceipt(idle) }),
+      expect.objectContaining({ modelOutput: renderSendReceipt(idle, true) }),
     ]);
     expect(records(own.sessionState)).toEqual([
       expect.objectContaining({ generation: 2, id: idle.id, status: "working" }),
     ]);
   });
 
-  it("returns AGENT_BUSY when a workflow body started the agent's current work", async () => {
+  it("returns TASK_BUSY when a workflow body started the agent's current work", async () => {
     const workflowOwned = {
       ...working,
       mode: "attached" as const,
@@ -1143,7 +1128,7 @@ describe("steering a working agent", () => {
     };
 
     const update = await start(
-      [modelCall({ agentId: workflowOwned.id, message: "Return a list instead." })],
+      [modelCall({ taskId: workflowOwned.id, message: "Return a list instead." })],
       [workflowOwned],
     );
 
@@ -1152,7 +1137,7 @@ describe("steering a working agent", () => {
       expect.objectContaining({
         isError: true,
         output: {
-          code: "AGENT_BUSY",
+          code: "TASK_BUSY",
           message: expect.stringContaining("is working for a workflow tool call"),
         },
       }),
@@ -1766,18 +1751,18 @@ function settledTaskIds(events: readonly UnstampedMessageStreamEvent[]): string[
 
 function modelCall(
   input: {
-    readonly agentId?: string;
+    readonly taskId?: string;
     readonly callId?: string;
     readonly message?: string;
     readonly target?: string;
   } = {},
 ): AgentTaskCall {
   const target = input.target ?? "research";
-  const callInput: { agentId?: string; message: string; target: string } = {
+  const callInput: { taskId?: string; message: string; target: string } = {
     message: input.message ?? "Find sources.",
     target,
   };
-  if (input.agentId !== undefined) callInput.agentId = input.agentId;
+  if (input.taskId !== undefined) callInput.taskId = input.taskId;
   return { callId: input.callId ?? "call-1", input: callInput, toolName: target };
 }
 

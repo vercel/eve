@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTaskRecord, taskTable } from "#internal/testing/task-records.js";
+import { taskTable } from "#internal/testing/task-records.js";
 import type { TaskMessage } from "#tasks/protocol.js";
 import { decodeTaskRecord } from "#tasks/record.js";
 import {
@@ -8,19 +8,16 @@ import {
   cancelTask,
   findTask,
   isReportedLoss,
-  MAX_WORKING_TASKS,
   pruneTaskTable,
   readTaskTable,
   setTaskWait,
   startTask,
-  steerTask,
   TASK_TABLE_STATE_KEY,
-  withdrawSteer,
-  workingDetachedTaskIds,
   writeTaskTable,
   type TaskTable,
 } from "#tasks/table.js";
 import { evaluateTaskDeadlines, nextTaskWakeAt, timeOutTask } from "#tasks/table-deadlines.js";
+import { sendTask } from "#tasks/table-generations.js";
 
 const NOW = "2026-09-24T14:02:00.000Z";
 const child = { commandToken: "hook_1", kind: "workflow", runId: "run_1" } as const;
@@ -81,55 +78,13 @@ describe("startTask", () => {
     expect(second.record.id).not.toBe(first.record.id);
   });
 
-  it("starts a new generation when an idle agent is continued", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher", nodeId: "n1" });
-    const settled = applyTaskMessage(
-      applyTaskMessage(
-        agent.table,
-        {
-          child: { continuationToken: "c", kind: "local", sessionId: "s" },
-          generation: 1,
-          kind: "task.started",
-          taskId: agent.record.id,
-        },
-        NOW,
-      ).table,
-      {
-        generation: 1,
-        kind: "task.settled",
-        outcome: { output: "done", status: "completed" },
-        taskId: agent.record.id,
-      },
-      NOW,
-    );
-    const continued = startTask(settled.table, {
-      agentId: agent.record.id,
-      callId: "call_2",
+  it("points a task at its task_wait and clears it, and a new generation drops a stale one", () => {
+    const agent = started(undefined, {
       kind: "agent",
-      mode: "attached",
       name: "researcher",
       nodeId: "n1",
-      now: NOW,
-      ownerId: "session_1",
-      turnId: "turn_1",
+      resumable: true,
     });
-    expect(continued.kind).toBe("started");
-    if (continued.kind !== "started") return;
-    expect(continued.record).toMatchObject({
-      callId: "call_2",
-      generation: 2,
-      id: agent.record.id,
-      status: "working",
-    });
-    expect(continued.record.child).toEqual({
-      continuationToken: "c",
-      kind: "local",
-      sessionId: "s",
-    });
-  });
-
-  it("points a task at its task_wait and clears it, and a new generation drops a stale one", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher", nodeId: "n1" });
     const wait = { callId: "call-w1", startedAt: NOW };
     const waited = setTaskWait(agent.table, agent.record.id, wait);
     expect(findTask(waited, agent.record.id)?.wait).toEqual(wait);
@@ -157,292 +112,15 @@ describe("startTask", () => {
       },
       NOW,
     );
-    const continued = startTask(settled.table, {
-      agentId: agent.record.id,
+    const continued = sendTask(settled.table, {
       callId: "call_2",
-      kind: "agent",
-      mode: "detached",
-      name: "researcher",
-      nodeId: "n1",
+      input: { message: "again" },
       now: NOW,
-      ownerId: "session_1",
+      taskId: agent.record.id,
       turnId: "turn_1",
     });
-    expect(continued).toMatchObject({ kind: "started", record: { generation: 2 } });
-    if (continued.kind === "started") expect(continued.record.wait).toBeUndefined();
-  });
-
-  it("rejects unknown agents, tasks passed as agents, and mismatched agents with guidance", () => {
-    const task = started();
-    const unknown = startTask(task.table, {
-      agentId: "nobody-123456",
-      callId: "call_2",
-      kind: "agent",
-      mode: "attached",
-      name: "researcher",
-      now: NOW,
-      ownerId: "session_1",
-      turnId: "turn_0",
-    });
-    expect(unknown).toMatchObject({ error: { code: "UNKNOWN_AGENT" }, kind: "rejected" });
-    const notAgent = startTask(task.table, {
-      agentId: task.record.id,
-      callId: "call_3",
-      kind: "agent",
-      mode: "attached",
-      name: "researcher",
-      now: NOW,
-      ownerId: "session_1",
-      turnId: "turn_0",
-    });
-    expect(notAgent).toMatchObject({ kind: "rejected" });
-    if (notAgent.kind === "rejected") expect(notAgent.error.message).toContain("task_cancel");
-  });
-
-  it("reports a working agent without changing it, so the owner decides whether a message may join", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
-    const steered = startTask(agent.table, {
-      agentId: agent.record.id,
-      callId: "call_2",
-      kind: "agent",
-      mode: "attached",
-      name: "researcher",
-      now: NOW,
-      ownerId: "session_1",
-      turnId: "turn_0",
-    });
-    expect(steered).toEqual({ kind: "steered", record: agent.record });
-  });
-});
-
-describe("steerTask", () => {
-  const message = { key: "k1", kind: "message", message: "also check Plain" } as const;
-  const localChild = {
-    continuationToken: "child_token",
-    kind: "local",
-    sessionId: "child",
-  } as const;
-
-  it("holds a message for an unstarted agent and counts it, then sends it on task.started", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
-    const steered = steerTask(agent.table, agent.record.id, message);
-    expect(steered.effects).toEqual([]);
-    expect(steered.table.records[0]).toMatchObject({ pendingCommands: [message], steers: 1 });
-
-    const start = applyTaskMessage(
-      steered.table,
-      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
-      NOW,
-    );
-    expect(start.effects).toEqual([expect.objectContaining({ commands: [message], kind: "send" })]);
-    expect(withdrawSteer(start.table, agent.record.id, 1).records[0]?.steers).toBeUndefined();
-  });
-
-  it("counts messages to a remote agent, which reports them with its answer", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
-    const remote = applyTaskMessage(
-      agent.table,
-      {
-        child: {
-          callbackBaseUrl: "https://owner",
-          kind: "remote",
-          sessionId: "r",
-          url: "https://r",
-        },
-        generation: 1,
-        kind: "task.started",
-        taskId: agent.record.id,
-      },
-      NOW,
-    ).table;
-    const steered = steerTask(remote, agent.record.id, message);
-    expect(steered.effects).toEqual([
-      expect.objectContaining({ commands: [message], kind: "send" }),
-    ]);
-    expect(steered.table.records[0]?.steers).toBe(1);
-  });
-
-  it("opens the next background generation when the agent answered before a message reached it", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher", timeoutMs: 60_000 });
-    const running = applyTaskMessage(
-      agent.table,
-      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
-      NOW,
-    ).table;
-    const steered = steerTask(steerTask(running, agent.record.id, message).table, agent.record.id, {
-      ...message,
-      key: "k2",
-    }).table;
-    const later = "2026-09-24T14:05:00.000Z";
-    const answered = applyTaskMessage(
-      steered,
-      {
-        generation: 1,
-        kind: "task.settled",
-        outcome: { output: "draft", status: "completed" },
-        steers: 1,
-        taskId: agent.record.id,
-      },
-      later,
-    );
-
-    expect(answered.effects).toEqual([
-      expect.objectContaining({
-        kind: "settled",
-        record: expect.objectContaining({ generation: 1, status: "completed" }),
-      }),
-      {
-        kind: "continued",
-        record: expect.objectContaining({
-          callId: "call_1",
-          deadlineAt: "2026-09-24T14:06:00.000Z",
-          delivered: false,
-          generation: 2,
-          mode: "detached",
-          startedAt: later,
-          status: "working",
-          steers: 1,
-        }),
-      },
-    ]);
-    // The continuation settles like any generation, and nothing more is expected.
-    const done = applyTaskMessage(
-      answered.table,
-      {
-        generation: 2,
-        kind: "task.settled",
-        outcome: { output: "draft with Plain", status: "completed" },
-        steers: 1,
-        taskId: agent.record.id,
-      },
-      later,
-    );
-    expect(done.effects).toEqual([expect.objectContaining({ kind: "settled" })]);
-    expect(done.table.records[0]).toMatchObject({ generation: 2, status: "completed" });
-  });
-
-  it("fails a continued generation over the working-task cap at once and asks the agent to stop", () => {
-    // Alice already has the maximum of other tasks working when her researcher's
-    // answer shows it missed her follow-up message.
-    const others = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
-      createTaskRecord({
-        callId: `call-other-${index}`,
-        id: `lookup-${String(index).padStart(6, "0")}`,
-        kind: "workflow",
-        mode: "detached",
-        name: "lookup",
-      }),
-    );
-    const researcher = createTaskRecord({
-      child: { continuationToken: "t", kind: "local", sessionId: "child" },
-      id: "research-7k2m9q",
-      mode: "detached",
-      steers: 1,
-    });
-
-    const answered = applyTaskMessage(
-      taskTable([...others, researcher]),
-      {
-        generation: 1,
-        kind: "task.settled",
-        outcome: { output: "draft", status: "completed" },
-        taskId: researcher.id,
-      },
-      NOW,
-    );
-
-    expect(answered.effects).toEqual([
-      expect.objectContaining({
-        kind: "settled",
-        record: expect.objectContaining({ generation: 1 }),
-      }),
-      expect.objectContaining({
-        kind: "continued",
-        record: expect.objectContaining({ generation: 2 }),
-      }),
-      {
-        kind: "settled",
-        outcome: {
-          error: { code: "TOO_MANY_TASKS", message: expect.stringContaining("20") },
-          status: "failed",
-        },
-        record: expect.objectContaining({ generation: 2, status: "failed" }),
-      },
-      expect.objectContaining({ commands: [{ kind: "cancel" }], kind: "send" }),
-    ]);
-    expect(findTask(answered.table, researcher.id)).toMatchObject({
-      cancelConfirmBy: expect.any(String),
-      generation: 2,
-      status: "failed",
-    });
-    expect(workingDetachedTaskIds(answered.table)).toHaveLength(MAX_WORKING_TASKS);
-  });
-
-  it("never settles the next generation with a repeat of the answer that opened it", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
-    const running = applyTaskMessage(
-      agent.table,
-      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
-      NOW,
-    ).table;
-    const steered = steerTask(steerTask(running, agent.record.id, message).table, agent.record.id, {
-      ...message,
-      key: "k2",
-    }).table;
-    // Two messages were sent and the answer accounts for one: the call's next
-    // generation waits on the other.
-    const first = {
-      answer: 2,
-      generation: 1,
-      kind: "task.settled",
-      outcome: { output: "draft", status: "completed" },
-      steers: 1,
-      taskId: agent.record.id,
-    } as const;
-    const answered = applyTaskMessage(steered, first, NOW);
-    expect(answered.table.records[0]).toMatchObject({ answerSeq: 2, generation: 2, steers: 1 });
-
-    // A retried callback repeats that answer. Its steering count matches what the
-    // new generation waits on, but it is the same answer, so nothing settles.
-    const repeated = applyTaskMessage(answered.table, { ...first, generation: 2 }, NOW);
-    expect(repeated.effects).toEqual([]);
-    expect(repeated.table.records[0]).toMatchObject({ generation: 2, status: "working" });
-
-    const next = applyTaskMessage(
-      answered.table,
-      { ...first, answer: 4, generation: 2, outcome: { output: "draft 2", status: "completed" } },
-      NOW,
-    );
-    expect(next.effects.map(({ kind }) => kind)).toEqual(["settled"]);
-    expect(next.table.records[0]).toMatchObject({
-      answerSeq: 4,
-      generation: 2,
-      status: "completed",
-    });
-  });
-
-  it("settles normally when every message reached the answer or the agent's session ended", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
-    const running = applyTaskMessage(
-      agent.table,
-      { child: localChild, generation: 1, kind: "task.started", taskId: agent.record.id },
-      NOW,
-    ).table;
-    const steered = steerTask(running, agent.record.id, message).table;
-    const settled = {
-      generation: 1,
-      kind: "task.settled",
-      outcome: { output: "draft", status: "completed" },
-      taskId: agent.record.id,
-    } as const;
-    expect(
-      applyTaskMessage(steered, { ...settled, steers: 1 }, NOW).effects.map(({ kind }) => kind),
-    ).toEqual(["settled"]);
-    expect(
-      applyTaskMessage(steered, { ...settled, childEnded: true }, NOW).effects.map(
-        ({ kind }) => kind,
-      ),
-    ).toEqual(["settled"]);
+    expect(continued).toMatchObject({ kind: "sent", record: { generation: 2 }, started: true });
+    if (continued?.kind === "sent") expect(continued.record.wait).toBeUndefined();
   });
 });
 
@@ -517,7 +195,12 @@ describe("applyTaskMessage", () => {
 
   it("clears a task's surfaced input when it settles, is cancelled, or starts a new generation", () => {
     const input = [{ requests: [QUESTION], sequence: 0, stepIndex: 0, turnId: "turn_c" }];
-    const agent = started(undefined, { kind: "agent", name: "researcher", nodeId: "n1" });
+    const agent = started(undefined, {
+      kind: "agent",
+      name: "researcher",
+      nodeId: "n1",
+      resumable: true,
+    });
     const address = { continuationToken: "c", kind: "local", sessionId: "s" } as const;
     const waiting = applyTaskMessage(
       applyTaskMessage(
@@ -545,17 +228,15 @@ describe("applyTaskMessage", () => {
     );
     expect(cancelTask(waiting, agent.record.id, NOW).table.records[0]).not.toHaveProperty("input");
     expect(timeOutTask(waiting, agent.record.id, NOW).table.records[0]).not.toHaveProperty("input");
-    const next = startTask(settled, {
-      agentId: agent.record.id,
+    const next = sendTask(settled, {
       callId: "call_2",
-      kind: "agent",
-      mode: "attached",
-      name: "researcher",
+      input: { message: "Continue." },
       now: NOW,
-      ownerId: "session_1",
+      taskId: agent.record.id,
       turnId: "turn_1",
     });
-    expect(next.kind === "started" && next.record).not.toHaveProperty("input");
+    expect(next).toMatchObject({ kind: "sent", started: true });
+    expect(next?.kind === "sent" && next.record).not.toHaveProperty("input");
   });
 });
 
@@ -595,8 +276,8 @@ describe("cancelTask", () => {
     expect(applyTaskMessage(confirmed.table, report, NOW).effects).toEqual([]);
   });
 
-  it("drops the child when a cancelled agent's session ended with its confirmation", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
+  it("ends an agent whose session ended with its cancel confirmation", () => {
+    const agent = started(undefined, { kind: "agent", name: "researcher", resumable: true });
     const withChild = applyTaskMessage(
       agent.table,
       { child, generation: 1, kind: "task.started", taskId: agent.record.id },
@@ -614,24 +295,9 @@ describe("cancelTask", () => {
       },
       NOW,
     );
-    expect(confirmed.effects).toEqual([expect.objectContaining({ kind: "confirmed" })]);
+    expect(confirmed.effects.map(({ kind }) => kind)).toEqual(["confirmed", "ended"]);
+    expect(confirmed.table.records[0]).toMatchObject({ ended: true, status: "cancelled" });
     expect(confirmed.table.records[0]?.child).toBeUndefined();
-  });
-
-  it("refuses to continue an agent that never started", () => {
-    const agent = started(undefined, { kind: "agent", name: "researcher" });
-    const cancelled = cancelTask(agent.table, agent.record.id, NOW).table;
-    const resumed = startTask(cancelled, {
-      agentId: agent.record.id,
-      callId: "call_2",
-      kind: "agent",
-      mode: "attached",
-      name: "researcher",
-      now: NOW,
-      ownerId: "session_1",
-      turnId: "turn_1",
-    });
-    expect(resumed).toMatchObject({ error: { code: "AGENT_UNREACHABLE" }, kind: "rejected" });
   });
 
   it("hard-stops a local child that has not confirmed within the window", () => {
@@ -854,7 +520,12 @@ describe("persistence", () => {
 
   it("prunes delivered workflow tasks but keeps idle agents", () => {
     const task = started();
-    const agent = started(task.table, { callId: "call_2", kind: "agent", name: "researcher" });
+    const agent = started(task.table, {
+      callId: "call_2",
+      kind: "agent",
+      name: "researcher",
+      resumable: true,
+    });
     let table = agent.table;
     for (const record of table.records) {
       table = applyTaskMessage(

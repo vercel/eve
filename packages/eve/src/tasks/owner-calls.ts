@@ -8,52 +8,54 @@ import type {
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
-import { AGENT_OTHER_PRINCIPAL } from "#subagents/agent-handle-errors.js";
 import type { AgentTaskCall, WorkflowCallerReply } from "#tasks/owner.js";
-import type { TaskRecord } from "#tasks/record.js";
+import { childCallId, isIdleTask, isOpenResumableTask, type TaskRecord } from "#tasks/record.js";
 import {
-  renderAgentOtherPrincipal,
+  renderTaskBusy,
+  renderTaskMismatch,
   renderTaskOtherPrincipal,
+  renderTooManyTasks,
+  renderUnknownSendTask,
   renderUnknownTask,
 } from "#tasks/render.js";
 import { readTaskCreator, sameTaskPrincipal } from "#tasks/results.js";
 import { isTerminalTaskStatus, type TaskError } from "#tasks/protocol.js";
-import { findTask, removeTasks, type TaskTable } from "#tasks/table.js";
+import {
+  findTask,
+  MAX_WORKING_TASKS,
+  removeTasks,
+  workingDetachedTaskIds,
+  type TaskTable,
+} from "#tasks/table.js";
 
-// How the owner resolves one agent call and the child report that settles it.
-
-/**
- * Idle agents a session keeps. Each is a child session the model may give
- * more work. Each time the owner starts agents, it retires the idle agents
- * past this many, least recently started first, so a long session's records
- * and child sessions stay bounded. The `[Tasks]` note lists only the 10 most
- * recent.
- */
-export const MAX_RETAINED_IDLE_AGENTS = 50;
+// How the owner resolves one task call: sends, lookups, idle retirement, and
+// the child report that settles an agent call.
 
 /**
- * Removes idle agents past {@link MAX_RETAINED_IDLE_AGENTS}, least recently
- * started first. The calling principal's own idle agents go before anyone
- * else's, so in a shared session one caller's new agents end another
- * caller's agents only once the first has none idle. The owner ends each
- * retired agent's session; a later call with its ID fails `UNKNOWN_AGENT`.
+ * Idle tasks a session keeps: agents and resumable workflow tools. Each keeps
+ * a child the model may give more work. Each time the owner starts tasks, it
+ * ends the idle tasks past this many, least recently started first, so a long
+ * session's records and children stay bounded. The `[Tasks]` note lists only
+ * the 10 most recent.
  */
-export function retireIdleAgents(
+export const MAX_RETAINED_IDLE_TASKS = 50;
+
+/**
+ * Removes idle tasks past {@link MAX_RETAINED_IDLE_TASKS}, least recently
+ * started first. The calling principal's own idle tasks go before anyone
+ * else's, so in a shared session one caller's new tasks end another caller's
+ * tasks only once the first has none idle. The owner ends each retired task's
+ * child; a later send to it fails `UNKNOWN_TASK`.
+ */
+export function retireIdleTasks(
   table: TaskTable,
   caller: SessionAuthContext | null,
 ): {
   readonly table: TaskTable;
   readonly retired: readonly TaskRecord[];
 } {
-  const idle = table.records.filter(
-    (record) =>
-      record.kind === "agent" &&
-      record.child !== undefined &&
-      record.delivered &&
-      record.cancelConfirmBy === undefined &&
-      isTerminalTaskStatus(record.status),
-  );
-  const excess = idle.length - MAX_RETAINED_IDLE_AGENTS;
+  const idle = table.records.filter(isIdleTask);
+  const excess = idle.length - MAX_RETAINED_IDLE_TASKS;
   if (excess <= 0) return { retired: [], table };
   const others = (record: TaskRecord) =>
     sameTaskPrincipal(readTaskCreator(record.creator).auth, caller) ? 0 : 1;
@@ -70,23 +72,57 @@ export function retireIdleAgents(
 }
 
 /**
- * Rejects a call that names an agent a different principal started: another
- * user, a schedule, or an app. The agent acts with its starter's credentials
- * and keeps their conversation, so neither new work nor a steering message
- * from anyone else may reach it. Every unauthenticated caller is the same
- * anonymous principal, so this separates no two of them. `task_wait` and
- * `task_cancel` apply the same rule through {@link findCallerTask}.
+ * Checks a send, a call to a resumable tool with a task's `taskId`, before
+ * the owner records it. A task only takes input as its own tool's input,
+ * from the principal that started it: it acts with its starter's credentials
+ * and keeps their conversation. Every unauthenticated caller is the same
+ * anonymous principal, so this separates no two of them. A workflow body
+ * awaits the result of the work it started, so a generation a body awaits
+ * takes no send, and a body's send never joins work it did not start. A send
+ * that starts an idle task's next generation counts toward the working-task
+ * cap like any start.
  */
-export function rejectOtherPrincipal(input: {
-  readonly agentId: string | undefined;
+export function checkSend(input: {
   readonly caller: SessionAuthContext | null;
+  /** The send comes from a workflow body (`ctx.agent`). */
+  readonly fromWorkflow?: boolean;
+  /** The agent definition the tool targets; a dynamic agent's changes with its selection. */
+  readonly nodeId?: string;
   readonly table: TaskTable;
-}): JsonValue | undefined {
-  if (input.agentId === undefined) return undefined;
-  const agent = findTask(input.table, input.agentId);
-  if (agent?.kind !== "agent") return undefined;
-  if (sameTaskPrincipal(readTaskCreator(agent.creator).auth, input.caller)) return undefined;
-  return { code: AGENT_OTHER_PRINCIPAL, message: renderAgentOtherPrincipal(agent.id) };
+  readonly taskId: string;
+  readonly toolName: string;
+}): TaskError | undefined {
+  const { taskId, toolName } = input;
+  const record = findTask(input.table, taskId);
+  // A task whose child never started cannot take input; one still starting holds it.
+  if (
+    record === undefined ||
+    !isOpenResumableTask(record) ||
+    (record.child === undefined && isTerminalTaskStatus(record.status))
+  ) {
+    return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, toolName) };
+  }
+  if (
+    record.name !== toolName ||
+    (input.nodeId !== undefined && record.nodeId !== undefined && record.nodeId !== input.nodeId)
+  ) {
+    return { code: "TASK_MISMATCH", message: renderTaskMismatch(record) };
+  }
+  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
+    return { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) };
+  }
+  const working = !isTerminalTaskStatus(record.status);
+  if (working && record.workflowCaller !== undefined) {
+    return { code: "TASK_BUSY", message: renderTaskBusy(record.id, toolName, "workflow-owned") };
+  }
+  if (working && input.fromWorkflow === true) {
+    return { code: "TASK_BUSY", message: renderTaskBusy(record.id, toolName, "workflow-caller") };
+  }
+  if (working || input.fromWorkflow === true) return undefined;
+  const busy = workingDetachedTaskIds(input.table);
+  return busy.length < MAX_WORKING_TASKS
+    ? undefined
+    : { code: "TOO_MANY_TASKS", message: renderTooManyTasks(busy, MAX_WORKING_TASKS) };
 }
 
 /**
@@ -130,15 +166,16 @@ export function readDynamicRemoteAgent(input: {
   return selection?.kind === "remote" ? selection.remoteAgent : undefined;
 }
 
-export function readAgentId(action: RuntimeAgentDispatchRequest): string | undefined {
-  const value = action.input.agentId;
+/** The `taskId` of an agent call that sends to an existing agent. */
+export function readSendTaskId(action: RuntimeAgentDispatchRequest): string | undefined {
+  const value = action.input.taskId;
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 /**
- * The task a child's result settles: the current generation's call, from a
- * child of the matching kind. A cancelled task still accepts its child's
- * confirmation. Remote results must come from the remote session the owner
+ * The task a child's result settles: the call the child answers for the
+ * current generation, from a child of the matching kind. A cancelled task
+ * still accepts its child's confirmation. Remote results must come from the remote session the owner
  * started, so one remote child cannot settle another task.
  */
 export function findReportedTask(
@@ -147,7 +184,7 @@ export function findReportedTask(
   source: RuntimeActionResultHookPayload["source"],
 ): TaskRecord | undefined {
   return table.records.find((record) => {
-    if (record.callId !== result.callId || record.name !== result.subagentName) return false;
+    if (childCallId(record) !== result.callId || record.name !== result.subagentName) return false;
     if (
       record.status !== "working" &&
       record.status !== "input_required" &&

@@ -403,12 +403,13 @@ describe("endTaskWaits", () => {
     expect(readPendingTaskResults(routed.session.state)).toHaveLength(1);
   });
 
-  it("interrupts every wait, telling the model how to correct an agent", () => {
+  it("interrupts every wait, telling the model how to correct a resumable task", () => {
     const agent = createTaskRecord({
       callId: "call-research",
       creator: encodeTaskCreator({ auth: ALICE }),
       id: "research-7k2m9q",
       mode: "detached",
+      resumable: true,
     });
     const w1 = waitCall("call-w1", { taskId: LOOKUP.id });
     const w2 = waitCall("call-w2", { taskId: agent.id });
@@ -429,7 +430,9 @@ describe("endTaskWaits", () => {
     expect(ended.results[0]?.modelOutput).toBe(
       "A new message arrived, so the wait ended after 40 s; lookup-q4x1ze is still working. Read the message and decide whether it changes this work: keep the task or stop it with task_cancel.",
     );
-    expect(ended.results[1]?.modelOutput).toContain("pass its id as agentId to research");
+    expect(ended.results[1]?.modelOutput).toContain(
+      "call research again with its taskId to correct it",
+    );
     expect(getTaskTable(ended.session).records.every((entry) => entry.wait === undefined)).toBe(
       true,
     );

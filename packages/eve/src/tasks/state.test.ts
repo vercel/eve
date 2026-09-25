@@ -69,13 +69,15 @@ describe("workflow task lookups", () => {
     name: "deploy",
   });
 
-  it("finds the task only for its own task, call, turn, and tool", () => {
+  it("finds the task only for its own task and tool, whichever call started the generation", () => {
     const table = taskTable([working]);
 
     expect(findWorkflowTask(table, from)).toEqual(working);
+    // A resumable run's later generations belong to the calls of their sends.
+    expect(findWorkflowTask(table, { taskId: from.taskId, toolName: from.toolName })).toEqual(
+      working,
+    );
     expect(findWorkflowTask(table, { ...from, taskId: "deploy-bbbbbb" })).toBeUndefined();
-    expect(findWorkflowTask(table, { ...from, callId: "call-2" })).toBeUndefined();
-    expect(findWorkflowTask(table, { ...from, turnId: "turn-2" })).toBeUndefined();
     expect(findWorkflowTask(table, { ...from, toolName: "rollback" })).toBeUndefined();
   });
 
@@ -86,16 +88,12 @@ describe("workflow task lookups", () => {
     expect(findWorkflowTask(table, from)?.id).toBe("deploy-aaaaaa");
   });
 
-  it("keeps matching a stopped task until its run confirms, and not after", () => {
-    const cancelled = {
-      ...working,
-      cancelConfirmBy: "2026-09-24T14:00:30.000Z",
-      status: "cancelled" as const,
-    };
+  it("leaves it to the table whether a message still applies, and skips a task without a run", () => {
+    const settled = { ...working, status: "completed" as const };
 
-    expect(findWorkflowTask(taskTable([cancelled]), from)?.status).toBe("cancelled");
+    expect(findWorkflowTask(taskTable([settled]), from)?.status).toBe("completed");
     expect(
-      findWorkflowTask(taskTable([{ ...working, status: "completed" as const }]), from),
+      findWorkflowTask(taskTable([{ ...working, child: undefined, ended: true as const }]), from),
     ).toBeUndefined();
   });
 });

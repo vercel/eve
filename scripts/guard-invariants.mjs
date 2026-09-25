@@ -552,6 +552,7 @@ const RULE48_TASK_MESSAGE_KINDS = new Set([
   "task.settled",
   "task.input",
   "task.deadline",
+  "task.ended",
 ]);
 const RULE48_PROTOCOL = `${EVE_SRC}tasks/protocol.ts`;
 // `file#type` entries. The local child's `task.started` wire report carries

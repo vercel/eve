@@ -132,6 +132,7 @@ async function createPreparedRuntimeTool(
               ...(workflowHandling?.attached === undefined
                 ? {}
                 : { attached: workflowHandling.attached }),
+              resumable: workflowHandling?.resumable,
               ...(workflowHandling?.timeout === undefined
                 ? {}
                 : { timeout: workflowHandling.timeout }),

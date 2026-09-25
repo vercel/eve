@@ -734,7 +734,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         },
         {
           content:
-            '[Tasks]\n<tasks>\n</tasks>\n<idle_agents>\n<agent id="conditional-marker-5ae9bf" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</idle_agents>',
+            '[Tasks]\n<tasks>\n</tasks>\n<idle>\n<task id="conditional-marker-5ae9bf" tool="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</task>\n</idle>',
           role: "user",
         },
       ],

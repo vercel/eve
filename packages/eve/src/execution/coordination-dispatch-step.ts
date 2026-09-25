@@ -1,6 +1,7 @@
 /**
- * Starts workflow tool calls in pending coordination as tasks and applies the
- * model's `task_wait` and `task_cancel` calls. Agent calls start separately.
+ * Starts workflow tool calls in pending coordination as tasks, applies sends
+ * to resumable workflow tasks, and applies the model's `task_wait` and
+ * `task_cancel` calls. Agent calls start separately.
  */
 
 import {
@@ -15,6 +16,7 @@ import { isAgentTaskRequest } from "#tasks/agent-tool.js";
 import { applyTaskCancelCall } from "#tasks/cancel.js";
 import { isTaskCancelRequest } from "#tasks/cancel-tool.js";
 import { readContext, type TaskOwnerUpdate } from "#tasks/owner.js";
+import { applyWorkflowSend, retireIdleTaskChildren } from "#tasks/send.js";
 import { runCommands, type CommandEffect } from "#tasks/transport.js";
 import { applyTaskWaitCall, type TaskWaitRegistration } from "#tasks/wait.js";
 import { isTaskWaitRequest } from "#tasks/wait-tool.js";
@@ -53,11 +55,33 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
   const results: RuntimeToolResultActionResult[] = [];
   const commands: CommandEffect[] = [];
   const taskWaits: TaskWaitRegistration[] = [];
+  const ctx = await readContext(input.serializedContext);
+  let startedResumable = false;
 
   for (const request of prepared.plan) {
     if (isAgentTaskRequest(request) || isTaskWaitRequest(request) || isTaskCancelRequest(request)) {
       continue;
     }
+    const { taskId } = request;
+    if (taskId !== undefined) {
+      const sent = await applyWorkflowSend({
+        call: {
+          callId: request.callId,
+          stepIndex: batch.event.stepIndex,
+          turn: { id: batch.event.turnId, sequence: batch.event.sequence },
+        },
+        caller: prepared.auth,
+        ctx,
+        now,
+        request: { ...request, taskId },
+        session: nextSession,
+      });
+      nextSession = sent.session;
+      events.push(...sent.events);
+      results.push(sent.result);
+      continue;
+    }
+    startedResumable ||= request.resumable === true;
     const started = await startWorkflowTask({
       creator: prepared.creator,
       now,
@@ -71,6 +95,7 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
           executeInput: request.executeInput,
           input: request.input,
           owner: input.workflowToolRunOwner,
+          resumable: request.resumable,
           session: {
             auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
             id: session.sessionId,
@@ -116,8 +141,15 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
     events.push(...cancelled.events);
     results.push(...cancelled.results);
   }
-  if (commands.length > 0) {
-    await runCommands(commands, await readContext(input.serializedContext));
+  if (commands.length > 0) await runCommands(commands, ctx);
+  // New resumable tasks are one way idle tasks accumulate.
+  if (startedResumable) {
+    nextSession = await retireIdleTaskChildren({
+      caller: prepared.auth,
+      ctx,
+      now,
+      session: nextSession,
+    });
   }
 
   return {

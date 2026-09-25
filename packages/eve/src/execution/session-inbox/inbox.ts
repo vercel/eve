@@ -256,6 +256,15 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   };
 }
 
+const WORKFLOW_MESSAGE_KINDS = new Set<string>([
+  "report",
+  "request",
+  "outcome",
+  "started",
+  "reply",
+  "ended",
+]);
+
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
-  return value.kind === "report" || value.kind === "request" || value.kind === "outcome";
+  return WORKFLOW_MESSAGE_KINDS.has(value.kind);
 }

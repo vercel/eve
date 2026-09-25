@@ -16,6 +16,7 @@ import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskDeadlineSignal } from "#tasks/protocol.js";
+import { childCallId } from "#tasks/record.js";
 import { getTaskTable } from "#tasks/state.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
@@ -58,7 +59,7 @@ export async function admitSessionInboxPayload(
   if (value.kind === "task.input") {
     const task = getTaskTable(input.cursor.sessionState.snapshot.session).records.find(
       (record) =>
-        record.callId === value.callId &&
+        childCallId(record) === value.callId &&
         (record.status === "working" || record.status === "input_required"),
     );
     // A remote child reports only through the callback route, which marks its

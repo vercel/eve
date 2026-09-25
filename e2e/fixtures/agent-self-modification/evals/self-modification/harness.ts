@@ -161,7 +161,7 @@ export class SelfModificationHarness {
     const call = parent.requireToolCall(SELF_MODIFICATION_AGENT, {
       status: parent.status === "waiting" ? "pending" : "completed",
     });
-    const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
+    const agentId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
     const message = agentId === undefined ? undefined : call.input.message;
     if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");

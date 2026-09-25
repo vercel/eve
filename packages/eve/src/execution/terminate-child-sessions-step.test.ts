@@ -150,9 +150,11 @@ describe("terminateChildSessionsStep", () => {
       sessionState: makeSessionState([working, cancelled, finished]),
     });
 
+    // Session end ends the task, not only its current generation.
     expect(cancelWorkflowToolRunMock).toHaveBeenCalledExactlyOnceWith(
       { hookToken: "run-working:command", runId: "run-working" },
       "Parent session ended",
+      { end: true },
     );
     // A run gets its full cleanup window plus a margin, as for a cancel.
     expect(armChildHardStopMock).toHaveBeenCalledExactlyOnceWith({

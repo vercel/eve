@@ -15,7 +15,7 @@ const FOLLOW_UP = [
 
 /**
  * A follow-up about work already in progress goes to the working agent
- * through its agentId: no second writer starts, and a draft that includes the
+ * through its taskId: no second writer starts, and a draft that includes the
  * follow-up arrives. The writer's slow tool keeps it working when the
  * follow-up lands; if it still answers first, eve runs the follow-up as the
  * same agent's next detached work, and one more result arrives for it.
@@ -37,7 +37,7 @@ export default defineEval({
 
     const followUp = await first.session.send(FOLLOW_UP);
     followUp.expectOk();
-    followUp.calledTool("launch-writer", { count: 1, input: { agentId: taskId } });
+    followUp.calledTool("launch-writer", { count: 1, input: { taskId } });
     t.judge(
       "The assistant tells Alice briefly that the price was passed on for the draft in progress. It does not present a draft or start a separate one.",
       { on: followUp.message ?? "" },

@@ -5,7 +5,7 @@ const MEMORABLE_FACT = "Alice named the tide station notebook Harbor Lumen 4482.
 /**
  * Cross-turn continuation of a remote child over a real HTTP hop: turn one
  * delegates a fact to `remote-loopback`, which answers and stays available;
- * turn two re-messages the same remote child via its agentId. The fact can
+ * turn two re-messages the same remote child via its taskId. The fact can
  * only come back if the continuation reached the same remote session.
  */
 export default defineEval({

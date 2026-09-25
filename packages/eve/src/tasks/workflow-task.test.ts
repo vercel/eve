@@ -15,11 +15,21 @@ import { readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { cancelTask } from "#tasks/table.js";
 import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
-import { settleWorkflowTask, startWorkflowTask } from "#tasks/workflow-task.js";
+import { runCommands } from "#tasks/transport.js";
+import {
+  applyWorkflowGenerationStep,
+  settleWorkflowTask,
+  startWorkflowTask,
+} from "#tasks/workflow-task.js";
 
 vi.mock("#internal/logging.js", () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn() })),
   logError: vi.fn(),
+}));
+vi.mock("#tasks/transport.js", () => ({ runCommands: vi.fn(async () => {}) }));
+vi.mock("#tasks/owner.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readContext: vi.fn(async () => ({})),
 }));
 
 const NOW = "2026-09-24T14:00:00.000Z";
@@ -36,7 +46,7 @@ const PARENT: { readonly sessionId: string; readonly state?: SessionStateMap } =
 const RUN = { commandToken: "control-hook", kind: "workflow" as const, runId: "run-1" };
 const FROM = {
   callId: "call-1",
-  input: { service: "api" },
+  generation: 1,
   runId: "run-1",
   sequence: 3,
   stepIndex: 1,
@@ -430,8 +440,7 @@ describe("settleWorkflowTask", () => {
 
   it.each([
     ["another task", { taskId: "deploy-def567" }],
-    ["another turn", { turnId: "turn-2" }],
-    ["another call", { callId: "call-2" }],
+    ["another generation", { generation: 2 }],
     ["another tool", { toolName: "rollback" }],
   ])("drops an outcome from %s", (_label, from) => {
     const state = ownerState(taskTableState([WORKING]));
@@ -473,6 +482,106 @@ describe("settleWorkflowTask", () => {
     );
 
     expect(hasPendingTaskInput(update.sessionState.snapshot.session)).toBe(false);
+  });
+});
+
+describe("applyWorkflowGenerationStep", () => {
+  const NOTES = createTaskRecord({
+    callId: "call-1",
+    child: RUN,
+    id: "release_notes-4hd8sa",
+    kind: "workflow",
+    mode: "detached",
+    name: "release_notes",
+    resumable: true,
+    turnId: "turn-1",
+  });
+  const from = { ...FROM, taskId: NOTES.id, toolName: "release_notes" };
+  const reply = (generation: number, output: string, read: number[] = []) => ({
+    message: {
+      from: { ...from, generation },
+      kind: "reply" as const,
+      read,
+      result: { output, status: "completed" as const },
+    },
+    serializedContext: {},
+  });
+
+  it("cancels the work a generation still owns before its reply settles it", async () => {
+    const owned = createTaskRecord({
+      callId: "call-1:hook-1",
+      child: { continuationToken: "tok", kind: "local", sessionId: "child-1" },
+      id: "researcher-7k2m9q",
+      name: "researcher",
+      workflowCaller: { replyTo: "hook-1", runId: RUN.runId },
+    });
+
+    const update = await applyWorkflowGenerationStep({
+      ...reply(1, "first draft"),
+      sessionState: ownerState(taskTableState([NOTES, owned])),
+    });
+
+    expect(update.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ taskId: "researcher-7k2m9q" }),
+        type: "task.settled",
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({ taskId: NOTES.id }),
+        type: "task.settled",
+      }),
+    ]);
+    expect(runCommands).toHaveBeenCalledOnce();
+    // The body awaiting that call gets the cancellation.
+    expect(update.replies).toEqual([expect.objectContaining({ replyTo: "hook-1" })]);
+    expect(records(update.sessionState).find((record) => record.id === NOTES.id)).toMatchObject({
+      generation: 1,
+      status: "completed",
+    });
+  });
+
+  it("drops a reply for a generation that is not the task's current one", async () => {
+    const state = ownerState(taskTableState([{ ...NOTES, generation: 2 }]));
+
+    const update = await applyWorkflowGenerationStep({ ...reply(1, "stale"), sessionState: state });
+
+    expect(update.events).toEqual([]);
+    expect(records(update.sessionState)[0]).toMatchObject({ generation: 2, status: "working" });
+  });
+
+  it("ends the task once, failing the sends its body never read", async () => {
+    const idle = {
+      ...NOTES,
+      delivered: true,
+      lastSeq: 1,
+      sends: [{ callId: "call-2", seq: 1, turnId: "turn-2" }],
+      status: "completed" as const,
+    };
+
+    const update = await applyWorkflowGenerationStep({
+      message: { from: { ...from, generation: 1 }, kind: "ended", unread: [1] },
+      serializedContext: {},
+      sessionState: ownerState(taskTableState([idle])),
+    });
+
+    expect(update.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ callId: "call-2" }),
+        type: "task.started",
+      }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          callId: "call-2",
+          error: {
+            code: "EXECUTION_FAILED",
+            message: "The task ended before it read this input.",
+          },
+          status: "failed",
+        }),
+        type: "task.settled",
+      }),
+    ]);
+    expect(records(update.sessionState)[0]).toMatchObject({ ended: true, generation: 2 });
   });
 });
 

@@ -215,6 +215,7 @@ function resolveHarnessToolDefinition(input: {
     }
     return createWorkflowToolHarnessDefinition({
       attached: input.tool.task.attached,
+      resumable: input.tool.task.resumable,
       executeInput: registeredTool.definition.executeInput,
       definition: createRegisteredHarnessToolDefinition({
         behavior: input.tool.behavior,

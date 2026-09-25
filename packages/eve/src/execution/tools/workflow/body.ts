@@ -2,7 +2,12 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import { agent } from "#execution/tools/workflow/agent.js";
-import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
+import type {
+  AgentInput,
+  AgentOptions,
+  ResumableWorkflowToolContext,
+  WorkflowToolContext,
+} from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
@@ -10,6 +15,7 @@ import {
   type WorkflowToolRunRef,
   type WorkflowToolRunReport,
 } from "#execution/tools/workflow/messages.js";
+import type { GenerationCall, Generations } from "#execution/tools/workflow/generations.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
@@ -34,6 +40,8 @@ export interface WorkflowBodyDefinition {
   readonly taskId: string;
   readonly toolName: string;
   readonly workflowId: string;
+  /** The run stays alive between generations; `ctx` gains `receive` and `reply`. */
+  readonly resumable?: boolean;
 }
 
 export interface WorkflowBodyInput extends WorkflowBodyDefinition {
@@ -50,17 +58,30 @@ type WorkflowToolExecute = (
   ctx: WorkflowToolContext,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
-/** Executes one registered workflow body and reports progress to its owner. */
+/**
+ * Executes one registered workflow body and reports progress to its owner. A
+ * resumable body's context follows its current generation (`generations`).
+ */
 export async function executeWorkflowBody(
   input: WorkflowBodyInput & { readonly runId?: string },
   signal: AbortSignal,
+  generations?: Generations,
 ): Promise<WorkflowBodyResult> {
-  const from = createWorkflowBodyRef(input);
-  const ctx = createWorkflowBodyContext(input, signal);
+  const base = createWorkflowBodyRef(input);
+  const current = (): WorkflowToolRunRef =>
+    generations === undefined
+      ? base
+      : { ...base, ...generationRef(generations.call), generation: generations.generation };
+  const ctx = createWorkflowBodyContext(input, signal, generations);
   attachWorkflowToolRunContext(ctx, {
     canRequestInput: input.canRequestInput,
-    from,
+    get from() {
+      return current();
+    },
     owner: input.owner,
+    get replied() {
+      return generations?.replied === true;
+    },
   });
   let reportCount = 0;
 
@@ -76,20 +97,28 @@ export async function executeWorkflowBody(
       let next = await iterator.next();
       while (next.done !== true) {
         last = next.value;
-        const report: WorkflowToolRunReport = { from, update: next.value };
+        const report: WorkflowToolRunReport = { from: current(), update: next.value };
         await resumeHookStep(input.owner.inbox, { kind: "report", ...report });
         reportCount += 1;
+        generations?.noteReport();
         next = await iterator.next();
       }
       output = (next.value as JsonValue | undefined) ?? last ?? null;
     }
     return { outcome: { output, status: "completed" }, reportCount };
   } catch (error) {
-    if (signal.aborted) {
+    // A throw after a cancel is the cancel; a resumable body's own cancel
+    // stops only its current generation.
+    const aborted = signal.aborted
+      ? signal
+      : generations?.signal.aborted === true && !generations.replied
+        ? generations.signal
+        : undefined;
+    if (aborted !== undefined) {
       return {
         outcome: {
           reason:
-            signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
+            aborted.reason instanceof Error ? aborted.reason.message : String(aborted.reason ?? ""),
           status: "cancelled",
         },
         reportCount,
@@ -103,14 +132,33 @@ export function createWorkflowBodyRef(
   input: WorkflowBodyDefinition & { readonly runId?: string },
 ): WorkflowToolRunRef {
   return {
-    callId: input.callId,
-    input: input.input,
+    ...generationRef(firstGenerationCall(input)),
+    generation: 1,
     runId: input.runId ?? getWorkflowMetadata().workflowRunId,
-    sequence: input.session.turn.sequence,
-    stepIndex: input.stepIndex,
     taskId: input.taskId,
     toolName: input.toolName,
-    turnId: input.session.turn.id,
+  };
+}
+
+/** The call that started a run's first generation. */
+export function firstGenerationCall(input: WorkflowBodyDefinition): GenerationCall {
+  return {
+    callId: input.callId,
+    input: input.input,
+    stepIndex: input.stepIndex,
+    turn: { id: input.session.turn.id, sequence: input.session.turn.sequence },
+  };
+}
+
+function generationRef(
+  call: GenerationCall,
+): Pick<WorkflowToolRunRef, "callId" | "input" | "sequence" | "stepIndex" | "turnId"> {
+  return {
+    callId: call.callId,
+    input: call.input,
+    sequence: call.turn.sequence,
+    stepIndex: call.stepIndex,
+    turnId: call.turn.id,
   };
 }
 
@@ -127,6 +175,7 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
   signal: AbortSignal,
+  generations: Generations | undefined,
 ): ToolContext & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
@@ -134,8 +183,8 @@ function createWorkflowBodyContext(
     );
   };
   const ctx: ToolContext & WorkflowToolContext = {
-    agent: ((target: string, agentInput: AgentInput) =>
-      agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
+    agent: ((target: string, agentInput: AgentInput, options?: AgentOptions) =>
+      agent(ctx, target, agentInput, options)) as WorkflowToolContext["agent"],
     agents: Object.freeze(
       Object.fromEntries(
         Object.entries(input.agents ?? {}).map(([name, metadata]) => [
@@ -158,7 +207,25 @@ function createWorkflowBodyContext(
     session: input.session,
     toolName: input.toolName,
   };
-  return ctx;
+  if (generations === undefined) return ctx;
+  // A generation's context follows the call that started it; each generation
+  // has its own signal, so a cancel stops the current work, not the task.
+  Object.defineProperties(ctx, {
+    abortSignal: { enumerable: true, get: () => generations.signal },
+    callId: { enumerable: true, get: () => generations.call.callId },
+    session: {
+      enumerable: true,
+      get: () => ({ ...input.session, turn: generations.call.turn }),
+    },
+  });
+  const resumable: Pick<
+    ResumableWorkflowToolContext<JsonObject, JsonValue>,
+    "receive" | "reply"
+  > = {
+    receive: () => generations.receive(),
+    reply: (output) => generations.reply(output),
+  };
+  return Object.assign(ctx, resumable);
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {

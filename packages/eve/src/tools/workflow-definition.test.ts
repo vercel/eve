@@ -5,6 +5,7 @@ import { defineTool } from "#tools/definition.js";
 import {
   defineWorkflowTool,
   isWorkflowToolDefinition,
+  type ResumableWorkflowToolContext,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
   type WorkflowToolContext,
@@ -51,6 +52,59 @@ describe("defineWorkflowTool", () => {
     });
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expectTypeOf(definition.execute).parameter(0).toEqualTypeOf<{ service: string }>();
+  });
+
+  it("types a resumable body's receive and reply by the tool's input and output", () => {
+    const definition = defineWorkflowTool({
+      description: "Draft release notes for Alice.",
+      inputSchema: z.object({ version: z.string(), note: z.string().optional() }),
+      outputSchema: z.object({ notes: z.string() }),
+      resumable: true,
+      async execute(input, ctx) {
+        expectTypeOf(ctx).toEqualTypeOf<
+          ResumableWorkflowToolContext<
+            { version: string; note?: string | undefined },
+            { notes: string }
+          >
+        >();
+        expectTypeOf(ctx.receive()).toEqualTypeOf<
+          Promise<{ version: string; note?: string | undefined }>
+        >();
+        ctx.reply({ notes: `notes(${input.version})` });
+        // @ts-expect-error A reply has the tool's output type.
+        ctx.reply({ draft: "wrong" });
+        const next = await ctx.receive();
+        // Returning ends the task; the returned value is the last result.
+        return { notes: `notes(${next.version})` };
+      },
+    });
+    expect(isWorkflowToolDefinition(definition)).toBe(true);
+    expect(definition.resumable).toBe(true);
+
+    defineWorkflowTool({
+      description: "Look up Bob's order.",
+      inputSchema: z.object({ orderId: z.string() }),
+      async execute(_input, ctx) {
+        // @ts-expect-error Only a resumable body receives more input.
+        void ctx.receive;
+        // @ts-expect-error Only a resumable body replies; it returns its one result.
+        void ctx.reply;
+        return 1;
+      },
+    });
+
+    expect(() =>
+      defineWorkflowTool({
+        attached: true,
+        description: "Draft release notes for Alice.",
+        inputSchema: z.object({ version: z.string() }),
+        // @ts-expect-error A resumable task stays available across turns, so it cannot be attached.
+        resumable: true,
+        async execute() {
+          return 1;
+        },
+      }),
+    ).toThrow('"resumable" cannot be combined with "attached"');
   });
 
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
@@ -162,6 +216,54 @@ describe("defineWorkflowTool", () => {
       }),
     ).toThrow(
       `defineWorkflowTool: "attached" must be true or false, received ${JSON.stringify(attached)}.`,
+    );
+  });
+
+  it("compiles resumable and refuses it combined with attached", () => {
+    const execute = Object.assign(async () => undefined, {
+      workflowId: "workflow//release_notes//execute",
+    });
+    const entry = normalizeToolDefinition(
+      defineWorkflowTool({
+        description: "Draft release notes for Alice.",
+        execute,
+        inputSchema: {},
+        resumable: true,
+      }),
+      "Invalid tool.",
+    );
+    expect(entry).toMatchObject({ definition: { resumable: true }, kind: "tool" });
+
+    const combined = {
+      attached: true,
+      description: "Draft release notes for Alice.",
+      execute,
+      inputSchema: {},
+      resumable: true,
+    } as never;
+    const message =
+      '"resumable" cannot be combined with "attached". A resumable task stays available across turns, so it cannot hold one; remove "attached".';
+    expect(() => defineWorkflowTool(combined)).toThrow(`defineWorkflowTool: ${message}`);
+    // A definition that bypassed defineWorkflowTool() is checked when it compiles.
+    const branded = defineWorkflowTool({
+      description: "Draft release notes for Alice.",
+      execute,
+      inputSchema: {},
+      resumable: true,
+    });
+    expect(() =>
+      normalizeToolDefinition(Object.assign(branded, { attached: true }), "Invalid tool."),
+    ).toThrow(message);
+    expect(() =>
+      defineWorkflowTool({ ...(combined as object), attached: false, resumable: "yes" } as never),
+    ).toThrow('defineWorkflowTool: "resumable" must be true or false, received "yes".');
+  });
+
+  it("rejects resumable on a tool that is not a workflow tool", () => {
+    const definition = { description: "Ordinary", execute: async () => 1, resumable: true };
+
+    expect(() => normalizeToolDefinition(definition, "Invalid tool.")).toThrow(
+      '"resumable" is only supported on defineWorkflowTool()',
     );
   });
 

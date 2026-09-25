@@ -312,6 +312,7 @@ describe("applyTaskDeadlines", () => {
         run("completed", {
           from: {
             callId: "call-1",
+            generation: 1,
             runId: "run-1",
             sequence: 0,
             stepIndex: 0,
@@ -350,6 +351,7 @@ describe("applyTaskDeadlines", () => {
         run("completed", {
           from: {
             callId: "call-1",
+            generation: 1,
             runId: "run-1",
             sequence: 0,
             stepIndex: 0,
@@ -770,11 +772,24 @@ describe("applyTaskDeadlines", () => {
     });
 
     it("never settles the next generation of a call with the answer to the one before", async () => {
-      // Two steering messages were sent; the agent answered after the first,
-      // so the owner applied that answer and started the call's next
-      // generation for the second message.
+      // Two sends reached the working agent; it answered after reading the
+      // first, so the owner applied that answer and started the task's next
+      // generation with the second.
+      const sends = [
+        { callId: "call-2", seq: 1, turnId: "turn-2" },
+        { callId: "call-3", seq: 2, turnId: "turn-3" },
+      ];
       const table = applyTaskMessage(
-        taskTable([{ ...remote, mode: "detached" as const, steers: 2 }]),
+        taskTable([
+          {
+            ...remote,
+            lastSeq: 2,
+            mode: "detached" as const,
+            resumable: true as const,
+            sends,
+            timeoutMs: 2 * 60 * 60 * 1000,
+          },
+        ]),
         {
           answer: 2,
           generation: 1,
@@ -786,7 +801,13 @@ describe("applyTaskDeadlines", () => {
         STARTED,
       ).table;
       const next = table.records[0]!;
-      expect(next).toMatchObject({ answerSeq: 2, generation: 2, status: "working", steers: 1 });
+      expect(next).toMatchObject({
+        answerSeq: 2,
+        generation: 2,
+        sends: [sends[1]],
+        startedBy: 2,
+        status: "working",
+      });
       // At the new generation's deadline the latest report is still that answer,
       // which accounts for as many steering messages as the generation waits on.
       vi.mocked(readRemoteTaskReport).mockResolvedValueOnce(report(2, 1));

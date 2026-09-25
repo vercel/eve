@@ -2,9 +2,12 @@ import type { SessionStateMap } from "#harness/types.js";
 import { TASK_RECORD_VERSION, type TaskRecord } from "#tasks/record.js";
 import { readTaskTable, TASK_TABLE_STATE_KEY, type TaskTable } from "#tasks/table.js";
 
-/** One agent task record with test defaults: a working attached call with no child yet. */
+/**
+ * One agent task record with test defaults: a working attached call with no
+ * child yet. An agent task is resumable, as the owner starts every one.
+ */
 export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecord {
-  return {
+  const record: TaskRecord = {
     callId: "call-1",
     delivered: false,
     generation: 1,
@@ -17,8 +20,9 @@ export function createTaskRecord(overrides: Partial<TaskRecord> = {}): TaskRecor
     status: "working",
     turnId: "turn-1",
     v: TASK_RECORD_VERSION,
-    ...overrides,
   };
+  const agent = overrides.kind === undefined || overrides.kind === "agent";
+  return agent ? { ...record, resumable: true, ...overrides } : { ...record, ...overrides };
 }
 
 /** Session state holding the given task records. */

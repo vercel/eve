@@ -1,7 +1,7 @@
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { JsonValue } from "#shared/json.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /**
@@ -77,7 +77,13 @@ export type TaskMessage =
       readonly kind: "task.started";
       readonly taskId: string;
       readonly generation: number;
-      readonly child: ChildAddress;
+      /** The child's address, on a task's first generation; later ones run on the same child. */
+      readonly child?: ChildAddress;
+      /**
+       * The send that started this generation, which the owner already
+       * attributed from its sends: a consistency check.
+       */
+      readonly send?: number;
     }
   | {
       readonly kind: "task.input";
@@ -94,13 +100,25 @@ export type TaskMessage =
       readonly usage?: TokenUsage;
       /** The child session ended with this generation, so the agent cannot be given more work. */
       readonly childEnded?: boolean;
-      /** Steering messages the child received for this generation before it answered. */
+      /**
+       * Messages an agent received for this generation before it answered,
+       * which the owner maps onto its oldest unread sends.
+       */
       readonly steers?: number;
+      /** Sends a workflow body read during this generation. */
+      readonly read?: readonly number[];
       /**
        * Where this answer falls among the child's answers, which only grows.
        * An answer at or below the last one applied is a repeat of it.
        */
       readonly answer?: number;
+    }
+  | {
+      /** The task stopped taking input, after its last generation settled. */
+      readonly kind: "task.ended";
+      readonly taskId: string;
+      /** Sends the child never read, oldest first. */
+      readonly unread: readonly number[];
     }
   | {
       /** Signals that a deadline or cancellation confirmation window may have passed. */
@@ -171,18 +189,14 @@ export interface TaskInputBatch {
 
 /** Owner → child. Held on the record until the child reports `task.started`. */
 export type TaskCommand =
+  /** Stops the current generation and the input queued for it. */
   | { readonly kind: "cancel" }
   | { readonly kind: "answer"; readonly responses: readonly InputResponse[] }
-  | {
-      /**
-       * A steering message that joins the current generation. It never changes
-       * the generation's output schema, which belongs to the call that started it.
-       */
-      readonly kind: "message";
-      readonly message: string;
-      /** Idempotency key, from the steering call's turn and call IDs. */
-      readonly key: string;
-    };
+  /**
+   * A send, numbered by the owner. An agent's input is `{ message,
+   * outputSchema? }`; a workflow run's is the tool's input.
+   */
+  | { readonly kind: "input"; readonly seq: number; readonly input: JsonObject };
 
 /**
  * A child's report that settles a delegated call, with the steering messages

@@ -560,7 +560,7 @@ describe("deriveRunFacts", () => {
       turnStarted("t1", 0),
       actionsRequested([
         { callId: "c1", input: { message: "Find sources." }, toolName: "research" },
-        { callId: "c2", input: { agentId: null, message: "Draft it." }, toolName: "writer" },
+        { callId: "c2", input: { message: "Draft it.", taskId: null }, toolName: "writer" },
       ]),
       {
         type: "task.settled",

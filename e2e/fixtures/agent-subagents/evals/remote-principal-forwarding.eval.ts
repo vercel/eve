@@ -20,7 +20,7 @@ const CREATE_CHILD_MESSAGE = [
 ].join(" ");
 const CONTINUE_CHILD_MESSAGE = [
   WORKSPACE_FORWARDING_MARKER,
-  "Continue that same remote-loopback agent using its agentId with this message:",
+  "Continue that same remote-loopback agent using its taskId with this message:",
   JSON.stringify(WORKSPACE_LOOKUP_MESSAGE),
 ].join(" ");
 const CLARIFICATION = [
@@ -99,12 +99,12 @@ export default defineEval({
 
 /** The turn named Alice's agent, and the agent refused a caller other than Alice. */
 function expectRefused(turn: EveEvalTurn, aliceAgentId: string): void {
-  turn.calledTool("remote-loopback", { input: { agentId: aliceAgentId }, status: "failed" });
+  turn.calledTool("remote-loopback", { input: { taskId: aliceAgentId }, status: "failed" });
   turn.event("action.result", {
     data: {
       result: {
         kind: "tool-result",
-        output: { code: "AGENT_OTHER_PRINCIPAL" },
+        output: { code: "TASK_OTHER_PRINCIPAL" },
         toolName: "remote-loopback",
       },
       status: "failed",

@@ -7,6 +7,10 @@ import type {
 import { isRuntimeNoActiveSessionError } from "#execution/runtime-errors.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
+import type {
+  WorkflowToolRunControlMessage,
+  WorkflowToolRunSendCall,
+} from "#execution/tools/workflow/messages.js";
 import { isWorkflowTargetGone } from "#execution/tools/workflow/target-gone.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
@@ -22,8 +26,7 @@ import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
-import { AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
-import { AGENT_SESSION_ENDED_MESSAGE, renderAgentUnreachable } from "#tasks/render.js";
+import { AGENT_SESSION_ENDED_MESSAGE, renderTaskUnreachable } from "#tasks/render.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
@@ -44,20 +47,31 @@ import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { RemoteTaskProtocolError } from "#subagents/remote/protocol.js";
 import type { TaskAnswers } from "#tasks/input.js";
 import type { ChildAddress, TaskCommand } from "#tasks/protocol.js";
-import type { TaskRecord } from "#tasks/record.js";
+import { childCallId, type TaskRecord } from "#tasks/record.js";
 import { readTaskCreator } from "#tasks/results.js";
 import type { ToolInputResponse } from "#tools/definition.js";
 import { ownerInboxHookToken } from "#tasks/state.js";
 import type { TaskEffect } from "#tasks/table.js";
 import type { HardStopTarget } from "#tasks/timer-steps.js";
 
-// Owner → child delivery: new generations for idle agents and owner commands.
+// Owner → child delivery: sends, new generations for idle agents, and owner commands.
 
 const log = createLogger("tasks.transport");
 
 const WORKFLOW_TASK_CANCEL_REASON = "The tool call was cancelled.";
 
+/** The code of a send its task's child could not take. */
+const TASK_UNREACHABLE = "TASK_UNREACHABLE";
+
 export type CommandEffect = Extract<TaskEffect, { kind: "send" }>;
+
+/** A send its task's child did not take: the call's error, and whether the child is gone for good. */
+export interface SendFailure {
+  readonly output: JsonValue;
+  readonly permanent: boolean;
+}
+
+type InputCommand = Extract<TaskCommand, { readonly kind: "input" }>;
 
 /**
  * Sends owner commands to started children without waiting for them to act.
@@ -80,7 +94,7 @@ async function runCommand(
   ctx: ContextContainer | undefined,
 ): Promise<void> {
   const child = record.child;
-  // Held messages go through `flushHeldCommands`, which knows the owner.
+  // Sends go through `sendTaskInput`, which knows the owner.
   if (child === undefined || command.kind !== "cancel") return;
   try {
     if (child.kind === "remote") {
@@ -120,76 +134,107 @@ async function runCommand(
 }
 
 /**
- * Sends a steering message to a working agent for its current generation's
- * call, with the owner's key, so the agent admits the message once and
- * reports receiving it when it answers that call: in its current turn, in
- * its next turn for the same call when it is holding that call for its own
- * detached work, or as a new turn for the call when it has already
- * answered. A remote agent gets the same message over HTTP, with the owner's
- * callback for the call. Returns the call's error output when the message
- * did not reach the agent.
+ * Delivers one send to a task's child. A workflow run takes it on its
+ * command hook, in order with cancels. A working agent gets it as a steering
+ * message for the call it is answering, with the owner's key, so the agent
+ * admits it once and counts it with the answer that settles that call: in
+ * its current turn, or in a next turn for the same call when it has already
+ * answered. The message carries the send's output schema, which becomes the
+ * turn's schema. A remote agent gets the same message over HTTP, with the
+ * owner's callback for the call. Returns the call's error when the child did
+ * not take it.
  */
-export async function sendAgentMessage(input: {
+export async function sendTaskInput(input: {
   /** The owner's remote callback alias; a remote agent answers through it. */
   readonly callbackAlias: string | undefined;
-  readonly command: Extract<TaskCommand, { readonly kind: "message" }>;
+  /** The send's call, whose context a workflow run's generation takes. */
+  readonly call?: WorkflowToolRunSendCall;
+  readonly command: InputCommand;
   readonly ctx: ContextContainer | undefined;
   readonly ownerSessionId: string;
   readonly record: TaskRecord;
-}): Promise<JsonValue | undefined> {
+}): Promise<SendFailure | undefined> {
   const { command, record } = input;
   const child = record.child;
-  const unreachable = (permanent: boolean): JsonValue => ({
-    code: AGENT_UNREACHABLE,
-    message: renderAgentUnreachable(record.id, permanent ? "gone" : "temporary"),
+  const unreachable = (permanent: boolean): SendFailure => ({
+    output: {
+      code: TASK_UNREACHABLE,
+      message: renderTaskUnreachable(record, permanent ? "ended" : "temporary"),
+    },
+    permanent,
   });
+  if (child?.kind === "workflow") {
+    const call = input.call ?? {
+      callId: record.callId,
+      stepIndex: 0,
+      turn: { id: record.turnId, sequence: 0 },
+    };
+    const message: WorkflowToolRunControlMessage = {
+      call,
+      input: command.input,
+      kind: "input",
+      seq: command.seq,
+    };
+    try {
+      await resumeHook(child.commandToken, message);
+      return undefined;
+    } catch (error) {
+      if (isWorkflowTargetGone(error)) return unreachable(true);
+      logError(log, "failed to send input to a workflow task", error, { taskId: record.id });
+      return unreachable(false);
+    }
+  }
   const bundle = input.ctx?.get(BundleKey);
   if (child === undefined || bundle === undefined) return unreachable(false);
+  const message = typeof command.input.message === "string" ? command.input.message : "";
+  const outputSchema = normalizeRequestedOutputSchema(command.input.outputSchema);
+  // The send's identity: a retried step resends the same key, and the agent admits it once.
+  const operationId = `${record.id}:${command.seq}`;
   try {
     if (child.kind === "remote") {
       const remote = resolveRemoteChild(record, input.ctx);
       if (remote === undefined || input.callbackAlias === undefined) return unreachable(true);
-      // Only the principal that started the generation may steer it.
+      // Only the principal that started the task may send to it.
       await continueRemoteAgentSession({
         auth: readTaskCreator(record.creator).auth,
-        callback: remoteCallback(record.callId, record.name, child, input.callbackAlias),
-        message: command.message,
-        operationId: command.key,
+        callback: remoteCallback(childCallId(record), record.name, child, input.callbackAlias),
+        message,
+        operationId,
+        outputSchema,
         remote: { ...remote, url: child.url },
         sessionId: child.sessionId,
         turnPolicy: "steer",
       });
       return undefined;
     }
-    if (child.kind !== "local") return unreachable(true);
     // Without `auth`, the child keeps acting as the principal that started
-    // it, which is the steering principal: only that principal may steer.
+    // it, which is the sending principal: only that principal may send.
     const result = await createWorkflowRuntime({
       compiledArtifactsSource: bundle.compiledArtifactsSource,
       nodeId: record.nodeId,
     }).dispatchSession({
       command: {
         caller: {
-          callId: record.callId,
+          callId: childCallId(record),
           replyTo: { kind: "hook", token: ownerInboxHookToken(input.ownerSessionId) },
           subagentName: record.name,
         },
         kind: "send",
-        operationId: command.key,
-        payload: { message: command.message },
+        operationId,
+        payload: outputSchema === undefined ? { message } : { message, outputSchema },
         turnPolicy: "steer",
       },
       sessionId: child.sessionId,
     });
     return result.status === "accepted" ? undefined : unreachable(result.retryable !== true);
   } catch (error) {
-    logError(log, "failed to send a message to a working agent", error, {
+    logError(log, "failed to send input to a working agent", error, {
       childKind: child.kind,
       taskId: record.id,
     });
-    // A working agent that no longer speaks this protocol cannot take the message.
+    // A working agent that no longer speaks this protocol cannot take the input.
     if (error instanceof RemoteTaskProtocolError) {
-      return { code: AGENT_UNREACHABLE, message: error.message };
+      return { output: { code: TASK_UNREACHABLE, message: error.message }, permanent: true };
     }
     return unreachable(
       isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
@@ -259,13 +304,13 @@ export async function answerTask(input: {
     const protocol = error instanceof RemoteTaskProtocolError;
     if (!protocol && isRetryableRemoteAgentContinueError(error)) return "retry";
     const failure = protocol
-      ? { code: AGENT_UNREACHABLE, message: error.message }
+      ? { code: TASK_UNREACHABLE, message: error.message }
       : { code: "AGENT_SESSION_ENDED", message: AGENT_SESSION_ENDED_MESSAGE };
     const report: RuntimeActionResultHookPayload = {
       kind: "runtime-action-result",
       results: [
         {
-          callId: record.callId,
+          callId: childCallId(record),
           isError: true,
           kind: "subagent-result",
           origin: "child",
@@ -306,7 +351,7 @@ export async function readRemoteTaskReport(
   if (child?.kind !== "remote" || remote === undefined) return undefined;
   try {
     const report = await readRemoteAgentReport({
-      callId: record.callId,
+      callId: childCallId(record),
       callbackToken,
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
@@ -354,26 +399,36 @@ function resolveRemoteChild(record: TaskRecord, ctx: ContextContainer | undefine
   });
 }
 
-/** Why a retired idle agent's session ends. */
-export const RETIRED_IDLE_AGENT_REASON = "The parent retired this idle agent.";
+/** Why a retired idle task's child ends. */
+export const RETIRED_IDLE_TASK_REASON = "The parent retired this idle task.";
 
 /**
- * Ends the session of an idle agent the owner no longer keeps: a local agent
- * ends as a reset session does, and a remote one through its reset route. A
- * failed request is logged. Returns a local agent the request did not reach,
- * for the owner's timer to ask again and hard-stop if that fails too; a
- * remote agent it did not reach is bounded by its own session lifetime.
+ * Ends the child of an idle task the owner no longer keeps: a local agent
+ * ends as a reset session does, a remote one through its reset route, and a
+ * workflow run is asked to end (a run that cannot be reached is cancelled
+ * outright). A failed request is logged. Returns a local agent the request
+ * did not reach, for the owner's timer to ask again and hard-stop if that
+ * fails too; a remote agent it did not reach is bounded by its own session
+ * lifetime.
  */
-export async function retireIdleAgent(
+export async function retireIdleTask(
   record: TaskRecord,
   ctx: ContextContainer | undefined,
 ): Promise<HardStopTarget | undefined> {
   const child = record.child;
-  if (child === undefined || child.kind === "workflow") return undefined;
+  if (child === undefined) return undefined;
   try {
+    if (child.kind === "workflow") {
+      await cancelWorkflowToolRun(
+        { hookToken: child.commandToken, runId: child.runId },
+        RETIRED_IDLE_TASK_REASON,
+        { end: true },
+      );
+      return undefined;
+    }
     if (child.kind === "local") {
       await requestWorkflowSessionEnd({
-        reason: RETIRED_IDLE_AGENT_REASON,
+        reason: RETIRED_IDLE_TASK_REASON,
         sessionId: child.sessionId,
       });
       return undefined;
@@ -381,12 +436,12 @@ export async function retireIdleAgent(
     const remote = resolveRemoteChild(record, ctx);
     if (remote === undefined) return undefined;
     await resetRemoteAgentSession({
-      reason: RETIRED_IDLE_AGENT_REASON,
+      reason: RETIRED_IDLE_TASK_REASON,
       remote: { ...remote, url: child.url },
       sessionId: child.sessionId,
     });
   } catch (error) {
-    logError(log, "failed to end a retired idle agent", error, {
+    logError(log, "failed to end a retired idle task", error, {
       childKind: child.kind,
       taskId: record.id,
     });
@@ -413,8 +468,9 @@ export async function cancelOrphanedChild(input: {
 }
 
 /**
- * Gives an idle agent its next generation. A lost response is never retried:
- * the child may already have accepted the message.
+ * Gives an idle agent its next generation, for the send `record` now names.
+ * A lost response is never retried: the child may already have accepted the
+ * message.
  */
 export async function deliverToChild(input: {
   readonly action: RuntimeAgentDispatchRequest;
@@ -424,13 +480,16 @@ export async function deliverToChild(input: {
   readonly child: ChildAddress;
   readonly record: TaskRecord;
   readonly replyToken: string;
-}): Promise<JsonValue | undefined> {
+}): Promise<SendFailure | undefined> {
   const { action, child, record } = input;
   const message = typeof action.input.message === "string" ? action.input.message : "";
   const outputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
-  const unreachable = (permanent: boolean): JsonValue => ({
-    code: AGENT_UNREACHABLE,
-    message: renderAgentUnreachable(record.id, permanent ? "gone" : "temporary"),
+  const unreachable = (permanent: boolean): SendFailure => ({
+    output: {
+      code: TASK_UNREACHABLE,
+      message: renderTaskUnreachable(record, permanent ? "ended" : "temporary"),
+    },
+    permanent,
   });
   // The call's identity: a retried step resends it, and the agent admits it once.
   const operationId = `${record.turnId}:${action.callId}`;
@@ -488,7 +547,9 @@ export async function deliverToChild(input: {
       callId: action.callId,
       taskId: record.id,
     });
-    if (error instanceof RemoteTaskProtocolError) return protocolFailure(error);
+    if (error instanceof RemoteTaskProtocolError) {
+      return { output: protocolFailure(error), permanent: true };
+    }
     return unreachable(
       isRuntimeNoActiveSessionError(error) || !isRetryableRemoteAgentContinueError(error),
     );

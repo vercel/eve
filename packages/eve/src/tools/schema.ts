@@ -142,6 +142,17 @@ export function defineJsonSchema<T = unknown>(
 const plainJsonSchemas = new WeakSet<object>();
 
 /**
+ * Marks a schema derived from `source` to reach the model the way `source`
+ * does: exactly as written when `source` is plain JSON Schema.
+ */
+export function deriveToolSchema<T extends ToolSchema>(derived: T, source: unknown): T {
+  if (typeof source === "object" && source !== null && plainJsonSchemas.has(source)) {
+    plainJsonSchemas.add(derived);
+  }
+  return derived;
+}
+
+/**
  * Permissive schema lowered onto model-visible tools whose definitions
  * declare no input schema. Accepts any input — an absent schema declares no
  * contract, so rejecting stray properties would only force needless retries.

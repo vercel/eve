@@ -17,14 +17,14 @@ export function isAgentTaskRequest(
   return request.workflowId === AGENT_TASK_WORKFLOW_ID;
 }
 
-/** Reads one model agent call. The tool name is the agent's name. */
+/** Reads one model agent call. The tool name is the agent's name; a `taskId` makes it a send. */
 export function agentTaskCallFromRequest(request: RuntimeWorkflowTaskRequest): AgentTaskCall {
-  const { agentId, message, outputSchema } = request.input;
-  const input: { agentId?: string; message: string; outputSchema?: JsonObject; target: string } = {
+  const { message, outputSchema } = request.input;
+  const input: { taskId?: string; message: string; outputSchema?: JsonObject; target: string } = {
     message: typeof message === "string" ? message : "",
     target: request.toolName,
   };
-  if (typeof agentId === "string" && agentId.trim() !== "") input.agentId = agentId;
+  if (request.taskId !== undefined) input.taskId = request.taskId;
   if (typeof outputSchema === "object" && outputSchema !== null && !Array.isArray(outputSchema)) {
     input.outputSchema = outputSchema as JsonObject;
   }

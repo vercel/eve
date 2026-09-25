@@ -19,7 +19,7 @@ import {
 } from "#tasks/render.js";
 
 // These sessions have no agent tools.
-const TASKS_INSTRUCTION = renderTasksInstruction({ agents: false });
+const TASKS_INSTRUCTION = renderTasksInstruction({ agents: false, resumable: false });
 import { encodeTaskCreator, holdTaskResult, readPendingTaskResults } from "#tasks/results.js";
 import { getTaskTable } from "#tasks/state.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";

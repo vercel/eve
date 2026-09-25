@@ -1,5 +1,6 @@
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
 import { renderTimedOut } from "#tasks/render.js";
+import { endTask } from "#tasks/table-generations.js";
 import {
   failTask,
   findTask,
@@ -58,6 +59,12 @@ export function evaluateTaskDeadlines(table: TaskTable, now: string): TaskTransi
           ? { kind: "unconfirmed", record: confirmed }
           : { child, kind: "unconfirmed", record: confirmed },
       );
+      // A hard-stopped child takes no more input.
+      if (child !== undefined && record.resumable === true) {
+        const ended = endTask(next, { ...confirmed, child }, now);
+        next = ended.table;
+        effects.push(...ended.effects);
+      }
     }
   }
   return { effects, table: next };

@@ -4,8 +4,8 @@ import type { TaskRecord } from "#tasks/record.js";
 import {
   renderInterruptedCall,
   renderModelOutputBody,
+  renderSendReceipt,
   renderStartReceipt,
-  renderSteeringReceipt,
   renderTaskResults,
   renderFinalOutputWhileTasksWork,
   renderTasksInstruction,
@@ -36,11 +36,17 @@ function record(overrides: Partial<TaskRecord> = {}): TaskRecord {
 
 describe("receipts", () => {
   it("name the task and point to task_wait", () => {
-    expect(renderStartReceipt(record())).toBe(
+    expect(renderStartReceipt(record({ kind: "workflow", name: "lookup" }), "lookup")).toBe(
       "Started task researcher-7k2m9q. Use task_wait for its result.",
     );
-    expect(renderSteeringReceipt(record())).toBe(
-      "Sent your message to agent researcher-7k2m9q, which is still working. Use task_wait for its result.",
+    expect(renderStartReceipt(record({ resumable: true }), "researcher")).toBe(
+      "Started task researcher-7k2m9q. Call researcher again with taskId researcher-7k2m9q to send it more input; use task_wait for its result.",
+    );
+    expect(renderSendReceipt(record(), false)).toBe(
+      "Sent to task researcher-7k2m9q, which is still working. It uses your input in its current work or starts on it right after; use task_wait for its next result.",
+    );
+    expect(renderSendReceipt(record({ id: "release_notes-4hd8sa" }), true)).toBe(
+      "Sent to task release_notes-4hd8sa, which is now working on it. Use task_wait for its result.",
     );
     expect(renderInterruptedCall(12_400)).toBe("Stopped after 12 s because a new message arrived.");
   });
@@ -175,7 +181,7 @@ describe("renderTimedOut", () => {
 });
 
 describe("renderTasksNote", () => {
-  it("lists undelivered background tasks and the most recent idle agents", () => {
+  it("lists undelivered background tasks and the most recent idle tasks with their tools", () => {
     const note = renderTasksNote([
       record(),
       record({ id: "fg-aaaaaa", mode: "attached", name: "fg" }),
@@ -186,6 +192,27 @@ describe("renderTasksNote", () => {
         lastStatus: "Answered the <Q3> revenue question.",
         mode: "attached",
         name: "d0",
+        resumable: true,
+        status: "completed",
+      }),
+      record({
+        child: { commandToken: "cmd", kind: "workflow", runId: "run" },
+        delivered: true,
+        id: "release_notes-4hd8sa",
+        kind: "workflow",
+        lastStatus: "Second draft of the 0.67 notes.",
+        name: "release_notes",
+        resumable: true,
+        startedAt: "2026-09-24T14:01:00.000Z",
+        status: "completed",
+      }),
+      // A workflow task that is not resumable, or one that ended, takes no more input.
+      record({ delivered: true, id: "lookup-a1b2c3", kind: "workflow", status: "completed" }),
+      record({
+        delivered: true,
+        ended: true,
+        id: "d1-aaaaaa",
+        resumable: true,
         status: "completed",
       }),
     ]);
@@ -196,9 +223,10 @@ describe("renderTasksNote", () => {
         "<tasks>",
         '<task id="researcher-7k2m9q" name="researcher" status="working" started="2026-09-24T14:02Z"/>',
         "</tasks>",
-        "<idle_agents>",
-        '<agent id="d0-2b0c1a" name="d0">Answered the &lt;Q3&gt; revenue question.</agent>',
-        "</idle_agents>",
+        "<idle>",
+        '<task id="d0-2b0c1a" tool="d0">Answered the &lt;Q3&gt; revenue question.</task>',
+        '<task id="release_notes-4hd8sa" tool="release_notes">Second draft of the 0.67 notes.</task>',
+        "</idle>",
       ].join("\n"),
     );
   });
@@ -219,7 +247,7 @@ describe("renderFinalOutputWhileTasksWork", () => {
 describe("renderTasksInstruction", () => {
   it("describes detached tasks, task_wait, results, and interruptions in one block", () => {
     for (const agents of [true, false]) {
-      const block = renderTasksInstruction({ agents });
+      const block = renderTasksInstruction({ agents, resumable: agents });
       expect(block).toMatch(/^Tasks\n/u);
       expect(block).toContain("return its id right away");
       expect(block).toContain("one task_wait per task");
@@ -235,11 +263,17 @@ describe("renderTasksInstruction", () => {
     }
   });
 
-  it("explains agentId only to a session with agents", () => {
-    expect(renderTasksInstruction({ agents: true })).toContain("agentId");
-    expect(renderTasksInstruction({ agents: true })).toContain("idle agents");
-    expect(renderTasksInstruction({ agents: false })).not.toContain("agentId");
-    expect(renderTasksInstruction({ agents: false })).not.toContain("agent call");
+  it("explains taskId only to a session with resumable tools", () => {
+    const agents = renderTasksInstruction({ agents: true, resumable: true });
+    expect(agents).toContain("call its tool again with its taskId");
+    expect(agents).toContain("idle tasks with their tools");
+    expect(agents).toContain("Agents stay available");
+    const workflows = renderTasksInstruction({ agents: false, resumable: true });
+    expect(workflows).toContain("taskId");
+    expect(workflows).not.toContain("Agents stay available");
+    const plain = renderTasksInstruction({ agents: false, resumable: false });
+    expect(plain).not.toContain("taskId");
+    expect(plain).not.toContain("agent call");
   });
 });
 
@@ -291,7 +325,7 @@ describe("resolveTasksAnnouncement", () => {
         messages: [tasksNote(note)],
         records: [{ ...working, delivered: true, status: "completed" }],
       }),
-    ).toBe(["[Tasks]", "<tasks>", "</tasks>", "<idle_agents>", "</idle_agents>"].join("\n"));
+    ).toBe(["[Tasks]", "<tasks>", "</tasks>", "<idle>", "</idle>"].join("\n"));
   });
 });
 

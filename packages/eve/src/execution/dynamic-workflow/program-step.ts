@@ -41,7 +41,7 @@ const agentBridgeSchema = jsonSchema({
     input: {
       additionalProperties: false,
       properties: {
-        agentId: { type: "string" },
+        taskId: { type: "string" },
         message: { type: "string" },
         outputSchema: { type: "object" },
       },

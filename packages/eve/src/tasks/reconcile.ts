@@ -139,6 +139,7 @@ async function readEndedWorkflowRun(
     const status = await run.status;
     const from = {
       callId: record.callId,
+      generation: record.generation,
       runId,
       sequence: 0,
       stepIndex: 0,
