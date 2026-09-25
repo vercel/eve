@@ -143,7 +143,6 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["registry:view", "registry:view"],
   ["set", "set"],
   ["set:model", "set:model"],
-  ["set:reasoning", "set:reasoning"],
   ["start", "start"],
   ["telemetry", "telemetry"],
   ["telemetry:disable", "telemetry:disable"],

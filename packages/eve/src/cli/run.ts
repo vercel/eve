@@ -229,24 +229,22 @@ export function createCliProgram(
     );
 
   const set = program.command("set").description("Change root agent model settings.");
-  agentCommand(set.command("model <model>"), applicationContext)
-    .description("Set the agent model.")
+  agentCommand(set.command("model [model]"), applicationContext)
+    .description("Set the agent model and reasoning effort.")
     .option(
       "--reasoning <effort>",
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
       parseReasoningOption,
     )
-    .action(async (model: string, options: { reasoning?: AgentReasoningDefinition }) => {
-      const { runSetCommand } = await import("#cli/commands/set.js");
-      await runSetCommand(logger, applicationContext.root, { model, reasoning: options.reasoning });
-    });
-  agentCommand(set.command("reasoning"), applicationContext)
-    .description("Set the agent reasoning effort.")
-    .argument("<effort>", "Reasoning effort", parseReasoningOption)
-    .action(async (reasoning: AgentReasoningDefinition) => {
-      const { runSetCommand } = await import("#cli/commands/set.js");
-      await runSetCommand(logger, applicationContext.root, { reasoning });
-    });
+    .action(
+      async (model: string | undefined, options: { reasoning?: AgentReasoningDefinition }) => {
+        const { runSetCommand } = await import("#cli/commands/set.js");
+        await runSetCommand(logger, applicationContext.root, {
+          model,
+          reasoning: options.reasoning,
+        });
+      },
+    );
 
   registerProjectCommands({ program, logger, applicationContext });
 

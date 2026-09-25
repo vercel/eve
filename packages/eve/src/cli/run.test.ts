@@ -203,7 +203,7 @@ describe("CLI command registration", () => {
     });
 
     const help = output.join("\n");
-    expect(help).toContain("<model>");
+    expect(help).toContain("[model]");
     expect(help).toContain("--reasoning <effort>");
   });
 

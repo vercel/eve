@@ -16,8 +16,7 @@ Relevant `eve` commands can run from the application root or any directory benea
 | `eve remote info <url>`                        | Inspect an existing agent                              |
 | `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
 | `eve info`                                     | Inspect the local application                          |
-| `eve set model <model> [--reasoning <effort>]` | Change model settings                                  |
-| `eve set reasoning <effort>`                   | Change reasoning effort                                |
+| `eve set model [model] [--reasoning <effort>]` | Change model and reasoning settings                    |
 | `eve build` / `eve start`                      | Build or serve the application                         |
 | `eve logs show [logid]` / `eve logs list`      | Inspect local diagnostic logs                          |
 | `eve traces show [trace]` / `eve traces list`  | Inspect local traces                                   |
@@ -96,12 +95,12 @@ Change the root agent's AI Gateway model and reasoning effort without opening th
 
 ```bash
 eve set model openai/gpt-6-sol --reasoning high
-eve set reasoning medium
+eve set model --reasoning medium
 ```
 
-Use `eve set model` to change the model, optionally with its reasoning effort.
-Use `eve set reasoning` to change only the reasoning effort. When you set both,
-eve writes them to `agent/agent.ts` in one source edit. `--reasoning` accepts
+Use `eve set model` to change the model, its reasoning effort, or both. Omit
+the optional model argument to keep the current model. When you set both, eve
+writes them to `agent/agent.ts` in one source edit. `--reasoning` accepts
 `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`;
 `provider-default` removes the authored `reasoning` field.
 
