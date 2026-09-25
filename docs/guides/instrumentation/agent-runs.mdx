@@ -43,9 +43,9 @@ The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
 ## Configure Agent Runs
 
 Preview and production deployments export to Vercel Agent Runs by default.
-Optionally you can export `agentRuns` from
-`agent/instrumentation/agent-runs.ts` to reconfigure it or return
-`disableInstrumentation()` to disable it.
+Omit `agent/instrumentation/agent-runs.ts` to keep that default. To change it,
+default-export `agentRuns(...)` from that file, or default-export
+`disableInstrumentation()` to turn off Agent Runs export.
 
 ## Filter Agent Runs exports
 
