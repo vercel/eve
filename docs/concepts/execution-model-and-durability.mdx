@@ -146,11 +146,19 @@ the returned handle. That identity lookup does not block workflow resumption.
 ID-addressed delivery already knows the session ID and needs no hook metadata
 lookup. An ambiguous delivery failure does not trigger session creation.
 
-While a handoff is in progress, the session's addresses are briefly unowned.
-The releasing owner leaves a short-lived marker for each address, so a
-delivery that lands in that interval retries until the successor claims the
-address instead of being reported as an inactive session. A channel therefore
-never starts a replacement session for an address that is mid-handoff.
+A handoff moves each of the session's addresses to the successor atomically,
+so a delivery that arrives mid-handoff always reaches a live owner. A channel
+therefore never starts a replacement session for an address that is
+mid-handoff. Messages the previous owner accepted just before the move are
+forwarded to the successor in the order it accepted them. A deployment running
+eve 0.66.3 or earlier cannot take addresses over, so after a rollback to such a
+deployment, sessions stay on their current deployment.
+
+If the session's current owner was started by a handoff from eve 0.66.2 or
+earlier, or by a legacy-session import, its next handoff releases the
+addresses briefly instead. That owner leaves a short-lived marker for each
+address, so a delivery that lands in the interval retries until the successor
+claims the address instead of being reported as an inactive session.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, the session owner signals pending model generation to stop, then applies the correction within the same turn and with the same turn ID. This includes model requests that perform provider-managed search before answering; interrupted search work may run again. Reasoning and search progress do not count as assistant output.
 

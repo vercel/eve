@@ -3,7 +3,11 @@ import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/
 import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.js";
 
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
-import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
+import {
+  claimHookOwnership,
+  disposeHook,
+  isHookForceClaimedError,
+} from "#execution/hook-ownership.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 /** All session addresses accept the same protocol. Callback routes construct
@@ -58,6 +62,11 @@ export interface SessionInboxOwnership {
 }
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
+  /**
+   * Takes a token from whichever run holds it, without waiting for the claim
+   * to register. The previous holder keeps what its hook accepted first.
+   */
+  claim(token: string): void;
   dispose(): Promise<void>;
   /** Disposes every hook and returns each payload the hooks accepted but the owner never read. */
   release(): Promise<SessionInboxPayload[]>;
@@ -105,7 +114,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
         notify();
       }
     } catch (error) {
-      if (!source.stopping) failure = { error };
+      // A forced claim ends a reader only after it delivered everything its
+      // hook accepted; from then on the claiming run answers the token.
+      if (!source.stopping && !isHookForceClaimedError(error)) failure = { error };
     } finally {
       source.closed = true;
       notify();
@@ -157,6 +168,24 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
     async claimSessionHooks(tokens) {
       const outcomes = await Promise.allSettled([...new Set(tokens)].map(claimSessionHook));
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+    },
+    claim(token) {
+      if (!token) throw new Error("A session alias requires a nonempty continuation token.");
+      if (sources.some((source) => source.token === token))
+        throw new Error(`Session address "${token}" is already claimed.`);
+      if (sources.length >= 256) throw new Error("A session may claim at most 256 addresses.");
+      const source: Source = {
+        token,
+        hook: createHook<SessionInboxPayload>({
+          token: sessionInboxHookToken(token),
+          metadata: { sessionId },
+          experimental_force: true,
+        }),
+        stopping: false,
+        closed: false,
+      };
+      sources.push(source);
+      void pump(source);
     },
     async next() {
       while (true) {

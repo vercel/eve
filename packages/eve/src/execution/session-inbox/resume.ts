@@ -20,7 +20,7 @@ import {
 import { getHookByToken, resumeHook } from "#internal/workflow/runtime.js";
 import { isObject } from "#shared/guards.js";
 
-/** Longest a delivery waits for a mid-handoff successor to claim its hooks. */
+/** Longest a delivery waits for a mid-handoff successor to claim released hooks. */
 const HANDOFF_RETRY_WINDOW_MS = 5_000;
 const HANDOFF_RETRY_INTERVAL_MS = 20;
 
@@ -31,10 +31,11 @@ export interface ResumedSessionInboxHook {
 }
 
 /**
- * Resumes the current owner with the current command shape. During a
- * deployment handoff the address is briefly unowned; the releasing owner
- * leaves a marker for that interval, so delivery retries instead of
- * reporting the session gone and letting a channel start a replacement.
+ * Resumes the current owner with the current command shape. A takeover
+ * handoff moves every address atomically. A release-first handoff
+ * (`session/legacy-handoff.ts`) leaves the address briefly unowned and marks
+ * it for that interval, so delivery retries instead of reporting the session
+ * gone and letting a channel start a replacement.
  */
 export async function resumeSessionInbox(
   address: string | SessionInboxAddress,

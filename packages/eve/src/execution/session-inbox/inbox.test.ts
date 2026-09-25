@@ -213,6 +213,59 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("force-claims a token and reads from it without waiting for registration", async () => {
+    const stable = createMockHook({
+      reads: [Promise.resolve(resolved(send("after takeover")))],
+      token: "stable",
+    });
+    installHooks(stable);
+    const inbox = createSessionInbox("session-1");
+
+    inbox.claim("stable");
+    expect(createHookMock).toHaveBeenCalledWith({
+      experimental_force: true,
+      metadata: { sessionId: "session-1" },
+      token: sessionInboxHookToken("stable"),
+    });
+    expect(hookTokens(inbox)).toEqual(["stable"]);
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("after takeover")));
+    expect(
+      (stable.hook as { getConflict: ReturnType<typeof vi.fn> }).getConflict,
+    ).not.toHaveBeenCalled();
+    await inbox.dispose();
+  });
+
+  it("guards forced claims like ordinary claims", () => {
+    const tokens = Array.from({ length: 256 }, (_, index) => `token-${index}`);
+    installHooks(...tokens.map((token) => createMockHook({ token })));
+    const inbox = createSessionInbox("session-1");
+
+    expect(() => inbox.claim("")).toThrow("nonempty");
+    for (const token of tokens) inbox.claim(token);
+    expect(() => inbox.claim(tokens[0]!)).toThrow("already claimed");
+    expect(() => inbox.claim("one-too-many")).toThrow("at most 256");
+    expect(hookTokens(inbox)).toEqual(tokens);
+  });
+
+  it("ends a taken reader quietly after it delivers what it accepted first", async () => {
+    const taken = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("before takeover"))), taken.promise],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    taken.reject(
+      Object.assign(new Error("Hook token was force-claimed"), { name: "HookForceClaimedError" }),
+    );
+
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("before takeover")));
+    await expect(readResult(inbox)).resolves.toEqual({ done: true, value: undefined });
+    await inbox.dispose();
+  });
+
   it("accounts for an accepted unread command before releasing ownership", async () => {
     installHooks(
       createMockHook({

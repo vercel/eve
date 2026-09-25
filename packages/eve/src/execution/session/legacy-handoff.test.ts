@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { SessionHandoff, type SessionOwnerActivation } from "#execution/session/handoff.js";
+import type { SessionOwnerActivation } from "#execution/session/handoff.js";
+import { isLegacyHandoff, LegacySessionHandoff } from "#execution/session/legacy-handoff.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
@@ -12,6 +13,7 @@ const createHookMock = vi.fn();
 
 vi.mock("#execution/session/handoff-steps.js", () => ({
   isSessionIdleForHandoffStep: (...args: unknown[]) => isSessionIdleForHandoffStepMock(...args),
+  validateSessionCheckpointStep: vi.fn(),
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({
   startSessionOwnerStep: (...args: unknown[]) => startSessionOwnerStepMock(...args),
@@ -28,7 +30,7 @@ afterEach(() => {
 
 const STABLE = "eve:session:session-1:inbox";
 
-describe("SessionHandoff", () => {
+describe("LegacySessionHandoff", () => {
   it("transfers one eligible conversational trigger with a structural checkpoint", async () => {
     const handoff = createHandoff(createInbox());
     installActivation({ kind: "active" });
@@ -147,6 +149,13 @@ describe("SessionHandoff", () => {
   });
 });
 
+describe("isLegacyHandoff", () => {
+  it("serves only sources that omit the handoff version", () => {
+    expect(isLegacyHandoff({})).toBe(true);
+    expect(isLegacyHandoff({ handoffVersion: 2 })).toBe(false);
+  });
+});
+
 const created: { token: string; dispose: ReturnType<typeof vi.fn> }[] = [];
 function createdHooks() {
   return created;
@@ -209,8 +218,8 @@ function state(
   };
 }
 
-function createHandoff(inbox: SessionInboxHandle): SessionHandoff {
-  return new SessionHandoff({
+function createHandoff(inbox: SessionInboxHandle): LegacySessionHandoff {
+  return new LegacySessionHandoff({
     checkpoint: { mode: "conversation", sessionTimeoutMs: 60_000 },
     deploymentId: "deployment-a",
     inbox,
@@ -226,6 +235,7 @@ function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionI
     claimedTokens: [],
     dispose: vi.fn(async () => {}),
     drain: vi.fn(() => []),
+    claim: vi.fn(),
     hasPending: vi.fn(() => false),
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),
