@@ -4,7 +4,7 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import { createSession, type Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ScheduleIdKey } from "#context/keys.js";
+import { ExtensionConfigsKey, ScheduleIdKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -64,18 +64,25 @@ export interface ScheduleDispatchResult {
 export class ScheduleDispatcher {
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
+  private readonly extensionConfigs: ReadonlyMap<string, Record<string, unknown>> | undefined;
 
   constructor(config: {
     readonly runtime: Runtime;
     readonly channels: readonly ResolvedChannelDefinition[];
+    /** Root extension configs the schedule's `run` reads through `extension.config`. */
+    readonly extensionConfigs?: ReadonlyMap<string, Record<string, unknown>>;
   }) {
     this.runtime = config.runtime;
     this.channels = config.channels;
+    this.extensionConfigs = config.extensionConfigs;
   }
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.scheduleId);
+    if (this.extensionConfigs !== undefined) {
+      scope.setVirtualContext(ExtensionConfigsKey, this.extensionConfigs);
+    }
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 

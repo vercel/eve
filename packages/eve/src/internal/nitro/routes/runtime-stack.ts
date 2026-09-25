@@ -21,6 +21,8 @@ import {
 export interface NitroChannelRuntimeBundle {
   readonly agentName: string;
   readonly channels: readonly ResolvedChannelDefinition[];
+  /** Root extension configs; channel routes serve the root agent. */
+  readonly extensionConfigs?: ReadonlyMap<string, Record<string, unknown>>;
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
   readonly runtime: Runtime;
 }
@@ -44,6 +46,7 @@ export async function resolveNitroChannelRuntimeBundle(
   return {
     agentName: bundle.resolvedAgent.config?.name ?? "eve",
     channels: bundle.graph.root.channels,
+    extensionConfigs: bundle.graph.root.extensionConfigs,
     resolveRemoteAgentStreamHeaders: async (input) =>
       await resolveRemoteAgentStreamHeaders({ bundle, ...input }),
     runtime,

@@ -12,6 +12,7 @@ import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
+import { resolveExtensionMountConfigs } from "#runtime/extension-mount-configs.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
@@ -80,6 +81,7 @@ export async function resolveRuntimeAgentGraph(
   input: ResolveRuntimeAgentGraphInput,
 ): Promise<ResolvedAgentGraphBundle> {
   validateCompiledModuleMap(input.manifest, input.moduleMap);
+  const extensionConfigsByNodeId = resolveExtensionMountConfigs(input.manifest, input.moduleMap);
   const nodesByNodeId = new Map<string, ResolvedAgentGraphBundle["root"]>();
   const childNodeIdsByParentNodeId = createChildNodeIdsByParentNodeId(input.manifest);
   const subagentNodesById = new Map(
@@ -87,6 +89,7 @@ export async function resolveRuntimeAgentGraph(
   );
   const root = await resolveRuntimeAgentNode({
     childNodeIdsByParentNodeId,
+    extensionConfigsByNodeId,
     manifest: input.manifest,
     moduleMap: input.moduleMap,
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
@@ -113,6 +116,10 @@ interface ResolveRuntimeAgentNodeInput {
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly sourceId?: string;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+  readonly extensionConfigsByNodeId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, Record<string, unknown>>
+  >;
 }
 
 async function resolveRuntimeAgentNode(
@@ -161,11 +168,13 @@ async function resolveRuntimeAgentNode(
       nodesByNodeId: input.nodesByNodeId,
       parentNodeId: input.nodeId,
       subagentNodesById: input.subagentNodesById,
+      extensionConfigsByNodeId: input.extensionConfigsByNodeId,
     }),
   });
   const node: ResolvedAgentGraphBundle["root"] = {
     agent,
     channels: agent.channels,
+    extensionConfigs: input.extensionConfigsByNodeId.get(input.nodeId) ?? new Map(),
     hookRegistry: createRuntimeHookRegistry(agent.hooks),
     nodeId,
     sandboxRegistry,
@@ -193,6 +202,10 @@ async function resolveRuntimeSubagents(input: {
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+  readonly extensionConfigsByNodeId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, Record<string, unknown>>
+  >;
 }): Promise<readonly ResolvedRuntimeDelegationNode[]> {
   const resolvedSubagents: ResolvedRuntimeDelegationNode[] = [];
   const childNodeIds = input.childNodeIdsByParentNodeId.get(input.parentNodeId) ?? [];
@@ -217,6 +230,7 @@ async function resolveRuntimeSubagents(input: {
         nodesByNodeId: input.nodesByNodeId,
         sourceRef,
         subagentNodesById: input.subagentNodesById,
+        extensionConfigsByNodeId: input.extensionConfigsByNodeId,
       }),
     );
   }
@@ -240,6 +254,10 @@ async function resolveRuntimeSubagent(input: {
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
+  readonly extensionConfigsByNodeId: ReadonlyMap<
+    string,
+    ReadonlyMap<string, Record<string, unknown>>
+  >;
 }): Promise<ResolvedRuntimeSubagentNode> {
   const variant:
     | { readonly description: string; readonly dynamic?: never; readonly tool?: boolean }
@@ -275,6 +293,7 @@ async function resolveRuntimeSubagent(input: {
     nodesByNodeId: input.nodesByNodeId,
     sourceId: input.sourceRef.sourceId,
     subagentNodesById: input.subagentNodesById,
+    extensionConfigsByNodeId: input.extensionConfigsByNodeId,
   });
 
   return resolvedSubagent;

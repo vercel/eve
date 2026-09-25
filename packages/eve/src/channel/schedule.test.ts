@@ -11,7 +11,7 @@ import {
 } from "#channel/schedule.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { contextStorage } from "#context/container.js";
-import { ScheduleIdKey, TaskDeliveryPolicyKey } from "#context/keys.js";
+import { ExtensionConfigsKey, ScheduleIdKey, TaskDeliveryPolicyKey } from "#context/keys.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -243,6 +243,25 @@ describe("ScheduleDispatcher", () => {
         }),
       ).rejects.toThrow(/not registered in this agent/);
     });
+  });
+
+  it("runs the handler with the root extension configs in scope", async () => {
+    const extensionConfigs = new Map([["@acme/crm", { apiKey: "sk-root" }]]);
+    const dispatcher = new ScheduleDispatcher({
+      runtime: createMockRuntime(),
+      channels: [],
+      extensionConfigs,
+    });
+    let seen: unknown;
+
+    await dispatcher.trigger({
+      scheduleId: "sync",
+      async run() {
+        seen = contextStorage.getStore()?.get(ExtensionConfigsKey);
+      },
+    });
+
+    expect(seen).toBe(extensionConfigs);
   });
 
   it("throws when neither run nor markdown is provided", async () => {

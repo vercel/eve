@@ -100,6 +100,13 @@ export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
 );
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
+/**
+ * Extension configs for runtime scopes without a session bundle, such as a
+ * channel request or schedule run. Set as a virtual value, never serialized.
+ */
+export const ExtensionConfigsKey = new ContextKey<ReadonlyMap<string, Record<string, unknown>>>(
+  "eve.extensionConfigs",
+);
 /** Display title derived from the session's initial input. */
 export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
