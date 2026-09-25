@@ -121,7 +121,8 @@ describe("estimateTokens", () => {
       threshold: 200_000,
     };
 
-    expect(getInputTokenCount(messages, compaction)).toBeLessThan(200_000);
+    expect(getInputTokenCount(messages, compaction)).toBeGreaterThan(43_895);
+    expect(getInputTokenCount(messages, compaction)).toBeLessThan(45_000);
     expect(shouldCompact(messages, compaction)).toBe(false);
   });
 

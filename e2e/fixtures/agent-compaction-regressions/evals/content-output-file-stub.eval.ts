@@ -1,38 +1,25 @@
 import { defineEval } from "eve/evals";
 
-import { CONTENT_OUTPUT_COMPACTION_MARKER } from "../constants";
+import { CONTENT_OUTPUT_UNCOMPACTED_MARKER } from "../constants";
 
-// Compaction handles the oversized content output with its tool-result cap
-// heuristic: no summarizer call, no checkpoint — the history keeps its exact
-// shape and only the file part is rewritten to a text stub in place. The
-// mock task model reports CONTENT_OUTPUT_COMPACTION_MARKER only when that
-// capped result honors the full contract:
-// - the raw payload is gone (a canary buried in the base64 detects the cap
-//   and any leak);
-// - the file rendered as its `Attached file <name> (<mediaType>)` stub;
-// - the text parts around the file survived in place (lead + tail markers);
-// - the surrounding conversation was untouched (the case's own user text).
-// On violation the model emits granular *_LOST diagnostics instead, so a
-// failing run names the broken clause.
-// The exact conversation shape, rendered by the mock model per request: the
-// pre-compaction call sees only the task; the post-cap call sees the same
-// conversation, structurally untouched — task, tool call, and tool result
-// all still present, with only the result's file payload stubbed. No
-// checkpoint pair appears because the cap heuristic satisfies the threshold
-// without summarizing.
+// Inline file bytes are multimodal input, not text budget. This case verifies
+// that an image-like content output reaches the next model step without
+// triggering compaction. The model reports CONTENT_OUTPUT_UNCOMPACTED_MARKER
+// only when the raw-payload canary remains present in the tool result.
 const EXPECTED_HISTORY =
   "HISTORY<1: system > user:task ;; " +
   "2: system > user:task > assistant:tool-call > tool:result>";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "Compaction stubs a large inline file content part without losing its sibling text.",
+  description:
+    "An inline file content part does not trigger compaction from its serialized byte length.",
   async test(t) {
     const turn = await t.send(
       [
         "[case: content-output-file-stub]",
         "Alice is preparing a reading-list handoff for Bob. Please collect one review note and its attachment with emit-compaction-content.",
-        "After the conversation is summarized, confirm that the completed note and its attachment reference are still available.",
+        "Confirm that the completed note and its attachment reference are still available.",
       ].join("\n"),
     );
 
@@ -43,8 +30,8 @@ export default defineEval({
       input: {},
       output: { completed: true },
     });
-    t.event("compaction.completed", { count: 1 });
-    t.messageIncludes(CONTENT_OUTPUT_COMPACTION_MARKER);
+    t.event("compaction.completed", { count: 0 });
+    t.messageIncludes(CONTENT_OUTPUT_UNCOMPACTED_MARKER);
     t.messageIncludes(EXPECTED_HISTORY);
   },
 });

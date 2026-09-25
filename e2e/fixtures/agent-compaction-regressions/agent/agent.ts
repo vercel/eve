@@ -4,11 +4,8 @@ import { mockModel, type MockModelRequest, type MockModelResponder } from "eve/e
 
 import {
   COMPACTION_CHECKPOINT_TEXT,
-  CONTENT_OUTPUT_COMPACTION_MARKER,
-  CONTENT_OUTPUT_FILENAME,
-  CONTENT_OUTPUT_LEAD_MARKER,
+  CONTENT_OUTPUT_UNCOMPACTED_MARKER,
   CONTENT_OUTPUT_PAYLOAD_CANARY,
-  CONTENT_OUTPUT_TAIL_MARKER,
   TASK_PRESERVED_MARKER,
   TASK_TAIL_SENTINEL,
 } from "../constants";
@@ -91,32 +88,15 @@ const taskModel = mockModel({
 
     if (regressionCase === "content-output-file-stub") {
       contentOutputHistoryShapes.push(renderHistoryShape(request));
-      // Compaction's tool-result cap heuristic rewrites the oversized content
-      // output in place: same messages, file part reduced to its text stub.
-      // The canary's absence is the detection signal — the raw payload can
-      // only be missing from the tool message if the cap ran.
       const toolText = request.messages.find((message) => message.role === "tool")?.text;
-      const capped = toolText !== undefined && !toolText.includes(CONTENT_OUTPUT_PAYLOAD_CANARY);
-      if (toolText !== undefined && capped) {
-        const diagnostics = [
-          toolText.includes(CONTENT_OUTPUT_TAIL_MARKER) ? "TAIL_PRESERVED" : "TAIL_LOST",
-          toolText.includes(CONTENT_OUTPUT_LEAD_MARKER) ? "LEAD_PRESERVED" : "LEAD_LOST",
-          toolText.includes(`Attached file ${CONTENT_OUTPUT_FILENAME}`)
-            ? "FILE_STUB_RENDERED"
-            : "FILE_STUB_LOST",
-          request.userMessages.some((text) => text.includes("[case: content-output-file-stub]"))
-            ? "NEIGHBOR_PRESERVED"
-            : "NEIGHBOR_LOST",
-        ];
-        const honored = !diagnostics.some((entry) => entry.endsWith("_LOST"));
+      if (toolText !== undefined) {
         const history = contentOutputHistoryShapes
           .map((shape, index) => `${index + 1}: ${shape}`)
           .join(" ;; ");
-        return honored
-          ? `Capped history honored the content-output contract (${diagnostics.join(", ")}): ` +
-              `${CONTENT_OUTPUT_COMPACTION_MARKER} HISTORY<${history}>`
-          : `Capped history violated the content-output contract: ${diagnostics.join(", ")} ` +
-              `HISTORY<${history}>`;
+        return toolText.includes(CONTENT_OUTPUT_PAYLOAD_CANARY)
+          ? `Inline content output stayed below compaction pressure: ${CONTENT_OUTPUT_UNCOMPACTED_MARKER} ` +
+              `HISTORY<${history}>`
+          : `Inline content output was compacted unexpectedly: HISTORY<${history}>`;
       }
 
       const contentOutputCalls = toolCallCounts.get(regressionCase) ?? 0;

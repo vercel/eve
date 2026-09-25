@@ -32,5 +32,5 @@ export const CONTENT_OUTPUT_PAYLOAD_CANARY = "QQPAYLOADCANARYXKJMZZ";
  */
 export const CONTENT_OUTPUT_FILENAME = "compaction-evidence.bin";
 
-/** Reported by the task model only when the checkpoint honored the full contract. */
-export const CONTENT_OUTPUT_COMPACTION_MARKER = "CONTENT_OUTPUT_TEXT_SURVIVED_COMPACTION";
+/** Reported by the task model when an inline file does not trigger compaction. */
+export const CONTENT_OUTPUT_UNCOMPACTED_MARKER = "CONTENT_OUTPUT_IMAGE_DID_NOT_TRIGGER_COMPACTION";
