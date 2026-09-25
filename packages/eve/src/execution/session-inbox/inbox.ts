@@ -170,6 +170,10 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
     },
     claim(token) {
+      if (!token) throw new Error("A session alias requires a nonempty continuation token.");
+      if (sources.some((source) => source.token === token))
+        throw new Error(`Session address "${token}" is already claimed.`);
+      if (sources.length >= 256) throw new Error("A session may claim at most 256 addresses.");
       const source: Source = {
         token,
         hook: createHook<SessionInboxPayload>({

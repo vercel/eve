@@ -235,6 +235,18 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("guards forced claims like ordinary claims", () => {
+    const tokens = Array.from({ length: 256 }, (_, index) => `token-${index}`);
+    installHooks(...tokens.map((token) => createMockHook({ token })));
+    const inbox = createSessionInbox("session-1");
+
+    expect(() => inbox.claim("")).toThrow("nonempty");
+    for (const token of tokens) inbox.claim(token);
+    expect(() => inbox.claim(tokens[0]!)).toThrow("already claimed");
+    expect(() => inbox.claim("one-too-many")).toThrow("at most 256");
+    expect(hookTokens(inbox)).toEqual(tokens);
+  });
+
   it("ends a taken reader quietly after it delivers what it accepted first", async () => {
     const taken = createDeferred<IteratorResult<SessionInboxPayload>>();
     installHooks(
