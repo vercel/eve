@@ -188,6 +188,7 @@ export function registerDevelopmentCommand(input: {
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
     .option("--no-ui", "Start the server without an interactive UI")
+    .option("--resume", "Attempt recovery of retained runs from previous local dev invocations")
     .option("--no-default-extensions", "Do not mount default development extensions")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input")
@@ -274,6 +275,7 @@ export function registerDevelopmentCommand(input: {
           ...(options.defaultExtensions === false
             ? { developmentExtensions: noDevelopmentExtensions() }
             : {}),
+          resume: options.resume,
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,

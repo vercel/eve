@@ -155,7 +155,7 @@ describe("parent development Workflow World", () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-routing-");
     await seedGeneration(appRoot, "generation-a");
     await seedGeneration(appRoot, "generation-b");
-    const world = createWorld({ activeGenerationId: () => "generation-b", appRoot });
+    const world = createWorld({ activeGenerationId: () => "generation-b", appRoot, resume: true });
     connectWorkerToWorld(world, appRoot);
 
     try {
@@ -301,7 +301,11 @@ describe("parent development Workflow World", () => {
       return Response.json({ ok: true });
     }) as typeof fetch;
     let activeGenerationId = "retained";
-    const restarted = createWorld({ activeGenerationId: () => activeGenerationId, appRoot });
+    const restarted = createWorld({
+      activeGenerationId: () => activeGenerationId,
+      appRoot,
+      resume: true,
+    });
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await restarted.start();
@@ -329,6 +333,71 @@ describe("parent development Workflow World", () => {
     } finally {
       warning.mockRestore();
       await restarted.close();
+    }
+  });
+
+  it("keeps previous invocations dormant across deliveries while new generations stay live", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-dormant-");
+    for (const id of ["old", "new", "reloaded"]) await seedGeneration(appRoot, id);
+    const first = createWorld({ activeGenerationId: () => "old", appRoot });
+    await first.start();
+    const created = await callWorld(first, "events.create", [
+      null,
+      {
+        eventType: "run_created",
+        specVersion: 6,
+        eventData: {
+          deploymentId: "old",
+          executionContext: {},
+          input: new Uint8Array(),
+          workflowName: workflowEntryReference.workflowId,
+        },
+      },
+    ]);
+    const runId = readCreatedRunId(created);
+    await first.close();
+
+    let active = "new";
+    const second = createWorld({ activeGenerationId: () => active, appRoot });
+    connectWorkerToWorld(second, appRoot);
+    const startupFetch = vi.spyOn(globalThis, "fetch");
+    try {
+      await second.start();
+      expect(startupFetch).not.toHaveBeenCalled();
+      startupFetch.mockRestore();
+      for (const message of [
+        { runId },
+        { workflowRunId: runId },
+        { runId, runInput: { deploymentId: "old" } },
+      ]) {
+        await expect(deliverToWorker(message)).resolves.toBeUndefined();
+      }
+      await expect(callWorld(second, "runs.get", [runId])).resolves.toMatchObject({
+        status: "pending",
+      });
+      active = "reloaded";
+      await expect(deliverToWorker({ runInput: { deploymentId: "reloaded" } })).resolves.toBe(
+        "reloaded",
+      );
+      await expect(deliverToWorker({ runInput: { deploymentId: "new" } })).resolves.toBe("new");
+      await expect(deliverToWorker({ runId })).resolves.toBeUndefined();
+    } finally {
+      await second.close();
+    }
+    const resumed = createWorld({ activeGenerationId: () => "reloaded", appRoot, resume: true });
+    // Capture startup recovery without opening a port.
+    const deliveries: string[] = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      deliveries.push(JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)).runId);
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      await resumed.start();
+      await expect.poll(() => deliveries).toEqual([runId]);
+      connectWorkerToWorld(resumed, appRoot);
+      await expect(deliverToWorker({ runId })).resolves.toBe("old");
+    } finally {
+      await resumed.close();
     }
   });
 
@@ -767,9 +836,11 @@ function readCreatedRunId(value: unknown): string {
 function createWorld(input: {
   readonly activeGenerationId: () => string;
   readonly appRoot: string;
+  readonly resume?: boolean;
 }): ParentDevelopmentWorkflowWorld {
   return createParentDevelopmentWorkflowWorld({
     agentName: AGENT_NAME,
+    resume: input.resume,
     appRoot: input.appRoot,
     resolveActiveGenerationId: input.activeGenerationId,
     transportSecret: SECRET,

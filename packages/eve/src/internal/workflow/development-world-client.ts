@@ -69,7 +69,7 @@ async function call<T>(
 
 async function getGenerationAvailability(
   generationId: string,
-): Promise<DevelopmentGenerationAvailability> {
+): Promise<DevelopmentGenerationAvailability | { readonly kind: "dormant" }> {
   const response = await fetchDevelopmentWorld(DEVELOPMENT_WORKFLOW_WORLD_ROUTE, {
     body: encodeDevelopmentWorldValue({
       operation: "eve.getGenerationAvailability",
@@ -77,7 +77,9 @@ async function getGenerationAvailability(
     } satisfies DevelopmentGenerationAvailabilityCall),
     method: "POST",
   });
-  return decodeDevelopmentWorldValue(await response.text()) as DevelopmentGenerationAvailability;
+  return decodeDevelopmentWorldValue(await response.text()) as
+    | DevelopmentGenerationAvailability
+    | { readonly kind: "dormant" };
 }
 
 /**
@@ -207,7 +209,8 @@ function createQueueHandler(
       const availability = await getGenerationAvailability(generationId);
       if (availability.kind === "missing")
         throw new MissingDevelopmentGenerationError(generationId);
-      if (availability.kind === "incompatible") return Response.json({ ok: true });
+      if (availability.kind === "incompatible" || availability.kind === "dormant")
+        return Response.json({ ok: true });
       const runtimeAppRoot = availability.runtimeAppRoot;
       const result = await withDevelopmentWorkflowGeneration(
         {
