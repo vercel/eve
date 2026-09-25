@@ -5,7 +5,7 @@ import type { CompileAgentResult } from "#compiler/compile-agent.js";
 
 const mocks = vi.hoisted(() => ({
   activateTransaction: vi.fn(),
-  prune: vi.fn(async () => undefined),
+  prune: vi.fn(async (): Promise<void> => undefined),
   prepare: vi.fn(),
   stage: vi.fn(),
   materialize: vi.fn(),
@@ -121,6 +121,66 @@ describe("development generation activation", () => {
     expect(commit).toHaveBeenCalledOnce();
     expect(rollback).not.toHaveBeenCalled();
     expect(mocks.prune).toHaveBeenCalledWith({ appRoot: "/tmp/app-commit" });
+  });
+
+  it("reconciles only after pruning and preserves requests made during failed reconciliation", async () => {
+    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
+    const pruning = Promise.withResolvers<void>();
+    const reconciliation = Promise.withResolvers<void>();
+    mocks.prune.mockReturnValueOnce(pruning.promise);
+    const onRuntimePruned = vi
+      .fn()
+      .mockReturnValueOnce(reconciliation.promise)
+      .mockResolvedValue(undefined);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const input = {
+      appRoot: "/tmp/app-reconcile",
+      generation: createGeneration("one"),
+      onRuntimePruned,
+    };
+    try {
+      await activateDevelopmentGeneration(input);
+      expect(onRuntimePruned).not.toHaveBeenCalled();
+      pruning.resolve();
+      await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledOnce());
+      await activateDevelopmentGeneration({ ...input, generation: createGeneration("two") });
+      reconciliation.reject(new Error("storage unavailable"));
+      await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledTimes(2));
+      expect(mocks.prune).toHaveBeenCalledTimes(2);
+      expect(warning).toHaveBeenCalledExactlyOnceWith(
+        "[eve:dev] failed to reconcile expired Workflow runs: Error: storage unavailable",
+      );
+    } finally {
+      pruning.resolve();
+      reconciliation.resolve();
+      warning.mockRestore();
+    }
+  });
+
+  it("does not reconcile failed pruning and retries a pending prune request", async () => {
+    mocks.activateTransaction.mockResolvedValue({ commit: vi.fn(), rollback: vi.fn() });
+    const pruning = Promise.withResolvers<void>();
+    mocks.prune.mockReturnValueOnce(pruning.promise);
+    const onRuntimePruned = vi.fn(async () => undefined);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const input = {
+      appRoot: "/tmp/app-prune-failure",
+      generation: createGeneration("one"),
+      onRuntimePruned,
+    };
+    try {
+      await activateDevelopmentGeneration(input);
+      await activateDevelopmentGeneration(input);
+      pruning.reject(new Error("filesystem unavailable"));
+      await vi.waitFor(() => expect(onRuntimePruned).toHaveBeenCalledOnce());
+      expect(mocks.prune).toHaveBeenCalledTimes(2);
+      expect(warning).toHaveBeenCalledExactlyOnceWith(
+        "[eve:dev] failed to prune runtime generations: Error: filesystem unavailable",
+      );
+    } finally {
+      pruning.resolve();
+      warning.mockRestore();
+    }
   });
 
   it("does not request pruning when an activation rolls back", async () => {
