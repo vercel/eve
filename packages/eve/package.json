@@ -388,6 +388,17 @@
       "import": "./dist/src/public/schedules/index.js",
       "default": "./dist/src/public/schedules/index.js"
     },
+    "./schedules/testing": {
+      "types": "./dist/src/public/schedules/testing.d.ts",
+      "import": "./dist/src/public/schedules/testing.js",
+      "default": "./dist/src/public/schedules/testing.js"
+    },
+    "./schedules/vercel": {
+      "eve-source": "./src/public/schedules/vercel.ts",
+      "types": "./dist/src/public/schedules/vercel.d.ts",
+      "import": "./dist/src/public/schedules/vercel.js",
+      "default": "./dist/src/public/schedules/vercel.js"
+    },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",
       "import": "./dist/src/public/channels/index.js",
@@ -540,7 +551,9 @@
     "@vercel/detect-agent": "1.2.3",
     "@vercel/oidc": "3.8.0",
     "@vercel/otel": "catalog:",
+    "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
+    "@vercel/schedules": "0.0.0-alpha.10",
     "@vercel/sdk": "1.28.8",
     "@workflow/core": "5.0.0-beta.56",
     "@workflow/errors": "5.0.0-beta.23",

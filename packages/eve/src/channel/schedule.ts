@@ -11,6 +11,10 @@ import type {
   ScheduleHandlerArgs,
   ScheduleRunHandler,
 } from "#public/definitions/schedule.js";
+import type {
+  ScheduleCollectionRunArgs,
+  ScheduleOccurrence,
+} from "#public/schedules/collection.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -61,6 +65,13 @@ export interface ScheduleDispatchResult {
   readonly waitUntilTasks: readonly Promise<unknown>[];
 }
 
+export interface ScheduleCollectionDispatchInput<TPayload> {
+  readonly collectionId: string;
+  readonly payload: TPayload;
+  readonly occurrence: ScheduleOccurrence;
+  readonly run: (args: ScheduleCollectionRunArgs<TPayload>) => Promise<void> | void;
+}
+
 export class ScheduleDispatcher {
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
@@ -79,27 +90,20 @@ export class ScheduleDispatcher {
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 
-  private async triggerInScope(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
-    const sessions: Session[] = [];
-    const waitUntilTasks: Promise<unknown>[] = [];
-    const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));
+  async triggerCollection<TPayload>(
+    input: ScheduleCollectionDispatchInput<TPayload>,
+  ): Promise<ScheduleDispatchResult> {
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, input.collectionId);
+    return await contextStorage.run(scope, async () => {
+      const { args, sessions, waitUntilTasks } = this.createHandlerContext();
+      await input.run({ ...args, payload: input.payload, occurrence: input.occurrence });
+      return { sessions, waitUntilTasks };
+    });
+  }
 
-    const args: ScheduleHandlerArgs = {
-      appAuth: SCHEDULE_APP_AUTH,
-      to(channel, target) {
-        const destination = toChannel(channel, target);
-        return {
-          async send(message, options) {
-            const session = await destination.send(message, options);
-            sessions.push(session);
-            return session;
-          },
-        };
-      },
-      waitUntil(task) {
-        waitUntilTasks.push(task);
-      },
-    };
+  private async triggerInScope(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
+    const { args, sessions, waitUntilTasks } = this.createHandlerContext();
 
     if (input.run) {
       await input.run(args);
@@ -113,6 +117,36 @@ export class ScheduleDispatcher {
     }
 
     return { sessions, waitUntilTasks };
+  }
+
+  private createHandlerContext(): {
+    args: ScheduleHandlerArgs;
+    sessions: Session[];
+    waitUntilTasks: Promise<unknown>[];
+  } {
+    const sessions: Session[] = [];
+    const waitUntilTasks: Promise<unknown>[] = [];
+    const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));
+    return {
+      args: {
+        appAuth: SCHEDULE_APP_AUTH,
+        to(channel, target) {
+          const destination = toChannel(channel, target);
+          return {
+            async send(message, options) {
+              const session = await destination.send(message, options);
+              sessions.push(session);
+              return session;
+            },
+          };
+        },
+        waitUntil(task) {
+          waitUntilTasks.push(task);
+        },
+      },
+      sessions,
+      waitUntilTasks,
+    };
   }
 
   private async runMarkdown(markdown: string): Promise<Session> {

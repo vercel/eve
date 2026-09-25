@@ -93,6 +93,35 @@ describe("ScheduleDispatcher", () => {
       }
     },
   );
+  describe("collection form", () => {
+    it("runs typed input with app auth and schedule provenance", async () => {
+      const dispatcher = new ScheduleDispatcher({ runtime: createMockRuntime(), channels: [] });
+      const observed: unknown[] = [];
+
+      const result = await dispatcher.triggerCollection({
+        collectionId: "queries",
+        payload: { query: "open incidents" },
+        occurrence: {
+          scheduledAt: "2026-09-20T12:00:00.000Z",
+          executionId: "occurrence_1",
+          name: "weekly-incidents",
+          scheduleId: "schedule_1",
+        },
+        run(args) {
+          observed.push(args.payload, args.occurrence, args.appAuth);
+          expect(contextStorage.getStore()?.get(ScheduleIdKey)).toBe("queries");
+          args.waitUntil(Promise.resolve());
+        },
+      });
+
+      expect(observed).toEqual([
+        { query: "open incidents" },
+        expect.objectContaining({ executionId: "occurrence_1", scheduleId: "schedule_1" }),
+        SCHEDULE_APP_AUTH,
+      ]);
+      expect(result.waitUntilTasks).toHaveLength(1);
+    });
+  });
 
   describe("markdown form", () => {
     it("starts a Session via runtime.createSession with the SCHEDULE_ADAPTER", async () => {

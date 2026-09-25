@@ -2,6 +2,8 @@ import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/b
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
+import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
+import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 import { EVE_WORKFLOW_FLOW_ROUTE_PATH } from "#internal/workflow-bundle/eve-service-route-output.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
@@ -9,6 +11,28 @@ import {
 } from "#shared/public-route-prefix.js";
 
 export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
+
+interface EveVercelFunctionRule {
+  readonly [key: string]: unknown;
+  readonly environment: Readonly<Record<string, string>>;
+  readonly experimentalTriggers: {
+    readonly consumer?: string;
+    readonly initialDelaySeconds: number;
+    readonly maxDeliveries?: number;
+    readonly retryAfterSeconds: number;
+    readonly topic: string;
+    readonly type: "queue/v2beta";
+  }[];
+  readonly maxDuration: "max";
+}
+
+export interface EveVercelOptions {
+  readonly config: {
+    readonly framework: { readonly slug: string; readonly version: string };
+    readonly version: 3;
+  };
+  readonly functionRules: Readonly<Record<string, EveVercelFunctionRule>>;
+}
 
 /**
  * Builds eve's Vercel preset options.
@@ -22,9 +46,10 @@ export { EVE_WORKFLOW_FLOW_ROUTE_PATH };
 export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
+  hasVercelScheduleCollections?: boolean;
   publicRoutePrefix?: string;
   workspaceMember?: boolean;
-}) {
+}): EveVercelOptions | undefined {
   if (!input.enabled) {
     return undefined;
   }
@@ -46,6 +71,29 @@ export function createEveVercelOptions(input: {
     environment[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] = "1";
   }
 
+  const functionRules: Record<string, EveVercelFunctionRule> = {
+    [EVE_WORKFLOW_FLOW_ROUTE_PATH]: {
+      maxDuration: "max" as const,
+      experimentalTriggers: [createEveWorkflowQueueTrigger(input.agentName)],
+      environment,
+    },
+  };
+  if (input.hasVercelScheduleCollections === true) {
+    functionRules[EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH] = {
+      maxDuration: "max" as const,
+      experimentalTriggers: [
+        {
+          type: "queue/v2beta" as const,
+          topic: deriveEveScheduleQueueTopic(input.agentName),
+          retryAfterSeconds: 5,
+          initialDelaySeconds: 0,
+          maxDeliveries: 10,
+        },
+      ],
+      environment,
+    };
+  }
+
   return {
     config: {
       version: 3 as const,
@@ -54,12 +102,6 @@ export function createEveVercelOptions(input: {
         version: resolveInstalledPackageInfo().version,
       },
     },
-    functionRules: {
-      [EVE_WORKFLOW_FLOW_ROUTE_PATH]: {
-        maxDuration: "max" as const,
-        experimentalTriggers: [createEveWorkflowQueueTrigger(input.agentName)],
-        environment,
-      },
-    },
+    functionRules,
   };
 }

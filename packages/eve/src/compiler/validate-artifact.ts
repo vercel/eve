@@ -185,6 +185,13 @@ export function validateCompiledAgentResources(
     node.schedules.map((entry) => ({ identity: entry.name, kind: "schedule" })),
     "schedule name",
   );
+  validateUniqueIdentities(
+    node.scheduleCollections.map((entry) => ({
+      identity: entry.name,
+      kind: "schedule collection",
+    })),
+    "schedule collection name",
+  );
   const referencedModuleSources = collectReferencedModuleSources(node);
   for (const source of options.additionalModuleSources ?? []) {
     referencedModuleSources.set(source.sourceId, { logicalPath: source.logicalPath });
@@ -350,6 +357,7 @@ function collectReferencedModuleSources(
   for (const value of node.instructions) if (value.sourceKind === "module") add(value);
   for (const value of node.skills) if (value.sourceKind === "module") add(value);
   for (const value of node.schedules) if (value.sourceKind === "module") add(value);
+  for (const value of node.scheduleCollections) add(value);
   add(node.sandbox);
   for (const mount of node.extensionMounts) {
     add({ logicalPath: mount.mountLogicalPath, sourceId: mount.mountSourceId });

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import {
   createAgentSourceManifest,
@@ -22,6 +23,8 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineScheduleCollection } from "#public/schedules/collection.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -427,6 +430,41 @@ describe("compileAgentManifest source graph", () => {
     expect(order).toContain("tool");
   });
 
+  it("materializes schedule factories once per compile", async () => {
+    const staticFactory = vi.fn(() =>
+      defineSchedule({ cron: "0 9 * * *", markdown: "Run the report." }),
+    );
+    const collectionFactory = vi.fn(() =>
+      defineScheduleCollection({
+        payloadSchema: z.object({ query: z.string() }),
+        provider: inMemoryScheduleProvider(),
+        run() {},
+        scope: "test",
+        tools: true,
+      }),
+    );
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: defineAgent({ model: "openai/gpt-5.4" }) }),
+      },
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({ default: staticFactory }),
+      },
+      {
+        logicalPath: "schedules/queries.ts",
+        loadNamespace: async () => ({ default: collectionFactory }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.schedules).toHaveLength(1);
+    expect(compiled.scheduleCollections).toHaveLength(1);
+    expect(staticFactory).toHaveBeenCalledOnce();
+    expect(collectionFactory).toHaveBeenCalledOnce();
+  });
+
   it("classifies compile and runtime usage from normalized authored semantics", async () => {
     const sourceRegistry = registry([
       {
@@ -476,6 +514,19 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "schedules/handler.ts",
         loadNamespace: async () => ({
           default: defineSchedule({ cron: "0 10 * * *", run: async () => {} }),
+        }),
+      },
+      {
+        logicalPath: "schedules/queries.ts",
+        loadNamespace: async () => ({
+          default: defineScheduleCollection({
+            description: "Run saved queries.",
+            payloadSchema: z.object({ query: z.string() }),
+            provider: inMemoryScheduleProvider(),
+            run: async () => {},
+            scope: "principal_1",
+            tools: true,
+          }),
         }),
       },
       {
@@ -537,6 +588,18 @@ describe("compileAgentManifest source graph", () => {
       Object.values(compiled.bindings).map((binding) => [binding.logicalPath, binding.usage]),
     );
 
+    expect(compiled.scheduleCollections).toContainEqual(
+      expect.objectContaining({
+        description: "Run saved queries.",
+        logicalPath: "schedules/queries.ts",
+        name: "queries",
+        providerKind: "in-memory",
+        tools: true,
+      }),
+    );
+    expect(compiled.dynamicTools).toContainEqual(
+      expect.objectContaining({ slug: "schedule__queries" }),
+    );
     expect(compiled.dynamicConnections).toContainEqual(
       expect.objectContaining({
         eventNames: ["turn.started"],
@@ -552,7 +615,8 @@ describe("compileAgentManifest source graph", () => {
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
       "instructions/static.ts": { compile: true, runtimeEntry: false },
       "schedules/handler.ts": { compile: true, runtimeEntry: true },
-      "schedules/prompt.ts": { compile: true, runtimeEntry: false },
+      "schedules/prompt.ts": { compile: true, runtimeEntry: true },
+      "schedules/queries.ts": { compile: true, runtimeEntry: true },
       "skills/dynamic.ts": { compile: true, runtimeEntry: true },
       "skills/static.ts": { compile: true, runtimeEntry: false },
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
