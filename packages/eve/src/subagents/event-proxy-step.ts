@@ -4,7 +4,6 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -128,8 +127,7 @@ export async function emitProxiedSubagentEvent(input: {
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
       // The child event is already routed; do not forward it again or apply
       // the parent's scheduled-turn suppression from createSessionEventSink.
-      const stamped = await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
-      await dispatchStreamEventHooks({ ctx, registry: bundle.hookRegistry, event: stamped });
+      await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
