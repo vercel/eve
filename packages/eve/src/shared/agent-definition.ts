@@ -371,10 +371,10 @@ type PublicAgentDefinitionBase = {
    */
   readonly tool?: boolean;
   /**
-   * Optional structured return type this agent produces when a parent
-   * delegates to it as a subagent and the call supplies no schema of its own.
-   * Top-level sessions ignore this field; clients pass a per-message output
-   * schema instead.
+   * Optional structured return type for the first turn of a fresh subagent
+   * delegation when the call supplies no schema of its own. Continuations
+   * with an `agentId` and top-level sessions ignore this field; pass a
+   * per-message output schema instead.
    */
   readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
 };
