@@ -50,13 +50,45 @@ export function getInputTokenCount(
     priorCount < 0 ||
     priorCount > messages.length
   ) {
-    return estimateTokens(messages) + requestEnvelopeTokens;
+    return estimatePromptTokens(messages) + requestEnvelopeTokens;
   }
 
   return (
     prior +
-    estimateTokens(messages.slice(priorCount)) +
+    estimatePromptTokens(messages.slice(priorCount)) +
     Math.max(0, requestEnvelopeTokens - previousEnvelopeTokens)
+  );
+}
+
+/**
+ * Estimates model-facing history without treating an inline content-file payload
+ * as text. File bytes are multimodal provider input, and the next completed
+ * model step replaces this provisional estimate with provider-reported usage.
+ */
+function estimatePromptTokens(messages: readonly ModelMessage[]): number {
+  return estimateTokens(
+    messages.map((message) => {
+      if (message.role !== "tool" || typeof message.content === "string") {
+        return message;
+      }
+
+      let changed = false;
+      const content = message.content.map((part) => {
+        if (part.type !== "tool-result") {
+          return part;
+        }
+
+        const output = stubContentOutputFileParts(part.output) as typeof part.output;
+        if (output === part.output) {
+          return part;
+        }
+
+        changed = true;
+        return { ...part, output };
+      });
+
+      return changed ? { ...message, content } : message;
+    }),
   );
 }
 
@@ -182,7 +214,7 @@ function evaluateThreshold(
   tokenEstimateAdjustment = 0,
 ): { readonly estimatedTokens: number; readonly type: "over-limit" | "within-limit" } {
   const overhead = ruler === "should-compact" ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0;
-  const estimatedTokens = estimateTokens(messages) + overhead + tokenEstimateAdjustment;
+  const estimatedTokens = estimatePromptTokens(messages) + overhead + tokenEstimateAdjustment;
   return {
     estimatedTokens,
     type: estimatedTokens <= config.threshold ? "within-limit" : "over-limit",
@@ -221,7 +253,8 @@ export async function compactMessages(
     // A new summary replaces that prompt, so it uses its own estimate below.
     const tokenEstimateAdjustment = Math.max(
       0,
-      (historyInputTokenCount ?? getInputTokenCount(messages, config)) - estimateTokens(messages),
+      (historyInputTokenCount ?? getInputTokenCount(messages, config)) -
+        estimatePromptTokens(messages),
     );
     for (const heuristic of COMPACTION_HEURISTICS) {
       const outcome = heuristic({
@@ -369,7 +402,7 @@ function withResumptionGuard(
       lastRole === "tool" &&
       replay !== undefined &&
       !alreadyKept &&
-      estimateTokens([replay]) <= threshold
+      estimatePromptTokens([replay]) <= threshold
     ) {
       return [...messages, replay];
     }
@@ -485,7 +518,7 @@ function selectRecentWindowSize(
       continue;
     }
 
-    const messageTokens = estimateTokens([message]);
+    const messageTokens = estimatePromptTokens([message]);
     if (recentTokens + messageTokens + reserve > config.threshold) {
       break;
     }
