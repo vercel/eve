@@ -1,61 +1,64 @@
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import type { TaskExecutorCancel } from "#execution/tasks/parent/task-cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.agent-invocation-cancel");
 
+type AgentInvocationHandle = Pick<
+  Extract<AgentHandle, { phase: "claimed" }>,
+  "address" | "identity"
+>;
+
 /** Cancels child turns and their nested tasks still owned by a background task. */
 export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
   if (input.session === undefined || input.serializedContext === undefined) return;
+  const handles = (getAgentHandleStore(input.session.state)?.handles ?? []).flatMap((handle) =>
+    handle.phase === "claimed" && handle.ownerId === input.entry.task.taskId
+      ? [{ address: handle.address, identity: handle.identity }]
+      : [],
+  );
   await cancelAgentInvocationOwner({
     ownerId: input.entry.task.taskId,
     serializedContext: input.serializedContext,
-    session: input.session,
+    handles,
   });
 };
 
 /** Cancels a child turn still claimed by a completed workflow-tool run. */
 export async function cancelAgentInvocationOwnerStep(input: {
+  readonly handles: readonly AgentInvocationHandle[];
   readonly ownerId: string;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
+  readonly serializedContext?: Record<string, unknown>;
 }): Promise<void> {
   "use step";
 
   try {
-    await cancelAgentInvocationOwner({
-      ownerId: input.ownerId,
-      serializedContext: input.serializedContext,
-      session: readDurableSession(input.sessionState),
-    });
+    await cancelAgentInvocationOwner(input);
   } catch (error) {
     logError(log, "failed to cancel workflow-owned agent turn", error, { ownerId: input.ownerId });
   }
 }
 
 async function cancelAgentInvocationOwner(input: {
+  readonly handles: readonly AgentInvocationHandle[];
   readonly ownerId: string;
-  readonly serializedContext: Record<string, unknown>;
-  readonly session: Pick<RuntimeSession, "state">;
+  readonly serializedContext?: Record<string, unknown>;
 }): Promise<void> {
-  const handles = (getAgentHandleStore(input.session.state)?.handles ?? []).filter(
-    (candidate): candidate is Extract<AgentHandle, { phase: "claimed" }> =>
-      candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
-  );
-  if (handles.length === 0) return;
+  if (input.handles.length === 0) return;
   let remoteContext: ReturnType<typeof deserializeContext> | undefined;
   const results = await Promise.allSettled(
-    handles.map(async (handle) => {
+    input.handles.map(async (handle) => {
       if (handle.address.kind !== "agent/remote") {
         await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId, tasks: true });
         return;
+      }
+      if (input.serializedContext === undefined) {
+        throw new Error("Missing serialized context for remote agent cancellation.");
       }
       remoteContext ??= deserializeContext(input.serializedContext);
       const ctx = await remoteContext;

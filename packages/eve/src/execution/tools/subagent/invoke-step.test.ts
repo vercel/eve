@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   dispatchAgentInvocation,
   dispatchTaskAgentInvocationStep,
-  releaseAgentInvocationOwnerStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
@@ -541,58 +540,6 @@ describe("task-owned agent settlement", () => {
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
-  });
-
-  it("releases every remaining claim for a completed workflow run", async () => {
-    const claimed = {
-      ...availableRecord,
-      callId: "call-1",
-      operationId: "operation-1",
-      ownerId: "workflow-run-1",
-      phase: "claimed" as const,
-    };
-    vi.mocked(readDurableSession).mockReturnValue({
-      ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
-    } as never);
-
-    const released = await releaseAgentInvocationOwnerStep({
-      ownerId: "workflow-run-1",
-      sessionState: {} as never,
-    });
-
-    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
-      availableRecord,
-    ]);
-  });
-
-  it("parks every remaining claim for a cancelled workflow run", async () => {
-    const claimed = {
-      ...availableRecord,
-      callId: "call-1",
-      operationId: "operation-1",
-      ownerId: "workflow-run-1",
-      phase: "claimed" as const,
-    };
-    vi.mocked(readDurableSession).mockReturnValue({
-      ...session,
-      state: setAgentHandleStore(undefined, { handles: [claimed] }),
-    } as never);
-
-    const released = await releaseAgentInvocationOwnerStep({
-      cancelled: true,
-      ownerId: "workflow-run-1",
-      sessionState: {} as never,
-    });
-
-    expect(getAgentHandleStore(released.sessionState.snapshot.session.state)?.handles).toEqual([
-      {
-        address: availableRecord.address,
-        identity: availableRecord.identity,
-        lastStatus: "(cancelled)",
-        phase: "parked",
-      },
-    ]);
   });
 
   it("keeps a cancelled parked child resumable after settlement", async () => {

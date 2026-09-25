@@ -2,10 +2,13 @@ import { ContextContainer } from "#context/container.js";
 import { beforeEach, expect, it, vi } from "vitest";
 import { cancelBackgroundAgentTask, cancelAgentInvocationOwnerStep } from "./task-cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { createTestSessionState } from "#internal/testing/session-state.js";
 import { deserializeContext } from "#context/serialize.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
-import { setAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
+import {
+  getAgentHandleStore,
+  setAgentHandleStore,
+  type AgentHandle,
+} from "#subagents/handles/store.js";
 import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({ requestWorkflowTurnCancellation: vi.fn() }));
@@ -59,14 +62,15 @@ it.each(["background", "waiting"])(
     if (mode === "background") {
       await cancelBackgroundAgentTask({ entry, session, serializedContext: {} });
     } else {
-      const sessionState = createTestSessionState();
+      const handles = (getAgentHandleStore(session.state)?.handles ?? []).flatMap((handle) =>
+        handle.phase === "claimed" && handle.ownerId === "owner"
+          ? [{ address: handle.address, identity: handle.identity }]
+          : [],
+      );
       await cancelAgentInvocationOwnerStep({
         ownerId: "owner",
+        handles,
         serializedContext: {},
-        sessionState: {
-          ...sessionState,
-          snapshot: { session: { ...sessionState.snapshot.session, ...session } },
-        },
       });
     }
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledTimes(2);
