@@ -44,10 +44,7 @@ export interface InstrumentationUsage {
   readonly outputTokens?: number;
 }
 
-/**
- * Agent usage settled before the terminal event. `costUsd` is the known subtotal;
- * `costUsdComplete` says whether every settled turn reported a price.
- */
+/** Agent usage settled before the terminal event. `costUsd` is the known subtotal; `costUsdComplete` says whether every settled turn reported a price. */
 export interface InstrumentationActionUsage extends InstrumentationUsage {
   readonly costUsd?: number;
   readonly costUsdComplete?: boolean;

@@ -233,7 +233,8 @@ function isTaskUsage(usage: unknown): usage is TaskUsage {
       usage.inputTokens,
       usage.outputTokens,
       ...(usage.costUsd === undefined ? [] : [usage.costUsd]),
-    ].every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0)
+    ].every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0) &&
+    (usage.costUsdComplete === undefined || typeof usage.costUsdComplete === "boolean")
   );
 }
 

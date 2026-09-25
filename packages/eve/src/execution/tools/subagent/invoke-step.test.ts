@@ -600,7 +600,7 @@ describe("task-owned agent settlement", () => {
 
     expect(
       getBackgroundTasks(settled.sessionState.snapshot.session.state).get("task-1")?.run.task.usage,
-    ).toEqual(usageDelta);
+    ).toEqual({ ...usageDelta, costUsdComplete: true });
 
     // A redelivered settlement no longer matches the released claim and adds nothing.
     vi.mocked(readDurableSession).mockReturnValue(settled.sessionState.snapshot.session as never);

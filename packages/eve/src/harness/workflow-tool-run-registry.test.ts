@@ -279,6 +279,26 @@ describe("shared workflow invocation ownership", () => {
     ).toThrow("Corrupt workflow task result");
   });
 
+  it.each(["false", 0, 1])("rejects corrupt terminal cost completeness %s", (costUsdComplete) => {
+    const entry = task("task-a");
+    expect(() =>
+      readWorkflowTaskView({
+        ...entry.task,
+        outcome: {
+          status: "completed",
+          lastOutput: { type: "result", data: "done" },
+          usage: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 1,
+            outputTokens: 1,
+            costUsdComplete,
+          },
+        },
+      }),
+    ).toThrow("Corrupt workflow task result");
+  });
+
   it.each([
     { second: 0.5, costUsd: 0.75, costUsdComplete: true },
     { second: undefined, costUsd: 0.25, costUsdComplete: false },
