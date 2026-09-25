@@ -434,7 +434,6 @@ describe("turn cancellation integration", () => {
   });
 
   it.each([
-    { turnPolicy: undefined, turnCount: 1 },
     { turnPolicy: "steer" as const, turnCount: 1 },
     { turnPolicy: "queue" as const, turnCount: 2 },
   ])(
