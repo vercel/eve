@@ -224,7 +224,7 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     text-align: left;
     font-size: 0.8125rem;
     margin: 1rem 0 0;
-    overflow-x: auto;
+    overflow: hidden;
     white-space: nowrap;
   }
   .terminal-prompt {
@@ -237,7 +237,10 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     flex: 1 1 auto;
     min-width: 0;
     overflow-x: auto;
+    /* Keep the command horizontally scrollable but hide the scrollbar chrome. */
+    scrollbar-width: none;
   }
+  .terminal-cmd::-webkit-scrollbar { display: none; }
   .terminal-copy {
     display: inline-flex;
     align-items: center;
