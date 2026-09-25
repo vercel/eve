@@ -1,6 +1,6 @@
 import type { FlexibleSchema } from "ai";
 
-import type { Approval } from "#approval/definition.js";
+import type { ToolApproval } from "#approval/definition.js";
 import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
@@ -31,7 +31,7 @@ export interface HarnessToolDefinition {
   readonly name: string;
   /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
   readonly nodeId?: string;
-  readonly approval?: Approval;
+  readonly approval?: ToolApproval;
   readonly outputSchema?: FlexibleSchema;
   /**
    * Advertise this tool only to the root session, hiding it from subagent

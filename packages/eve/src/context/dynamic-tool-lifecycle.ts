@@ -199,6 +199,7 @@ export function validateDurableDynamicToolCallbacks(
       key !== "outputSchema" &&
       key !== "label" &&
       key !== "approvalKey" &&
+      key !== "approvalPrompt" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
       key !== "toModelOutput",
@@ -210,10 +211,12 @@ export function validateDurableDynamicToolCallbacks(
   }
 
   const hasApproval = entry.approval !== undefined;
-  const hasApprovalResponse =
-    entry.approval !== undefined &&
-    typeof entry.approval !== "function" &&
-    entry.approval.response !== undefined;
+  const approvalConfiguration =
+    entry.approval !== undefined && typeof entry.approval !== "function"
+      ? entry.approval
+      : undefined;
+  const hasApprovalPrompt = approvalConfiguration?.prompt !== undefined;
+  const hasApprovalResponse = approvalConfiguration?.response !== undefined;
   const execute = validateReference({
     name,
     owner,
@@ -248,6 +251,13 @@ export function validateDurableDynamicToolCallbacks(
     phase: "approvalKey",
     stamped: raw.approvalKey,
     required: entry.approvalKey !== undefined,
+  });
+  const approvalPrompt = validateReference({
+    name,
+    owner,
+    phase: "approvalPrompt",
+    stamped: raw.approvalPrompt,
+    required: hasApprovalPrompt,
   });
   const approvalRequest = validateReference({
     name,
@@ -296,6 +306,7 @@ export function validateDurableDynamicToolCallbacks(
       start?: DurableDynamicCallbackReference;
     };
     approvalKey?: DurableDynamicCallbackReference;
+    approvalPrompt?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
@@ -310,6 +321,7 @@ export function validateDurableDynamicToolCallbacks(
     };
   }
   if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
+  if (approvalPrompt !== undefined) callbacks.approvalPrompt = approvalPrompt;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

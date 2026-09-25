@@ -18,6 +18,7 @@ type CallbackPhase =
   | "labelDelta"
   | "labelStart"
   | "approvalKey"
+  | "approvalPrompt"
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
@@ -28,6 +29,7 @@ type CallbackPropertyName =
   | "approvalKey"
   | "label"
   | "approval"
+  | "prompt"
   | "execute"
   | "start"
   | "request"
@@ -285,6 +287,14 @@ function collectToolCallbacks(
       findProperty(approvalValue, "request"),
       "approvalRequest",
       "request",
+      results,
+      nestedScopes,
+    );
+    collectCallbackProperty(
+      source,
+      findProperty(approvalValue, "prompt"),
+      "approvalPrompt",
+      "prompt",
       results,
       nestedScopes,
     );

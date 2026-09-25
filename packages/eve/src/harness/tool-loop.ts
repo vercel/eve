@@ -2700,6 +2700,7 @@ async function handleStepResult(input: {
   const approvalRequests = extractToolApprovalInputRequests({
     content: result.content ?? [],
     excludedCallIds: invalidInputToolCallIds,
+    tools: input.coordinationTools,
   });
   const inputRequests: InputRequest[] = approvalRequests;
   const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);

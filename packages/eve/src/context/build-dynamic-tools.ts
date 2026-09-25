@@ -17,6 +17,7 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
 import type {
   ApprovalContext,
+  ApprovalPromptContext,
   ApprovalResponseContext,
   ApprovalResponseDecision,
   ApprovalStatus,
@@ -70,28 +71,46 @@ function buildReplayedApproval(
             context,
           )) as ApprovalStatus;
 
+  const promptReference = metadata.callbacks.approvalPrompt;
+  const prompt =
+    promptReference === undefined
+      ? undefined
+      : lookupDurableDynamicCallback(owner, "approvalPrompt");
+  if (promptReference !== undefined && prompt === undefined) {
+    log.error(missingCallbackError(metadata, "approvalPrompt").message);
+  }
   const responseReference = metadata.callbacks.approvalResponse;
-  if (responseReference === undefined) return requestPolicy;
+  const response =
+    responseReference === undefined
+      ? undefined
+      : lookupDurableDynamicCallback(owner, "approvalResponse");
+  if (prompt === undefined && responseReference === undefined) return requestPolicy;
 
-  const response = lookupDurableDynamicCallback(owner, "approvalResponse");
   return {
     request: requestPolicy,
+    prompt:
+      prompt === undefined || promptReference === undefined
+        ? undefined
+        : (context: ApprovalPromptContext) =>
+            callDurableDynamicCallback(prompt, promptReference.closure, context) as string,
     response:
-      response === undefined
-        ? async () => {
-            const error = missingCallbackError(metadata, "approvalResponse");
-            log.error(error.message);
-            return {
-              reason: error.message,
-              status: "rejected" as const,
-            };
-          }
-        : async (context: ApprovalResponseContext) =>
-            (await callDurableDynamicCallback(
-              response,
-              responseReference.closure,
-              context,
-            )) as ApprovalResponseDecision,
+      responseReference === undefined
+        ? undefined
+        : response === undefined
+          ? async () => {
+              const error = missingCallbackError(metadata, "approvalResponse");
+              log.error(error.message);
+              return {
+                reason: error.message,
+                status: "rejected" as const,
+              };
+            }
+          : async (context: ApprovalResponseContext) =>
+              (await callDurableDynamicCallback(
+                response,
+                responseReference.closure,
+                context,
+              )) as ApprovalResponseDecision,
   };
 }
 
