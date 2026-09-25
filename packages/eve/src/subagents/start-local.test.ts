@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { startLocalSubagent } from "#subagents/start-local.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
+import { contextStorage } from "#context/container.js";
+import { ScheduleOriginKey } from "#context/keys.js";
 
 const createSessionMock = vi.fn();
 
@@ -28,7 +30,12 @@ beforeEach(() => {
 });
 
 describe("startLocalSubagent", () => {
-  it("uses the session that wins continuation ownership", async () => {
+  it("uses the session that wins continuation ownership and preserves scheduled origin", async () => {
+    const origin = { sessionId: "origin", auth: { current: null, initiator: null }, channel: {} };
+    createSessionMock.mockImplementationOnce(async () => {
+      expect(contextStorage.getStore()?.get(ScheduleOriginKey)).toEqual(origin);
+      return { sessionId: "candidate-session" };
+    });
     const outcome = await startLocalSubagent({
       action: {
         callId: "call-1",
@@ -56,6 +63,7 @@ describe("startLocalSubagent", () => {
       sandboxSessionId: "parent-session",
       session: {} as never,
       source: { description: "Research", type: "local" },
+      scheduleOrigin: origin,
     });
 
     expect(createWorkflowRuntime).toHaveBeenCalledOnce();

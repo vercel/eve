@@ -729,26 +729,12 @@ const compiledScheduleDefinitionSchema = z.discriminatedUnion("sourceKind", [
 const compiledScheduleCollectionDefinitionSchema = z
   .object({
     description: z.string().optional(),
-    inputSchema: jsonObjectSchema,
     logicalPath: z.string(),
     name: z.string(),
     providerKind: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
-    tools: z
-      .union([
-        z.boolean(),
-        z
-          .object({
-            create: z.boolean().optional(),
-            delete: z.boolean().optional(),
-            invoke: z.boolean().optional(),
-            read: z.boolean().optional(),
-            update: z.boolean().optional(),
-          })
-          .strict(),
-      ])
-      .optional(),
+    tools: z.boolean().optional(),
   })
   .strict();
 

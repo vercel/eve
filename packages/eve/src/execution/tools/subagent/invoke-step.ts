@@ -265,6 +265,7 @@ export async function dispatchAgentInvocation(input: {
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
+      scheduleOrigin: prepared.scheduleOrigin,
       parentContinuationToken: input.replyTo,
       activityObserver: prepared.activityObserver,
       taskActivityObserver,

@@ -388,16 +388,29 @@
       "import": "./dist/src/public/schedules/index.js",
       "default": "./dist/src/public/schedules/index.js"
     },
-    "./schedules/testing": {
-      "types": "./dist/src/public/schedules/testing.d.ts",
-      "import": "./dist/src/public/schedules/testing.js",
-      "default": "./dist/src/public/schedules/testing.js"
+    "./experimental/slack": {
+      "eve-source": "./src/public/experimental/slack/send-message.ts",
+      "types": "./dist/src/public/experimental/slack/send-message.d.ts",
+      "import": "./dist/src/public/experimental/slack/send-message.js",
+      "default": "./dist/src/public/experimental/slack/send-message.js"
     },
-    "./schedules/vercel": {
-      "eve-source": "./src/public/schedules/vercel.ts",
-      "types": "./dist/src/public/schedules/vercel.d.ts",
-      "import": "./dist/src/public/schedules/vercel.js",
-      "default": "./dist/src/public/schedules/vercel.js"
+    "./experimental/schedules/testing": {
+      "eve-source": "./src/public/experimental/schedules/testing.ts",
+      "types": "./dist/src/public/experimental/schedules/testing.d.ts",
+      "import": "./dist/src/public/experimental/schedules/testing.js",
+      "default": "./dist/src/public/experimental/schedules/testing.js"
+    },
+    "./experimental/schedules": {
+      "eve-source": "./src/public/experimental/schedules/index.ts",
+      "types": "./dist/src/public/experimental/schedules/index.d.ts",
+      "import": "./dist/src/public/experimental/schedules/index.js",
+      "default": "./dist/src/public/experimental/schedules/index.js"
+    },
+    "./experimental/schedules/vercel": {
+      "eve-source": "./src/public/experimental/schedules/vercel.ts",
+      "types": "./dist/src/public/experimental/schedules/vercel.d.ts",
+      "import": "./dist/src/public/experimental/schedules/vercel.js",
+      "default": "./dist/src/public/experimental/schedules/vercel.js"
     },
     "./channels": {
       "types": "./dist/src/public/channels/index.d.ts",

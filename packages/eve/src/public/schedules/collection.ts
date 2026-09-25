@@ -1,8 +1,5 @@
-import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-
 import type { SessionAuth } from "#context/keys.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { ScheduleHandlerArgs } from "#public/definitions/schedule.js";
 import { SCHEDULE_COLLECTION_DEFINITION_BRAND } from "#shared/schedule-collection-definition.js";
 
 export type ScheduleScopeResolverResult = string | readonly string[] | null;
@@ -26,13 +23,6 @@ export type ScheduleScopeDefinition =
   | ((
       context: ScheduleScopeContext,
     ) => ScheduleScopeResolverResult | Promise<ScheduleScopeResolverResult>);
-
-/** Trusted context available while resolving schedule input for storage. */
-export interface ScheduleCollectionPayloadResolveContext {
-  readonly abortSignal: AbortSignal;
-  readonly auth: SessionAuth;
-  readonly channel: ScheduleScopeContext["channel"];
-}
 
 export interface ScheduleProviderContext {
   readonly abortSignal: AbortSignal;
@@ -124,50 +114,22 @@ export interface ScheduleOccurrence {
   readonly scheduledAt: string;
 }
 
-export interface ScheduleCollectionRunArgs<TPayload> extends ScheduleHandlerArgs {
-  readonly payload: TPayload;
-  readonly occurrence: ScheduleOccurrence;
-}
-
-export interface ScheduleCollectionToolOptions {
-  readonly create?: boolean;
-  readonly delete?: boolean;
-  readonly invoke?: boolean;
-  readonly read?: boolean;
-  readonly update?: boolean;
-}
-
-export interface ScheduleCollectionDefinition<
-  TPayload = unknown,
-  TPayloadSchema extends StandardSchemaV1<unknown, TPayload> = StandardSchemaV1<unknown, TPayload>,
-> {
+export interface ScheduleCollectionDefinition {
   readonly description?: string;
-  readonly payloadSchema: TPayloadSchema;
   readonly provider: ScheduleProvider;
+  /** Effective caller for occurrences; creator identity follows background-task semantics. */
+  readonly runAs: "creator" | "app";
   readonly scope: ScheduleScopeDefinition;
-  /** Resolve validated payload with trusted creation context before storing it. */
-  readonly resolvePayload?: (
-    payload: TPayload,
-    context: ScheduleCollectionPayloadResolveContext,
-  ) => TPayload | Promise<TPayload>;
-  readonly tools?: boolean | ScheduleCollectionToolOptions;
-  readonly run: (args: ScheduleCollectionRunArgs<TPayload>) => Promise<void> | void;
+  readonly tools?: boolean;
 }
 
-export type DefinedScheduleCollection<
-  T extends ScheduleCollectionDefinition<any, any> = ScheduleCollectionDefinition,
-> = T & {
+export type DefinedScheduleCollection = ScheduleCollectionDefinition & {
   readonly [SCHEDULE_COLLECTION_DEFINITION_BRAND]: true;
 };
 
-export function defineScheduleCollection<TPayloadSchema extends StandardSchemaV1<unknown, unknown>>(
-  definition: ExactDefinition<
-    ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TPayloadSchema>, TPayloadSchema>,
-    ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TPayloadSchema>, TPayloadSchema>
-  >,
-): DefinedScheduleCollection<
-  ScheduleCollectionDefinition<StandardSchemaV1.InferOutput<TPayloadSchema>, TPayloadSchema>
->;
+export function defineScheduleCollection(
+  definition: ExactDefinition<ScheduleCollectionDefinition, ScheduleCollectionDefinition>,
+): DefinedScheduleCollection;
 export function defineScheduleCollection(
   definition: ScheduleCollectionDefinition,
 ): DefinedScheduleCollection {

@@ -1,7 +1,7 @@
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import type { LocalDevRequestProvenance } from "#context/keys.js";
+import { ScheduleOriginKey, type LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
@@ -32,6 +32,7 @@ export async function startLocalSubagent(input: {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
+  readonly scheduleOrigin?: import("#runtime/schedules/payload.js").ScheduleCollectionOrigin;
   readonly parent: SubagentParentContext;
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
@@ -66,9 +67,9 @@ export async function startLocalSubagent(input: {
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   let childSessionId: string;
   try {
-    await contextStorage.run(new ContextContainer({ localDevRequest: input.localDevRequest }), () =>
-      childRuntime.createSession(runInput),
-    );
+    const scope = new ContextContainer({ localDevRequest: input.localDevRequest });
+    if (input.scheduleOrigin !== undefined) scope.set(ScheduleOriginKey, input.scheduleOrigin);
+    await contextStorage.run(scope, () => childRuntime.createSession(runInput));
     childSessionId = (await waitForCommandHookOwner(sessionInboxHookToken(childContinuationToken)))
       .runId;
   } catch (error) {

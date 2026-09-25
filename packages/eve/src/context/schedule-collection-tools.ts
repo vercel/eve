@@ -1,21 +1,22 @@
-import { always } from "#tools/approval/policies.js";
+import { z } from "#compiled/zod/index.js";
+import { contextStorage } from "#context/container.js";
+import { ScheduleOriginKey } from "#context/keys.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { defineDynamic } from "#dynamic/definition.js";
 import { markDynamicCallbackRebind } from "#internal/dynamic-tool-rebind.js";
+import { parseJsonObject } from "#shared/json.js";
+import { always } from "#tools/approval/policies.js";
+import { defineTool } from "#tools/definition.js";
+import type { DynamicToolEntry } from "#tools/dynamic.js";
+import {
+  readDurableDynamicToolCallbacks,
+  stampDurableDynamicToolCallbacks,
+} from "#tools/durable-callbacks.js";
 import type {
   ScheduleCollectionDefinition,
   ScheduleExpression,
 } from "#public/schedules/collection.js";
 import { bindScheduleCollection } from "#runtime/schedules/collection-client.js";
-import { defineTool } from "#tools/definition.js";
-import type { DynamicToolEntry } from "#tools/dynamic.js";
-import { parseJsonObject } from "#shared/json.js";
-import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
-import {
-  readDurableDynamicToolCallbacks,
-  stampDurableDynamicToolCallbacks,
-} from "#tools/durable-callbacks.js";
-import { z } from "#compiled/zod/index.js";
 
 const scheduleNameSchema = z
   .string()
@@ -29,7 +30,7 @@ const scheduleNameSchema = z
 const timezoneSchema = z
   .string()
   .describe(
-    "IANA timezone such as America/New_York or UTC. Optional; omission uses UTC. For a relative delay, calculate a UTC one-time date from a reliable current clock; do not ask for the user's timezone. Ask for a timezone only when an absolute local wall-clock time would otherwise be ambiguous.",
+    "IANA timezone such as America/New_York or UTC. Optional; omission uses UTC. For a relative delay, first check a reliable current clock—for example, run `date -u` with bash when that tool is available—then calculate the UTC one-time date. Never guess the current time. Do not ask for the user's timezone for a relative delay; ask only when an absolute local wall-clock time is ambiguous.",
   );
 
 const expressionSchema = z.discriminatedUnion("type", [
@@ -43,31 +44,29 @@ const expressionSchema = z.discriminatedUnion("type", [
       .min(1)
       .max(15)
       .optional()
-      .describe(
-        "Optional maximum random delay in minutes. Omit to use the provider and plan default; set only when the user requests a jitter window.",
-      ),
+      .describe("Optional maximum random delay in minutes. Omit unless requested."),
   }),
   z.object({
     type: z.literal("single"),
     at: z
       .string()
       .describe(
-        "Minute-precision local datetime in YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:00 format without an offset or fractional seconds.",
+        "Minute-precision local datetime in YYYY-MM-DDTHH:mm format without offset or fractional seconds.",
       ),
     timezone: timezoneSchema.optional(),
   }),
 ]);
 
-export function createScheduleCollectionToolDynamicDefinition<TInput>(
-  definition: ScheduleCollectionDefinition<TInput>,
+export function createScheduleCollectionToolDynamicDefinition(
+  definition: ScheduleCollectionDefinition,
   input: { readonly application: string; readonly collection: string },
 ) {
   return markDynamicCallbackRebind(
     defineDynamic({
       events: {
         "turn.started": async (_event, context) => {
-          const options = resolveToolOptions(definition.tools);
-          if (options === null) return null;
+          if (definition.tools === false || contextStorage.getStore()?.has(ScheduleOriginKey))
+            return null;
           const client = await bindScheduleCollection(
             input.collection,
             definition,
@@ -75,99 +74,67 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
           );
           if (client === null) return null;
 
-          const tools: Record<string, unknown> = {};
           const description = (value: string) =>
             definition.description === undefined ? value : `${definition.description}\n\n${value}`;
-
-          const toolName = (operation: string) => `schedule__${input.collection}__${operation}`;
-
-          if (options.create) {
-            tools[toolName("create")] = defineTool({
+          const tools = {
+            [`schedule__${input.collection}__create`]: defineTool({
               approval: always(),
-              description: description(
-                "Create a recurring or one-time schedule in this collection.",
-              ),
-              inputSchema: scheduleCreateToolSchema(definition.payloadSchema),
-              execute: async (toolInput) => {
-                const input = toolInput as {
-                  readonly expression: ScheduleExpression;
-                  readonly name: string;
-                  readonly payload: TInput;
-                  readonly state?: "active" | "inactive";
-                };
-                return await client.create(input);
-              },
-            });
-          }
-          if (options.read) {
-            tools[toolName("list")] = defineTool({
-              description: description("List schedules in this collection for the current scope."),
+              description: description("Schedule an agent request to run at a future time."),
               inputSchema: z.object({
-                cursor: z
+                expression: expressionSchema,
+                name: scheduleNameSchema,
+                request: z
                   .string()
-                  .optional()
+                  .min(1)
+                  .max(2_000)
                   .describe(
-                    "Pagination cursor returned by a prior list call. Omit for the first page.",
+                    "The task the agent should perform when this schedule fires. Timing is set by expression; do not ask it to create another schedule.",
                   ),
+              }),
+              execute: async ({ expression, name, request }) => {
+                assertScheduleManagementAllowed();
+                return await client.create({
+                  expression: expression as ScheduleExpression,
+                  name,
+                  payload: request,
+                });
+              },
+            }),
+            [`schedule__${input.collection}__list`]: defineTool({
+              description: description(
+                "List schedules in this collection for the current scope. When asked to remove several schedules, collect their names and delete them together in one delete call.",
+              ),
+              inputSchema: z.object({
+                cursor: z.string().optional().describe("Pagination cursor from a prior list call."),
                 limit: z.number().int().optional(),
               }),
-              execute: async (toolInput) => await client.list(toolInput),
-            });
-            tools[toolName("read")] = defineTool({
-              description: description("Read one schedule in this collection by its exact name."),
-              inputSchema: z.object({ name: scheduleNameSchema }),
-              execute: async ({ name }) => await client.get(name),
-            });
-          }
-          if (options.update) {
-            tools[toolName("update")] = defineTool({
-              approval: always(),
-              description: description("Update the timing or typed input of an existing schedule."),
-              inputSchema: scheduleUpdateToolSchema(definition.payloadSchema),
               execute: async (toolInput) => {
-                const { name, ...patch } = toolInput as {
-                  readonly expression?: ScheduleExpression;
-                  readonly name: string;
-                  readonly payload?: TInput;
-                };
-                const update: { expression?: ScheduleExpression; payload?: TInput } = {};
-                if (patch.expression !== undefined) update.expression = patch.expression;
-                if (patch.payload !== undefined) update.payload = patch.payload;
-                return await client.update(name, update);
+                assertScheduleManagementAllowed();
+                return await client.list(toolInput);
               },
-            });
-            tools[toolName("enable")] = defineTool({
+            }),
+            [`schedule__${input.collection}__delete`]: defineTool({
               approval: always(),
-              description: description("Enable an inactive schedule."),
-              inputSchema: z.object({ name: scheduleNameSchema }),
-              execute: async ({ name }) => await client.enable(name),
-            });
-            tools[toolName("disable")] = defineTool({
-              approval: always(),
-              description: description("Disable a schedule without deleting it."),
-              inputSchema: z.object({ name: scheduleNameSchema }),
-              execute: async ({ name }) => await client.disable(name),
-            });
-          }
-          if (options.delete) {
-            tools[toolName("delete")] = defineTool({
-              approval: always(),
-              description: description("Permanently delete a schedule from this collection."),
-              inputSchema: z.object({ name: scheduleNameSchema }),
-              execute: async ({ name }) => ({ deleted: await client.delete(name) }),
-            });
-          }
-          if (options.invoke) {
-            tools[toolName("invoke")] = defineTool({
-              approval: always(),
-              description: description("Run a schedule now without changing its timing or state."),
-              inputSchema: z.object({ name: scheduleNameSchema }),
-              execute: async ({ name }) => {
-                await client.invoke(name);
-                return { invoked: true };
+              description: description(
+                "Permanently delete one or more schedules from this collection. Provide every schedule name to remove in one request.",
+              ),
+              inputSchema: z
+                .object({
+                  names: z
+                    .array(scheduleNameSchema)
+                    .min(1)
+                    .max(25)
+                    .describe(
+                      "Names of schedules to permanently delete. Duplicate names are ignored.",
+                    ),
+                })
+                .strict(),
+              execute: async ({ names }) => {
+                assertScheduleManagementAllowed();
+                return { results: await client.delete(names) };
               },
-            });
-          }
+            }),
+          };
           return Object.fromEntries(
             Object.entries(tools).map(([name, tool]) => {
               stampGeneratedToolCallbacks(tool);
@@ -180,31 +147,10 @@ export function createScheduleCollectionToolDynamicDefinition<TInput>(
   );
 }
 
-function scheduleCreateToolSchema(payloadSchema: unknown) {
-  return toInputSchema({
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      expression: serializeInputSchema(expressionSchema),
-      name: serializeInputSchema(scheduleNameSchema),
-      payload: serializeInputSchema(payloadSchema as never),
-      state: { enum: ["active", "inactive"], type: "string" },
-    },
-    required: ["expression", "name", "payload"],
-  });
-}
-
-function scheduleUpdateToolSchema(payloadSchema: unknown) {
-  return toInputSchema({
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      expression: serializeInputSchema(expressionSchema.optional()),
-      name: serializeInputSchema(scheduleNameSchema),
-      payload: serializeInputSchema(payloadSchema as never),
-    },
-    required: ["name"],
-  });
+function assertScheduleManagementAllowed(): void {
+  if (contextStorage.getStore()?.has(ScheduleOriginKey)) {
+    throw new Error("Schedule management is unavailable during scheduled execution.");
+  }
 }
 
 function stampGeneratedToolCallbacks(tool: unknown): void {
@@ -231,25 +177,5 @@ function bindingContext(application: string, context: DynamicResolveContext) {
     channel: context.channel,
     targetKey: application,
     session: context.session,
-  };
-}
-
-function resolveToolOptions(tools: ScheduleCollectionDefinition["tools"]): {
-  create: boolean;
-  delete: boolean;
-  invoke: boolean;
-  read: boolean;
-  update: boolean;
-} | null {
-  if (tools === false) return null;
-  if (tools === undefined || tools === true) {
-    return { create: true, delete: true, invoke: true, read: true, update: true };
-  }
-  return {
-    create: tools.create ?? true,
-    delete: tools.delete ?? true,
-    invoke: tools.invoke ?? true,
-    read: tools.read ?? true,
-    update: tools.update ?? true,
   };
 }

@@ -50,7 +50,7 @@ describe("vercelScheduleProvider", () => {
         timezone: "America/New_York",
         jitter: 5,
       },
-      payload: { message: "Review PRs" },
+      payload: "Review PRs",
       name: "review-prs-daily",
     });
 
@@ -63,7 +63,7 @@ describe("vercelScheduleProvider", () => {
       namespace: "eve-namespace",
       payload: {
         eve: { application: "dynamic-schedules", collection: "collection", version: 1 },
-        payload: { message: "Review PRs" },
+        payload: "Review PRs",
       },
       target: { type: "queue", topic: expect.stringMatching(/^__eve_schedule_/u) },
     });
@@ -102,7 +102,7 @@ describe("vercelScheduleProvider", () => {
 
     await provider.create(context, {
       expression: { type: "single", at: "2026-10-01T12:00:00", timezone: "UTC" },
-      payload: { message: "Review PRs" },
+      payload: "Review PRs",
       name: "review-prs",
     });
     await expect(

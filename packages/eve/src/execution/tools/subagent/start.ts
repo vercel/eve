@@ -45,6 +45,7 @@ export async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
+  readonly scheduleOrigin?: import("#runtime/schedules/payload.js").ScheduleCollectionOrigin;
   readonly parentContinuationToken: string | undefined;
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
@@ -89,6 +90,7 @@ export async function startSubagent(input: {
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
+        scheduleOrigin: input.scheduleOrigin,
         parent,
         activityObserver: input.taskActivityObserver ?? input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,

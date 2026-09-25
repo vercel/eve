@@ -14,7 +14,10 @@ const message = {
   executionId: "execution_1",
   name: "reminder",
   namespace: "eve-scope-a",
-  payload: { eve: { application, collection: "reminders", version: 1 }, input: { message: "Hi" } },
+  payload: {
+    eve: { application, collection: "reminders", version: 1 },
+    payload: "Review open incidents",
+  },
   scheduleId: "sch_1",
   scheduledAt: "2026-09-23T12:00:00.000Z",
   source: "dynamic",
@@ -37,7 +40,7 @@ describe("schedule queue delivery", () => {
     null,
     { ...message, source: "static" },
     { ...message, payload: { ...message.payload, eve: { ...message.payload.eve, version: 2 } } },
-    { ...message, payload: { ...message.payload, input: "x".repeat(256 * 1024) } },
+    { ...message, payload: { ...message.payload, payload: "x".repeat(256 * 1024) } },
   ])("rejects invalid or oversized queue bodies", (body) => {
     expect(() => expectScheduleQueueMessage(body)).toThrow(PermanentScheduleMessageError);
   });

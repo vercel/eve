@@ -11,7 +11,14 @@ import {
 } from "#channel/schedule.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { contextStorage } from "#context/container.js";
-import { ScheduleIdKey, TaskDeliveryPolicyKey } from "#context/keys.js";
+import {
+  ScheduleIdKey,
+  ScheduleOriginKey,
+  AuthKey,
+  InitiatorAuthKey,
+  TaskDeliveryPolicyKey,
+} from "#context/keys.js";
+import { createSchedulePayload } from "#runtime/schedules/payload.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -94,32 +101,100 @@ describe("ScheduleDispatcher", () => {
     },
   );
   describe("collection form", () => {
-    it("runs typed input with app auth and schedule provenance", async () => {
-      const dispatcher = new ScheduleDispatcher({ runtime: createMockRuntime(), channels: [] });
-      const observed: unknown[] = [];
+    const creator = {
+      attributes: { user_id: "alice" },
+      authenticator: "slack-webhook",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const initiator = { ...creator, principalId: "bob" };
+    const payload = (runAs: "creator" | "app") =>
+      createSchedulePayload({
+        request: "Review open incidents",
+        runAs,
+        binding: {
+          application: "fixture",
+          collection: "queries",
+          namespace: "eve-test",
+          name: "weekly-incidents",
+        },
+        context: {
+          abortSignal: new AbortController().signal,
+          channel: { kind: "slack" },
+          session: { id: "origin", auth: { current: creator, initiator } },
+        },
+      });
 
-      const result = await dispatcher.triggerCollection({
+    it.each(["creator", "app"] as const)(
+      "restores %s execution identity independently of origin",
+      async (runAs) => {
+        const runtime = createMockRuntime();
+        runtime.createSession = vi.fn(async (run) => {
+          const ctx = buildRunContext({ bundle: {} as never, run });
+          expect(ctx.get(AuthKey)).toEqual(runAs === "creator" ? creator : SCHEDULE_APP_AUTH);
+          expect(ctx.get(InitiatorAuthKey)).toEqual(
+            runAs === "creator" ? initiator : SCHEDULE_APP_AUTH,
+          );
+          expect(ctx.get(ScheduleOriginKey)?.auth.current).toEqual(creator);
+          expect(ctx.get(ScheduleOriginKey)?.sessionId).toBe("origin");
+          expect(run).not.toHaveProperty("parent");
+          expect(run).not.toHaveProperty("continuationToken");
+          return createMockRunHandle();
+        });
+        await new ScheduleDispatcher({ runtime, channels: [] }).triggerCollection({
+          collectionId: "queries",
+          payload: payload(runAs),
+          occurrence: {
+            executionId: "id",
+            name: "weekly-incidents",
+            scheduleId: "schedule",
+            scheduledAt: "2026-09-25T12:00:00Z",
+          },
+        });
+        expect(runtime.createSession).toHaveBeenCalledOnce();
+      },
+    );
+    it("starts a channel-less task with schedule provenance and app auth", async () => {
+      const runtime = createMockRuntime();
+      runtime.createSession = vi.fn(async (run) => {
+        expect(contextStorage.getStore()?.get(ScheduleIdKey)).toBe("queries");
+        expect(run).toMatchObject({
+          adapter: SCHEDULE_ADAPTER,
+          auth: SCHEDULE_APP_AUTH,
+          mode: "task",
+          input: { message: expect.stringContaining("Request:\nReview open incidents") },
+        });
+        return createMockRunHandle();
+      });
+      const result = await new ScheduleDispatcher({ runtime, channels: [] }).triggerCollection({
         collectionId: "queries",
-        payload: { query: "open incidents" },
+        payload: payload("app"),
         occurrence: {
           scheduledAt: "2026-09-20T12:00:00.000Z",
           executionId: "occurrence_1",
           name: "weekly-incidents",
           scheduleId: "schedule_1",
         },
-        run(args) {
-          observed.push(args.payload, args.occurrence, args.appAuth);
-          expect(contextStorage.getStore()?.get(ScheduleIdKey)).toBe("queries");
-          args.waitUntil(Promise.resolve());
-        },
       });
+      expect(result.sessions).toHaveLength(1);
+      expect(result.waitUntilTasks).toEqual([]);
+    });
 
-      expect(observed).toEqual([
-        { query: "open incidents" },
-        expect.objectContaining({ executionId: "occurrence_1", scheduleId: "schedule_1" }),
-        SCHEDULE_APP_AUTH,
-      ]);
-      expect(result.waitUntilTasks).toHaveLength(1);
+    it("rejects invalid persisted requests before starting a session", async () => {
+      const runtime = createMockRuntime();
+      await expect(
+        new ScheduleDispatcher({ runtime, channels: [] }).triggerCollection({
+          collectionId: "queries",
+          payload: { ...payload("app"), request: " " },
+          occurrence: {
+            scheduledAt: "now",
+            executionId: "id",
+            name: "name",
+            scheduleId: "schedule",
+          },
+        }),
+      ).rejects.toThrow("Invalid scheduled request payload");
+      expect(runtime.createSession).not.toHaveBeenCalled();
     });
   });
 

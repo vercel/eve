@@ -13,6 +13,7 @@ import {
   type LocalDevRequestProvenance,
   ParentSessionKey,
   SandboxKey,
+  ScheduleOriginKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
@@ -88,6 +89,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = DispatchPlanEntry> {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
+  readonly scheduleOrigin?: import("#runtime/schedules/payload.js").ScheduleCollectionOrigin;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
   readonly activityObserver?: ActivityObserverConfig & {
@@ -227,6 +229,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     fanoutSize: input.fanoutSize ?? batch.localFanoutSize ?? 0,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
+    scheduleOrigin: ctx.get(ScheduleOriginKey),
     parentSession: ctx.get(ParentSessionKey),
     plan,
     activityObserver: resolvePreparedActivity(

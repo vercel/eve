@@ -4,17 +4,18 @@ import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-ch
 import { createSession, type Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ScheduleIdKey } from "#context/keys.js";
+import { ScheduleIdKey, ScheduleOriginKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
   ScheduleHandlerArgs,
   ScheduleRunHandler,
 } from "#public/definitions/schedule.js";
-import type {
-  ScheduleCollectionRunArgs,
-  ScheduleOccurrence,
-} from "#public/schedules/collection.js";
+import type { ScheduleOccurrence } from "#public/schedules/collection.js";
+import {
+  parseSchedulePayload,
+  type ScheduleCollectionPayload,
+} from "#runtime/schedules/payload.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 export { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
@@ -65,11 +66,10 @@ export interface ScheduleDispatchResult {
   readonly waitUntilTasks: readonly Promise<unknown>[];
 }
 
-export interface ScheduleCollectionDispatchInput<TPayload> {
+export interface ScheduleCollectionDispatchInput {
   readonly collectionId: string;
-  readonly payload: TPayload;
+  readonly payload: ScheduleCollectionPayload;
   readonly occurrence: ScheduleOccurrence;
-  readonly run: (args: ScheduleCollectionRunArgs<TPayload>) => Promise<void> | void;
 }
 
 export class ScheduleDispatcher {
@@ -90,15 +90,30 @@ export class ScheduleDispatcher {
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 
-  async triggerCollection<TPayload>(
-    input: ScheduleCollectionDispatchInput<TPayload>,
-  ): Promise<ScheduleDispatchResult> {
+  async triggerCollection(input: ScheduleCollectionDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.collectionId);
     return await contextStorage.run(scope, async () => {
-      const { args, sessions, waitUntilTasks } = this.createHandlerContext();
-      await input.run({ ...args, payload: input.payload, occurrence: input.occurrence });
-      return { sessions, waitUntilTasks };
+      const payload = parseSchedulePayload(input.payload);
+      if (
+        payload.binding.collection !== input.collectionId ||
+        payload.binding.name !== input.occurrence.name
+      ) {
+        throw new Error("Schedule payload does not match the occurrence.");
+      }
+      scope.set(ScheduleOriginKey, payload.origin);
+      const auth = payload.runAs === "creator" ? payload.origin.auth.current! : SCHEDULE_APP_AUTH;
+      const session = await this.runtime.createSession({
+        adapter: SCHEDULE_ADAPTER,
+        auth,
+        initiatorAuth:
+          payload.runAs === "creator" ? (payload.origin.auth.initiator ?? auth) : SCHEDULE_APP_AUTH,
+        mode: "task",
+        input: {
+          message: `This is an occurrence of an existing schedule, not a request to create or change one. Execute the task now using your available tools. Do not create or change another schedule while carrying it out. Your final answer is recorded on this run, not sent to a channel. Only claim a delivery or other side effect after its tool confirms success.\n\nSchedule: ${input.occurrence.name}\nScheduled for: ${input.occurrence.scheduledAt}\n\nRequest:\n${payload.request}`,
+        },
+      });
+      return { sessions: [createSession(session.sessionId, this.runtime)], waitUntilTasks: [] };
     });
   }
 

@@ -1,9 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { SessionAuth } from "#context/keys.js";
+import { captureSlackActionContext } from "#public/experimental/slack/action-context.js";
+import {
+  createSchedulePayload,
+  type ScheduleCollectionPayload,
+} from "#runtime/schedules/payload.js";
 import type {
   ScheduleCollectionDefinition,
-  ScheduleCollectionPayloadResolveContext,
   ScheduleCreate,
   ScheduleDelivery,
   ScheduleList,
@@ -24,32 +28,50 @@ export interface ScheduleCollectionBindingContext extends ScheduleScopeContext {
   readonly targetKey?: string;
 }
 
-export interface BoundScheduleCollection<TInput> {
-  create(payload: ScheduleCreate<TInput>): Promise<ScheduleRecord>;
-  delete(name: string): Promise<boolean>;
+export const MAX_SCHEDULES_PER_DELETE = 25;
+
+export type ScheduleDeleteResult = {
+  readonly name: string;
+  readonly status: "deleted" | "not-found" | "failed";
+};
+
+export interface BoundScheduleCollection {
+  create(input: ScheduleCreate<string>): Promise<ScheduleRecord>;
+  delete(names: readonly string[]): Promise<readonly ScheduleDeleteResult[]>;
   disable(name: string): Promise<ScheduleRecord>;
   enable(name: string): Promise<ScheduleRecord>;
   get(name: string): Promise<ScheduleRecord | null>;
   invoke(name: string): Promise<void>;
   list(input?: ScheduleList): Promise<import("#public/schedules/collection.js").SchedulePage>;
-  update(name: string, patch: SchedulePatch<TInput>): Promise<ScheduleRecord>;
+  update(name: string, patch: SchedulePatch<string>): Promise<ScheduleRecord>;
 }
 
-export async function bindScheduleCollection<TInput>(
+export async function bindScheduleCollection(
   collection: string,
-  definition: ScheduleCollectionDefinition<TInput>,
+  definition: ScheduleCollectionDefinition,
   binding: ScheduleCollectionBindingContext,
-  deliver?: (delivery: ScheduleDelivery<TInput>) => Promise<void>,
-): Promise<BoundScheduleCollection<TInput> | null> {
+  deliver?: (delivery: ScheduleDelivery<ScheduleCollectionPayload>) => Promise<void>,
+): Promise<BoundScheduleCollection | null> {
   const scope = await resolveScope(definition.scope, binding);
   if (scope === null) return null;
   const namespace = deriveScheduleNamespace(binding.application, collection, scope);
+  const origin = {
+    ...binding,
+    session: structuredClone(binding.session),
+    channel: {
+      kind: binding.channel.kind,
+      continuationToken: binding.channel.continuationToken,
+    },
+  };
+  const slack = captureSlackActionContext(origin.session.auth.current);
   const nextOperationId = binding.operationId ?? randomUUID;
   const providerContext = (): ScheduleProviderContext => {
     const target: {
       key: string;
-      deliver?: (value: ScheduleDelivery<any>) => Promise<void>;
-    } = { key: binding.targetKey ?? collection };
+      deliver?: (delivery: ScheduleDelivery<ScheduleCollectionPayload>) => Promise<void>;
+    } = {
+      key: binding.targetKey ?? collection,
+    };
     if (deliver !== undefined) target.deliver = deliver;
     return {
       abortSignal: binding.abortSignal,
@@ -62,14 +84,42 @@ export async function bindScheduleCollection<TInput>(
   const provider = definition.provider;
 
   return {
-    create: async (schedule) =>
+    create: async (input) =>
       await provider.create(providerContext(), {
-        ...schedule,
-        expression: validateScheduleExpression(schedule.expression),
-        payload: await resolveCollectionInput(definition, schedule.payload, binding),
-        name: validateScheduleName(schedule.name),
+        ...input,
+        expression: validateScheduleExpression(input.expression),
+        payload: createSchedulePayload({
+          request: input.payload,
+          binding: {
+            application: binding.application,
+            collection,
+            namespace,
+            name: validateScheduleName(input.name),
+          },
+          runAs: definition.runAs,
+          context: origin,
+          slack,
+        }),
+        name: validateScheduleName(input.name),
       }),
-    delete: async (name) => provider.delete(providerContext(), validateScheduleName(name)),
+    delete: async (names) => {
+      if (names.length < 1 || names.length > MAX_SCHEDULES_PER_DELETE) {
+        throw new Error(`Delete between 1 and ${MAX_SCHEDULES_PER_DELETE} schedules per request.`);
+      }
+      const uniqueNames = [...new Set(names.map(validateScheduleName))];
+      const results: ScheduleDeleteResult[] = [];
+      for (const name of uniqueNames) {
+        try {
+          results.push({
+            name,
+            status: (await provider.delete(providerContext(), name)) ? "deleted" : "not-found",
+          });
+        } catch {
+          results.push({ name, status: "failed" });
+        }
+      }
+      return results;
+    },
     disable: async (name) => provider.disable(providerContext(), validateScheduleName(name)),
     enable: async (name) => provider.enable(providerContext(), validateScheduleName(name)),
     get: async (name) => provider.get(providerContext(), validateScheduleName(name)),
@@ -83,6 +133,12 @@ export async function bindScheduleCollection<TInput>(
       return provider.list(providerContext(), normalized);
     },
     update: async (name, patch) => {
+      // Providers cannot read the existing payload, so replacing it would lose the original caller.
+      if (patch.payload !== undefined) {
+        throw new Error(
+          "Updating a scheduled request is not supported yet; delete and recreate the schedule.",
+        );
+      }
       const normalizedName = validateScheduleName(name);
       const expression =
         patch.expression === undefined ? undefined : validateScheduleExpression(patch.expression);
@@ -92,33 +148,11 @@ export async function bindScheduleCollection<TInput>(
           throw new Error("A schedule cannot change between recurring and one-time expressions.");
         }
       }
-      const input =
-        patch.payload === undefined
-          ? undefined
-          : await resolveCollectionInput(definition, patch.payload, binding);
-      let normalized: SchedulePatch<TInput> = {};
+      let normalized: SchedulePatch<string> = {};
       if (expression !== undefined) normalized = { ...normalized, expression };
-      if (input !== undefined) normalized = { ...normalized, payload: input };
       return provider.update(providerContext(), normalizedName, normalized);
     },
   };
-}
-
-async function resolveCollectionInput<TInput>(
-  definition: ScheduleCollectionDefinition<TInput>,
-  payload: unknown,
-  binding: ScheduleCollectionBindingContext,
-): Promise<TInput> {
-  const validated = await validateCollectionInput(definition, payload);
-  const context: ScheduleCollectionPayloadResolveContext = {
-    abortSignal: binding.abortSignal,
-    auth: binding.session.auth,
-    channel: binding.channel,
-  };
-  const resolved = definition.resolvePayload
-    ? await definition.resolvePayload(validated, context)
-    : validated;
-  return await validateCollectionInput(definition, resolved);
 }
 
 export function createScheduleScopeContext(input: {
@@ -144,18 +178,6 @@ function deriveScheduleNamespace(
     .update(JSON.stringify(["eve-schedule-namespace-v1", application, collection, scope]))
     .digest("base64url");
   return `eve-${digest}`;
-}
-
-async function validateCollectionInput<TInput>(
-  definition: ScheduleCollectionDefinition<TInput>,
-  payload: unknown,
-): Promise<TInput> {
-  const result = await definition.payloadSchema["~standard"].validate(payload);
-  if (result.issues !== undefined) {
-    const details = result.issues.map((issue) => issue.message).join("; ");
-    throw new Error(`Invalid schedule input${details ? `: ${details}` : "."}`);
-  }
-  return result.value;
 }
 
 async function resolveScope(

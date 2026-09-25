@@ -16,6 +16,10 @@ import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runt
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import {
+  parseSchedulePayload,
+  type ScheduleCollectionPayload,
+} from "#runtime/schedules/payload.js";
 
 /** Handles one private Vercel Queues callback for dynamic schedule collections. */
 export async function handleScheduleCollectionConsumer(
@@ -70,11 +74,17 @@ export async function handleScheduleCollectionConsumer(
         value,
         `Expected schedule collection "${collectionName}" to match the public eve shape.`,
       );
-      const validation = await definition.payloadSchema["~standard"].validate(
-        payload.payload.payload,
-      );
-      if (validation.issues !== undefined) {
-        throw new PermanentScheduleMessageError("Scheduled collection input is invalid.");
+      let collectionPayload: ScheduleCollectionPayload;
+      try {
+        collectionPayload = parseSchedulePayload(payload.payload.payload, {
+          application,
+          collection: collectionName,
+          namespace: payload.namespace,
+          name: payload.name,
+          runAs: definition.runAs,
+        });
+      } catch {
+        throw new PermanentScheduleMessageError("Scheduled collection request is invalid.");
       }
       const executionId = payload.executionId ?? metadata.messageId;
       const scheduledAt =
@@ -85,14 +95,13 @@ export async function handleScheduleCollectionConsumer(
       });
       const result = await dispatcher.triggerCollection({
         collectionId: collectionName,
-        payload: validation.value,
+        payload: collectionPayload,
         occurrence: {
           executionId,
           name: payload.name,
           scheduleId: payload.scheduleId,
           scheduledAt,
         },
-        run: definition.run,
       });
       await Promise.all(result.waitUntilTasks);
     },

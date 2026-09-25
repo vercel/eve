@@ -2,7 +2,6 @@ import type { CompiledScheduleCollectionDefinition } from "#compiler/manifest.js
 import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ScheduleSourceRef } from "#discover/manifest.js";
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
-import { serializeInputSchema } from "#tools/schema.js";
 
 export function compileScheduleCollectionDefinition(
   source: ScheduleSourceRef,
@@ -17,7 +16,6 @@ export function compileScheduleCollectionDefinition(
   );
 
   const compiled: CompiledScheduleCollectionDefinition = {
-    inputSchema: serializeInputSchema(definition.payloadSchema),
     logicalPath: source.logicalPath,
     name: stripLogicalPathExtension(source.logicalPath).replace(/^schedules\//u, ""),
     providerKind: definition.provider.kind,

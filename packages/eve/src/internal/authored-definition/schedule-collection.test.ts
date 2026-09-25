@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 
 import { normalizeScheduleCollectionDefinition } from "#internal/authored-definition/schedule-collection.js";
 import { defineScheduleCollection } from "#public/schedules/collection.js";
@@ -7,15 +6,13 @@ import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.
 
 const definition = () =>
   defineScheduleCollection({
-    payloadSchema: z.object({ query: z.string() }),
     provider: inMemoryScheduleProvider(),
     scope: "principal_1",
-    tools: true,
-    run: async () => undefined,
+    runAs: "creator",
   });
 
 describe("normalizeScheduleCollectionDefinition", () => {
-  it("accepts a branded collection", () => {
+  it("accepts a branded minimal collection", () => {
     const value = definition();
     expect(normalizeScheduleCollectionDefinition(value, "invalid")).toBe(value);
   });
@@ -23,17 +20,10 @@ describe("normalizeScheduleCollectionDefinition", () => {
   it("rejects unbranded and incomplete definitions", () => {
     expect(() =>
       normalizeScheduleCollectionDefinition(
-        {
-          payloadSchema: z.object({ query: z.string() }),
-          provider: inMemoryScheduleProvider(),
-          scope: "principal_1",
-          tools: true,
-          run: async () => undefined,
-        },
+        { provider: inMemoryScheduleProvider(), scope: "principal_1" },
         "invalid",
       ),
     ).toThrow("invalid");
-
     const value = definition();
     Object.assign(value.provider, { invoke: undefined });
     expect(() => normalizeScheduleCollectionDefinition(value, "invalid")).toThrow(
@@ -41,28 +31,25 @@ describe("normalizeScheduleCollectionDefinition", () => {
     );
   });
 
-  it("accepts an input resolver and rejects non-functions", () => {
-    const valid = defineScheduleCollection({
-      ...definition(),
-      resolvePayload: (input) => input,
-    });
-    expect(normalizeScheduleCollectionDefinition(valid, "invalid")).toBe(valid);
+  it.each([undefined, "parent", "user", null])(
+    "requires an explicit supported execution identity (%s)",
+    (runAs) => {
+      const value = definition();
+      Object.assign(value, { runAs });
+      expect(() => normalizeScheduleCollectionDefinition(value, "invalid")).toThrow(
+        '"runAs" must be "creator" or "app"',
+      );
+    },
+  );
 
-    Object.assign(valid, { resolvePayload: "not a function" });
-    expect(() => normalizeScheduleCollectionDefinition(valid, "invalid")).toThrow(
-      '"resolvePayload" must be a function',
-    );
-  });
-
-  it("rejects unknown and invalid tool options", () => {
-    const unknown = definition() as typeof definition extends () => infer T ? T : never;
-    Object.assign(unknown, { extra: true });
+  it("rejects unknown keys and invalid tool flags", () => {
+    const unknown = definition();
+    Object.assign(unknown, { run: () => {} });
     expect(() => normalizeScheduleCollectionDefinition(unknown, "invalid")).toThrow("invalid");
-
     const invalid = definition();
-    Object.assign(invalid, { tools: { invoke: "yes" } });
+    Object.assign(invalid, { tools: { create: true } });
     expect(() => normalizeScheduleCollectionDefinition(invalid, "invalid")).toThrow(
-      "tools.invoke must be a boolean",
+      '"tools" must be a boolean',
     );
   });
 });

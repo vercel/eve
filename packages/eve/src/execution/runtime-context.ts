@@ -17,6 +17,7 @@ import {
   ParentTraceContextKey,
   ActivityObserverKey,
   ScheduleIdKey,
+  ScheduleOriginKey,
   TaskDeliveryPolicyKey,
   SessionCallbackKey,
   SessionTitleKey,
@@ -89,6 +90,9 @@ export function buildRunContext(input: {
   if (scheduleId !== undefined) {
     ctx.set(ScheduleIdKey, scheduleId);
   }
+
+  const scheduleOrigin = contextStorage.getStore()?.get(ScheduleOriginKey);
+  if (scheduleOrigin !== undefined) ctx.set(ScheduleOriginKey, scheduleOrigin);
 
   ctx.set(
     TaskDeliveryPolicyKey,

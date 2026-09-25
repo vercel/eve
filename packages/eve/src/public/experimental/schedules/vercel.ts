@@ -1,3 +1,4 @@
+/** Experimental Vercel-backed dynamic schedule collections. */
 export {
   vercelScheduleProvider,
   type VercelScheduleProviderOptions,

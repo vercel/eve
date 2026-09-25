@@ -100,6 +100,10 @@ export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
 );
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
+/** Creation provenance only; never substitutes for the invocation's current auth. */
+export const ScheduleOriginKey = new ContextKey<
+  import("#runtime/schedules/payload.js").ScheduleCollectionOrigin
+>("eve.scheduleOrigin");
 /** Display title derived from the session's initial input. */
 export const SessionTitleKey = new ContextKey<string>("eve.sessionTitle");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");

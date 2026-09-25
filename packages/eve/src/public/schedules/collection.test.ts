@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
-
 import {
   defineScheduleCollection,
   type ScheduleProviderContext,
@@ -23,13 +21,9 @@ describe("schedule collections", () => {
     const provider = inMemoryScheduleProvider();
     const definition = defineScheduleCollection({
       description: "Run saved queries.",
-      payloadSchema: z.object({ query: z.string() }),
       provider,
       scope: byPrincipal,
-      tools: true,
-      run: async ({ payload }) => {
-        payload.query.toUpperCase();
-      },
+      runAs: "creator",
     });
 
     expect(definition.provider).toBe(provider);

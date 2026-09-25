@@ -23,7 +23,13 @@ describe("startSubagent", () => {
         traceId: "1".repeat(32),
       };
 
+      const scheduleOrigin = {
+        sessionId: "origin",
+        auth: { current: null, initiator: null },
+        channel: {},
+      };
       await startSubagent({
+        scheduleOrigin,
         auth: null,
         batchEvent: { sequence: 1, turnId: "turn-1" },
         bundle: {} as never,
@@ -65,6 +71,9 @@ describe("startSubagent", () => {
           },
         }),
       );
+      if (kind === "local") {
+        expect(start).toHaveBeenCalledWith(expect.objectContaining({ scheduleOrigin }));
+      }
       expect(other).not.toHaveBeenCalled();
     },
   );

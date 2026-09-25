@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 
 import {
   createAgentSourceManifest,
@@ -436,10 +435,9 @@ describe("compileAgentManifest source graph", () => {
     );
     const collectionFactory = vi.fn(() =>
       defineScheduleCollection({
-        payloadSchema: z.object({ query: z.string() }),
         provider: inMemoryScheduleProvider(),
-        run() {},
         scope: "test",
+        runAs: "app",
         tools: true,
       }),
     );
@@ -521,10 +519,9 @@ describe("compileAgentManifest source graph", () => {
         loadNamespace: async () => ({
           default: defineScheduleCollection({
             description: "Run saved queries.",
-            payloadSchema: z.object({ query: z.string() }),
             provider: inMemoryScheduleProvider(),
-            run: async () => {},
             scope: "principal_1",
+            runAs: "creator",
             tools: true,
           }),
         }),
