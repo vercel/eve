@@ -460,8 +460,9 @@ assertion `t.calledSubagent(name, { status })` keeps its API and reads task even
   opens with `ctx.agent`, which are not tasks. One small versioned record per task, written only
   by applying the session's inbox messages (`execution/tasks/table.ts`): `id`, `name`,
   `resumable`, `status` (`working`, `idle`, or finished), the calls without a result, `turnId`,
-  `delivered`, `creator` (auth captured at start), and the cancel timestamp. A record that fails to decode fails its
-  task ("its state could not be read"), never the session. Sessions aren't migrated.
+  `delivered`, `creator` (auth captured at start), and the cancel timestamp. A record that fails
+  to decode fails its task ("its state could not be read"), never the session. Sessions aren't
+  migrated.
 - **Every wait suspends.** The session is a durable workflow (`execution/session/entry.ts`) whose
   inbox is built on Workflow SDK hooks. Workflow tool calls keep today's path: the call defers out
   of the model step and the turn loop parks until it settles (`execution/session/turn.ts`,
