@@ -20,6 +20,7 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { recordProxyInputRequestStep } from "#subagents/record-input-request-step.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -148,12 +149,20 @@ async function handleWorkflowToolRunRequest(
     });
     return;
   }
+  const hookPayload = workflowToolRunRequestToInputRequestPayload(message);
+  const answerHook =
+    message.requestCoordinates === undefined ? createAnswerHookRoute(message) : undefined;
+  await cursor.apply(
+    await recordProxyInputRequestStep({
+      answerHook,
+      hookPayload,
+      sessionState: cursor.sessionState,
+    }),
+  );
   await cursor.apply(
     await runProxySubagentEventStep({
-      ...(message.requestCoordinates === undefined
-        ? { answerHook: createAnswerHookRoute(message) }
-        : {}),
-      hookPayload: workflowToolRunRequestToInputRequestPayload(message),
+      answerHook,
+      hookPayload,
       sessionWritable: cursor.sessionWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,

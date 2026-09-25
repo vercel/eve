@@ -185,6 +185,8 @@ A thrown handler during a model turn propagates through turn execution and surfa
 
 For `subagent.called`, `subagent.completed`, and events proxied from a child, a thrown handler fails the publishing step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the publishing step to finish or exhaust its retries.
 
+Response routes are recorded before proxied input requests are published, so a hook failure does not discard the pending request's route. Exhausting the publishing step's retries still fails the session.
+
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.

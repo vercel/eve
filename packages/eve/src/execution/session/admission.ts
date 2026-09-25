@@ -13,6 +13,7 @@ import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { findRunningAgentHandle } from "#subagents/handles/query.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { recordProxyInputRequestStep } from "#subagents/record-input-request-step.js";
 
 export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
 
@@ -51,6 +52,14 @@ export async function admitSessionInboxPayload(
       handle?.identity.name === value.subagentName &&
       handle.address.sessionId === value.childSessionId
     ) {
+      if (value.kind === "subagent-input-request") {
+        await input.cursor.apply(
+          await recordProxyInputRequestStep({
+            hookPayload: value,
+            sessionState: input.cursor.sessionState,
+          }),
+        );
+      }
       await input.cursor.apply(
         await runProxySubagentEventStep({
           hookPayload: value,

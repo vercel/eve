@@ -1,5 +1,4 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
 import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
@@ -9,7 +8,7 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { setChannelContext } from "#execution/channel-context.js";
+import { publishChannelEvent } from "#execution/publish-channel-event.js";
 import {
   createDurableSessionState,
   type DurableSession,
@@ -28,7 +27,6 @@ import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -128,10 +126,9 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-      const stamped = stampMessageStreamEvent(transformed);
-      await writer.write(encodeMessageStreamEvent(stamped));
+      // The child event is already routed; do not forward it again or apply
+      // the parent's scheduled-turn suppression from createSessionEventSink.
+      const stamped = await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
       await dispatchStreamEventHooks({ ctx, registry: bundle.hookRegistry, event: stamped });
     };
 
