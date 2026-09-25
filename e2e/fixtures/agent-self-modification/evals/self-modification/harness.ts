@@ -194,7 +194,7 @@ export class SelfModificationHarness {
       ),
       continuation?.result().then((turn) => turn.expectOk()),
     ]);
-    this.#t.event("subagent.called", { data: { name: SELF_MODIFICATION_AGENT } });
+    this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
   }
 
