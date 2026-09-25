@@ -63,8 +63,8 @@ export interface SessionInboxOwnership {
 export interface SessionInbox extends SessionInboxReader, SessionInboxOwnership {}
 export interface SessionInboxHandle extends SessionInbox {
   /**
-   * Takes a token from whichever run holds it. The previous holder keeps what
-   * its hook accepted first. Rejects when the World refuses the takeover.
+   * Takes a token from whichever run holds it, without waiting for the claim
+   * to register. The previous holder keeps what its hook accepted first.
    */
   claim(token: string): void;
   dispose(): Promise<void>;

@@ -4,7 +4,6 @@ import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { HandoffWorkflowEntryInput } from "#execution/session/entry-input.js";
 import type { SessionOwnerActivation } from "#execution/session/handoff.js";
-import { isLegacyHandoff } from "#execution/session/legacy-handoff.js";
 import { TakeoverSessionHandoff, takeOverSession } from "#execution/session/takeover-handoff.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -122,12 +121,12 @@ describe("TakeoverSessionHandoff", () => {
       createHandoff(inbox).tryTransfer(selection("deployment-b"), state()),
     ).resolves.toEqual({ kind: "retained", reason: "activation-failed" });
     expect(inbox.drain).not.toHaveBeenCalled();
-    expect(inbox.claimSessionHooks).not.toHaveBeenCalled();
+    expect(forwardSessionInputStepMock).not.toHaveBeenCalled();
   });
 });
 
 describe("takeOverSession", () => {
-  it("fences the attempt, validates, then force-claims every hook", async () => {
+  it("fences the attempt, validates, reads the fence, then force-claims every hook", async () => {
     const inbox = { claim: vi.fn() };
     const tokens = ["eve:session:session-1:inbox", "channel:current"];
     installFence(null);
@@ -137,8 +136,34 @@ describe("takeOverSession", () => {
       experimental_minRetention: "1d",
       token: "owner-1:handoff:delivery-deployment-b",
     });
-    expect(validateSessionCheckpointStepMock).toHaveBeenCalledOnce();
     expect(inbox.claim.mock.calls).toEqual(tokens.map((token) => [token]));
+    // Reading the fence only after validation keeps validation inline.
+    const fence = createHookMock.mock.results[0]?.value as {
+      getConflict: ReturnType<typeof vi.fn>;
+    };
+    const order = [
+      createHookMock.mock.invocationCallOrder[0],
+      validateSessionCheckpointStepMock.mock.invocationCallOrder[0],
+      fence.getConflict.mock.invocationCallOrder[0],
+      inbox.claim.mock.invocationCallOrder[0],
+    ];
+    expect(order).toEqual([...order].sort((a, b) => (a ?? 0) - (b ?? 0)));
+  });
+
+  it("claims nothing when the trigger carries no delivery id", async () => {
+    const inbox = { claim: vi.fn() };
+    installFence(null);
+    const input = handoffInput();
+
+    await expect(
+      takeOverSession(
+        { ...input, delivery: { ...input.delivery, deliveryMetadata: undefined } },
+        inbox,
+        ["token"],
+      ),
+    ).rejects.toThrow("delivery id");
+    expect(createHookMock).not.toHaveBeenCalled();
+    expect(inbox.claim).not.toHaveBeenCalled();
   });
 
   it("leaves the session to another start of the same attempt", async () => {
@@ -158,11 +183,6 @@ describe("takeOverSession", () => {
       "unsupported checkpoint",
     );
     expect(inbox.claim).not.toHaveBeenCalled();
-  });
-
-  it("serves only sources that stamp a handoff version", () => {
-    expect(isLegacyHandoff({})).toBe(true);
-    expect(isLegacyHandoff({ handoffVersion: 2 })).toBe(false);
   });
 });
 

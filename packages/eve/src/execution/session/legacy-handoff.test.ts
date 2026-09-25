@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionOwnerActivation } from "#execution/session/handoff.js";
-import { LegacySessionHandoff } from "#execution/session/legacy-handoff.js";
+import { isLegacyHandoff, LegacySessionHandoff } from "#execution/session/legacy-handoff.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
@@ -146,6 +146,13 @@ describe("LegacySessionHandoff", () => {
     ).resolves.toEqual({ kind: "retained", reason: "accepted-during-release" });
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
     expect(inbox.restore).toHaveBeenCalledWith(accepted);
+  });
+});
+
+describe("isLegacyHandoff", () => {
+  it("serves only sources that omit the handoff version", () => {
+    expect(isLegacyHandoff({})).toBe(true);
+    expect(isLegacyHandoff({ handoffVersion: 2 })).toBe(false);
   });
 });
 

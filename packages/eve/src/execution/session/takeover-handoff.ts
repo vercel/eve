@@ -122,8 +122,10 @@ export async function takeOverSession(
   // it taken after this run ends, when later owners hold the session. It is
   // written in the same suspension as validation and read after validation
   // returns, so validation still runs inline.
+  const deliveryId = input.delivery.deliveryMetadata?.[0]?.deliveryId;
+  if (deliveryId === undefined) throw new Error("A handoff trigger must carry a delivery id.");
   const fence = createHook<never>({
-    token: `${input.activationToken}:${input.delivery.deliveryMetadata?.[0]?.deliveryId ?? ""}`,
+    token: `${input.activationToken}:${deliveryId}`,
     experimental_minRetention: "1d",
   });
   await validateSessionCheckpointStep({ checkpoint: input.checkpoint });
