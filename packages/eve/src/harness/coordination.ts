@@ -556,7 +556,11 @@ function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output
   };
 }
 
-function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonValue {
+function toMutableJsonValue(value: RuntimeActionResult["output"] | undefined): MutableJsonValue {
+  if (value === undefined) {
+    return null;
+  }
+
   if (
     value === null ||
     typeof value === "string" ||
@@ -573,7 +577,9 @@ function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonVa
   const next: Record<string, MutableJsonValue> = {};
 
   for (const [key, item] of Object.entries(value)) {
-    next[key] = toMutableJsonValue(item);
+    if (item !== undefined) {
+      next[key] = toMutableJsonValue(item);
+    }
   }
 
   return next;
