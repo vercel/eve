@@ -146,9 +146,21 @@ Prefer `recordInputs: false` or `recordOutputs: false` when the destination does
 
 ## Lifecycle events
 
-Instrumentation can handle session, channel delivery, turn, model attempt,
-model call, action, input request, and tool call events. Start and terminal
-events share an `idempotencyKey`, which can serve as a destination row ID.
+`defineInstrumentation({ events })` supports the following event names. A
+start and its terminal event share an `idempotencyKey`; use it as a stable
+operation key when upserting records across replays.
+
+| Lifecycle        | Events                                                                                                            | Meaning                                                                                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session          | `session.started`, `session.waiting`, `session.completed`, `session.failed`                                       | Track a session from creation through suspension or termination. `session.waiting` is resumable; `session.completed` and `session.failed` are terminal.                          |
+| Turn             | `turn.started`, `turn.completed`, `turn.cancelled`, `turn.failed`                                                 | Track one turn. Cancellation is not a failure and commonly leaves the session waiting for another turn.                                                                          |
+| Channel delivery | `channel.delivery.started`, `channel.delivery.completed`, `channel.delivery.cancelled`, `channel.delivery.failed` | Track an inbound channel delivery while eve processes its turn. These events are emitted when the channel provides delivery metadata.                                            |
+| Step attempt     | `step.attempt.started`, `step.attempt.completed`, `step.attempt.failed`, `step.attempt.metadata`                  | Track each model-step attempt; retries have separate attempts. `step.attempt.metadata` is emitted after a step only when the AI SDK supplies provider metadata.                  |
+| Model call       | `model.call.started`, `model.call.completed`, `model.call.failed`                                                 | Track an individual call to the model provider. Completion includes usage and finish reason; content fields follow the trace policy.                                             |
+| Action           | `action.started`, `action.completed`, `action.failed`                                                             | Track eve's durable dispatch of a tool, skill load, local subagent, or remote agent. A failed event's `outcome` distinguishes failure, rejection, cancellation, and abandonment. |
+| Tool call        | `tool.call.started`, `tool.call.completed`, `tool.call.failed`                                                    | Track the AI SDK's in-process tool execution boundary, including its input and result when allowed by the trace policy.                                                          |
+| User input       | `input.requested`, `input.resolved`                                                                               | Track a question, tool approval, or session-limit request and its resolution. The resolution includes an outcome such as `answered`, `approved`, `denied`, or `cancelled`.       |
+| Memory operation | `memory.operation.started`, `memory.operation.completed`, `memory.operation.failed`                               | Track a memory-store search or write. Events include the operation name, phase, and memory slot; completion may include a record count and records.                              |
 
 An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
 
