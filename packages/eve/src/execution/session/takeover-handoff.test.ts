@@ -134,6 +134,7 @@ describe("takeOverSession", () => {
 
     await expect(takeOverSession(handoffInput(), inbox, tokens)).resolves.toBe(true);
     expect(createHookMock).toHaveBeenCalledWith({
+      experimental_minRetention: "1d",
       token: "owner-1:handoff:delivery-deployment-b",
     });
     expect(validateSessionCheckpointStepMock).toHaveBeenCalledOnce();

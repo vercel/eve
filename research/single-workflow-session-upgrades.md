@@ -205,9 +205,10 @@ every address always resolves to a live owner.
    continuation hook claimed during the session.
 3. The candidate validates the checkpoint, then confirms a plain claim on a fence unique to this
    attempt (the activation token plus the trigger's delivery id). A start step can run twice, and
-   forced claims would let the second start take the session from the first; the start that loses
-   the fence exits without touching the session. The fence registers alongside validation and is
-   read after it, so validation still runs inline.
+   forced claims would let the second start take the session from whoever owns it then; the start
+   that loses the fence exits without touching the session. The fence token is retained for a day
+   after the claiming run ends, so a start that boots after later handoffs still loses. It is
+   written in the same suspension as validation and read after it, so validation still runs inline.
 4. The candidate force-claims that exact hook set and activates without waiting for the claims to
    register: a version 2 or later source runs on a Workflow spec that can always be taken from.
    The Workflow runtime commits every hook of a suspension before the activation step it schedules,

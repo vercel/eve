@@ -1913,108 +1913,135 @@ describe("workflowEntry integration", () => {
       });
     });
 
-    it("keeps one owner when the same successor is started twice", async () => {
-      const runtime = await createTestRuntime({
-        agent: { name: "workflow-entry-handoff-duplicate" },
-      });
-
-      await runtime.run(async () => {
-        const anchor = await start(workflowEntry, [
-          {
-            kind: "initial",
-            ownerDeploymentId: "dpl_a",
-            sessionTimeoutMs: false,
-            input: { message: "Alice opens a session." },
-            serializedContext: buildSerializedContext({
-              acceptedDeploymentId: "dpl_a",
-              channelKind: "http",
-              mode: "conversation",
-            }),
-          },
-        ]);
-        const stream = captureTurnEvents(anchor);
-        const world = await getWorld();
-        const workflowRuntime = createWorkflowRuntime({
-          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    it.each([
+      ["while the first successor owns the session", false],
+      ["after the first successor handed off and exited", true],
+    ] as const)(
+      "keeps the session when the same successor boots again %s",
+      async (_when, late) => {
+        const runtime = await createTestRuntime({
+          agent: { name: "workflow-entry-handoff-duplicate" },
         });
-        // A start step can run again after its first run already started the
-        // successor, so the same successor input can boot twice.
-        let successorStart: { runId: string; input: unknown } | undefined;
-        const createEvent = world.events.create.bind(world.events);
-        const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
-          const [runId] = args;
-          const event = args[1] as (typeof args)[1] | RunCreatedEventRequest;
-          if (event.eventType === "run_created" && event.eventData.deploymentId === "dpl_b") {
-            successorStart ??= { runId, input: event.eventData.input };
-          }
-          return createEvent(...args);
-        });
-        try {
-          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-          await waitForParkedTurnStep(anchor.runId);
-          await workflowRuntime.dispatchSession({
-            command: followUp("dpl_b", "Bob asks from the next deployment.", "duplicate-trigger"),
-            sessionId: anchor.runId,
-          });
-          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
-          spy.mockRestore();
-          const successor = await waitForCommandHookOwner(
-            sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
-          );
-          expect(successor.runId).not.toBe(anchor.runId);
-          await waitForParkedTurnStep(successor.runId);
 
-          assert(successorStart !== undefined);
-          const [input] = (await hydrateWorkflowArguments(
-            successorStart.input,
-            successorStart.runId,
-            undefined,
-          )) as [HandoffWorkflowEntryInput];
-          const duplicate = await start(workflowEntry, [
-            { ...input, sessionWritable: getRun(anchor.runId).getWritable<Uint8Array>() },
+        await runtime.run(async () => {
+          const anchor = await start(workflowEntry, [
+            {
+              kind: "initial",
+              ownerDeploymentId: "dpl_a",
+              sessionTimeoutMs: false,
+              input: { message: "Alice opens a session." },
+              serializedContext: buildSerializedContext({
+                acceptedDeploymentId: "dpl_a",
+                channelKind: "http",
+                mode: "conversation",
+              }),
+            },
           ]);
-          await vi.waitFor(
-            async () => expect(["completed", "failed"]).toContain(await duplicate.status),
-            { timeout: 30_000 },
-          );
-          // The duplicate never touched the session; the first successor still owns it.
-          expect(await anchor.status).toBe("running");
-          expect(await world.hooks.list({ runId: duplicate.runId })).toMatchObject({
-            data: expect.not.arrayContaining([
-              expect.objectContaining({ token: expect.stringContaining("eve:inbox:") }),
-            ]),
+          const stream = captureTurnEvents(anchor);
+          const world = await getWorld();
+          const workflowRuntime = createWorkflowRuntime({
+            compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
           });
-          expect(
-            (
-              await waitForCommandHookOwner(
-                sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
-              )
-            ).runId,
-          ).toBe(successor.runId);
-
-          await expect(
-            workflowRuntime.dispatchSession({
-              command: followUp("dpl_b", "Alice follows up.", "duplicate-follow-up"),
+          // A start step can run again after its first run already started the
+          // successor, so the same successor input can boot twice, at any time.
+          let successorStart: { runId: string; input: unknown } | undefined;
+          let duplicateRunId: string | undefined;
+          const duplicateClaims: string[] = [];
+          const createBatch = world.events.createBatch;
+          world.events.createBatch = undefined;
+          const createEvent = world.events.create.bind(world.events);
+          const spy = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+            const [runId] = args;
+            const event = args[1] as (typeof args)[1] | RunCreatedEventRequest;
+            if (event.eventType === "run_created" && event.eventData.deploymentId === "dpl_b") {
+              successorStart ??= { runId, input: event.eventData.input };
+            }
+            if (
+              runId === duplicateRunId &&
+              event.eventType === "hook_created" &&
+              event.eventData.token.startsWith("eve:inbox:")
+            ) {
+              duplicateClaims.push(event.eventData.token);
+            }
+            return createEvent(...args);
+          });
+          const stableToken = sessionInboxHookToken(sessionCommandHookToken(anchor.runId));
+          try {
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            await waitForParkedTurnStep(anchor.runId);
+            await workflowRuntime.dispatchSession({
+              command: followUp("dpl_b", "Bob asks from the next deployment.", "duplicate-trigger"),
               sessionId: anchor.runId,
-            }),
-          ).resolves.toMatchObject({ status: "accepted" });
-          const next = await withTimeout(stream.nextTurn(), "turn after duplicate successor");
-          expect(filterEventsByType(next, "session.failed")).toEqual([]);
-          expect(filterEventsByType(next, "session.completed")).toEqual([]);
-          expect(
-            next.some(
-              (event) =>
-                event.type === "message.completed" &&
-                event.data.message?.includes("Alice follows up.") === true,
-            ),
-          ).toBe(true);
-        } finally {
-          spy.mockRestore();
-          stream.dispose();
-          if ((await anchor.status) === "running") await anchor.cancel();
-        }
-      });
-    }, 60_000);
+            });
+            expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+            const successor = await waitForCommandHookOwner(stableToken);
+            expect(successor.runId).not.toBe(anchor.runId);
+            await waitForParkedTurnStep(successor.runId);
+
+            let owner = successor.runId;
+            let ownerDeployment = "dpl_b";
+            if (late) {
+              await workflowRuntime.dispatchSession({
+                command: followUp("dpl_c", "Bob moves on again.", "duplicate-later-handoff"),
+                sessionId: anchor.runId,
+              });
+              expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+              const next = await waitForCommandHookOwner(stableToken);
+              expect(next.runId).not.toBe(successor.runId);
+              await vi.waitFor(async () =>
+                expect((await world.runs.get(successor.runId)).status).toBe("completed"),
+              );
+              await waitForParkedTurnStep(next.runId);
+              owner = next.runId;
+              ownerDeployment = "dpl_c";
+            }
+
+            assert(successorStart !== undefined);
+            const [input] = (await hydrateWorkflowArguments(
+              successorStart.input,
+              successorStart.runId,
+              undefined,
+            )) as [HandoffWorkflowEntryInput];
+            const duplicate = await start(workflowEntry, [
+              { ...input, sessionWritable: getRun(anchor.runId).getWritable<Uint8Array>() },
+            ]);
+            duplicateRunId = duplicate.runId;
+            await vi.waitFor(
+              async () => expect(["completed", "failed"]).toContain(await duplicate.status),
+              { timeout: 30_000 },
+            );
+            // The duplicate left quietly without claiming any session address.
+            expect(await duplicate.status).toBe("completed");
+            expect(duplicateClaims).toEqual([]);
+            expect(await anchor.status).toBe("running");
+            expect((await waitForCommandHookOwner(stableToken)).runId).toBe(owner);
+
+            await expect(
+              workflowRuntime.dispatchSession({
+                command: followUp(ownerDeployment, "Alice follows up.", "duplicate-follow-up"),
+                sessionId: anchor.runId,
+              }),
+            ).resolves.toMatchObject({ status: "accepted" });
+            const next = await withTimeout(stream.nextTurn(), "turn after duplicate successor");
+            expect(filterEventsByType(next, "session.failed")).toEqual([]);
+            expect(filterEventsByType(next, "session.completed")).toEqual([]);
+            expect(
+              next.some(
+                (event) =>
+                  event.type === "message.completed" &&
+                  event.data.message?.includes("Alice follows up.") === true,
+              ),
+            ).toBe(true);
+          } finally {
+            spy.mockRestore();
+            world.events.createBatch = createBatch;
+            stream.dispose();
+            if ((await anchor.status) === "running") await anchor.cancel();
+          }
+        });
+      },
+      60_000,
+    );
 
     it("keeps the session on the current owner when it is not idle", async () => {
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-busy" } });

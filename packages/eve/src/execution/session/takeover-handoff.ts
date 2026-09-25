@@ -116,12 +116,15 @@ export async function takeOverSession(
   inbox: Pick<SessionInboxHandle, "claim">,
   tokens: readonly string[],
 ): Promise<boolean> {
-  // A re-run start step can boot this attempt twice, and forced claims would
-  // let the second take the session from the first. A plain claim on a token
-  // unique to the attempt fences them. It registers alongside validation and
-  // is read once validation returns, so validation still runs inline.
+  // A re-run start step can boot this attempt twice, at any time, and forced
+  // claims would let the second take the session from whoever owns it then.
+  // A plain claim on a token unique to the attempt fences them; retention keeps
+  // it taken after this run ends, when later owners hold the session. It is
+  // written in the same suspension as validation and read after validation
+  // returns, so validation still runs inline.
   const fence = createHook<never>({
     token: `${input.activationToken}:${input.delivery.deliveryMetadata?.[0]?.deliveryId ?? ""}`,
+    experimental_minRetention: "1d",
   });
   await validateSessionCheckpointStep({ checkpoint: input.checkpoint });
   try {
