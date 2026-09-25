@@ -179,6 +179,7 @@ function toModelCallStarted(
       ? Object.freeze({
           instructions: source.instructions,
           messages: Object.freeze([...source.messages]),
+          tools: source.tools === undefined ? undefined : Object.freeze([...source.tools]),
         })
       : undefined,
     model: Object.freeze({ modelId: source.modelId, provider: source.provider }),

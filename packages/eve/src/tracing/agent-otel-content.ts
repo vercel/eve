@@ -52,6 +52,31 @@ export function genAiSystemInstructionsAttribute(instructions: unknown): string 
   return text === undefined ? undefined : semanticJsonAttribute([{ content: text, type: "text" }]);
 }
 
+/** Serializes tool definitions, dropping trailing entries to keep the JSON whole. */
+export function genAiToolDefinitionsAttribute(tools: unknown): string | undefined {
+  if (!Array.isArray(tools)) return undefined;
+  const definitions = tools.flatMap((tool): Record<string, unknown>[] => {
+    if (!isRecord(tool) || typeof tool.name !== "string") return [];
+    const definition: Record<string, unknown> = { name: tool.name };
+    if (typeof tool.description === "string") definition.description = tool.description;
+    if (tool.inputSchema !== undefined) definition.parameters = tool.inputSchema;
+    return [definition];
+  });
+  if (definitions.length === 0) return undefined;
+
+  const serialized: string[] = [];
+  let length = 2;
+  for (const definition of definitions) {
+    const json = stringifyContent(definition);
+    if (json === undefined) break;
+    const nextLength = length + (serialized.length === 0 ? 0 : 1) + json.length;
+    if (nextLength > CONTENT_ATTRIBUTE_LIMIT) break;
+    serialized.push(json);
+    length = nextLength;
+  }
+  return `[${serialized.join(",")}]`;
+}
+
 /** Serializes one model response using the OpenTelemetry GenAI message schema. */
 export function genAiOutputMessagesAttribute(
   content: readonly unknown[],
