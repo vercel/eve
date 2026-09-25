@@ -200,6 +200,7 @@ export async function dispatchMemoryCompactionRequested(input: {
           sequence: input.event.data.sequence,
           sessionId: callbackContext.session.id,
           slot: memory.slot,
+          stepIndex: input.event.data.stepIndex,
           turnId: turn?.id ?? null,
         });
         await instrumentMemoryOperation(
@@ -262,6 +263,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
             sequence: input.event.data.sequence,
             sessionId: callbackContext.session.id,
             slot: memory.slot,
+            stepIndex: input.event.data.stepIndex,
             turnId: turn?.id ?? null,
           });
           const result = await instrumentMemoryOperation(
@@ -480,6 +482,7 @@ export function memoryOperationId(input: {
   readonly sequence: number;
   readonly sessionId: string;
   readonly slot: string;
+  readonly stepIndex?: number;
   readonly turnId: string | null;
 }): string {
   return [
@@ -487,6 +490,7 @@ export function memoryOperationId(input: {
     input.sessionId,
     String(input.sequence),
     input.turnId ?? "standalone",
+    ...(input.stepIndex === undefined ? [] : [String(input.stepIndex)]),
     input.phase,
     input.slot,
   ].join(":");
