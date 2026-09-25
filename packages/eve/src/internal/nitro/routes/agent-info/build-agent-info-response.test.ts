@@ -155,7 +155,7 @@ describe("buildAgentInfoResponse", () => {
     );
   });
 
-  it("never serializes BYOK or credential-shaped providerOptions values", async () => {
+  it("only exposes the priority tier from providerOptions", async () => {
     const { manifest } = await compileFromMemory({
       model: "openai/gpt-5.4",
       name: "info-agent",
@@ -173,6 +173,7 @@ describe("buildAgentInfoResponse", () => {
         apiKey: "sk-canary-direct",
         headers: { authorization: "Bearer canary-header" },
         reasoningEffort: "high",
+        metadata: { workspace: "sk-canary-unrecognized" },
       },
     };
 
@@ -188,14 +189,21 @@ describe("buildAgentInfoResponse", () => {
     expect(serialized).not.toContain("sk-canary-byok");
     expect(serialized).not.toContain("sk-canary-direct");
     expect(serialized).not.toContain("canary-header");
+    expect(serialized).not.toContain("sk-canary-unrecognized");
     // Non-secret options survive for the dev TUI (`gateway.serviceTier`).
     expect(response.agent.model.providerOptions).toEqual({
       gateway: { serviceTier: "priority" },
-      openai: {
-        apiKey: "[redacted]",
-        headers: "[redacted]",
-        reasoningEffort: "high",
-      },
     });
+
+    model.providerOptions = { gateway: { serviceTier: "sk-canary-tier" } };
+    const customTierResponse = buildAgentInfoResponse(
+      { manifest, schedules: [] },
+      {
+        gatewayCredentials: { apiKey: false, oidc: false },
+        mode: "production",
+      },
+    );
+    expect(customTierResponse.agent.model.providerOptions).toBeUndefined();
+    expect(JSON.stringify(customTierResponse)).not.toContain("sk-canary-tier");
   });
 });
