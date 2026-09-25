@@ -11,10 +11,15 @@
 import type { AgentTUIInputOption } from "./runner.js";
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
-import { clipVisible, renderInputWithBlockCursor, wrapVisibleLine } from "#cli/ui/terminal-text.js";
+import {
+  clipVisible,
+  renderInputText,
+  renderInputWithBlockCursor,
+  wrapVisibleLine,
+} from "#cli/ui/terminal-text.js";
 import { renderOptionRow } from "#setup/cli/option-row.js";
 
-const FREEFORM_ROW_LABEL = "Type your own answer";
+const FREEFORM_ROW_LABEL = "Type your own answer…";
 
 export interface QuestionPanelState {
   readonly prompt: string;
@@ -34,7 +39,6 @@ export function renderQuestionPanel(
   width: number,
 ): string[] {
   const c = theme.colors;
-  const g = theme.glyph;
   // The rule hugs the question — no blank row between them.
   const rows: string[] = [];
 
@@ -51,14 +55,7 @@ export function renderQuestionPanel(
 
   rows.push(...renderQuestionChoices(state.options, state.cursor, theme));
   if (state.allowFreeform) {
-    const index = state.options.length;
-    const focused = state.cursor === index;
-    rows.push(
-      ...renderQuestionChoices([{ id: "freeform", label: FREEFORM_ROW_LABEL }], 0, theme, focused),
-    );
-    if (focused || state.editor.text.length > 0) {
-      rows.push(`        ${c.dim(g.elbow)} ${freeformEditorBody(state, focused, theme, width)}`);
-    }
+    rows.push(renderFreeformRow(state, theme, width));
   }
 
   return rows.map((row) => clipVisible(row, width));
@@ -96,22 +93,25 @@ export function renderQuestionChoices(
   });
 }
 
-function freeformEditorBody(
-  state: QuestionPanelState,
-  focused: boolean,
-  theme: Theme,
-  width: number,
-): string {
+function renderFreeformRow(state: QuestionPanelState, theme: Theme, width: number): string {
   const c = theme.colors;
-  // Reserve the elbow gutter plus the block cursor's trailing cell.
-  const budget = Math.max(4, width - 12);
+  const focused = state.cursor === state.options.length;
+  const budget = Math.max(4, width - 5);
   if (!focused) {
-    const preserved = visibleLine(state.editor, budget, theme.glyph.ellipsis);
-    return c.dim(`${preserved.before}${preserved.under}${preserved.after}`);
+    const visible = visibleLine(state.editor, budget, theme.glyph.ellipsis);
+    const value =
+      state.editor.text.length === 0
+        ? FREEFORM_ROW_LABEL
+        : `${visible.before}${visible.under}${visible.after}`;
+    return `     ${c.dim(value)}`;
   }
-  return renderInputWithBlockCursor({
-    ...visibleLine(state.editor, budget, theme.glyph.ellipsis),
+
+  const placeholder = state.editor.text.length === 0;
+  const line = placeholder ? { text: FREEFORM_ROW_LABEL, cursor: 0 } : state.editor;
+  return `     ${renderInputWithBlockCursor({
+    ...visibleLine(line, budget, theme.glyph.ellipsis),
     visible: state.caretVisible,
     inverse: c.inverse,
-  });
+    render: placeholder ? (text) => c.dim(renderInputText(text)) : undefined,
+  })}`;
 }

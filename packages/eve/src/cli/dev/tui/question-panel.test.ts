@@ -40,7 +40,7 @@ describe("renderQuestionPanel", () => {
     expect(rows).toContain("     See 4 tools I can use");
     expect(rows).toContain("     Connected Services");
     expect(rows[1]).toBe("");
-    expect(rows.at(-1)).toBe("     Type your own answer");
+    expect(rows.at(-1)).toBe("     Type your own answer…");
   });
 
   it("marks only the cursor row with the pointer and enter badge", () => {
@@ -62,15 +62,15 @@ describe("renderQuestionPanel", () => {
     expect(columnsOf(render({ cursor: 1 }))).toEqual(columnsOf(render({ cursor: 0 })));
   });
 
-  it("shows the elbow editor only while the freeform row is focused or drafted", () => {
-    expect(render({ cursor: 0 }).some((row) => row.includes("⎿"))).toBe(false);
+  it("turns the freeform placeholder into an inline editor when focused", () => {
+    expect(render({ cursor: 0 }).at(-1)).toBe("     Type your own answer…");
 
     const focused = render({ cursor: 2 });
-    expect(focused.some((row) => row.includes("⎿"))).toBe(true);
+    expect(focused.at(-1)).toBe("     Type your own answer…");
 
-    // A draft typed then abandoned stays visible under the row.
+    // A draft remains in the inline field when the cursor moves away.
     const drafted = render({ cursor: 0, editor: { text: "custom", cursor: 6 } });
-    expect(drafted.find((row) => row.includes("⎿"))).toContain("custom");
+    expect(drafted.at(-1)).toBe("     custom");
   });
 
   it("splits a multi-paragraph prompt into real rows before wrapping", () => {

@@ -3023,8 +3023,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
       allowFreeform: true,
     });
     input.down();
+    expect(screen.snapshot()).toContain("Type your own answer…");
+    expect(screen.rawOutput()).toContain("\x1b[7m");
     input.type("draft answer");
-    expect(screen.snapshot()).toContain("⎿ draft answer");
+    expect(screen.snapshot()).toContain("draft answer");
 
     await escape();
     expect(screen.snapshot()).not.toContain("draft answer");
@@ -3100,13 +3102,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
       allowFreeform: true,
     });
 
-    expect(screen.snapshot()).toContain("Type your own answer");
+    expect(screen.snapshot()).toContain("Type your own answer…");
     // Moving to the freeform row focuses its inline editor; typing lands
     // there without a separate enter.
     input.down();
     input.down();
+    expect(screen.rawOutput()).toContain("\x1b[7m");
     input.type("neither");
-    expect(screen.snapshot()).toContain("⎿ neither");
+    expect(screen.snapshot()).toContain("neither");
     input.enter();
 
     await expect(answer).resolves.toEqual({ text: "neither" });
