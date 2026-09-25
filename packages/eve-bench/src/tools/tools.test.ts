@@ -23,11 +23,6 @@ describe("run_bench input", () => {
     );
     assert.equal(runBenchInput.safeParse({ harness: "oracle" }).success, true);
     assert.equal(
-      runBenchInput.safeParse({ harness: "e0", agent: "/apps/e0", model: "openai/gpt-5.6-terra" })
-        .success,
-      true,
-    );
-    assert.equal(
       runBenchInput.safeParse({
         harness: "pi",
         version: "0.80.3",
@@ -45,6 +40,7 @@ describe("run_bench input", () => {
     assert.equal(
       runBenchInput.safeParse({ harness: "e0", model: "openai/gpt-5.6-terra" }).success,
       false,
+      "e0 is not a supported harness",
     );
     assert.equal(
       runBenchInput.safeParse({ harness: "codex", model: "openai/gpt-5.6-terra" }).success,

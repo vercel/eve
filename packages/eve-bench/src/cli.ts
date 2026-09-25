@@ -23,8 +23,8 @@ const USAGE = `eve-bench: zero-dependency Terminal-Bench runner for eve
   eve-bench tasks sync [--dataset <name>]        fetch pinned datasets into .generated/datasets
   eve-bench tasks list [--cohort <name>]         print task names
   eve-bench run --model <id> [--cohort <name>] [--task <name>...] [--task-dir <path>...] [--attempts N]
-                [--concurrency N] [--harness eve|e0|oracle|pi|opencode|codex] [--job <name>]
-                [--eve local|<version>] [--agent <e0-app>] [--version <cli-version>]
+                [--concurrency N] [--harness eve|oracle|pi|opencode|codex] [--job <name>]
+                [--eve local|<version>] [--version <cli-version>]
                 [--reasoning <level>] [--base-url <https-url>] [--format console|json|junit]
   eve-bench prepare --harness <name> --model <id> [harness options]  build/cache without model calls
   eve-bench report <job> [--format console|json|junit] [--fail-on-invalid]
@@ -99,7 +99,6 @@ async function run(args: string[], prepareOnly = false): Promise<void> {
       concurrency: { type: "string", default: "4" },
       eve: { type: "string", default: "local" },
       harness: { type: "string", default: "eve" },
-      agent: { type: "string" },
       version: { type: "string" },
       "base-url": { type: "string" },
       reasoning: { type: "string" },

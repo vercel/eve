@@ -28,15 +28,7 @@ AI_GATEWAY_API_KEY=... pnpm bench run --model zai/glm-5.2 --cohort smoke --attem
 pnpm bench run --harness oracle --cohort smoke           # reference solutions; validates the runner, no model
 pnpm bench run --model zai/glm-5.2 --task fix-git --eve 0.35.0   # benchmark a published eve release
 pnpm bench run --harness oracle --task-dir ./path/to/task # run a local Terminal-Bench task
-
-# Build and cache a local e0 snapshot without calling a model.
-pnpm bench prepare --harness e0 --agent /path/to/internal-agents/agents/e0 \
-  --model openai/gpt-5.6-terra
-
-# Run one e0 smoke task. The source app must have installed workspace dependencies.
-AI_GATEWAY_API_KEY=... pnpm bench run --harness e0 \
-  --agent /path/to/internal-agents/agents/e0 \
-  --model deepseek/deepseek-v4-pro --cohort smoke --task fix-git --job e0-deepseek
+pnpm bench prepare --harness eve --model zai/glm-5.2     # build and cache a bundle without calling a model
 
 pnpm bench report <job> --format junit --out junit.xml
 pnpm bench diff <base-job> <candidate-job>
@@ -82,7 +74,7 @@ task. Resolve invalid attempts before comparing jobs; `pnpm bench report <job>
 --fail-on-invalid` exits 1 when any remain, and CI applies it to every smoke job.
 
 Usage is read on the host from each harness's own event log (`events.ndjson`
-for eve and e0, `<cli>.jsonl` for pi, OpenCode, and Codex), so it survives agent
+for eve, `<cli>.jsonl` for pi, OpenCode, and Codex), so it survives agent
 timeouts. Input tokens include cache reads and output tokens include reasoning.
 `costUsd` is null when the harness reports no cost; the CLI competitors report
 none for custom Gateway providers, so compare tokens rather than cost across
@@ -139,15 +131,6 @@ trials.
   `EVE_BENCH_TASK_WORKDIR`; Docker is the isolation boundary, so they bypass
   eve's nested sandbox on purpose.
 
-- `e0`: snapshots an installed local e0 app and its source-backed `eve-code`
-  extension. The bundle records source, dependency, and installed eve hashes.
-  It preserves e0's instructions, coding capabilities, tools, skills, and
-  authored worker model. The adapter replaces production sandbox and transport
-  integrations with the task-container backend and a local eve channel. It
-  removes production Connect configuration, channels, connections, schedules,
-  instrumentation, and sandbox bootstrap. `--model` changes the root model,
-  not e0's authored worker model.
-
 - `pi`, `opencode`, and `codex`: prepare explicitly versioned CLI bundles on the
   host and route full provider-qualified model IDs through an HTTPS API base.
   Pass an exact `--version`. The default base is Vercel AI Gateway. Codex uses
@@ -192,7 +175,7 @@ diff the result against a downloaded base-job artifact.
 
 - `agent/`: harness behavior under evaluation (model binding, instructions, tools)
 - `src/core/`: runner library with no dependency on eve or third parties
-- `src/harnesses/`: `eve`, `e0`, CLI competitors, and `oracle`
+- `src/harnesses/`: `eve`, CLI competitors, and `oracle`
 - `src/tools/`: eve tool definitions over the runner core
 - `src/options.ts`: run options shared by the CLI and tools
 - `src/cli.ts`: `eve-bench` CLI

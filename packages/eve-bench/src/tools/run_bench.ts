@@ -13,8 +13,7 @@ export const inputSchema = z
     cohort: z.string().min(1).optional(),
     tasks: z.array(z.string().min(1)).min(1).optional(),
     model: z.string().min(1).optional(),
-    harness: z.enum(["eve", "e0", "oracle", "pi", "opencode", "codex", "hermes"]).default("eve"),
-    agent: z.string().min(1).optional(),
+    harness: z.enum(["eve", "oracle", "pi", "opencode", "codex", "hermes"]).default("eve"),
     version: z.string().min(1).optional(),
     baseUrl: z.string().url().optional(),
     reasoning: z.string().min(1).optional(),
@@ -26,9 +25,6 @@ export const inputSchema = z
   .superRefine((input, ctx) => {
     if (input.harness !== "oracle" && !input.model) {
       ctx.addIssue({ code: "custom", path: ["model"], message: "model is required" });
-    }
-    if (input.harness === "e0" && !input.agent) {
-      ctx.addIssue({ code: "custom", path: ["agent"], message: "agent is required for e0" });
     }
     if (["pi", "opencode", "codex", "hermes"].includes(input.harness) && !input.version) {
       ctx.addIssue({ code: "custom", path: ["version"], message: "version is required" });

@@ -6,7 +6,6 @@ import { readCohort, readDatasetLock, type DatasetLock } from "./core/dataset.ts
 import type { Harness } from "./core/harness.ts";
 import { createEveHarness } from "./harnesses/eve/index.ts";
 import { createOracleHarness } from "./harnesses/oracle.ts";
-import { createE0Harness } from "./harnesses/e0/index.ts";
 import { createCliHarness } from "./harnesses/cli/index.ts";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,11 +80,8 @@ export function defaultJobName(label: string): string {
 export function selectHarness(
   name: string,
   eve: string,
-  options: { agent?: string; version?: string; baseUrl?: string; reasoning?: string } = {},
+  options: { version?: string; baseUrl?: string; reasoning?: string } = {},
 ): Harness {
-  if (name !== "e0" && options.agent) throw new Error("--agent is only supported by --harness e0");
-  if (name === "e0")
-    return createE0Harness({ agent: options.agent ?? "", reasoning: options.reasoning });
   if (name === "pi" || name === "opencode" || name === "codex" || name === "hermes") {
     return createCliHarness(name, {
       version: options.version ?? "",
