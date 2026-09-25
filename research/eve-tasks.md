@@ -458,9 +458,9 @@ assertion `t.calledSubagent(name, { status })` keeps its API and reads task even
 
 - **One owner per task.** The session owns every task; a workflow run owns only the sessions it
   opens with `ctx.agent`, which are not tasks. One small versioned record per task, written only
-  by applying the session's inbox messages (`tasks/table.ts`): `id`, `name`, `resumable`, `status`
-  (`working`, `idle`, or finished), the calls without a result, `turnId`, `delivered`, `creator`
-  (auth captured at start), and the cancel timestamp. A record that fails to decode fails its
+  by applying the session's inbox messages (`execution/tasks/table.ts`): `id`, `name`,
+  `resumable`, `status` (`working`, `idle`, or finished), the calls without a result, `turnId`,
+  `delivered`, `creator` (auth captured at start), and the cancel timestamp. A record that fails to decode fails its
   task ("its state could not be read"), never the session. Sessions aren't migrated.
 - **Every wait suspends.** The session is a durable workflow (`execution/session/entry.ts`) whose
   inbox is built on Workflow SDK hooks. Workflow tool calls keep today's path: the call defers out
@@ -501,8 +501,9 @@ assertion `t.calledSubagent(name, { status })` keeps its API and reads task even
   the caller's reply from one guarded site. The hold is keyed by principal, so a turn resumed
   after an approval or sign-in still holds on the parked turn's work.
 - **Guards** (`pnpm guard:invariants`): `tools/provided/**` and generated agent tools import only
-  public entry points, except the kernel's `task_wait` and `task_cancel`; only `tasks/table*.ts`
-  writes records; model text lives only in `tasks/render.ts`; one caller-reply site.
+  public entry points, except the kernel's `task_wait` and `task_cancel`; only
+  `execution/tasks/table*.ts` writes records; model text lives only in
+  `execution/tasks/render.ts`; one caller-reply site.
 
 ## 8. Removed and changed
 
@@ -538,12 +539,34 @@ templates and apps, and 18 docs pages. In internal-agents it touches 15 files wi
 
 ## 9. Delivery
 
-The work lands as a stack of pull requests managed with `gh stack`, on top of #3817 and #3700.
+The work lands as a stack of pull requests managed with `gh stack`, on top of this plan's PR.
 Each PR is one coherent step from the one below it: it passes CI on its own, updates the docs and
 fixtures for the behavior it changes, and carries a changeset (`minor` when it breaks a public
 API). Main may lack features between PRs, never correctness. **Hold the Changesets release from
 PR 1 until PR 10 merges**, so no release ships without background work and then without its
 replacement.
+
+### Implementation rules
+
+- **One large removal, then narrow steps.** PR 1 deletes background tasks wholesale, including
+  every test of them: unit, integration, scenario, and e2e. Every later PR is tight and changes
+  only what its step needs; unrelated cleanup waits for its own PR.
+- **The bar for each PR is a passing build.** `pnpm build`, `pnpm typecheck`, `pnpm lint`, and
+  `pnpm guard:invariants` pass, and CI is green. An existing test a PR breaks is updated if it
+  still describes intended behavior and deleted if it doesn't.
+- **Few tests during implementation, if any.** Don't add unit tests that restate the code just
+  written. Add a test only when a PR can't be trusted without one. Proper coverage comes after
+  the stack lands, as e2e suites where they prove behavior end to end (§10).
+- **Code quality comes first.**
+  - Write readable code, not compact code: no dense one- or two-line expressions such as nested
+    ternaries, chained callbacks that do several things, or clever reduces. Name each step.
+  - Extract a helper function wherever a step has a name, and define explicit interfaces and
+    types at module boundaries: task records, inbox commands, the received call, and agent
+    session handles.
+  - Keep related code together: the task kernel under `execution/tasks/`, its model text in one
+    renderer, and public types beside the definitions they describe.
+  - Follow `AGENTS.md`: keep it simple, comment why rather than what, add no legacy fallbacks,
+    and wrap third-party APIs.
 
 | #   | PR                            | Main after it lands                                         |
 | --- | ----------------------------- | ----------------------------------------------------------- |
@@ -556,7 +579,7 @@ replacement.
 | 7   | Resumable tasks               | `task: { resumable: true }`, `taskId`                       |
 | 8   | Agents as tasks               | Agent tools as resumable tasks; `subagent.*` removed        |
 | 9   | Slack post before a wait      | The text of a `task_wait` step is posted                    |
-| 10  | Release readiness             | Tasks guide, upgrade guide, real-model evals                |
+| 10  | Tests and release readiness   | E2E suites, real-model evals, Tasks and upgrade guides      |
 
 **1. Remove background tasks.** Delete `execution: "background"` (rejected at definition),
 `taskDeliveryPolicy`, cohorts, the `[Task state]` and `[Agents]` notes, prose notifications,
@@ -566,22 +589,18 @@ path, with `agentId` continuation unchanged. Delete the `agent-background-tools`
 `agent-task-reporting`, `agent-task-wake-policy`, and `fixture-tasks` fixtures and the background
 suites in `agent-subagents`, `agent-cancellation`, and `agent-workflow-tools`; update the docs to
 describe blocking calls only. Delete `research/background-task-wake-policy.md`, which describes
-the removed behavior. Tests: only deletions and the `execution` rejection.
+the removed behavior, and every test of background tasks.
 
 **2. Workflow tool body.** `execute(ctx)`, `ctx.receive()` with the first call from the start
 input, the second-`receive()` error, `ctx.reply()`, return and throw settlement, `callId` and
 `abortSignal` on the call, and `ctx.ask` throwing once no call waits. Migrate every workflow tool
-in the repository and the docs. Tests (integration, at the workflow body): first `receive()`
-without a step; second `receive()` throws; reply then return settles at the reply and drops the
-return.
+in the repository and the docs.
 
 **3. Steering signals.** Start with a spike commit proving an `interrupt` command on the run's
 command hook reaches the body and replays deterministically; it is the one unproven mechanism.
 Then `interruptSignal`, the steering rule for waited workflow calls, `ctx.ask(..., { signal })`
 withdrawal with `outcome: "cancelled"`, removing `dismissible`, `sleep` and `ask_question` rebuilt
-on public API, and the `tools/provided/**` guard. Tests: scenario, an `interrupt` racing a call's
-return; unit, steering fires `interruptSignal` and a body that ignores it gets the message after it
-settles; e2e (mock model), steering ends `sleep` but not an approval-gated tool.
+on public API, and the `tools/provided/**` guard.
 
 **4. Agent sessions.** `ctx.agent(name)` handles opened from the run with the caller's principal,
 capabilities, dynamic selections, and sandbox reference in the start input; `agent.started`;
@@ -593,9 +612,7 @@ model's agent tools keep the old path and `subagent.called` until PR 8. Check fi
 remote stream proxy finds the remote URL and credential key without `findRemoteSubagentBinding`
 scanning for `subagent.called` (`eve-channel/support.ts`); resolve it from the agent definition by
 `agent.started.name`, and if dynamic remote agents can't be resolved that way, record the binding
-on the run's `agent.started` step instead. Tests (integration): no request reaches the session
-inbox; `send` during a running turn joins it; a child's question reaches the root and the answer
-returns; finishing the run cancels a running turn.
+on the run's `agent.started` step instead.
 
 **5. Task kernel and the turn rule.** Task records, `task: true`, receipts, `task.started` and
 `task.settled`, `task_wait`, `task_cancel`, the `task.result` message, `[Tasks]`, the system block,
@@ -603,47 +620,58 @@ returns; finishing the run cancels a running turn.
 hard-stop timer, and the turn rule with `final_output`'s error. A held turn shows no waiting
 boundary yet: every held text step reports `"tool-calls"`, as child turns do. `agentRouter()` and
 the `workflow` program tool set `task: true`; the `execution` error gains its final wording.
-Tests: scenario, one per race (duplicate settlement, result before started, cancel before
-started, crash between record and start, hard stop racing a result, a result settling as
-`task_wait` starts or ends, steering interrupting a wait with a result in flight, a held turn per
-session kind with `session.cancel()` during one); unit, `task_wait`'s statuses and `UNKNOWN_TASK`
-cases; stream lifecycle over conformance streams; e2e, start, wait, and result for a `task: true`
-tool and the turn rule per session kind.
 
 **6. Held-turn presentation.** The waiting boundary for root sessions, `turn.completed` only at
-the real end, and `"tool-calls"` only for child and schedule turns. Tests: unit, finish reason
-per session kind; integration, MCP `agent_start` with a delegating agent reports `completed` only
-after the delegate's result.
+the real end, and `"tool-calls"` only for child and schedule turns.
 
 **7. Resumable tasks.** `task: { resumable: true }`, `taskId` on the model input and its build
 check, later calls through the run's hook, per-stretch `abortSignal`, idle tasks in the turn rule
-and `[Tasks]`, and cancel keeping the task. Tests: integration, calls reach `receive()` in order,
-a `receive()` that loses a race still gets the next call, repeated cancels each abort a fresh
-signal, a reply after a cancel never settles a newer call; scenario, a call arriving before the
-body's first `receive()`; e2e, a user-defined resumable tool continued by `taskId`.
+and `[Tasks]`, and cancel keeping the task.
 
 **8. Agents as tasks.** Agent tools rebuilt as resumable workflow tools on `ctx.agent`;
 `agentId` becomes `taskId`. Delete the old dispatch (`subagents/handle-dispatch.ts`,
 `subagents/remote-dispatch.ts`, `execution/tools/subagent/`), the four `subagent.*` events, the
 `AGENT_*` codes, and `streamSubagent(called)`. Move the client reducer, dev TUI, eval assertions,
-and hook event map to task events. Tests: a scenario where an agent message races the end of the
-agent's turn and every call gets exactly one result; #3700's delegated-session regressions and
-its `agent-subagents-hitl` eval pass unchanged for agent tools, local and remote; e2e, an agent
-continued by `taskId` across turns and after `task_cancel` with its conversation intact.
+and hook event map to task events. #3700's delegated-session regressions and its
+`agent-subagents-hitl` eval keep passing for agent tools, local and remote.
 
 **9. Slack post before a wait.** First confirm Slack's event handlers can read `ScheduleIdKey`.
-Tests (unit): a step whose only tool call is `task_wait` posts its text; a step with any other
-tool call only sets the typing status; a held text step with no tool call posts nothing; a
-schedule's turn doesn't post.
 
-**10. Release readiness.** A Tasks guide in `docs/` (the `task` choice, the ordering pattern,
-signals), the upgrade guide from §8, and the real-model evals that gate the release: waits when
-the answer is needed; fans out, then waits for every result; keeps tasks after an unrelated
-message; corrects an agent by `taskId` or cancels after a redirect; continues an agent instead of
-starting a new one; doesn't wait when told there's no rush; doesn't use a side-effect tool before
-the result it depends on. Then release, and migrate internal-agents.
+**10. Tests and release readiness.** The test pass in §10, a Tasks guide in `docs/` (the `task`
+choice, the ordering pattern, signals), and the upgrade guide from §8. Then release, and migrate
+internal-agents.
 
-## 10. Risks and accepted costs
+## 10. Tests after the stack
+
+Tests are written once the implementation has landed and the build is green, starting with e2e
+suites under the fixtures they exercise.
+
+**E2E (mock model):**
+
+- A workflow tool's result arrives as its tool result, and a tool that replies and keeps working
+  settles at the reply.
+- Steering ends `sleep` but not an approval-gated tool, and a withdrawn ask reports
+  `outcome: "cancelled"`.
+- A `task: true` tool starts, is waited on, and delivers its result; `task_cancel` stops one.
+- The turn rule in each session kind: a root session's waiting boundary, a child turn, a
+  schedule's turn, and MCP `agent_start` with a delegating agent reporting only the final reply.
+- A user-defined resumable tool is continued by `taskId`, cancelled, and continued again.
+- An agent, local and remote, is continued by `taskId` across turns and after `task_cancel` with
+  its conversation intact; a child's question is answered at the root.
+- Slack posts the text of a step whose only tool call is `task_wait`.
+
+**Real-model evals** that gate the release: waits when the answer is needed; fans out, then waits
+for every result; keeps tasks after an unrelated message; corrects an agent by `taskId` or
+cancels after a redirect; continues an agent instead of starting a new one; doesn't wait when
+told there's no rush; doesn't use a side-effect tool before the result it depends on.
+
+**Candidates beyond e2e,** decided in this pass because e2e can't hit them deterministically:
+duplicate settlement; a result before the run reports started; a cancel before it starts; a crash
+between the record and the start; a hard stop racing a result; a result settling as `task_wait`
+starts or ends; an agent message racing the end of its turn; a call arriving before the body's
+first `receive()`.
+
+## 11. Risks and accepted costs
 
 1. **One more model step per needed result** (start, then wait), and one wake per result when the
    model needs several.
