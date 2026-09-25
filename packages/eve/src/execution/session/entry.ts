@@ -1,5 +1,4 @@
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
-import { hasDelegatedCallerContext } from "#execution/session/turn.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
