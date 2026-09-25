@@ -67,8 +67,8 @@ jobs:
       group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.slug }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    # Every trial runs in parallel, so a run lasts about as long as its slowest
-    # trial (15-minute agent timeout plus preparation and verification).
+    # Trials run in at most 3 rounds per harness, so the worst case is about 3
+    # slowest trials (15-minute agent timeout plus preparation and verification).
     timeout-minutes: 90
     steps:
       # vercel/eve is public and eve-bench is private; GitHub never lets a public
@@ -87,7 +87,7 @@ jobs:
         with:
           harness: ${{ needs.request.outputs.harness }}
           agent-repository: vercel/eve
-          agent-path: packages/eve-code
+          agent-paths: '["packages/eve-code"]'
           agent-ref: ${{ needs.request.outputs.sha }}
           dataset: swe-lean
           # The PR comment's ranking tables show these plus each dimension's winner.
@@ -96,9 +96,11 @@ jobs:
           # opencode drops Gemini's tool-call thought signatures, so Gemini stops reasoning
           # after its first steps there; gpt-6-luna needs no signature to keep reasoning.
           reasoning: low
-          attempts: "1"
-          # Per harness: one sandbox per task, so all trials start at once.
-          concurrency: "8"
+          # A single attempt per task is mostly noise at 7 tasks; 5 halves the correctness
+          # interval and lets the comment report pass^5.
+          attempts: "5"
+          # Per harness: 35 trials in at most 3 rounds of sandboxes.
+          concurrency: "12"
           native-build: "false"
           # Baselines and cross-harness references resolve automatically from the
           # durable result store; only dispatch/push/schedule runs publish to it.
