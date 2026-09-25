@@ -15,6 +15,10 @@ const EVENT_TIMEOUT_MS = 30_000;
 const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
+const REMOTE_BACKGROUND_CHILD = "REMOTE_BACKGROUND_CHILD";
+const REMOTE_CHILD_REPORT = "REMOTE_CHILD_REPORT";
+const REMOTE_PROGRESS = "REMOTE_PROGRESS";
+const REMOTE_LATE_REPORT = "REMOTE_LATE_REPORT";
 
 function createScriptedParentAgentSource(subagentName: string): string {
   const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
@@ -161,6 +165,36 @@ const REMOTE_MEMORY_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   name: "remote-memory-agent",
 };
 
+const REMOTE_BACKGROUND_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
+  files: {
+    "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+const CHILD_MESSAGE = ${JSON.stringify(REMOTE_BACKGROUND_CHILD)};
+
+const model = mockModel((request) => {
+  if (request.lastUserMessage === CHILD_MESSAGE) return ${JSON.stringify(REMOTE_CHILD_REPORT)};
+  if (request.userMessages.some((message) => message.includes("Background task "))) {
+    return ${JSON.stringify(REMOTE_LATE_REPORT)};
+  }
+  const result = request.toolResults.find((entry) => entry.id === "background-child");
+  if (result === undefined) {
+    return {
+      toolCalls: [{ id: "background-child", input: { message: CHILD_MESSAGE }, name: "agent" }],
+    };
+  }
+  return ${JSON.stringify(REMOTE_PROGRESS)};
+});
+
+export default defineAgent({ model, modelContextWindowTokens: 32_000 });
+`,
+    "agent/channels/eve.ts": AUTHENTICATED_EVE_CHANNEL_SOURCE,
+    "agent/instructions.md": "Delegate the requested work, then return its completed report.\n",
+  },
+  installDependencies: true,
+  name: "remote-background-agent",
+};
+
 function createRemoteAgentMessagingDescriptor(remoteUrl: string): ScenarioAppDescriptor {
   return {
     files: {
@@ -180,6 +214,49 @@ export default defineRemoteAgent({
     },
     installDependencies: true,
     name: "remote-agent-messaging",
+  };
+}
+
+function createRemoteBackgroundCallerDescriptor(remoteUrl: string): ScenarioAppDescriptor {
+  const program = `return ctx.agent("remote-background-child", { message: "Produce the report." });`;
+  return {
+    files: {
+      "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+const model = mockModel((request) => {
+  const result = request.toolResults.find((entry) => entry.id === "remote-background-call");
+  if (result === undefined) {
+    return {
+      toolCalls: [
+        {
+          id: "remote-background-call",
+          input: { js: ${JSON.stringify(program)} },
+          name: "run-program",
+        },
+      ],
+    };
+  }
+  return \`CALLER_GOT=\${String(result.output)}\`;
+});
+
+export default defineAgent({ model, modelContextWindowTokens: 32_000 });
+`,
+      "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
+      "agent/instructions.md": "Return the completed remote report.\n",
+      "agent/tools/run-program.ts": createWorkflowProgramToolSource(),
+      "agent/subagents/remote-background-child.ts": `import { defineRemoteAgent } from "eve";
+import { bearer } from "eve/agents/auth";
+
+export default defineRemoteAgent({
+  auth: bearer(${JSON.stringify(REMOTE_MEMORY_TOKEN)}),
+  description: "Produce a report using background research.",
+  url: ${JSON.stringify(remoteUrl)},
+});
+`,
+    },
+    installDependencies: true,
+    name: "remote-background-caller",
   };
 }
 
@@ -248,6 +325,71 @@ describe("agent messaging", () => {
           );
         } finally {
           await parentServer.stop();
+        }
+      } finally {
+        await remoteServer.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "waits for a remote agent's background work before returning its report",
+    async () => {
+      const remoteApp = await scenarioApp(REMOTE_BACKGROUND_AGENT_DESCRIPTOR);
+      const remoteServer = await startScriptedEveDev(remoteApp.appRoot);
+
+      try {
+        const callerApp = await scenarioApp(
+          createRemoteBackgroundCallerDescriptor(remoteServer.url),
+        );
+        const callerServer = await startScriptedEveDev(callerApp.appRoot);
+
+        try {
+          const callerClient = new Client({ host: callerServer.url });
+          const { response } = await callerClient.sessions.create({
+            message: "Return the completed remote report.",
+          });
+          const callerTurn = await response.result();
+          const calls = filterEventsByType(callerTurn.events, "subagent.called");
+          expect(calls).toHaveLength(1);
+          const remoteSessionId = calls[0]?.data.childSessionId;
+          if (remoteSessionId === undefined) {
+            throw new Error("Remote subagent call did not include a child session id.");
+          }
+
+          const remoteClient = new Client({
+            auth: { bearer: REMOTE_MEMORY_TOKEN },
+            host: remoteServer.url,
+          });
+          await collectStreamUntil({
+            label: "remote background report",
+            predicate: (event) =>
+              event.type === "message.completed" && event.data.message === REMOTE_LATE_REPORT,
+            stream: remoteClient.sessions.attach(remoteSessionId).stream({ follow: true }),
+          });
+          const remoteEvents = await collectStreamToEnd({
+            label: "remote background session history",
+            stream: remoteClient.sessions.attach(remoteSessionId).stream({ follow: false }),
+          });
+          expect(
+            filterEventsByType(remoteEvents, "message.completed").map(
+              (event) => event.data.message,
+            ),
+          ).toContain(REMOTE_LATE_REPORT);
+          expect(callerTurn.message).toBe(`CALLER_GOT=${REMOTE_LATE_REPORT}`);
+        } catch (error) {
+          throw new Error(
+            [
+              `caller stdout:\n${callerServer.stdout()}`,
+              `caller stderr:\n${callerServer.stderr()}`,
+              `remote stdout:\n${remoteServer.stdout()}`,
+              `remote stderr:\n${remoteServer.stderr()}`,
+            ].join("\n\n"),
+            { cause: error },
+          );
+        } finally {
+          await callerServer.stop();
         }
       } finally {
         await remoteServer.stop();
@@ -350,6 +492,35 @@ async function collectStreamToEnd(input: {
     if (timeout !== undefined) {
       clearTimeout(timeout);
     }
+  }
+}
+
+async function collectStreamUntil(input: {
+  readonly label: string;
+  readonly predicate: (event: HandleMessageStreamEvent) => boolean;
+  readonly stream: AsyncIterable<HandleMessageStreamEvent>;
+}): Promise<readonly HandleMessageStreamEvent[]> {
+  const events: HandleMessageStreamEvent[] = [];
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      (async () => {
+        for await (const event of input.stream) {
+          events.push(event);
+          if (input.predicate(event)) return events;
+        }
+        throw new Error(`Stream ended before ${input.label}.`);
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`Timed out waiting for ${input.label}.`)),
+          EVENT_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
