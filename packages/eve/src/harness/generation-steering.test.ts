@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import {
   createMessageAppendedEvent,
-  createMessageCompletedEvent,
   createReasoningAppendedEvent,
   createInputRequestedEvent,
   createStepFailedEvent,
@@ -25,15 +24,6 @@ describe("GenerationSteering", () => {
     generation.beforeEvent(
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_0",
-      }),
-    );
-    generation.beforeEvent(
-      createMessageCompletedEvent({
-        message: null,
-        finishReason: "tool-calls",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_0",

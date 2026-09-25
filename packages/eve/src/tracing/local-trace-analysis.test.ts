@@ -144,7 +144,7 @@ describe("analyzeLocalTrace", () => {
     expect(analysis.records[0]).toMatchObject({ category: "tool", toolName: "web_search" });
   });
 
-  it("preserves a background action lifetime without adding it to tool work", () => {
+  it("preserves a subagent action lifetime without adding it to tool work", () => {
     const analysis = analyzeLocalTrace(traceId, [
       span({
         attributes: { "agent.action.kind": "subagent-call", "agent.action.name": "worker" },

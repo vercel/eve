@@ -70,11 +70,7 @@ describe.sequential("sandbox-bundling Vercel deployment integration", () => {
 
 function expectAtLeastOneAssistantTextEvent(events: readonly MessageStreamEvent[]): void {
   for (const event of events) {
-    if (
-      event.type === "message.completed" &&
-      event.data.message !== null &&
-      event.data.message.trim().length > 0
-    ) {
+    if (event.type === "message.completed" && event.data.message.trim().length > 0) {
       return;
     }
   }

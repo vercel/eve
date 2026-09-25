@@ -7,7 +7,6 @@ import {
   isWorkflowToolDefinition,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
-  type TaskReceipt,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -70,23 +69,18 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
-  it("provides progress yields and receipt projections for background workflows", () => {
-    const definition = defineWorkflowTool({
+  it("rejects the removed execution option", () => {
+    const definition = {
       description: "Report a deployment",
       execution: "background",
       inputSchema: z.object({ service: z.string() }),
-      async *execute(input, ctx) {
-        expectTypeOf(input).toEqualTypeOf<{ service: string }>();
-        expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
-        yield { status: "planning" };
-        return { deployed: input.service };
+      async execute() {
+        return null;
       },
-      toModelOutput(receipt) {
-        expectTypeOf(receipt).toEqualTypeOf<TaskReceipt>();
-        return { type: "text", value: receipt.taskId };
-      },
-    });
-    expect(isWorkflowToolDefinition(definition)).toBe(true);
+    };
+    expect(() => defineWorkflowTool(definition)).toThrow(
+      '"execution" was removed; workflow tool calls now block until they settle.',
+    );
   });
 
   it("keeps workflow capabilities off ordinary tools and top-level exports", () => {

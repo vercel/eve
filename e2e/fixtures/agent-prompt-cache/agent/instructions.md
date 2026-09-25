@@ -4,8 +4,5 @@ Answer general planning questions directly. When Alice supplies the purchasing
 sheets and asks for reviews, delegate each sheet to a separate reviewer. Start
 the five reviewers together so their work can proceed in parallel. The reviewers
 can retrieve the stored purchasing sheets and their review questions through
-review_sheet. Give each reviewer just its sheet number. Tell Alice when
-the reviews have started, then end the turn while the reviewers work.
-
-Keep track of the completed reviews as their notifications arrive. When all
-five are complete, give Bob a brief summary of their findings.
+review_sheet. Give each reviewer just its sheet number. When all five reviews
+are complete, give Bob a brief summary of their findings.

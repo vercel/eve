@@ -11,12 +11,8 @@ import {
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
 import type { SessionInboxPayload, SessionInboxReader } from "#execution/session-inbox/inbox.js";
-import {
-  admitSessionInboxPayload,
-  applySessionCancellation,
-} from "#execution/session/admission.js";
+import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
@@ -90,7 +86,6 @@ export class SessionExecution {
 
     while (true) {
       const { cursor } = this.input;
-      const beforeStepContext = cursor.serializedContext;
       const result: DurableStepResult = await turnStep(
         cursor.createStepInput(nextStepInput, {
           abortSignal: turn.signal,
@@ -99,36 +94,17 @@ export class SessionExecution {
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
-      const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
-
-      if (hasBackgroundTasks) {
-        if (result.backgroundTaskState === undefined) {
-          throw new Error("Background tasks were returned without their committed session state.");
-        }
-        await cursor.apply({
-          serializedContext: result.backgroundTaskContext ?? beforeStepContext,
-          sessionState: result.backgroundTaskState,
-        });
-        await acknowledgeDelegatedTasksStep({ tasks: result.backgroundTasks ?? [] });
-      }
 
       await cursor.apply({
         serializedContext: result.serializedContext,
-        sessionState:
-          result.action === "cancelled" || (!turnCompleted && turn.signal.aborted)
-            ? (result.backgroundTaskState ?? result.sessionState)
-            : result.sessionState,
+        sessionState: result.sessionState,
       });
       await turn.admitBoundary();
       turn.resetSteering();
 
       if (result.action === "cancelled") return await this.finishCancelledTurn();
-      if (
-        !turnCompleted &&
-        turn.signal.aborted &&
-        (pendingCallIds === undefined || hasBackgroundTasks)
-      ) {
+      if (!turnCompleted && turn.signal.aborted && pendingCallIds === undefined) {
         return await this.finishCancelledTurn();
       }
 
@@ -314,10 +290,7 @@ class ActiveTurn {
       isSteeringDelivery(delivery, this.callerCallId) &&
       !this.input.cursor.sessionState.hasProxyInputRequests &&
       delivery.payloads.some(
-        (value) =>
-          value.message !== undefined &&
-          value.inputResponses === undefined &&
-          value.task === undefined,
+        (value) => value.message !== undefined && value.inputResponses === undefined,
       )
     )
       this.steeringController.abort();
@@ -405,9 +378,7 @@ class ActiveTurn {
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return;
       case "cancel":
-        if (!this.cancelsThisTurn(value)) return;
-        await applySessionCancellation(admitted.command, this.input);
-        this.abort();
+        if (this.cancelsThisTurn(value)) this.abort();
         return;
       case "consumed":
         return;

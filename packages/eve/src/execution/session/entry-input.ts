@@ -21,7 +21,6 @@ export interface InitialWorkflowEntryInput {
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
-  readonly taskId?: string;
 }
 
 /** A successor owner started by a previous owner during a deployment handoff. */

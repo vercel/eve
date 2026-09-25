@@ -139,27 +139,6 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("retains a background task identity beside an opaque parent reply hook", () => {
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: makeSession(),
-      taskId: "task-1",
-      parent: makeParent(
-        makeSession(),
-        { id: "turn-0", sequence: 0 },
-        { continuationToken: "invocation-reply-hook" },
-      ),
-    });
-
-    expect(runInput.adapter.state).toMatchObject({
-      parentContinuationToken: "invocation-reply-hook",
-      taskId: "task-1",
-    });
-    expect(runInput.taskId).toBe("task-1");
-  });
-
   it("forwards channelMetadata to the child run input", () => {
     const projection = {
       kind: "channel:slack",

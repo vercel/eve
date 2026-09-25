@@ -30,11 +30,7 @@ function preToolNarration(events: readonly MessageStreamEvent[]): string | undef
 
   for (let index = actionRequestIndex - 1; index >= 0; index -= 1) {
     const event = events[index];
-    if (
-      event?.type === "message.completed" &&
-      event.data.finishReason === "tool-calls" &&
-      event.data.message !== null
-    ) {
+    if (event?.type === "message.completed" && event.data.finishReason === "tool-calls") {
       return firstNonEmptyLine(event.data.message);
     }
   }

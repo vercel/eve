@@ -5,10 +5,8 @@ import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import { readRetainedBackgroundToolResult } from "#execution/tasks/parent/tool-execution.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
-import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 
 export interface CompletedModelCallCheckpoint {
@@ -25,12 +23,7 @@ export async function createCancelledModelCallBatchResult(input: {
   readonly stepInput: StepInput | undefined;
 }): Promise<DurableStepResult> {
   const interruptedContext = serializeContext(input.ctx);
-  const retained = readRetainedBackgroundToolResult(input.ctx);
-  const backgroundTaskSession =
-    retained?.backgroundTaskSession ?? input.checkpoint?.result.backgroundTaskSession;
-  const backgroundTasks = retained?.backgroundTasks ?? input.checkpoint?.result.backgroundTasks;
-  const checkpointSession =
-    backgroundTaskSession ?? input.checkpoint?.result.session ?? input.initialSession;
+  const checkpointSession = input.checkpoint?.result.session ?? input.initialSession;
   const cancelledSession =
     input.checkpoint === undefined
       ? await contextStorage.run(input.ctx, () =>
@@ -44,17 +37,6 @@ export async function createCancelledModelCallBatchResult(input: {
 
   return {
     action: "cancelled",
-    ...(backgroundTaskSession === undefined || backgroundTasks === undefined
-      ? {}
-      : {
-          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
-            input.beforeBatchContext,
-            interruptedContext,
-            backgroundTasks,
-          ),
-          backgroundTaskState: createDurableSessionState({ session: cancelledSession }),
-          backgroundTasks,
-        }),
     serializedContext: preserveSerializedInstrumentationState(
       preserveSerializedAgentTraceState(
         preserveSerializedSessionDynamicModelSelection(checkpointContext, interruptedContext),

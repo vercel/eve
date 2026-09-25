@@ -235,7 +235,6 @@ describe("chatSdkChannel", () => {
         auth: AUTH,
         thread,
         title: "mention",
-        taskDeliveryPolicy: "cohort",
       });
     });
 
@@ -259,7 +258,6 @@ describe("chatSdkChannel", () => {
         },
       },
       title: "mention",
-      taskDeliveryPolicy: "cohort",
     });
   });
 

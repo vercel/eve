@@ -10,11 +10,8 @@ import {
   readDurableSession,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
-import {
-  createSessionEventSink,
-  type PublishedSessionEvent,
-} from "#execution/session/event-sink.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { createSessionEventSink } from "#execution/session/event-sink.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 /** Publishes a subagent notification, then runs its hooks without model preparation. */
@@ -31,11 +28,10 @@ export async function emitSubagentEventStep(input: {
 
   const ctx = await deserializeContext(input.serializedContext);
   const bundle = ctx.require(BundleKey);
-  const publish = async (): Promise<PublishedSessionEvent> => {
+  const publish = async (): Promise<MessageStreamEvent> => {
     const sink = createSessionEventSink({
       adapter: ctx.require(ChannelKey),
       ctx,
-      isFirstTurn: input.sessionState.emissionState.sequence === 0,
       sessionWritable: input.sessionWritable,
       sessionId: input.sessionState.sessionId,
     });
@@ -65,9 +61,7 @@ export async function emitSubagentEventStep(input: {
   });
   const scoped = await withContextScope(ctx, session, async (enriched) => {
     const emitted = await publish();
-    if (!emitted.suppressed) {
-      await dispatchStreamEventHooks({ ctx, registry, event: emitted.event });
-    }
+    await dispatchStreamEventHooks({ ctx, registry, event: emitted });
     return { result: undefined, session: enriched };
   });
   return {

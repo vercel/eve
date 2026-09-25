@@ -54,16 +54,11 @@ describe("workflow step authorization", () => {
     });
   }, 60_000);
 
-  it.each([
-    { background: false, service: "interactive" },
-    { background: true, service: "interactive" },
-    { background: false, service: "retry" },
-  ])(
-    "parks on its own callback and resumes the step (background=$background, service=$service)",
-    async ({ background, service }) => {
+  it.each(["interactive", "retry"])(
+    "parks on its own callback and resumes the step (service=%s)",
+    async (service) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth",
-        background,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });

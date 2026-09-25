@@ -120,8 +120,7 @@ export const runtimeRemoteAgentDispatchRequestSchema = z
 
 /**
  * One workflow task requested by the harness. The turn owner starts the
- * durable run named by `workflowId`; blocking tools wait for its result,
- * while background tools settle after task admission.
+ * durable run named by `workflowId` and waits for its result.
  *
  * Tasks are the coordination contract for authored workflow tools and
  * subagents. They are intentionally separate from `RuntimeActionRequest`.
@@ -242,17 +241,8 @@ const runtimeToolResultActionResultSchema = z
  * field. `usage`
  * carries the turn's token spend so the caller can attribute the
  * subagent's tokens.
- *
- * `backgroundTask` marks the one parent-produced exception: delegated
- * dispatch resolves the model's tool call with a parked task receipt before
- * the child settles. Stream consumers use the marker to keep child lifecycle
- * open while still recording the receipt as the tool result.
  */
 export interface RuntimeSubagentChildResult {
-  readonly backgroundTask?: {
-    readonly status: "working";
-    readonly taskId: string;
-  };
   readonly callId: string;
   readonly isError?: boolean;
   readonly kind: "subagent-result";
@@ -264,12 +254,6 @@ export interface RuntimeSubagentChildResult {
 }
 
 const runtimeSubagentChildResultFields = {
-  backgroundTask: z
-    .strictObject({
-      status: z.literal("working"),
-      taskId: z.string(),
-    })
-    .optional(),
   callId: z.string(),
   isError: z.boolean().optional(),
   kind: z.literal("subagent-result"),
@@ -281,12 +265,6 @@ const runtimeSubagentChildResultFields = {
 /** Token-only subagent result schema retained for historical wire formats. */
 export const runtimeSubagentChildResultSchema = z
   .object({
-    backgroundTask: z
-      .strictObject({
-        status: z.literal("working"),
-        taskId: z.string(),
-      })
-      .optional(),
     callId: z.string(),
     isError: z.boolean().optional(),
     kind: z.literal("subagent-result"),

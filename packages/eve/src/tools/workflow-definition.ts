@@ -13,12 +13,6 @@ import {
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
-/** Fixed acknowledgement returned when a background task is admitted. */
-export interface TaskReceipt {
-  readonly status: "working";
-  readonly taskId: string;
-}
-
 export interface AgentInput {
   readonly agentId?: string;
   readonly message: string;
@@ -105,51 +99,20 @@ export type WorkflowToolContext = Pick<
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
 
 /** A static tool whose executor runs as a durable workflow. Its executor must start with "use workflow". */
-export interface BlockingWorkflowToolDefinition<
+export interface WorkflowToolDefinition<
   TInput = unknown,
   TOutput = unknown,
 > extends PublicToolDefinition<TInput, TOutput> {
   readonly [WORKFLOW_TOOL_BRAND]: true;
-  readonly execution?: never;
   execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
-export type BackgroundWorkflowToolDefinition<TInput, TOutput> = PublicToolDefinition<
-  TInput,
-  TaskReceipt
-> & {
-  readonly [WORKFLOW_TOOL_BRAND]: true;
-  readonly execution: "background";
-  execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<unknown>;
-  approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
-  toModelOutput?: (output: TaskReceipt) => ToolModelOutput | Promise<ToolModelOutput>;
-};
-
-/** A static tool whose executor runs as a durable workflow. */
-export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
-  | BlockingWorkflowToolDefinition<TInput, TOutput>
-  | BackgroundWorkflowToolDefinition<TInput, TOutput>;
-
-type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
-type BackgroundReturn<T> =
-  T extends AsyncGenerator<unknown, infer Output>
-    ? Output
-    : T extends AsyncIterable<unknown>
-      ? null
-      : Awaited<T>;
-type BackgroundDefinition<TInput, TReturn> = Omit<
-  BackgroundWorkflowToolDefinition<TInput, BackgroundReturn<TReturn>>,
-  typeof WORKFLOW_TOOL_BRAND | "execute"
-> & {
-  execute(input: TInput, ctx: WorkflowToolContext): TReturn;
-};
-
 type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
 type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
 type Definition<TInput, TReturn> = Omit<
-  BlockingWorkflowToolDefinition<TInput, WorkflowReturn<TReturn>>,
+  WorkflowToolDefinition<TInput, WorkflowReturn<TReturn>>,
   typeof WORKFLOW_TOOL_BRAND | "execute"
 > & {
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
@@ -169,7 +132,7 @@ export function defineWorkflowTool<
     inputSchema: TInputSchema;
     outputSchema: TOutputSchema;
   },
-): BlockingWorkflowToolDefinition<
+): WorkflowToolDefinition<
   StandardSchemaV1.InferOutput<TInputSchema>,
   StandardJSONSchemaV1.InferOutput<TOutputSchema>
 >;
@@ -177,34 +140,22 @@ export function defineWorkflowTool<
   TSchema extends Schema,
   TReturn extends Promise<unknown> | AsyncIterable<unknown>,
 >(
-  definition: Omit<
-    BackgroundDefinition<StandardSchemaV1.InferOutput<TSchema>, TReturn>,
-    "inputSchema"
-  > & { inputSchema: TSchema },
-): BackgroundWorkflowToolDefinition<
-  StandardSchemaV1.InferOutput<TSchema>,
-  BackgroundReturn<TReturn>
->;
-export function defineWorkflowTool<TReturn extends Promise<unknown> | AsyncIterable<unknown>>(
-  definition: BackgroundDefinition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
-): BackgroundWorkflowToolDefinition<Record<string, unknown>, BackgroundReturn<TReturn>>;
-export function defineWorkflowTool<
-  TSchema extends Schema,
-  TReturn extends Promise<unknown> | AsyncIterable<unknown>,
->(
   definition: Omit<Definition<StandardSchemaV1.InferOutput<TSchema>, TReturn>, "inputSchema"> & {
     inputSchema: TSchema;
   },
-): BlockingWorkflowToolDefinition<StandardSchemaV1.InferOutput<TSchema>, WorkflowReturn<TReturn>>;
+): WorkflowToolDefinition<StandardSchemaV1.InferOutput<TSchema>, WorkflowReturn<TReturn>>;
 export function defineWorkflowTool<TReturn extends Promise<unknown> | AsyncIterable<unknown>>(
   definition: Definition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
-): BlockingWorkflowToolDefinition<Record<string, unknown>, WorkflowReturn<TReturn>>;
+): WorkflowToolDefinition<Record<string, unknown>, WorkflowReturn<TReturn>>;
 export function defineWorkflowTool<TInput = unknown, TOutput = unknown>(
-  definition: Unbranded<WorkflowToolDefinition<TInput, TOutput>>,
+  definition: Omit<WorkflowToolDefinition<TInput, TOutput>, typeof WORKFLOW_TOOL_BRAND>,
 ): WorkflowToolDefinition<TInput, TOutput>;
 export function defineWorkflowTool<TInput, TOutput>(
-  definition: Unbranded<WorkflowToolDefinition<TInput, TOutput>>,
+  definition: Omit<WorkflowToolDefinition<TInput, TOutput>, typeof WORKFLOW_TOOL_BRAND>,
 ): WorkflowToolDefinition<TInput, TOutput> {
+  if ("execution" in definition) {
+    throw new Error('"execution" was removed; workflow tool calls now block until they settle.');
+  }
   stampToolDefinition(definition, "defineWorkflowTool");
   return Object.assign(definition, { [WORKFLOW_TOOL_BRAND]: true as const });
 }

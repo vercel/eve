@@ -13,7 +13,6 @@ import {
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
-  TaskDeliveryPolicyKey,
   SessionTitleKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -156,22 +155,6 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
 }
 
 describe("buildRunContext", () => {
-  it.each([undefined, "auto", "cohort"] as const)(
-    "resolves an ordinary send policy %s",
-    (taskDeliveryPolicy) => {
-      const ctx = buildRunContext({
-        bundle: createMinimalBundle(),
-        run: {
-          auth: null,
-          adapter: { kind: "http" },
-          input: { message: "Report" },
-          taskDeliveryPolicy,
-        },
-      });
-      expect(ctx.get(TaskDeliveryPolicyKey)).toBe(taskDeliveryPolicy ?? "auto");
-    },
-  );
-
   it.each([undefined, testAuth])(
     "defers prewarm initiator identity unless explicitly forwarded (%s)",
     (initiatorAuth) => {
@@ -239,10 +222,9 @@ describe("buildRunContext", () => {
     expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
   });
 
-  it("inherits schedule provenance but not its delivery policy in child sessions", () => {
+  it("inherits schedule provenance in child sessions", () => {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, "automatic-reports");
-    scope.set(TaskDeliveryPolicyKey, "auto");
     const ctx = contextStorage.run(scope, () =>
       buildRunContext({
         bundle: createMinimalBundle(),
@@ -260,7 +242,6 @@ describe("buildRunContext", () => {
       }),
     );
     expect(ctx.require(ScheduleIdKey)).toBe("automatic-reports");
-    expect(ctx.get(TaskDeliveryPolicyKey)).toBe("cohort");
   });
 
   it("stores a title only for top-level sessions", () => {

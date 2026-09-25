@@ -59,22 +59,13 @@ describe("workflowEntry integration", () => {
                 state: {
                   ...session.state,
                   "eve.workflowTool": {
-                    version: 3,
+                    version: 4,
                     runs: [
                       {
-                        callId: "task",
+                        callId: "call",
                         toolName: "research",
-                        lifetime: "session" as const,
                         origin: { turnId: "turn", stepIndex: 0 },
                         address: { runId: "run", hookToken: 42 },
-                        task: {
-                          taskId: "task",
-                          metadata: { kind: "tool", name: "research" },
-                          outcome: {
-                            status: "cancelled",
-                          },
-                          dispatchContext: { auth: { current: null, initiator: null } },
-                        },
                       },
                     ],
                   },

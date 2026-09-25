@@ -12,13 +12,11 @@ vi.mock("#subagents/remote-dispatch.js", () => ({
 
 import { startRemoteSubagent } from "#subagents/start-remote.js";
 
-const taskObserver = {
+const parentObserver = {
   sink: { url: "https://parent.example/activity", version: 1 as const },
   workIdentity: {
-    id: "work:task",
-    kind: "task" as const,
-    name: "research-task",
-    parentId: "work:root",
+    id: "work:root",
+    kind: "root-turn" as const,
     rootSessionId: "root-session",
     rootTurnId: "root-turn",
   },
@@ -27,7 +25,7 @@ const taskObserver = {
 describe("startRemoteSubagent", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("derives a child identity when no task-owned observer is supplied", async () => {
+  it("derives a child identity beneath the parent observer", async () => {
     await startRemoteSubagent({
       action: {
         callId: "call-remote",
@@ -38,7 +36,7 @@ describe("startRemoteSubagent", () => {
         nodeId: "remoteAgents/research",
         remoteAgentName: "research",
       },
-      activityObserver: taskObserver,
+      activityObserver: parentObserver,
       auth: null,
       batchEvent: { sequence: 0, turnId: "parent-turn" },
       bundle: { subagentRegistry: { subagentsByNodeId: new Map() } },
@@ -58,23 +56,21 @@ describe("startRemoteSubagent", () => {
         traceContext: undefined,
       },
       session: { sessionId: "parent-session" },
-      taskId: "task-1",
     } as never);
 
     expect(startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
         activityObserver: {
-          sink: taskObserver.sink,
+          sink: parentObserver.sink,
           workIdentity: expect.objectContaining({
             callId: "call-remote",
             kind: "remote-agent",
             name: "research",
-            parentId: taskObserver.workIdentity.id,
+            parentId: parentObserver.workIdentity.id,
             rootSessionId: "root-session",
             rootTurnId: "root-turn",
           }),
         },
-        taskId: "task-1",
       }),
     );
   });

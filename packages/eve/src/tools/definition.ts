@@ -30,13 +30,10 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   options: ToolExecuteOptions,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
-export type ToolExecution = "background";
-
 interface ToolDefinitionBase {
   /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
   readonly availableInSubagents?: boolean;
   readonly description: string;
-  readonly execution?: ToolExecution;
 }
 
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
@@ -208,7 +205,6 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   TInput,
   TOutput
 > {
-  readonly execution?: never;
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -344,11 +340,6 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
-  if ("execution" in definition && definition.execution !== undefined) {
-    throw new Error(
-      'defineTool: "execution" is not supported. Use defineWorkflowTool for background work.',
-    );
-  }
   return stampToolDefinition(definition, "defineTool");
 }
 

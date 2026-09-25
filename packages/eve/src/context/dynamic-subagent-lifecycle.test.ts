@@ -157,7 +157,7 @@ describe("dynamic subagent lifecycle", () => {
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeUndefined();
   });
 
-  it("runs every dynamic local and remote selection in the background", async () => {
+  it("runs every dynamic local and remote selection as a workflow tool", async () => {
     const ctx = createContext();
     const created = createResolver({ eventNames: ["session.started", "turn.started"] });
     const resolver: ResolvedDynamicSubagentResolver = {
@@ -165,7 +165,7 @@ describe("dynamic subagent lifecycle", () => {
       events: {
         "session.started": () =>
           defineAgent({
-            description: "Research in the background.",
+            description: "Research the request.",
             model: "openai/gpt-5.5",
             modelContextWindowTokens: 200_000,
           }),
@@ -183,7 +183,9 @@ describe("dynamic subagent lifecycle", () => {
       messages: [],
       resolvers: [resolver],
     });
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
+      "workflow//eve//subagentToolExecuteWorkflow",
+    );
     expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
 
     await dispatchDynamicSubagentEvent({
@@ -192,7 +194,9 @@ describe("dynamic subagent lifecycle", () => {
       messages: [],
       resolvers: [resolver],
     });
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
+      "workflow//eve//subagentToolExecuteWorkflow",
+    );
     expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
   });
 
@@ -204,7 +208,7 @@ describe("dynamic subagent lifecycle", () => {
       events: {
         "session.started": () =>
           defineAgent({
-            description: "Research in the background.",
+            description: "Research the request.",
             model: "openai/gpt-5.5",
             modelContextWindowTokens: 200_000,
           }),
@@ -218,7 +222,9 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
 
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
+      "workflow//eve//subagentToolExecuteWorkflow",
+    );
   });
 
   it("lets a turn-scoped agent config switch the subagent model", async () => {
@@ -270,7 +276,7 @@ describe("dynamic subagent lifecycle", () => {
     });
   });
 
-  it("runs dynamic local selections in the background", async () => {
+  it("runs dynamic local selections as workflow tools", async () => {
     const ctx = createContext();
     const selected = defineAgent({
       description: "Research the request.",
@@ -286,7 +292,9 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [created.resolver],
     });
 
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
+      "workflow//eve//subagentToolExecuteWorkflow",
+    );
   });
 
   it("exposes a remote subagent with the returned remote config", async () => {
@@ -372,7 +380,7 @@ describe("dynamic subagent lifecycle", () => {
     });
   });
 
-  it("runs dynamic remote selections in the background", async () => {
+  it("runs dynamic remote selections as workflow tools", async () => {
     const ctx = createContext();
     const remoteAgent = defineRemoteAgent({
       description: "Research on the remote deployment.",
@@ -387,7 +395,9 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [created.resolver],
     });
 
-    expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
+      "workflow//eve//subagentToolExecuteWorkflow",
+    );
   });
 
   it("omits an invalid non-null result", async () => {

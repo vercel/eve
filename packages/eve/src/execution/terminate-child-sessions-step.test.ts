@@ -3,14 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 const COMPILED_BUNDLE = {
   subagentRegistry: { subagentsByNodeId: new Map() },
 };
 
 const {
-  cancelOwnedTaskMock,
   cancelRunMock,
   deserializeContextMock,
   getWorldMock,
@@ -21,7 +19,6 @@ const {
   resolveRemoteAgentStreamHeadersMock,
   resolveEffectiveAgentRuntimeMock,
 } = vi.hoisted(() => ({
-  cancelOwnedTaskMock: vi.fn(),
   cancelRunMock: vi.fn(),
   deserializeContextMock: vi.fn(),
   getWorldMock: vi.fn(),
@@ -50,9 +47,6 @@ vi.mock("#subagents/remote-dispatch.js", () => ({
   resolveRemoteAgentForAction: resolveRemoteAgentForActionMock,
   resolveRemoteAgentStreamHeaders: resolveRemoteAgentStreamHeadersMock,
 }));
-vi.mock("#execution/tasks/parent/dispatch.js", () => ({
-  cancelOwnedTask: cancelOwnedTaskMock,
-}));
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: cancelRunMock,
   getWorld: getWorldMock,
@@ -60,10 +54,6 @@ vi.mock("#internal/workflow/runtime.js", () => ({
 
 describe("terminateChildSessionsStep", () => {
   beforeEach(() => {
-    cancelOwnedTaskMock.mockReset();
-    cancelOwnedTaskMock.mockImplementation(
-      async ({ entry }: { entry: BackgroundWorkflowToolRun }) => cancelledView(entry),
-    );
     cancelRunMock.mockReset();
     cancelRunMock.mockResolvedValue(undefined);
     deserializeContextMock.mockReset();
@@ -245,91 +235,6 @@ describe("terminateChildSessionsStep", () => {
     });
   });
 
-  it("settles every indexed task cancellation before terminating local children", async () => {
-    const firstCancellation = createDeferred();
-    const secondCancellation = createDeferred();
-    const order: string[] = [];
-    cancelOwnedTaskMock
-      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) => {
-        await firstCancellation.promise;
-        order.push("task-1-settled");
-        return cancelledView(entry);
-      })
-      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) => {
-        await secondCancellation.promise;
-        order.push("task-2-settled");
-        return cancelledView(entry);
-      });
-    cancelRunMock.mockImplementation(async () => {
-      order.push("child-cancelled");
-    });
-
-    const termination = terminateChildSessionsStep({
-      serializedContext: { context: "serialized" },
-      sessionState: makeSessionState(
-        [runningHandle({ id: "ag_local:1", kind: "agent/local", sessionId: "session-local" })],
-        [indexedTask("task-1"), indexedTask("task-2")],
-      ),
-    });
-
-    await vi.waitFor(() => expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(1));
-    expect(cancelRunMock).not.toHaveBeenCalled();
-
-    firstCancellation.resolve();
-    await vi.waitFor(() => expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2));
-    expect(order).toEqual(["task-1-settled"]);
-    expect(cancelRunMock).not.toHaveBeenCalled();
-
-    secondCancellation.resolve();
-    await termination;
-
-    expect(order).toEqual(["task-1-settled", "task-2-settled", "child-cancelled"]);
-    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
-      cancelReason: "Parent session ended",
-    });
-  });
-
-  it("continues finalization after an indexed task cancellation fails", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    cancelOwnedTaskMock
-      .mockRejectedValueOnce(new Error("task cancellation unavailable"))
-      .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) =>
-        cancelledView(entry),
-      );
-
-    try {
-      await expect(
-        terminateChildSessionsStep({
-          serializedContext: { context: "serialized" },
-          sessionState: makeSessionState(
-            [
-              parkedHandle({
-                id: "ag_local:1",
-                kind: "agent/local",
-                sessionId: "session-local",
-              }),
-            ],
-            [indexedTask("task-1"), indexedTask("task-2")],
-          ),
-        }),
-      ).resolves.toBeUndefined();
-
-      expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
-      expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
-        cancelReason: "Parent session ended",
-      });
-      expect(errorSpy).toHaveBeenCalledWith(
-        "[eve:execution.cancel-indexed-session-tasks] failed to cancel indexed task",
-        expect.objectContaining({
-          parentSessionId: "parent-session",
-          taskId: "task-1",
-        }),
-      );
-    } finally {
-      errorSpy.mockRestore();
-    }
-  });
-
   it("continues terminating children after one termination fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     cancelRunMock
@@ -433,31 +338,7 @@ function startingHandle(input: {
   };
 }
 
-function indexedTask(taskId: string): BackgroundWorkflowToolRun {
-  return {
-    callId: taskId,
-    toolName: {
-      kind: "tool",
-      name: "research",
-    }.name,
-    lifetime: "session" as const,
-    origin: { turnId: "turn-1", stepIndex: 0 },
-    address: { runId: `run-${taskId}`, hookToken: `${taskId}:inbox` },
-    task: {
-      dispatchContext: { auth: { current: null, initiator: null } },
-      metadata: {
-        kind: "tool",
-        name: "research",
-      },
-      taskId,
-    },
-  };
-}
-
-function makeSessionState(
-  handles: readonly AgentHandle[],
-  tasks: readonly BackgroundWorkflowToolRun[] = [],
-): DurableSessionState {
+function makeSessionState(handles: readonly AgentHandle[]): DurableSessionState {
   return {
     continuationToken: "parent-token",
     emissionState: {
@@ -474,27 +355,9 @@ function makeSessionState(
         continuationToken: "parent-token",
         history: [],
         sessionId: "parent-session",
-        state:
-          tasks.length === 0
-            ? { [AGENT_HANDLES_STATE_KEY]: { handles } }
-            : {
-                [AGENT_HANDLES_STATE_KEY]: { handles },
-                "eve.workflowTool": { version: 3, runs: tasks },
-              },
+        state: { [AGENT_HANDLES_STATE_KEY]: { handles } },
       },
     },
     version: 1,
   };
-}
-
-function createDeferred(): { readonly promise: Promise<void>; resolve(): void } {
-  let resolve!: () => void;
-  const promise = new Promise<void>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
-
-function cancelledView(entry: BackgroundWorkflowToolRun) {
-  return { taskId: entry.task.taskId, metadata: entry.task.metadata, status: "cancelled" as const };
 }

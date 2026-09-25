@@ -6,7 +6,7 @@ export default defineEval({
   timeoutMs: 90_000,
   async test(t) {
     const started = await t.send(
-      "Call the approval-child subagent exactly once. Acknowledge its receipt and relay its final result when it completes.",
+      "Call the approval-child subagent exactly once and relay its final result when it completes.",
     );
     let parent = started.session;
     let called = started.events.find(

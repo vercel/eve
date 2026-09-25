@@ -374,7 +374,6 @@ describe("registryHandoffAddress", () => {
       suspendPromptForInput: () => promptSuspended.resolve(),
       subagents: {
         begin: vi.fn(),
-        background: vi.fn(),
         upsertStep: vi.fn(),
         upsertTool: vi.fn(),
         removeTool: vi.fn(),
@@ -881,7 +880,7 @@ describe("EveTUIRunner idle session follow", () => {
     expect(renderIdleStream).not.toHaveBeenCalled();
   });
 
-  it("renders background completion after two quiet minutes without another user message", async () => {
+  it("renders an idle-session turn after two quiet minutes without another user message", async () => {
     vi.useFakeTimers();
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();
@@ -896,7 +895,7 @@ describe("EveTUIRunner idle session follow", () => {
         type: "message.completed",
         data: {
           finishReason: "stop",
-          message: "Alice's background review is ready for Bob.",
+          message: "Alice's review is ready for Bob.",
           sequence: 1,
           stepIndex: 0,
           turnId: "wake-turn",
@@ -949,7 +948,7 @@ describe("EveTUIRunner idle session follow", () => {
       expect(idleEvents).toContainEqual({
         type: "assistant-complete",
         id: "text:wake-turn:0",
-        text: "Alice's background review is ready for Bob.",
+        text: "Alice's review is ready for Bob.",
       });
       expect(send).not.toHaveBeenCalled();
     } finally {
@@ -1012,10 +1011,10 @@ describe("EveTUIRunner idle session follow", () => {
         data: {
           actions: [
             {
-              callId: "cancel-1",
-              input: { taskIds: ["task_123"] },
+              callId: "lookup-1",
+              input: { query: "research status" },
               kind: "tool-call",
-              toolName: "task_cancel",
+              toolName: "lookup",
             },
           ],
           sequence: 1,
@@ -1027,10 +1026,10 @@ describe("EveTUIRunner idle session follow", () => {
         type: "action.result",
         data: {
           result: {
-            callId: "cancel-1",
+            callId: "lookup-1",
             kind: "tool-result",
-            output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
-            toolName: "task_cancel",
+            output: { status: "finished" },
+            toolName: "lookup",
           },
           sequence: 1,
           status: "completed",
@@ -1041,7 +1040,7 @@ describe("EveTUIRunner idle session follow", () => {
       {
         type: "message.appended",
         data: {
-          messageDelta: "Background research finished.",
+          messageDelta: "Research finished.",
           sequence: 1,
           stepIndex: 1,
           turnId: "wake-turn",
@@ -1051,7 +1050,7 @@ describe("EveTUIRunner idle session follow", () => {
         type: "message.completed",
         data: {
           finishReason: "stop",
-          message: "Background research finished.",
+          message: "Research finished.",
           sequence: 1,
           stepIndex: 1,
           turnId: "wake-turn",
@@ -1116,7 +1115,7 @@ describe("EveTUIRunner idle session follow", () => {
     expect(send).toHaveBeenCalledOnce();
     expect(idleEvents.filter((event) => event.type === "assistant-delta")).toEqual([
       {
-        delta: "Background research finished.",
+        delta: "Research finished.",
         id: "text:wake-turn:1",
         type: "assistant-delta",
       },
@@ -1133,7 +1132,7 @@ describe("EveTUIRunner idle session follow", () => {
   it("reconnects idle following when a transport stream ends before an approval arrives", async () => {
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();
-    const requestId = "task_123:approval-after-reconnect";
+    const requestId = "approval-after-reconnect";
     const firstWakeEvents = [
       stampTestEvent({
         type: "message.appended",
@@ -1230,10 +1229,10 @@ describe("EveTUIRunner idle session follow", () => {
     );
   });
 
-  it("answers a background-task approval that arrives while the prompt is idle", async () => {
+  it("answers an approval that arrives while the prompt is idle", async () => {
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();
-    const requestId = "task_123:approval-1";
+    const requestId = "approval-1";
     const wakeEvents = [
       stampTestEvent({
         type: "input.requested",
@@ -3618,7 +3617,6 @@ describe("EveTUIRunner renderer teardown", () => {
         }),
         subagents: {
           begin: vi.fn(),
-          background: vi.fn(),
           upsertStep: vi.fn(),
           upsertTool: vi.fn(),
           removeTool: vi.fn(),
@@ -3658,122 +3656,6 @@ describe("EveTUIRunner renderer teardown", () => {
     await completed.promise;
 
     expect(completeSubagent).toHaveBeenCalledWith({ authoritative: true, callId: "call-child" });
-  });
-
-  it("keeps a subagent section open when action.result returns a working receipt", async () => {
-    const backgroundSubagent = vi.fn();
-    const completeSubagent = vi.fn();
-    const runner = new EveTUIRunner({
-      name: "Weather Agent",
-      renderer: fakeRenderer({
-        readPrompt: vi.fn().mockResolvedValueOnce("delegate").mockResolvedValueOnce(undefined),
-        renderStream: vi.fn(async (result) => {
-          for await (const event of result.events as AsyncIterable<unknown>) void event;
-        }),
-        subagents: {
-          begin: vi.fn(),
-          background: backgroundSubagent,
-          upsertStep: vi.fn(),
-          upsertTool: vi.fn(),
-          removeTool: vi.fn(),
-          markChildToolCallId: vi.fn(),
-          complete: completeSubagent,
-        },
-      }),
-      session: sessionYielding([
-        {
-          type: "subagent.called",
-          data: {
-            callId: "call-child",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
-            name: "researcher",
-            sequence: 0,
-            sessionId: "parent-session",
-            toolName: "researcher",
-            turnId: "turn-parent",
-            workflowId: "workflow-parent",
-          },
-        },
-        {
-          type: "action.result",
-          data: {
-            status: "completed",
-            sequence: 1,
-            stepIndex: 0,
-            turnId: "turn-parent",
-            result: {
-              kind: "tool-result",
-              callId: "call-child",
-              output: { agentId: "agent-1", status: "working", taskId: "task_123" },
-              toolName: "researcher",
-            },
-          },
-        },
-        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
-      ]),
-    });
-
-    await runner.run();
-
-    expect(backgroundSubagent).toHaveBeenCalledWith({ callId: "call-child" });
-    expect(completeSubagent).not.toHaveBeenCalled();
-  });
-
-  it("does not settle a subagent section when completed carries a background receipt", async () => {
-    const backgroundSubagent = vi.fn();
-    const completeSubagent = vi.fn();
-    const runner = new EveTUIRunner({
-      name: "Weather Agent",
-      renderer: fakeRenderer({
-        readPrompt: vi.fn().mockResolvedValueOnce("delegate").mockResolvedValueOnce(undefined),
-        renderStream: vi.fn(async (result) => {
-          for await (const event of result.events as AsyncIterable<unknown>) void event;
-        }),
-        subagents: {
-          begin: vi.fn(),
-          background: backgroundSubagent,
-          upsertStep: vi.fn(),
-          upsertTool: vi.fn(),
-          removeTool: vi.fn(),
-          markChildToolCallId: vi.fn(),
-          complete: completeSubagent,
-        },
-      }),
-      session: sessionYielding([
-        {
-          type: "subagent.called",
-          data: {
-            callId: "call-child",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
-            name: "researcher",
-            sequence: 0,
-            sessionId: "parent-session",
-            toolName: "researcher",
-            turnId: "turn-parent",
-            workflowId: "workflow-parent",
-          },
-        },
-        {
-          type: "subagent.completed",
-          data: {
-            backgroundTask: { status: "working", taskId: "task_123" },
-            callId: "call-child",
-            output: '{"status":"working","taskId":"task_123"}',
-            subagentName: "researcher",
-          },
-        },
-        { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
-        { type: "session.waiting", data: { wait: "next-user-message" } },
-      ]),
-    });
-
-    await runner.run();
-
-    expect(backgroundSubagent).toHaveBeenCalledWith({ callId: "call-child" });
-    expect(completeSubagent).not.toHaveBeenCalled();
   });
 
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
@@ -4892,7 +4774,6 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     ]);
     const view = {
       begin: vi.fn(),
-      background: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),

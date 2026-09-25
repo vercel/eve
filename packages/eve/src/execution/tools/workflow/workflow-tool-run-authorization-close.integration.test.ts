@@ -13,17 +13,11 @@ import {
 } from "#internal/testing/workflow-tool-run-harness.js";
 
 describe("workflow step authorization failures", () => {
-  it.each([
-    { background: false, disposition: "denied" },
-    { background: false, disposition: "rejected" },
-    { background: false, disposition: "cancel" },
-    { background: true, disposition: "cancel" },
-  ])(
-    "closes authorization on $disposition (background=$background)",
-    async ({ background, disposition }) => {
+  it.each(["denied", "rejected", "cancel"])(
+    "closes authorization on %s",
+    async (disposition) => {
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth-failure",
-        background,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });
@@ -65,10 +59,10 @@ describe("workflow step authorization failures", () => {
           const executorRunId = (await world.hooks.getByToken(token)).runId;
           const params = { token, attemptId: required.data.attemptId!, name: required.data.name };
           if (disposition === "cancel") {
-            await resumeSessionInbox(
-              sessionCommandHookToken(run.runId),
-              background ? { kind: "cancel", tasks: true } : { kind: "cancel", turnId: "turn_0" },
-            );
+            await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+              kind: "cancel",
+              turnId: "turn_0",
+            });
           } else {
             url.searchParams.set("code", disposition === "denied" ? "denied" : "approved");
             expect(
@@ -76,10 +70,8 @@ describe("workflow step authorization failures", () => {
             ).toBe(200);
           }
           if (disposition === "cancel") {
-            if (!background) {
-              events.push(...(await stream.nextTurn()));
-              expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
-            }
+            events.push(...(await stream.nextTurn()));
+            expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
           } else {
             for (
               let i = 0;

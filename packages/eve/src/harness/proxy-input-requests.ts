@@ -1,7 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import { inputOptionSchema, type InputOption, type InputRequestKind } from "#shared/input.js";
-import { isLoopbackHostname } from "#shared/network-address.js";
 import {
   isSessionInboxAddress,
   type SessionInboxAddress,
@@ -39,15 +38,9 @@ export interface ProxyInputRequest {
   readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  /** Child-local id restored before forwarding a namespaced task response. */
-  readonly childRequestId?: string;
-  /** Trusted parent-derived capability URL for a remote task child. */
-  readonly childResponseUrl?: string;
   readonly kind: InputRequestKind;
   /** Question metadata lets the human-facing parent resolve plain text before proxying by ID. */
   readonly question?: AnswerHookQuestion;
-  /** Present when the route is authorized by a parent-owned durable task. */
-  readonly taskId?: string;
 }
 
 export interface ProxyInputRequestBatch {
@@ -57,11 +50,6 @@ export interface ProxyInputRequestBatch {
 
 /** `requestId → route` map stored on the parent session. */
 type ProxyInputRequestMap = Readonly<Record<string, ProxyInputRequest>>;
-
-/** Parent-visible id for one task-owned child-local input request. */
-export function createTaskInputRequestId(taskId: string, childRequestId: string): string {
-  return `${taskId}:${childRequestId}`;
-}
 
 /**
  * Returns the proxy-routing map as a fresh `Map`. Never returns a live
@@ -185,14 +173,6 @@ export function retireProxyInputRequests<T extends { readonly state?: SessionSta
   return changed ? writeMap(session, next) : session;
 }
 
-/** Removes every proxy route owned by one durable task. */
-export function clearProxyInputRequestsForTask<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  taskId: string,
-): T {
-  return clearProxyInputRequestsWhere(session, (route) => route.taskId === taskId);
-}
-
 /**
  * Removes every proxy entry. Called when a cancelled turn orphans its
  * descendants so stale HITL responses no longer route to them.
@@ -210,7 +190,6 @@ export function clearAllProxyInputRequests(session: HarnessSession): HarnessSess
  */
 export function toProxyInputRequestEntries(
   payload: SubagentInputRequestHookPayload,
-  taskId?: string,
 ): readonly (readonly [requestId: string, route: ProxyInputRequest])[] {
   const batch: ProxyInputRequestBatch = {
     approvalRequestIds: payload.event.requests.flatMap((request) =>
@@ -222,10 +201,8 @@ export function toProxyInputRequestEntries(
     const route: {
       readonly childContinuationToken: string;
       childSessionInbox?: SessionInboxAddress;
-      childResponseUrl?: string;
       readonly kind: InputRequestKind;
       question?: AnswerHookQuestion;
-      taskId?: string;
     } & { readonly batch: ProxyInputRequestBatch } = {
       batch,
       childContinuationToken: payload.childContinuationToken,
@@ -237,7 +214,6 @@ export function toProxyInputRequestEntries(
         ...(request.options !== undefined && { options: [...request.options] }),
       };
     }
-    if (taskId !== undefined) route.taskId = taskId;
     if (payload.childSessionInbox?.sessionId === payload.childSessionId) {
       route.childSessionInbox = payload.childSessionInbox;
     }
@@ -291,25 +267,6 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (typeof value.childContinuationToken !== "string" || !isInputRequestKind(value.kind)) {
     return undefined;
   }
-  const taskId = "taskId" in value ? value.taskId : undefined;
-  const childRequestId = "childRequestId" in value ? value.childRequestId : undefined;
-  const childResponseUrl = "childResponseUrl" in value ? value.childResponseUrl : undefined;
-  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
-    return undefined;
-  }
-  if (
-    childRequestId !== undefined &&
-    (typeof childRequestId !== "string" || childRequestId.length === 0)
-  ) {
-    return undefined;
-  }
-  if ((taskId === undefined) !== (childRequestId === undefined)) return undefined;
-  if (
-    childResponseUrl !== undefined &&
-    (typeof childResponseUrl !== "string" || !isAllowedChildResponseUrl(childResponseUrl))
-  ) {
-    return undefined;
-  }
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
   const answerHook = "answerHook" in value ? parseAnswerHookRoute(value.answerHook) : undefined;
   if ("answerHook" in value && answerHook === undefined) return undefined;
@@ -323,11 +280,8 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     childSessionInbox?: SessionInboxAddress;
-    childRequestId?: string;
-    childResponseUrl?: string;
     readonly kind: InputRequestKind;
     question?: AnswerHookQuestion;
-    taskId?: string;
   } = {
     childContinuationToken: value.childContinuationToken,
     kind: value.kind,
@@ -335,10 +289,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (answerHook !== undefined) request.answerHook = answerHook;
   if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
-  if (typeof childRequestId === "string") request.childRequestId = childRequestId;
-  if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
   if (question !== undefined) request.question = question;
-  if (typeof taskId === "string") request.taskId = taskId;
   return request;
 }
 
@@ -389,17 +340,6 @@ function parseProxyInputRequestBatch(value: unknown): ProxyInputRequestBatch | u
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}
-
-function isAllowedChildResponseUrl(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (url.protocol === "https:") return true;
-  return url.protocol === "http:" && isLoopbackHostname(url.hostname);
 }
 
 function isInputRequestKind(value: unknown): value is InputRequestKind {

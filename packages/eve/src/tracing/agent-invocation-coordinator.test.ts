@@ -7,7 +7,6 @@ import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinat
 import { settleAgentInvocationTrace } from "#tracing/agent-invocation-terminal.js";
 import { deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import { deriveTaskId } from "#tasks/task-id.js";
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
@@ -21,12 +20,11 @@ const conversation: ConversationContext = {
 
 const sessionState = {
   "eve.workflowTool": {
-    version: 3,
+    version: 4,
     runs: [
       {
         callId: "workflow",
         toolName: "coordinate",
-        lifetime: "turn" as const,
         origin: { turnId: "turn-1", stepIndex: 0 },
         address: { runId: "workflow-run", hookToken: "workflow-hook" },
       },
@@ -165,55 +163,6 @@ describe("agent invocation trace coordinator", () => {
       );
       expect(store.findInvocations("session-1")).toHaveLength(0);
     });
-  });
-
-  it("uses the persisted action anchor after the live action is gone", async () => {
-    const context = new ContextContainer();
-    await contextStorage.run(context, () => {
-      const store = new ContextAgentTraceStateStore();
-      const action = outerAction();
-      store.setAction(outerKey, action);
-      store.setActionAnchor(outerKey, action);
-      store.deleteAction(outerKey);
-    });
-
-    const prepared = prepareAgentInvocationTrace({
-      invocation: { callId: "workflow:background", kind: "subagent-call", name: "research" },
-      ownerId: "background-task",
-      startTimeMs: 2,
-      serializedContext: serializeContext(context),
-      sessionId: "session-1",
-      taskId: deriveTaskId({
-        callId: "workflow",
-        parentSessionId: "session-1",
-        parentTurnId: "turn-1",
-      }),
-      turnId: "later-turn",
-    });
-
-    expect(prepared.dispatch.parentTraceContext?.spanId).toBe(
-      deriveAgentActionSpanId("session-1", "turn-1", "workflow:background"),
-    );
-    await expect(readInvocations(prepared.serializedContext)).resolves.toEqual([
-      expect.objectContaining({
-        callId: "workflow:background",
-        parentActionCallId: "workflow",
-      }),
-    ]);
-    const failed = prepared.fail({
-      callId: "workflow:background",
-      isError: true,
-      kind: "subagent-result",
-      origin: "dispatch",
-      output: "unreachable",
-      subagentName: "research",
-    });
-    await expect(readInvocations(failed)).resolves.toEqual([
-      expect.objectContaining({
-        turnId: "turn-1",
-        terminal: expect.objectContaining({ outcome: "failed" }),
-      }),
-    ]);
   });
 
   it("does not infer an outer call from caller-chosen invocation IDs", async () => {

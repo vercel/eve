@@ -20,7 +20,6 @@ const sessionCallbackSchema = z
   .object({
     callId: z.string().min(1),
     subagentName: z.string().min(1),
-    taskId: z.string().min(1).optional(),
     token: z.string().min(1),
     url: z.string().min(1),
   })

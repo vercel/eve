@@ -6,7 +6,6 @@ import {
   pruneAgentTraceState,
 } from "#tracing/agent-trace-context-store.js";
 import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
-import { deriveTaskId } from "#tasks/task-id.js";
 import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
 
 const anchor = {
@@ -56,49 +55,6 @@ describe("trace retention by live work", () => {
         });
         pruneAgentTraceState(context, "session", undefined);
       }
-    });
-    expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
-  });
-
-  it("keeps background anchors until their recorded task finishes", () => {
-    const context = new ContextContainer();
-    contextStorage.run(context, () =>
-      new ContextAgentTraceStateStore().setActionAnchor("key", anchor),
-    );
-    const task = {
-      callId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
-      toolName: "workflow",
-      lifetime: "session" as const,
-      origin: { turnId: "turn", stepIndex: 0 },
-      address: { runId: "task-run", hookToken: "task-token" },
-      task: {
-        dispatchContext: { auth: { current: null, initiator: null } },
-        taskId: deriveTaskId({ callId: "call", parentSessionId: "session", parentTurnId: "turn" }),
-        metadata: { kind: "tool", name: "workflow" },
-      },
-    };
-    pruneAgentTraceState(context, "session", {
-      "eve.workflowTool": { version: 3, runs: [task] },
-    });
-    expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({
-      actionAnchors: { key: anchor },
-    });
-    pruneAgentTraceState(context, "session", {
-      "eve.workflowTool": {
-        version: 3,
-        runs: [
-          {
-            ...task,
-            task: {
-              ...task.task,
-              outcome: {
-                status: "completed",
-                lastOutput: { type: "result", data: "done" },
-              },
-            },
-          },
-        ],
-      },
     });
     expect(serializeContext(context)[AGENT_TRACE_CONTEXT_KEY]).toMatchObject({ actionAnchors: {} });
   });

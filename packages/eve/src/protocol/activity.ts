@@ -1,6 +1,6 @@
 export const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
 
-export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
+export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent";
 export type ActivityWorkPhase = "running" | "completed" | "failed" | "cancelled";
 export type ActivityActionKind = "tool" | "skill";
 export type ActivityActionPhase = "running" | "completed" | "failed" | "rejected" | "cancelled";
@@ -130,7 +130,7 @@ export function parseActivityWorkIdentityV1(value: unknown): ActivityWorkIdentit
   if (!isRecord(value)) return undefined;
   const kind = value.kind;
   if (
-    !isOneOf(kind, ["root-turn", "subagent", "remote-agent", "task"] as const) ||
+    !isOneOf(kind, ["root-turn", "subagent", "remote-agent"] as const) ||
     !isIdentity(value.id) ||
     !isIdentity(value.rootSessionId) ||
     !isIdentity(value.rootTurnId) ||

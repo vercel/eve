@@ -9,7 +9,6 @@ import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-pr
 import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
-import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   createSubagentCalledEvent,
   type SubagentCalledStreamEvent,
@@ -19,7 +18,7 @@ import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
+import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -42,12 +41,8 @@ import {
   AGENT_UNREACHABLE,
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
-import { getBackgroundTasks, type TaskAgentDispatchContext } from "#harness/workflow-tool-runs.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import {
-  clearProxyInputRequestsForChild,
-  clearProxyInputRequestsForTask,
-} from "#harness/proxy-input-requests.js";
+import { clearProxyInputRequestsForChild } from "#harness/proxy-input-requests.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -58,12 +53,6 @@ import {
   flushAgentInvocationTraces,
   settleAgentInvocationTrace,
 } from "#tracing/agent-invocation-terminal.js";
-import {
-  AuthKey,
-  InitiatorAuthKey,
-  SessionDynamicSubagentSelectionsKey,
-  TurnDynamicSubagentSelectionsKey,
-} from "#context/keys.js";
 
 export type AgentInvocationDispatchResult =
   | {
@@ -80,13 +69,8 @@ export type AgentInvocationDispatchResult =
       readonly sessionState: DurableSessionState;
     };
 
-export type TaskAgentInvocationDispatchResult =
-  | { readonly kind: "not-admitted"; readonly sessionState: DurableSessionState }
-  | AgentInvocationDispatchResult;
-
 /** Dispatches one owner-scoped local or remote agent invocation. */
 export async function dispatchAgentInvocation(input: {
-  readonly activityWorkIdentity?: ActivityWorkIdentityV1;
   readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
   readonly replyTo: string;
@@ -94,9 +78,6 @@ export async function dispatchAgentInvocation(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly ownerId: string;
-  /** Optional creator snapshot used only to prepare this invocation. */
-  readonly invocationContext?: Record<string, unknown>;
-  readonly taskId?: string | undefined;
 }): Promise<AgentInvocationDispatchResult> {
   const durableSession = readDurableSession(input.sessionState);
   const agentHandles = getAgentHandleStore(durableSession.state)?.handles ?? [];
@@ -104,9 +85,8 @@ export async function dispatchAgentInvocation(input: {
     invocation: input.request.input,
     invocationId: input.request.invocationId,
     knownAgentIds: agentHandles.map((handle) => handle.identity.id),
-    serializedContext: input.invocationContext ?? input.serializedContext,
+    serializedContext: input.serializedContext,
     sessionState: input.sessionState,
-    taskId: input.taskId,
   });
   const entry = prepared.plan[0];
   if (entry === undefined) {
@@ -129,13 +109,8 @@ export async function dispatchAgentInvocation(input: {
     sessionId: prepared.session.sessionId,
     sessionState: durableSession.state,
     startTimeMs: Date.now(),
-    taskId: input.taskId,
     turnId: prepared.batch.event.turnId,
   });
-  const taskActivityObserver =
-    prepared.activityObserver === undefined || input.activityWorkIdentity === undefined
-      ? undefined
-      : { sink: prepared.activityObserver.sink, workIdentity: input.activityWorkIdentity };
   let session = prepared.session;
   const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
@@ -200,16 +175,12 @@ export async function dispatchAgentInvocation(input: {
       dynamicRemoteAgent: entry.dynamicRemoteAgent,
     });
     outcome = await dispatchToClaimedAgentAddress({
-      activityObserver: taskActivityObserver,
       action: entry.action,
       auth: prepared.auth,
       bundle,
       currentSession: session,
       handle: claimed,
-      reply:
-        input.taskId === undefined
-          ? { kind: "reply", parentToken: input.replyTo }
-          : { kind: "reply", parentToken: input.replyTo, taskId: input.taskId },
+      parentToken: input.replyTo,
     });
     if (outcome.kind === "error" && outcome.deliveryPermanent === true) {
       applyHandleCommand({ agentId: entry.agentId, kind: "remove", ownerId: input.ownerId });
@@ -228,9 +199,9 @@ export async function dispatchAgentInvocation(input: {
     const start =
       reserved.length === 1
         ? { identity: reserved[0]!.identity, operation: { id: reserved[0]!.operationId } }
-        : createSubagentReceiptIdentity({
+        : mintStartOperation({
             callId: action.callId,
-            subagentName:
+            name:
               action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName,
             nodeId: action.nodeId,
             parentSessionId: prepared.session.sessionId,
@@ -267,10 +238,8 @@ export async function dispatchAgentInvocation(input: {
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
       activityObserver: prepared.activityObserver,
-      taskActivityObserver,
       sandboxSessionId: prepared.sandboxSessionId,
       session,
-      taskId: input.taskId,
       target: entry.target,
       trace: tracing.dispatch,
     });
@@ -337,57 +306,19 @@ export async function dispatchAgentInvocation(input: {
 }
 
 /**
- * Dispatches one agent request after any task-owned invocation is admitted.
- * The callback origin is parent-owned, so it is derived from this workflow's
- * own metadata rather than accepted from the inbound request.
+ * Dispatches one workflow-owned agent request. The callback origin is
+ * parent-owned, so it is derived from this workflow's own metadata rather
+ * than accepted from the inbound request.
  */
 export async function dispatchTaskAgentInvocationStep(
   input: Omit<Parameters<typeof dispatchAgentInvocation>[0], "callbackBaseUrl" | "emit">,
-): Promise<TaskAgentInvocationDispatchResult> {
+): Promise<AgentInvocationDispatchResult> {
   "use step";
 
-  let activityWorkIdentity: ActivityWorkIdentityV1 | undefined;
-  let taskDispatchContext: TaskAgentDispatchContext | undefined;
-  if (input.taskId !== undefined) {
-    const session = readDurableSession(input.sessionState);
-    const task = getBackgroundTasks(session.state).get(input.taskId);
-    if (task?.status !== "working") {
-      return { kind: "not-admitted", sessionState: input.sessionState };
-    }
-    taskDispatchContext = task.run.task.dispatchContext;
-    if (task.metadata.kind === "subagent") {
-      activityWorkIdentity = task.run.task.activityWorkIdentity;
-    }
-  }
-  const dispatched = await dispatchAgentInvocation({
+  return await dispatchAgentInvocation({
     ...input,
-    activityWorkIdentity,
     callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
-    invocationContext:
-      taskDispatchContext === undefined
-        ? undefined
-        : applyTaskDispatchContext(input.serializedContext, taskDispatchContext),
   });
-  return dispatched;
-}
-
-function applyTaskDispatchContext(
-  parent: Record<string, unknown>,
-  task: TaskAgentDispatchContext,
-): Record<string, unknown> {
-  const context = {
-    ...parent,
-    [AuthKey.name]: task.auth.current,
-    [InitiatorAuthKey.name]: task.auth.initiator,
-  };
-  for (const [key, value] of [
-    [SessionDynamicSubagentSelectionsKey.name, task.sessionDynamicSubagentSelections],
-    [TurnDynamicSubagentSelectionsKey.name, task.turnDynamicSubagentSelections],
-  ] as const) {
-    if (value === undefined) delete context[key];
-    else context[key] = value;
-  }
-  return context;
 }
 
 /** Applies an owner-scoped child settlement to the parent session's canonical state. */
@@ -396,7 +327,6 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly result: RuntimeSubagentChildResult;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  readonly taskId?: string | undefined;
 }): Promise<{
   readonly settled: boolean;
   readonly completion?: SubagentCompletedStreamEvent;
@@ -449,16 +379,11 @@ export async function settleTaskAgentInvocationStep(input: {
             : candidate,
         );
   let session = writeHandles(durable, nextHandles);
-  if (input.result.outcome.kind === "terminal") {
-    session =
-      input.taskId === undefined
-        ? "continuationToken" in handle.address
-          ? clearProxyInputRequestsForChild(
-              session as Parameters<typeof clearProxyInputRequestsForChild>[0],
-              handle.address.continuationToken,
-            )
-          : session
-        : clearProxyInputRequestsForTask(session, input.taskId);
+  if (input.result.outcome.kind === "terminal" && "continuationToken" in handle.address) {
+    session = clearProxyInputRequestsForChild(
+      session as Parameters<typeof clearProxyInputRequestsForChild>[0],
+      handle.address.continuationToken,
+    );
   }
   session = setTurnUsageState(
     session,
@@ -467,13 +392,8 @@ export async function settleTaskAgentInvocationStep(input: {
       usage: input.result.outcome.usageDelta,
     }),
   );
-  const task =
-    input.taskId === undefined ? undefined : getBackgroundTasks(session.state).get(input.taskId);
-  // A generated subagent task completes when the parent records its task outcome.
-  // Nested agents inside authored background workflows settle independently of that task.
-  const isTaskAgent = task?.metadata.kind === "subagent" && task.run.callId === input.result.callId;
   const completion: SubagentCompletedStreamEvent | undefined =
-    input.result.outcome.result.kind !== "succeeded" || isTaskAgent
+    input.result.outcome.result.kind !== "succeeded"
       ? undefined
       : {
           type: "subagent.completed",

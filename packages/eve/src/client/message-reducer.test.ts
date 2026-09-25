@@ -1279,41 +1279,6 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
-  it("removes streamed text for a null message completion", () => {
-    const reducer = defaultMessageReducer();
-    const data = reduceServerEvents(reducer, reducer.initial(), [
-      createMessageCompletedEvent({
-        message: "Earlier step.",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createMessageAppendedEvent({
-        messageDelta: "<eve-empty-delivery/>",
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_1",
-      }),
-      createMessageCompletedEvent({
-        message: null,
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_1",
-      }),
-    ]);
-
-    expect(data.messages[0]?.parts).toEqual([
-      { type: "step-start" },
-      {
-        state: "done",
-        stepIndex: 0,
-        text: "Earlier step.",
-        type: "text",
-      },
-      { type: "step-start" },
-    ]);
-  });
-
   it("preserves separate participant messages received within one turn", () => {
     const reducer = defaultMessageReducer();
     const events = stampTestEvents([
@@ -1364,20 +1329,6 @@ describe("defaultMessageReducer", () => {
 
     const data = reducer.reduce(reducer.initial(), event);
     expect(data.messages[0]?.id).toBe("turn_1:2:user");
-  });
-
-  it("does not project framework-authored task input", () => {
-    const reducer = defaultMessageReducer();
-    const [event] = stampTestEvents([
-      createMessageReceivedEvent({
-        kind: "execution.background_task",
-        message: "Task completed",
-        sequence: 1,
-        turnId: "turn_1",
-      }),
-    ]);
-
-    expect(reducer.reduce(reducer.initial(), event!).messages).toEqual([]);
   });
 
   it("projects structured file parts from message.received onto the user message", () => {

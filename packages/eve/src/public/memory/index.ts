@@ -121,7 +121,6 @@ export interface MemoryToolsContext extends DynamicResolveContext {
 export interface MemoryToolDefinition {
   readonly approval?: Approval<never>;
   readonly description: string;
-  readonly execution?: never;
   execute(input: never, context: ToolContext): unknown | Promise<unknown> | AsyncIterable<unknown>;
   readonly inputSchema: unknown;
   readonly outputSchema?: unknown;

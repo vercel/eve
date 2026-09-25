@@ -364,7 +364,7 @@ function projectInvocation(
         break;
       case "message.completed":
         // Only tool-call narration continues the turn; any other finish is the reply.
-        if (event.data.finishReason !== "tool-calls" && event.data.message !== null) {
+        if (event.data.finishReason !== "tool-calls") {
           result = safeJson(event.data.message);
         }
         break;
