@@ -184,6 +184,7 @@ async function updateAnsweredCard(input: {
   readonly messageTs: string;
 }): Promise<void> {
   await callSlackApi({
+    api: input.deps.api,
     botToken: input.deps.config.credentials?.botToken,
     context: { teamId: input.installationTeamId },
     operation: "chat.update",

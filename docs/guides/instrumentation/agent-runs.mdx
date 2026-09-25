@@ -19,19 +19,12 @@ Agent Runs usage is billed at
 [Always-on Tracing rates](https://vercel.com/docs/tracing/always-on-tracing#usage-and-pricing)
 during beta. All plans include 30-day Agent Runs retention during beta.
 
-## Configure Agent Runs
-
-Preview and production deployments export to Vercel Agent Runs by default.
-Omitting `agent/instrumentation/agent-runs.ts` preserves that default. Export
-`agentRuns(...)` from that file to reconfigure it, or export
-`disableInstrumentation()` to disable it.
-
 ## Enable tracing on Vercel
 
-New eve deployments automatically sample 100% of requests. Existing eve
-deployments need a sampling rule configured for the Vercel project to collect
-traces. To enable tracing for an existing deployment, select your team and
-project, then open
+When `eve deploy` creates a new Vercel project, it configures 100% trace
+sampling for all environments. Existing Vercel projects need a sampling rule
+configured to collect traces. To enable tracing for an existing project, select
+your team and project, then open
 [**Settings → Tracing**](https://vercel.com/d?to=%2F%5Bteam%5D%2F%5Bproject%5D%2Fsettings%2Ftracing&title=Go+to+Tracing+settings):
 
 1. Select **Add Sampling Rule**.
@@ -46,6 +39,13 @@ requests, update it to use a 100% rate; a later rule will not override it.
 Tracing starts as soon as you save the rule. You can also manage sampling
 rules with [`vercel traces config`](https://vercel.com/docs/cli/traces#manage-trace-sampling-rules).
 The CLI accepts rates from 1 to 100%; add a 0% rule from the dashboard.
+
+## Configure Agent Runs
+
+Preview and production deployments export to Vercel Agent Runs by default.
+Omit `agent/instrumentation/agent-runs.ts` to keep that default. To change it,
+default-export `agentRuns(...)` from that file, or default-export
+`disableInstrumentation()` to turn off Agent Runs export.
 
 ## Filter Agent Runs exports
 

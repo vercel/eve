@@ -211,14 +211,9 @@ export function createRegistrySetupClient(
       warning: (text) => send(childProcess, { type: "log", level: "warning", text }),
       error: (text) => send(childProcess, { type: "log", level: "error", text }),
       commandOutput: (text) => send(childProcess, { type: "log", level: "commandOutput", text }),
-      spinner(status, intent) {
+      spinner(status) {
         const id = nextId++;
-        send(childProcess, {
-          type: "status",
-          id,
-          status,
-          intent: intent?.kind === "external-action" ? intent : undefined,
-        });
+        send(childProcess, { type: "status", id, status });
         return { stop: () => send(childProcess, { type: "status", id }) };
       },
     },

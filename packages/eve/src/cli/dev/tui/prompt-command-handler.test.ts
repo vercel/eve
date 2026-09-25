@@ -1,4 +1,3 @@
-import pc from "picocolors";
 import { describe, expect, it, vi } from "vitest";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
@@ -86,11 +85,27 @@ describe("createPromptCommandHandler", () => {
         context(),
       ),
     ).resolves.toEqual({
-      message: `Model changed to ${pc.bold("anthropic/claude-opus-4.6")}. Live on your next prompt.`,
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.6",
     });
     expect(applyModel).toHaveBeenCalledWith({
       appRoot: APP_ROOT,
       slug: "anthropic/claude-opus-4.6",
+    });
+  });
+
+  it("marks an unchanged model as neutral", async () => {
+    const handler = createPromptCommandHandler({
+      target: LOCAL_TARGET,
+      applyModel: async ({ slug }) => ({ kind: "unchanged", model: slug }),
+      modelChangeRefusal: async () => null,
+    });
+
+    await expect(
+      handler.handle({ type: "extension", name: "model", argument: "openai/gpt-5.5" }, context()),
+    ).resolves.toEqual({
+      message: "",
+      summary: "Model already set to openai/gpt-5.5",
     });
   });
 
@@ -109,6 +124,8 @@ describe("createPromptCommandHandler", () => {
       handler.handle({ type: "extension", name: "model", argument: "openai/gpt-5.4" }, context()),
     ).resolves.toEqual({
       message: "Model is pinned to the external provider `anthropic`.",
+      summary: "Couldn't change the model",
+      failed: true,
     });
     expect(applyModel).not.toHaveBeenCalled();
   });
@@ -257,7 +274,7 @@ describe("createPromptCommandHandler", () => {
       const settleOutcome = vi.fn(async () => {
         await pending;
         return fail
-          ? { tone: "error" as const, message: "The agent could not reload." }
+          ? { failed: true as const, message: "The agent could not reload." }
           : { message: "Connected." };
       });
       const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
@@ -273,7 +290,7 @@ describe("createPromptCommandHandler", () => {
       expect(setupFlow.end).toHaveBeenCalledOnce();
       expect(outcome.effect).toBeUndefined();
       if (fail) {
-        expect(outcome.tone).toBe("error");
+        expect(outcome.failed).toBe(true);
         expect(outcome.message).toContain("could not reload");
         expect(outcome.message).not.toContain("private runtime failure");
       } else {

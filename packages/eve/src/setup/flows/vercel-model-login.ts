@@ -56,10 +56,7 @@ export async function loginVercelModel(
     typeof device.interval === "number" ? Math.max(1, Math.min(30, device.interval)) : 5;
   const duration = typeof device.expires_in === "number" ? Math.min(600, device.expires_in) : 300;
   const deadline = Date.now() + duration * 1000;
-  const spinner = prompter.log.spinner?.("Finish signing in to Vercel in your browser", {
-    kind: "external-action",
-    emphasis: "your browser",
-  });
+  const spinner = prompter.log.spinner?.("Finish signing in to Vercel in your browser");
   let session;
   try {
     while (Date.now() < deadline) {

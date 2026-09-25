@@ -440,6 +440,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         compactOnly: input.input?.control === "compact",
         createRuntime: createWorkflowRuntime,
         handleEvent,
+        prepareApprovalTurn: (event) => dynamicConnections.dispatch(createTurnStartedEvent(event)),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
@@ -477,14 +478,20 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   session: enrichedSession,
                 })
               : enrichedSession;
+            const connectionState = getHarnessEmissionState(schemaSession.state);
             await dynamicConnections.rehydrate(
-              getHarnessEmissionState(schemaSession.state),
+              connectionState,
               runtimeIdentity,
-              isHarnessBetweenTurns(schemaSession),
+              isHarnessBetweenTurns(schemaSession)
+                ? undefined
+                : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
             );
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
-              if (isHarnessBetweenTurns(schemaSession)) {
+              const startsTurn = completedAuths.some(
+                ({ candidateId }) => candidateId === undefined,
+              );
+              if (startsTurn && isHarnessBetweenTurns(schemaSession)) {
                 const turnInput = createTurnInputMessages(
                   consumeDeferredStepInput({ session: schemaSession, input: stepInput }).input,
                 );
@@ -526,10 +533,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);
               }
-              for (const { authorization, result } of completedAuths) {
-                const candidateId = pendingAuth?.challenges.find(
-                  (challenge) => challenge.attemptId === result.attemptId,
-                )?.candidateId;
+              for (const { authorization, result, candidateId } of completedAuths) {
                 await handleEvent(
                   createAuthorizationCompletedEvent({
                     attemptId: result.attemptId,

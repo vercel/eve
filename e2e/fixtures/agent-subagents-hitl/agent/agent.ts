@@ -9,6 +9,12 @@ const outputText = (output: unknown) =>
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  if (message.includes("Read the parent input-hook audit")) {
+    const audit = request.toolResults.find((result) => result.name === "read_input_hooks");
+    return audit === undefined
+      ? { toolCalls: [{ name: "read_input_hooks", input: {} }] }
+      : JSON.stringify(audit.output);
+  }
   if (message.includes("Call the stock-price subagent exactly once")) {
     const result = request.toolResults.find((entry) => entry.name === "stock-price");
     return result !== undefined

@@ -12,6 +12,7 @@ import type {
   AgentTUIStreamResult,
   AgentTUIToolApprovalRequest,
   AgentTUIToolApprovalResponse,
+  CommandPresentation,
   ConnectionAuthUpdate,
   SubagentStepUpdate,
   SubagentView,
@@ -43,12 +44,13 @@ import {
 import {
   isPromptControlCommand,
   parsePromptCommand,
+  promptCommandSpec,
   PROMPT_COMMANDS,
+  type ArgumentTypeaheadCommand,
   type PromptCommandSpec,
 } from "./prompt-commands.js";
 import {
   enterBadge,
-  renderFlowDrawer,
   flowMessageRows,
   renderAcknowledgeQuestion,
   renderSelectQuestion,
@@ -60,12 +62,11 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
 import type {
   SetupEditableSelectResult,
-  SetupFlowIndicator,
   SetupFlowInterrupt,
   SetupFlowRenderer,
-  SetupFlowStatus,
   SetupSelectRequest,
   SetupSelectResult,
 } from "./setup-flow.js";
@@ -134,6 +135,7 @@ import {
   renderInputText,
   renderInputWithBlockCursor,
   stripAnsi,
+  wrapVisibleLine,
   stripTerminalControls,
 } from "#cli/ui/terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
@@ -233,18 +235,15 @@ function completedTurnStatus(input: {
   return "Done";
 }
 
-type SetupFlowIndicatorState = { kind: "spinner" } | { kind: "pulse"; startedAtMs: number };
-
-type SetupFlowStatusState =
-  | { kind: "progress"; text: string; startedAtMs: number }
-  | { kind: "external-action"; text: string; emphasis: string; startedAtMs: number };
+type SetupFlowStatusState = { text: string; startedAtMs: number };
 
 type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: number };
 
 type SetupFlowState = {
   title: string;
   navigation?: PlannerNavigation;
-  indicator: SetupFlowIndicatorState;
+  /** When the flow's pulse started, so its blink stays on a steady beat. */
+  startedAtMs: number;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
   status?: SetupFlowStatusState;
@@ -296,7 +295,7 @@ export type TerminalRendererOptions = {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
-    command: "model" | "add" | "login",
+    command: ArgumentTypeaheadCommand,
   ) => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };
@@ -416,6 +415,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Live (uncommitted) blocks, in transcript order. */
   #blocks: Block[] = [];
   readonly #blockById = new Map<string, Block>();
+  /** The invocation whose gutter awaits the command's outcome. */
+  #pendingCommandEcho: Block | undefined;
   /** Section ids already committed to scrollback — never re-rendered. */
   readonly #committedIds = new Set<string>();
   /**
@@ -590,6 +591,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pendingEchoedPrompt?: string;
   /** The open HITL question overlay, painted above the input area. */
   #questionPanel?: (width: number) => string[];
+  #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
+  #transientPanelClose?: () => void;
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
   /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
@@ -634,7 +637,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
-    begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    begin: (title) => this.#beginSetupFlow(title),
     setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
@@ -1029,7 +1032,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
               argumentOpen === undefined &&
               selected !== undefined &&
               this.#argumentSuggestions !== undefined &&
-              (selected.name === "add" || selected.name === "login" || selected.name === "model")
+              (selected.name === "add" ||
+                selected.name === "login" ||
+                selected.name === "loglevel" ||
+                selected.name === "model")
             ) {
               apply(lineOf(typeaheadCompletion(selected)));
               break;
@@ -1044,19 +1050,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
             if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
             this.#argumentTypeahead = undefined;
-            this.#promptHistory.add(prompt);
+            if (promptCommandSpec(prompt)?.spec.history !== "omit") this.#promptHistory.add(prompt);
             this.#inputActive = false;
             this.#stopCaretBlink();
             this.#status = STATUS.processing;
             if (isPromptControlCommand(prompt)) {
-              // Commands echo as their own line (blue, under the prompt
-              // glyph) so the elbow-connected outcome has an invocation to
-              // hang under — never as a user chat message.
-              this.#pushBlock({
-                kind: "command",
-                body: stripTerminalControls(prompt.trim()),
-                live: false,
-              });
+              // Commands echo as their own line so the elbow-connected
+              // outcome has an invocation to hang under — never as a user
+              // chat message.
+              this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
             } else {
               this.#startWorking();
               this.#addUserBlock(prompt);
@@ -1987,33 +1989,152 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** Commits a slash-command invocation that was started without prompt input. */
-  renderCommandInvocation(text: string, status?: "failed"): void {
+  /** Echoes a slash-command invocation that was started without prompt input. */
+  renderCommandInvocation(text: string): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     this.#start();
-    const block: Block = {
-      kind: "command",
-      body: content,
-      live: false,
-    };
-    if (status === "failed") block.status = "error";
-    this.#pushBlock(block);
+    this.#pushCommandEcho(content);
     this.#paint();
   }
 
-  /** Commits one command outcome, promoting explicit status to a top-level result. */
-  renderCommandResult(text: string, tone?: "success" | "error"): void {
-    const content = stripAnsi(text);
-    if (content.trim().length === 0) return;
+  /** Lets `/help` select a command without leaving a transcript row. */
+  async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
     this.#start();
-    this.#pushBlock({
-      kind: "result",
-      body: content,
-      live: false,
-      status: tone === "success" ? "done" : undefined,
-    });
+    this.#inputActive = false;
+    let state = typeaheadFor(commands, "/");
+    this.#transientPanel = (width) => {
+      const rows = renderCommandSuggestions(state, this.#theme, width);
+      const visible = Math.max(1, this.#height() - 7);
+      const start = Math.max(0, Math.min(state.selectedIndex - visible + 1, rows.length - visible));
+      return renderTransientDrawer(
+        rows.slice(start, start + visible),
+        ["↑/↓ move · Enter select · Esc close"],
+        this.#theme,
+        width,
+      );
+    };
+    this.#status = "";
     this.#paint();
+    return await new Promise((resolve) => {
+      this.#transientPanelClose = () => resolve(undefined);
+      this.#consumeKey = (key) => {
+        if (key.type === "up" || key.type === "ctrl-p") {
+          state = moveTypeaheadSelection(state, -1);
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          state = moveTypeaheadSelection(state, 1);
+          this.#paint();
+        } else if (key.type === "enter") {
+          const command = selectedTypeaheadCommand(state);
+          this.#closeTransientPanel();
+          resolve(command === undefined ? undefined : typeaheadCompletion(command));
+        } else if (key.type === "escape" || key.type === "ctrl-c") {
+          this.#closeTransientPanel();
+          resolve(undefined);
+        }
+      };
+      this.#attachInput();
+    });
+  }
+
+  /** Shows local application metadata without retaining it in the transcript. */
+  async showInfoPanel(text: string): Promise<void> {
+    this.#start();
+    this.#inputActive = false;
+    const plainText = stripAnsi(text);
+    let scroll = 0;
+    const infoRows = (width: number) =>
+      plainText
+        .split("\n")
+        .flatMap((line) =>
+          wrapVisibleLine(line, Math.max(1, width - 4)).map((part) => `  ${part}`),
+        );
+    this.#transientPanel = (width) => {
+      const rows = infoRows(width);
+      const visible = Math.max(1, this.#height() - 7);
+      scroll = Math.min(scroll, Math.max(0, rows.length - visible));
+      return renderTransientDrawer(
+        rows.slice(scroll, scroll + visible),
+        [rows.length > visible ? "↑/↓ scroll · Esc close" : "Esc to close"],
+        this.#theme,
+        width,
+      );
+    };
+    this.#status = "";
+    this.#paint();
+    await new Promise<void>((resolve) => {
+      this.#transientPanelClose = resolve;
+      this.#consumeKey = (key) => {
+        if (key.type === "up" || key.type === "ctrl-p") {
+          scroll = Math.max(0, scroll - 1);
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          const visible = Math.max(1, this.#height() - 7);
+          scroll = Math.min(scroll + 1, Math.max(0, infoRows(this.#width()).length - visible));
+          this.#paint();
+        } else if (key.type === "escape" || key.type === "ctrl-c" || key.type === "enter") {
+          this.#closeTransientPanel();
+          resolve();
+        }
+      };
+      this.#attachInput();
+    });
+  }
+
+  #closeTransientPanel(): void {
+    this.#transientPanel = undefined;
+    this.finishCommand({ kind: "dismiss" });
+    this.#consumeKey = undefined;
+    this.#transientPanelClose = undefined;
+    this.#detachInput();
+    this.#paint();
+  }
+
+  /** Completes the active command's transcript record in one operation. */
+  finishCommand(outcome: CommandPresentation): void {
+    if (outcome.kind === "dismiss") {
+      if (this.#removePendingCommandEcho()) this.#paint();
+      return;
+    }
+    const echo = this.#settleCommandEcho(outcome.summary);
+    if (echo !== undefined) echo.status = "done";
+    const content = outcome.message === undefined ? "" : stripAnsi(outcome.message);
+    if (content.trim().length === 0) {
+      if (echo !== undefined) this.#paint();
+      return;
+    }
+    this.#start();
+    this.#pushBlock({ kind: "result", body: content, live: false });
+    this.#paint();
+  }
+
+  #removePendingCommandEcho(): boolean {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return false;
+    this.#pendingCommandEcho = undefined;
+    this.#blocks = this.#blocks.filter((candidate) => candidate !== block);
+    return true;
+  }
+
+  /**
+   * The echo stays live, and so out of scrollback, until its command settles:
+   * its gutter pulses meanwhile, then carries the outcome.
+   */
+  #pushCommandEcho(body: string): void {
+    if (this.#pendingCommandEcho !== undefined) this.#settleCommandEcho();
+    const block: Block = { kind: "command", body, live: true };
+    this.#pendingCommandEcho = block;
+    this.#pushBlock(block);
+  }
+
+  #settleCommandEcho(summary?: string): Block | undefined {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return undefined;
+    this.#pendingCommandEcho = undefined;
+    block.live = false;
+    if (summary !== undefined) block.result = stripTerminalControls(summary);
+    return block;
   }
 
   /**
@@ -2021,16 +2142,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * every flow line, question, and status renders inside it; the transcript
    * above stays untouched.
    */
-  #beginSetupFlow(title: string, indicator: SetupFlowIndicator = "spinner"): void {
+  #beginSetupFlow(title: string): void {
     this.#start();
     if (this.#startupEditor === undefined) this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    const indicatorState: SetupFlowIndicatorState =
-      indicator === "pulse" ? { kind: "pulse", startedAtMs: Date.now() } : { kind: "spinner" };
     this.#setupFlow = {
       title: stripTerminalControls(title),
-      indicator: indicatorState,
+      startedAtMs: Date.now(),
       lines: [],
       outputBuffer: [],
     };
@@ -2284,7 +2403,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     const flow = this.#requireSetupFlow();
     flow.status = {
-      kind: "progress",
       text: stripTerminalControls(opts.status),
       startedAtMs: Date.now(),
     };
@@ -2721,7 +2839,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#setupFlow === undefined) {
       this.#setupFlow = {
         title: "",
-        indicator: { kind: "spinner" },
+        startedAtMs: Date.now(),
         lines: [],
         outputBuffer: [],
         // Fabricated for a bare question (no begin/end pair) — closed with
@@ -2867,18 +2985,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * status into the working indicator; `undefined` clears it. Nothing is ever
    * committed to the transcript.
    */
-  #setFlowStatus(status: SetupFlowStatus | undefined): void {
+  #setFlowStatus(status: string | undefined): void {
     const content: SetupFlowStatusState | undefined =
       status === undefined
         ? undefined
-        : typeof status === "string"
-          ? { kind: "progress", text: stripTerminalControls(status), startedAtMs: Date.now() }
-          : {
-              kind: "external-action",
-              text: stripTerminalControls(status.text),
-              emphasis: stripTerminalControls(status.emphasis),
-              startedAtMs: Date.now(),
-            };
+        : { text: stripTerminalControls(status), startedAtMs: Date.now() };
     if (this.#setupFlow !== undefined) {
       this.#setupFlow.status = content;
       if (content === undefined) this.#setupFlow.preview = undefined;
@@ -3165,6 +3276,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
   };
 
   #stop() {
+    const closeTransientPanel = this.#transientPanelClose;
+    if (closeTransientPanel !== undefined) {
+      this.#transientPanelClose = undefined;
+      this.#transientPanel = undefined;
+      this.finishCommand({ kind: "dismiss" });
+      this.#consumeKey = undefined;
+      closeTransientPanel();
+    }
     // An open trace viewer must leave the alt screen before teardown, and its
     // awaited `open()` resolves so the runner loop can observe the shutdown.
     this.#closeTraceViewer();
@@ -3190,6 +3309,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // vanishing with the repaint area. The in-place rebuild status and any
     // open log run settle first so their last state survives as scrollback.
     this.#settleDevRebuildStatus();
+    this.#settleCommandEcho();
     for (const block of this.#blocks) {
       if (block.kind === "log" && block.id === undefined) block.live = false;
     }
@@ -3361,7 +3481,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#messageQueue.requestCancellation();
           this.#cancelRequestedByUser = true;
           this.renderCommandInvocation(message.trim());
-          this.renderCommandResult("Turn cancellation requested.");
+          this.finishCommand({ kind: "result", summary: "Cancellation requested" });
           this.#requestTurnCancel();
           this.#paint();
           break;
@@ -3709,7 +3829,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#provisionalSubagentCallIds.has(block.subagentCallId)) ||
         block.status === "approval" ||
         block.status === "running" ||
-        (block.kind === "connection-auth" && block.live)
+        (block.kind === "connection-auth" && block.live) ||
+        // A command's echo settles only with its own outcome.
+        block === this.#pendingCommandEcho
       ) {
         continue;
       }
@@ -4304,6 +4426,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ),
     };
     if (previous !== undefined) context.previous = previous;
+    if (this.#setupFlow !== undefined) context.setupFlowOpen = true;
+    if (this.#transientPanel !== undefined) context.transientPanelOpen = true;
     const rows = renderBlockLines(block, width, this.#theme, context);
     if ((block.depth ?? 0) === 0 && leadsWithGap(block, previous)) {
       return ["", ...rows];
@@ -4319,22 +4443,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return isProgressPulseVisible(Date.now() - startedAtMs) ? glyph : " ";
   }
 
-  #setupFlowIndicator(flow: SetupFlowState, status?: SetupFlowStatusState): FlowPanelIndicator {
-    if (flow.indicator.kind === "spinner") {
-      return { glyph: this.#spinnerFrame(), color: "yellow" };
-    }
+  #setupFlowIndicator(flow: SetupFlowState): FlowPanelIndicator {
     return {
       glyph: this.#progressPulseGlyph(
-        flow.indicator.startedAtMs,
+        flow.startedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
       ),
-      color: status?.kind === "external-action" ? "yellow" : "green",
     };
   }
 
   #footerRows(width: number): string[] {
     const c = this.#theme.colors;
     const rows: string[] = [""];
+
+    if (this.#transientPanel !== undefined) {
+      const drawer = this.#transientPanel(width);
+      return [...drawer.rows, ...drawer.controls];
+    }
 
     // The HITL question overlay owns the footer down to the status bar —
     // no indicator or hint row beneath it (the panel carries its own).
@@ -4350,7 +4475,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // very state the line shows (link, pending deploy, model), so mid-flow
       // values are guaranteed stale; it reappears, refreshed, when the
       // panel closes.
-      const indicator = this.#setupFlowIndicator(flow, flow.status);
+      const indicator = this.#setupFlowIndicator(flow);
       let status: FlowPanelStatus | undefined;
       if (flow.status !== undefined) {
         const { startedAtMs, ...flowStatus } = flow.status;
@@ -4445,9 +4570,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
-      // A fully typed known command paints blue, confirming it will dispatch
-      // as a command instead of being sent to the agent as a message.
-      const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
       this.#pushStatusLine(statusRows, width);
@@ -4470,7 +4592,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         width,
         theme: this.#theme,
         caretVisible: this.#caretVisible,
-        isCommand,
         ghost,
         maxRows: maxPromptRows,
       };
@@ -4599,7 +4720,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width,
       theme: this.#theme,
       caretVisible: true,
-      isCommand: false,
       ghost: "",
       maxRows: 4,
       inert: options.inert,
@@ -5054,8 +5174,6 @@ interface PromptInputRowsInput {
   readonly width: number;
   readonly theme: Theme;
   readonly caretVisible: boolean;
-  /** A fully typed known command is bold, confirming it will dispatch as a command. */
-  readonly isCommand: boolean;
   readonly ghost: string;
   readonly maxRows: number;
   /**
@@ -5080,7 +5198,6 @@ function promptInputRows({
   width,
   theme,
   caretVisible,
-  isCommand,
   ghost,
   maxRows,
   placeholder,
@@ -5104,10 +5221,7 @@ function promptInputRows({
     return [clip(`${theme.glyph.prompt} ${body}`, width), ""];
   }
 
-  const style = (segment: string): string => {
-    const rendered = renderInputText(segment);
-    return isCommand && rendered.length > 0 ? c.bold(rendered) : rendered;
-  };
+  const style = renderInputText;
 
   const layout = layoutPromptInput({ text, cursor });
   const visibleCount = Math.min(Math.max(1, maxRows), layout.rows.length);
@@ -5116,7 +5230,12 @@ function promptInputRows({
     Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
   );
   // An inert prompt's typed draft keeps the mark dim: the state is legible without claiming readiness.
-  const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : c.cyan(theme.glyph.prompt);
+  const promptGlyph =
+    inert === true
+      ? c.dim(theme.glyph.prompt)
+      : text.startsWith("/")
+        ? theme.glyph.user
+        : theme.glyph.prompt;
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
   // The gutter sits at column 0, sharing a column with the conversation

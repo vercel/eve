@@ -1,5 +1,6 @@
 import type { ModelAccessChange, ModelConnectionSelection } from "#shared/model-connection.js";
 import { runModelLogin } from "#setup/flows/model-login.js";
+import { LOGIN_CONNECTION_OPTIONS } from "#setup/flows/model-login-options.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
@@ -11,28 +12,16 @@ import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import {
-  formatRegistrySessionResult,
-  registryItemProgress,
-  registryResultTone,
-} from "./registry-result-message.js";
+import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
+
+import { registryCommandOutcome, registryItemProgress } from "./registry-result-message.js";
+import type { PromptCommandOutcome } from "./runner.js";
 import { createTuiPrompter, type TuiPrompterRenderer } from "./tui-prompter.js";
 import type { PromptCommandExtensionName } from "./prompt-commands.js";
-import type { SetupFlowIndicator, SetupFlowRenderer } from "./setup-flow.js";
+import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { VercelStatusEffect } from "./vercel-status.js";
 
 export type TuiSetupCommand = Exclude<PromptCommandExtensionName, "model">;
-
-/**
- * Panel title and loading indicator per command. The bordered panel never
- * repeats the echoed command verbatim, but it keeps a constant title as flows
- * move past their opening question.
- */
-export const SETUP_FLOW_CONFIG = {
-  login: { title: "", indicator: "pulse" },
-  add: { title: "", indicator: "pulse" },
-  deploy: { title: "", indicator: "spinner" },
-} satisfies Record<TuiSetupCommand, { title: string; indicator: SetupFlowIndicator }>;
 
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
   Pick<SetupFlowRenderer, "readProviderPicker" | "setNavigation" | "waitForInterrupt">;
@@ -83,14 +72,15 @@ export interface TuiSetupFlows {
   runDeployFlow: typeof runDeployFlow;
 }
 
-export interface TuiSetupCommandResult {
+/** Setup owns flow-close behavior; the command adapter receives only the transcript outcome. */
+export interface TuiSetupCommandResult extends PromptCommandOutcome {
   message: string;
   /** The user dismissed this setup step without completing it. */
   cancelled?: true;
   /** Keep settled batch results instead of replacing them with an interrupt notice. */
   partial?: true;
-  /** Promotes an outcome to a top-level status. */
-  tone?: "success" | "error";
+  /** Replaces the echoed invocation once the command settles. */
+  summary?: string;
   /** Keep warning/error lines after the bordered panel closes. */
   preserveFlowDiagnostics: boolean;
   /** Status refresh required after the command settles. */
@@ -105,7 +95,8 @@ export interface TuiSetupCommandResult {
 function muteableRenderer(
   renderer: TuiSetupCommandRenderer,
   isMuted: () => boolean,
-  withSuspendedRuntime?: TuiSetupCommandInput["withExclusiveTerminal"],
+  withSuspendedRuntime: TuiSetupCommandInput["withExclusiveTerminal"],
+  warnings: string[],
 ): MuteableSetupRenderer {
   return {
     readSelect: (options) =>
@@ -128,6 +119,7 @@ function muteableRenderer(
       if (!isMuted()) renderer.setStatus(text);
     },
     renderLine: (text, tone) => {
+      if (tone === "warning") warnings.push(text);
       if (!isMuted() || tone === "warning" || tone === "error") {
         renderer.renderLine(text, tone);
       }
@@ -163,7 +155,14 @@ export async function runTuiSetupCommand(
   const { command } = input;
   let interrupted = false;
   const controller = new AbortController();
-  const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
+  // Flow warnings outlive the panel only as short notes on the `/add` outcome.
+  const warnings: string[] = [];
+  const renderer = muteableRenderer(
+    input.renderer,
+    () => interrupted,
+    input.withExclusiveTerminal,
+    warnings,
+  );
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   let cancelActiveRegistryItem: (() => void) | undefined;
@@ -186,6 +185,7 @@ export async function runTuiSetupCommand(
     renderer,
     controller.signal,
     runRegistryItem,
+    warnings,
   );
   const outcomePromise = execution.then((value) => ({ kind: "outcome" as const, value }));
   try {
@@ -196,7 +196,7 @@ export async function runTuiSetupCommand(
           outcomePromise,
           interrupt.promise.then((interrupt) => ({ kind: "interrupt" as const, interrupt })),
         ]);
-        if (settled.kind === "outcome") return settled.value;
+        if (settled.kind === "outcome") return withCommandSummary(input, settled.value);
         if (
           command === "add" &&
           settled.interrupt === "escape" &&
@@ -208,13 +208,12 @@ export async function runTuiSetupCommand(
           interrupted = true;
           controller.abort(new WizardCancelledError());
           const outcome = await execution;
-          return outcome.partial === true
-            ? outcome
-            : {
-                ...outcome,
-                ...cancelledSetupResult(),
-                tone: undefined,
-              };
+          return withCommandSummary(
+            input,
+            outcome.partial === true
+              ? outcome
+              : { ...outcome, ...cancelledSetupResult(), failed: undefined, summary: undefined },
+          );
         }
       } finally {
         interrupt.dispose();
@@ -234,6 +233,7 @@ async function executeSetupCommand(
   renderer: MuteableSetupRenderer,
   signal: AbortSignal,
   runRegistryItem: <T>(task: (signal?: AbortSignal) => Promise<T>) => Promise<T>,
+  warnings: readonly string[],
 ): Promise<TuiSetupCommandResult> {
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
@@ -256,21 +256,30 @@ async function executeSetupCommand(
           connectionMessage: "",
           withConnectionUpdate: input.withExclusiveTerminal,
         });
-        return result.kind === "cancelled"
-          ? {
-              message: "Connect a model with /login when you’re ready.",
-              cancelled: true,
-              preserveFlowDiagnostics: false,
-            }
-          : {
-              message: "Connected. Start chatting · /add to extend your agent",
-              effect: {
-                kind: "model-access-changed",
-                reload: result.reload,
-                ...(result.model && { model: result.model }),
-              },
-              preserveFlowDiagnostics: false,
-            };
+        if (result.kind === "cancelled") {
+          return {
+            // Onboarding has no echoed `/login` to summarize, so it keeps the hint.
+            message:
+              input.initialModelStep === "provider"
+                ? "Connect a model with /login when you’re ready."
+                : "",
+            cancelled: true,
+            preserveFlowDiagnostics: false,
+          };
+        }
+        const connection = LOGIN_CONNECTION_OPTIONS.find(
+          (option) => option.value === input.initialLoginConnection,
+        );
+        return {
+          message: "",
+          summary: connection === undefined ? "Connected" : `Connected with ${connection.label}`,
+          effect: {
+            kind: "model-access-changed",
+            reload: result.reload,
+            ...(result.model && { model: result.model }),
+          },
+          preserveFlowDiagnostics: false,
+        };
       }
       case "add": {
         const flow = await flows.runRegistryFlow({
@@ -283,24 +292,12 @@ async function executeSetupCommand(
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
         });
-        if (flow.kind === "cancelled") {
+        if (flow.kind === "cancelled" || flow.result.outcomes.length === 0) {
           return cancelledSetupResult();
         }
-        const result = flow.result;
-        const tone = registryResultTone(result);
-        const report =
-          result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined
-            ? formatRegistrySessionResult(result)
-            : "No integrations selected.";
-        const outcome: TuiSetupCommandResult = {
-          message: tone === "error" ? `/add failed — ${report}` : report,
-          preserveFlowDiagnostics: true,
-        };
-        if (result.cancelled === true) {
-          outcome.partial = true;
-          outcome.tone = "error";
-        } else if (tone !== undefined) outcome.tone = tone;
-        if (result.deployed === "production") outcome.effect = { kind: "deployed" };
+        const outcome = registryResult(flow.result, warnings);
+        if (flow.result.cancelled === true) outcome.partial = true;
+        if (flow.result.deployed === "production") outcome.effect = { kind: "deployed" };
         return outcome;
       }
       case "deploy": {
@@ -312,6 +309,7 @@ async function executeSetupCommand(
           return {
             message:
               "Not linked to a Vercel project. Run eve deploy in an interactive terminal to link it.",
+            failed: true,
             preserveFlowDiagnostics: true,
           };
         }
@@ -319,12 +317,14 @@ async function executeSetupCommand(
           return {
             message:
               "ChatGPT subscription models are local-only. Switch to an AI Gateway or server-authenticated model before deploying.",
+            failed: true,
             preserveFlowDiagnostics: true,
           };
         }
         return {
-          message:
-            result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
+          message: "",
+          summary:
+            result.productionUrl === undefined ? "Deployed" : `Deployed to ${result.productionUrl}`,
           preserveFlowDiagnostics: true,
           effect: { kind: "deployed" },
         };
@@ -340,39 +340,85 @@ async function executeSetupCommand(
       prompter,
       signal,
     });
-    if (upgrade !== undefined) return withRegistryResults(upgrade, error);
+    if (upgrade !== undefined) return withRegistryResults(upgrade, error, warnings);
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
     const routed = vercelActionOutcome(actionableError, command);
-    if (routed !== undefined) return withRegistryResults(routed, error);
+    if (routed !== undefined) return withRegistryResults(routed, error, warnings);
     if (error instanceof RegistryFlowFailedError) {
-      return {
-        message: `${formatRegistrySessionResult(error.completed)}\n\n${error.message}`,
-        partial: true,
-        tone: "error",
-        preserveFlowDiagnostics: true,
-      };
+      return withRegistryResults(
+        { message: error.message, failed: true, preserveFlowDiagnostics: false },
+        error,
+        warnings,
+      );
     }
     return {
-      message: `/${command} failed: ${error instanceof Error ? error.message : String(error)}`,
-      tone: "error",
-      preserveFlowDiagnostics: true,
+      message: error instanceof Error ? error.message : String(error),
+      failed: true,
+      preserveFlowDiagnostics: command !== "add",
     };
   }
+}
+
+function fallbackSummaries(
+  input: TuiSetupCommandInput,
+): { error: string; cancelled: string } | undefined {
+  switch (input.command) {
+    case "add": {
+      const address = input.initialRegistryAddress;
+      if (address === undefined) return undefined;
+      return { error: `Couldn't add ${address}`, cancelled: `${address} not added` };
+    }
+    case "login":
+      return { error: "Couldn't connect a model", cancelled: "Login cancelled" };
+    case "deploy":
+      return { error: "Couldn't deploy", cancelled: "Deploy cancelled" };
+  }
+}
+
+/** Failed and cancelled outcomes leave a summary in place of their invocation too. */
+function withCommandSummary(
+  input: TuiSetupCommandInput,
+  outcome: TuiSetupCommandResult,
+): TuiSetupCommandResult {
+  const summaries = fallbackSummaries(input);
+  if (outcome.summary !== undefined || summaries === undefined) return outcome;
+  if (outcome.failed === true) return { ...outcome, summary: summaries.error };
+  if (outcome.cancelled === true) return { ...outcome, summary: summaries.cancelled };
+  return outcome;
+}
+
+function registryResult(
+  result: RegistrySessionResult,
+  warnings: readonly string[],
+): TuiSetupCommandResult {
+  const { failed, summary, message } = registryCommandOutcome(result, warnings);
+  const cancelled =
+    result.cancelled === true || result.outcomes.some((item) => item.kind === "cancelled");
+  return {
+    message,
+    summary,
+    ...(failed && { failed: true }),
+    ...(!failed && cancelled && { cancelled: true }),
+    preserveFlowDiagnostics: false,
+  };
 }
 
 function withRegistryResults(
   outcome: TuiSetupCommandResult,
   error: unknown,
+  warnings: readonly string[],
 ): TuiSetupCommandResult {
   if (!(error instanceof RegistryFlowFailedError)) return outcome;
+  const completed = registryResult(error.completed, warnings);
   return {
     ...outcome,
-    message: `${formatRegistrySessionResult(error.completed)}\n\n${outcome.message}`,
+    summary: completed.summary,
+    message: [completed.message, outcome.message].filter((part) => part !== "").join("\n"),
     partial: true,
-    tone: "error",
-    preserveFlowDiagnostics: true,
+    failed: true,
+    preserveFlowDiagnostics: false,
   };
 }
 
@@ -413,7 +459,7 @@ async function vercelCliUpgradeOutcome(
   if (choice === "later") {
     return {
       message: `The Vercel CLI needs an update — run \`vercel upgrade\`, then retry /${command}.`,
-      tone: "error",
+      failed: true,
       preserveFlowDiagnostics: true,
     };
   }
@@ -429,7 +475,7 @@ async function vercelCliUpgradeOutcome(
   } catch (error) {
     return {
       message: vercelCliUpgradeFailureMessage(command, errorMessage(error)),
-      tone: "error",
+      failed: true,
       preserveFlowDiagnostics: true,
     };
   }
@@ -437,25 +483,25 @@ async function vercelCliUpgradeOutcome(
     case "installed":
       return {
         message: `Upgraded the Vercel CLI. Retry /${command}.`,
-        tone: "error",
+        failed: true,
         preserveFlowDiagnostics: false,
       };
     case "failed":
       return {
         message: vercelCliUpgradeFailureMessage(command, result.reason),
-        tone: "error",
+        failed: true,
         preserveFlowDiagnostics: true,
       };
     case "cancelled":
       return {
         message: `Vercel CLI upgrade cancelled — run \`vercel upgrade\`, then retry /${command}.`,
-        tone: "error",
+        failed: true,
         preserveFlowDiagnostics: true,
       };
     case "already":
       return {
         message: `The Vercel CLI is already up to date. Retry /${command}.`,
-        tone: "error",
+        failed: true,
         preserveFlowDiagnostics: false,
       };
   }
@@ -484,7 +530,7 @@ function vercelActionOutcome(error: unknown, command: string): TuiSetupCommandRe
   const message = vercelActionMessage(error.action.kind, command);
   return message === undefined
     ? undefined
-    : { message, tone: "error", preserveFlowDiagnostics: true };
+    : { message, failed: true, preserveFlowDiagnostics: true };
 }
 
 /** The one-line fix message per Vercel action kind, or `undefined` for others. */

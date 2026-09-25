@@ -430,7 +430,12 @@ export async function installRegistryItem(
   item: string,
   options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal } = {},
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<{ output: readonly string[]; setup?: RegistrySetupCompletion }> {
+): Promise<{
+  output: readonly string[];
+  setup?: RegistrySetupCompletion;
+  /** Files were added, but setup was cancelled or skipped. */
+  setupIncomplete?: { resumeCommand: string };
+}> {
   let failure: string | undefined;
   const output: string[] = [];
   const logger: RegistryCommandLogger = {
@@ -454,6 +459,9 @@ export async function installRegistryItem(
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
   if (setup === false) throw new WizardCancelledError();
+  if (setup === "setup-incomplete") {
+    return { output, setupIncomplete: { resumeCommand: setupResumeCommand(item) } };
+  }
   const result: { output: readonly string[]; setup?: RegistrySetupCompletion } = { output };
   if (setup !== undefined) result.setup = setup;
   return result;
@@ -466,7 +474,12 @@ export async function runAddCommand(
   item: string,
   options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<RegistrySetupCompletion | false | undefined> {
+): Promise<RegistrySetupCompletion | false | "setup-incomplete" | undefined> {
+  // Silent callers render the resume hint themselves from the structured result.
+  const setupIncomplete = (outcome: "cancelled" | "skipped") => {
+    if (options.silent !== true) logger.log(setupReminder(item, outcome));
+    return "setup-incomplete" as const;
+  };
   return runRegistryAction(logger, appRoot, async () => {
     const address = itemAddress(item);
     const projectRoot =
@@ -508,9 +521,9 @@ export async function runAddCommand(
         setups: eveMetadata.setup,
         options,
         dependencies,
-        cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
+      if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
       return reportCompletion(logger, item, completion, options);
     }
 
@@ -557,8 +570,7 @@ export async function runAddCommand(
     }
     if (options.skipSetup === true) {
       if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, options);
-      logger.log(setupReminder(item, "skipped"));
-      return;
+      return setupIncomplete("skipped");
     }
     if (
       !options.nonInteractive &&
@@ -566,8 +578,7 @@ export async function runAddCommand(
       !interactive &&
       options.setupAuthorized !== true
     ) {
-      logger.log(setupReminder(item, "skipped"));
-      return;
+      return setupIncomplete("skipped");
     }
 
     if (!options.nonInteractive && !options.yes && options.setupAuthorized !== true) {
@@ -584,14 +595,10 @@ export async function runAddCommand(
             { value: "no", label: "No" },
           ],
         });
-        if (shouldRun === "no") {
-          logger.log(setupReminder(item, "skipped"));
-          return;
-        }
+        if (shouldRun === "no") return setupIncomplete("skipped");
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
-        logger.log(setupReminder(item, "cancelled"));
-        return;
+        return setupIncomplete("cancelled");
       }
     }
 
@@ -602,9 +609,9 @@ export async function runAddCommand(
       setups: eveMetadata.setup,
       options: { ...options, force: options.overwrite },
       dependencies,
-      cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
+    if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
     return reportCompletion(logger, item, completion, options);
   });
 }

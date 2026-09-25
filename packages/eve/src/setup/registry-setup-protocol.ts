@@ -75,7 +75,6 @@ export type RegistrySetupChildMessage =
       type: "status";
       id: number;
       status?: string;
-      intent?: { kind: "external-action"; emphasis: string };
     };
 
 export type RegistrySetupParentMessage =

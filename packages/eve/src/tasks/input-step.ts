@@ -1,5 +1,6 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -123,8 +124,8 @@ export async function answerTaskStep(input: {
 
 /**
  * Emits each event with its task's ID through this session's own sink, which
- * passes it on to this session's caller when it has one, and records what
- * the task then waits on. Between turns the sink stamps the last turn's
+ * passes it on to this session's caller when it has one, runs this session's
+ * stream hooks on it, and records what the task then waits on. Between turns the sink stamps the last turn's
  * delivery IDs: the IDs of the turn that started an attached task, but not
  * always of the turn that started a detached one.
  */
@@ -141,7 +142,14 @@ async function publishTaskInput(
     sessionId: durable.sessionId,
     sessionWritable: input.sessionWritable,
   });
-  const emit = async (event: Parameters<typeof sink.emit>[0]) => void (await sink.emit(event));
+  const emit = async (event: Parameters<typeof sink.emit>[0]): Promise<void> => {
+    const published = await sink.emit(event);
+    await dispatchStreamEventHooks({
+      ctx,
+      event: published.event,
+      registry: ctx.require(BundleKey).hookRegistry,
+    });
+  };
   const mode = ctx.require(ModeKey);
   const now = new Date().toISOString();
   let session: HarnessSession;

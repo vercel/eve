@@ -75,6 +75,7 @@ import {
   type AgentSamplingOperation,
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
+import { withAgentToolContentPolicy } from "#tracing/agent-tool-span-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
@@ -310,7 +311,6 @@ export function createAgentOtelInstrumentation(
     }
     if (event.turnId !== undefined) {
       const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
-      // A held turn opens to input before it ends; its span ends after its terminal event.
       if (turn !== undefined && (event.type !== "session.waiting" || turn.terminal !== undefined)) {
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
@@ -601,17 +601,17 @@ export function createAgentOtelInstrumentation(
               seed?.forwardedTracePolicy,
               environment,
             );
-      return parent === undefined
-        ? execute()
-        : context.with(
-            markAgentTraceContext(
-              withErrorContent(
-                parent,
-                recordOutputs && effective?.action === "record" && effective.recordOutputs,
-              ),
-            ),
-            execute,
-          );
+      const toolContentPolicy = {
+        recordInputs: recordInputs && effective?.action === "record" && effective.recordInputs,
+        recordOutputs: recordOutputs && effective?.action === "record" && effective.recordOutputs,
+      };
+      if (parent === undefined) return execute();
+      const withErrorPolicy = withErrorContent(parent, toolContentPolicy.recordOutputs);
+      const operationContext =
+        operation.type === "tool.call"
+          ? withAgentToolContentPolicy(withErrorPolicy, toolContentPolicy)
+          : withErrorPolicy;
+      return context.with(markAgentTraceContext(operationContext), execute);
     },
   };
 

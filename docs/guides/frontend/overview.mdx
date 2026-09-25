@@ -226,8 +226,10 @@ const pendingRequests = agent.data.messages
     return request ? [request] : [];
   });
 
+const inputDisabled = ["submitted", "streaming", "resuming"].includes(agent.status);
+
 return pendingRequests.map((request) => (
-  <fieldset key={request.requestId}>
+  <fieldset disabled={inputDisabled} key={request.requestId}>
     <legend>
       {request.kind === "tool-approval"
         ? "Approval required"
@@ -249,7 +251,7 @@ return pendingRequests.map((request) => (
 ));
 ```
 
-For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. The default reducer marks each matching part as responded immediately. Approved tools update again when eve streams their result.
+For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. The default reducer keeps each request pending until the server confirms its resolution through `input.resolved` or `approval.settled`. Disable input controls while the response is being processed; a refused approval attempt leaves the request answerable. Approved tools update again when eve streams their result.
 
 ## Authorization prompts
 
@@ -345,7 +347,7 @@ const agent = useEveAgent({ reducer: toolCounter });
 // agent.data is ToolLog
 ```
 
-`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). `client.input.responded` updates the submitting UI immediately; the durable `input.resolved` event later confirms the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
+`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
 
 ## Resumable sessions
 

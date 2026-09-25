@@ -9,7 +9,11 @@ import {
   createDiscoverWarningDiagnostic,
   type DiscoverDiagnostic,
 } from "#discover/diagnostics.js";
-import { type DirectoryEntryType, getDirectoryEntryType } from "#discover/filesystem.js";
+import {
+  type DirectoryEntryType,
+  getDirectoryEntryType,
+  isAuthoredTestPath,
+} from "#discover/filesystem.js";
 import { type InstructionsSourceRef, createModuleSourceRef } from "#discover/manifest.js";
 import { discoverMarkdownSource } from "#discover/markdown.js";
 import { discoverNamedSourceDirectory } from "#discover/named-source-directory.js";
@@ -165,13 +169,16 @@ export const DISCOVER_UNSUPPORTED_DIRECTORY = "discover/unsupported-directory";
 export type StringDirent = Dirent<string>;
 
 /**
- * Reads one directory through `source` and returns its entries sorted by name.
+ * Reads sorted agent source entries, excluding colocated tests unless reading resources.
  */
 export async function readSortedDirectoryEntries(
   source: ProjectSource,
   directoryPath: string,
+  options: { readonly includeTests?: boolean } = {},
 ): Promise<ProjectSourceEntry[]> {
-  const entries = [...(await source.readDirectory(directoryPath))];
+  const entries = (await source.readDirectory(directoryPath)).filter(
+    (entry) => options.includeTests || !isAuthoredTestPath(entry.name),
+  );
 
   entries.sort((left, right) => left.name.localeCompare(right.name));
 

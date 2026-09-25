@@ -595,15 +595,6 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
   });
 
-  it("does not offer self-modification when init was launched by a coding agent", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-launched-selfmod-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.isCodingAgentLaunch.mockResolvedValue(true);
-
-    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
-  });
-
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-package-spec-"));
     const output = logger();

@@ -16,7 +16,7 @@ import { createTestSessionState } from "#internal/testing/session-state.js";
 import { createTaskRecord, taskTableState } from "#internal/testing/task-records.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createEmptyHookRegistry, createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   BundleKey,
   ChannelKey,
@@ -70,13 +70,16 @@ beforeEach(() => {
   );
 });
 
-function setup(adapter: ChannelAdapter = { kind: "test" }) {
+function setup(
+  adapter: ChannelAdapter = { kind: "test" },
+  hookRegistry = createEmptyHookRegistry(),
+) {
   ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
     compiledArtifactsSource: { kind: "bundled" },
     graph: { root: { sandboxRegistry: { sandbox: null }, turnAgent } },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry,
     resolvedAgent: { config: {} },
     turnAgent,
   } as never as CompiledBundle);
@@ -396,5 +399,67 @@ describe("answerTaskStep", () => {
       deadlineAt: "2026-09-24T15:10:00.000Z",
       status: "working",
     });
+  });
+});
+
+describe("stream hooks for a task's input", () => {
+  const asked = {
+    data: { ...COORDINATES, requests: [QUESTION], taskId: "x-zzzzzz" },
+    type: "input.requested" as const,
+  };
+  function auditHooks(
+    typed: (event: MessageStreamEvent) => unknown,
+    wildcard: (event: MessageStreamEvent) => unknown,
+  ) {
+    return createRuntimeHookRegistry([
+      {
+        events: { "input.requested": typed, "session.waiting": typed, "*": wildcard },
+        logicalPath: "hooks/audit.ts",
+        slug: "audit",
+        sourceId: "hooks/audit.ts",
+        sourceKind: "module",
+      },
+    ] as never);
+  }
+
+  it("runs this session's hooks on each event it publishes", async () => {
+    const typed = vi.fn();
+    const wildcard = vi.fn();
+    setup({ kind: "test" }, auditHooks(typed, wildcard));
+
+    await surface(
+      ownerState([createTaskRecord({ deadlineAt: "2026-09-24T15:00:00.000Z" })]),
+      asked,
+    );
+
+    const events = published();
+    expect(events.map((event) => event.type)).toEqual(["input.requested", "session.waiting"]);
+    expect(typed.mock.calls.map(([event]) => event)).toEqual(events);
+    expect(wildcard.mock.calls.map(([event]) => event)).toEqual(events);
+  });
+
+  it("fails the step when a hook throws, after publishing, and releases the writer", async () => {
+    const error = new Error("audit failed");
+    const wildcard = vi.fn();
+    setup(
+      { kind: "test" },
+      auditHooks(() => {
+        throw error;
+      }, wildcard),
+    );
+    const sessionWritable = writable();
+
+    await expect(
+      surfaceTaskInputStep({
+        event: asked,
+        serializedContext: {},
+        sessionState: ownerState([createTaskRecord({ deadlineAt: "2026-09-24T15:00:00.000Z" })]),
+        sessionWritable,
+        taskId: TASK_ID,
+      }),
+    ).rejects.toBe(error);
+    expect(published().map((event) => event.type)).toEqual(["input.requested"]);
+    expect(wildcard).not.toHaveBeenCalled();
+    expect(sessionWritable.locked).toBe(false);
   });
 });

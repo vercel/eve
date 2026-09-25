@@ -92,6 +92,7 @@ export async function buildExtensionPackage(
         : { build: { externalDependencies: config.externalDependencies } }),
       requires: await deriveExtensionCapabilityRequirements({
         runtimeImports,
+        runtimeRoot: stagedOutDir,
         declarationModule,
         manifest,
         packageName: config.packageName,

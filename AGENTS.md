@@ -160,6 +160,9 @@ or ownership relationship materially clearer.
 
 ## Testing
 
+Use the [`test-audit`](./.agents/skills/test-audit/SKILL.md) skill when
+writing, reviewing, or pruning tests.
+
 Tests belong in one of four tiers. Pick the tightest tier that can express the
 assertion:
 

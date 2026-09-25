@@ -1,6 +1,7 @@
 import type { ChannelActivityRenderer } from "#channel/activity-renderer.js";
 import type { ActivitySnapshotV1, ActivityWorkStateV1 } from "#protocol/activity.js";
 import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
+import type { SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 export const SLACK_ACTIVITY_PLAN_RENDERER_ID = "slack.experimental.plan.v1";
 type Phase = "running" | "completed" | "failed" | "rejected" | "cancelled" | "blocked";
@@ -18,6 +19,7 @@ interface PlanState {
 }
 
 export function createSlackPlanRenderer(
+  apiOptions: SlackTransportOptions | undefined,
   botToken: SlackBotToken | undefined,
 ): ChannelActivityRenderer {
   return {
@@ -61,6 +63,7 @@ export function createSlackPlanRenderer(
                 ...view.parents.map(taskChunk),
               ],
             },
+            apiOptions,
             botToken,
             installation,
           );
@@ -81,6 +84,7 @@ export function createSlackPlanRenderer(
           await checked(
             "chat.appendStream",
             { channel, ts: current.ts, chunks: updates },
+            apiOptions,
             botToken,
             installation,
           );
@@ -89,7 +93,13 @@ export function createSlackPlanRenderer(
           ...view.entities.map((entity) => [entity.id, entityVersion(entity)]),
         ]);
         if (view.settled) {
-          await checked("chat.stopStream", { channel, ts: current.ts }, botToken, installation);
+          await checked(
+            "chat.stopStream",
+            { channel, ts: current.ts },
+            apiOptions,
+            botToken,
+            installation,
+          );
           const blocks = [
             {
               type: "plan",
@@ -105,6 +115,7 @@ export function createSlackPlanRenderer(
           await checked(
             "chat.update",
             { channel, ts: current.ts, text: view.parents.map((p) => p.name).join(", "), blocks },
+            apiOptions,
             botToken,
             installation,
           );
@@ -230,10 +241,12 @@ function safeId(id: string) {
 async function api(
   operation: string,
   body: unknown,
+  apiOptions: SlackTransportOptions | undefined,
   botToken: SlackBotToken | undefined,
   installation: unknown,
 ) {
   return callSlackApi({
+    api: apiOptions,
     operation,
     body,
     botToken,
@@ -243,10 +256,11 @@ async function api(
 async function checked(
   operation: string,
   body: unknown,
+  apiOptions: SlackTransportOptions | undefined,
   token: SlackBotToken | undefined,
   installation: unknown,
 ) {
-  const response = await api(operation, body, token, installation);
+  const response = await api(operation, body, apiOptions, token, installation);
   if (!response.ok)
     throw new Error(`Slack ${operation} failed: ${response.error ?? "unknown_error"}`);
 }

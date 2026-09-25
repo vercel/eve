@@ -57,6 +57,7 @@ export function buildToolSet(input: {
       description: definition.description,
       execute: wrapToolExecute(definition),
       inputSchema: toModelSchema(definition.inputSchema, "input"),
+      strict: false,
       outputSchema: toModelSchema(definition.outputSchema, "output"),
       ...(definition.execute !== undefined
         ? {

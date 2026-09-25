@@ -1,14 +1,18 @@
-import { describe, expect, it } from "vitest";
-
-import type { SessionAuthContext } from "#channel/types.js";
+import { describe, expect, it, vi } from "vitest";
+import { jsonSchema } from "ai";
+import type { ApprovalResponsePolicy } from "#approval/definition.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
 import {
   getApprovalAuditState,
-  settleDirectApprovalResponse,
+  markApprovalCandidateAuthorizationRequired,
 } from "#harness/approval-candidates.js";
-import {
-  coordinateApprovalDelivery,
-  shouldPrepareApprovalReplayTools,
-} from "#harness/approval-delivery-coordinator.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+
+import type { SessionAuthContext } from "#channel/types.js";
+import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
+import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
+import { selectApprovalReplayBatch } from "#harness/input-requests.js";
 import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -49,6 +53,125 @@ function parkedSession(): HarnessSession {
 }
 
 describe("coordinateApprovalDelivery", () => {
+  function authorize(session: HarnessSession, response: ApprovalResponsePolicy) {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: responder },
+      sessionId: session.sessionId,
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    const tool: HarnessToolDefinition = {
+      name: "gate",
+      description: "A gated tool.",
+      inputSchema: jsonSchema({ type: "object" }),
+      execute: async () => "done",
+      approval: { request: () => "user-approval", response },
+    };
+    return contextStorage.run(ctx, () =>
+      coordinateApprovalDelivery({
+        now: 101,
+        session,
+        tools: new Map([["gate", tool]]),
+      }),
+    );
+  }
+
+  async function ingest(session = parkedSession()) {
+    return coordinateApprovalDelivery({
+      now: 100,
+      session,
+      stepInput: {
+        attributedInputResponses: [
+          { auth: responder, response: { requestId: request.requestId, optionId: "approve" } },
+        ],
+      },
+      tools: new Map(),
+    });
+  }
+
+  it.each(["rejected", "failed", "allowed"] as const)(
+    "explicitly completes %s candidates only after ingestion",
+    async (status) => {
+      const ingested = await ingest();
+      expect(ingested.kind).toBe("continue-coordination");
+      expect(getApprovalAuditState(ingested.session.state).activeCandidates).toHaveLength(1);
+      const response = vi.fn(() => {
+        if (status === "failed") throw new Error("policy unavailable");
+        return { status, reason: "Not an eligible responder." };
+      });
+      const result = await authorize(ingested.session, response);
+      expect(response).toHaveBeenCalledOnce();
+      expect(result.kind).toBe("responses-completed");
+      expect(getApprovalAuditState(result.session.state).activeCandidates).toEqual([]);
+      expect(getApprovalAuditState(result.session.state).candidateHistory[0]?.status).toBe(status);
+      expect(result.stepInput?.inputResponses ?? []).toEqual(
+        status === "allowed" ? [{ optionId: "approve", requestId: request.requestId }] : [],
+      );
+      const repeated = await authorize(result.session, response);
+      expect(repeated.kind).toBe("continue");
+      expect(response).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("completes an expired candidate without executing policy", async () => {
+    const ingested = await ingest();
+    const result = await coordinateApprovalDelivery({
+      now: 600_100,
+      session: ingested.session,
+      tools: new Map(),
+    });
+    expect(result.kind).toBe("responses-completed");
+    expect(getApprovalAuditState(result.session.state).candidateHistory[0]?.status).toBe(
+      "timed-out",
+    );
+  });
+
+  it("completes a failed authorizer timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const ingested = await ingest();
+      const pending = authorize(ingested.session, () => new Promise(() => {}));
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await pending;
+      expect(result.kind).toBe("responses-completed");
+      expect(getApprovalAuditState(result.session.state).candidateHistory[0]?.status).toBe(
+        "failed",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not complete a duplicate while its candidate is active", async () => {
+    const ingested = await ingest();
+    const duplicate = await ingest(ingested.session);
+    expect(duplicate.kind).toBe("continue");
+    expect(getApprovalAuditState(duplicate.session.state).activeCandidates).toHaveLength(1);
+  });
+
+  it("keeps authorization-required candidates parked instead of completing", async () => {
+    const ingested = await ingest();
+    const candidate = getApprovalAuditState(ingested.session.state).activeCandidates[0]!;
+    const session = {
+      ...ingested.session,
+      state: markApprovalCandidateAuthorizationRequired({
+        candidateId: candidate.candidateId,
+        state: ingested.session.state,
+        authorizationChallenges: [
+          {
+            name: "provider",
+            hookUrl: "https://example.com/callback",
+            challenge: { url: "https://example.com/login" },
+          },
+        ],
+      }),
+    };
+    const response = vi.fn(() => ({ status: "allowed" as const }));
+    const result = await authorize(session, response);
+    expect(result.kind).toBe("authorization-required");
+    expect(response).not.toHaveBeenCalled();
+  });
+
   it("recovers an allowed settlement before its synthetic response is consumed", async () => {
     const parked = parkedSession();
     const settled = settleDirectApprovalResponse({
@@ -180,6 +303,12 @@ describe("attributed approval responses", () => {
 });
 
 describe("text approval replay preparation", () => {
+  function shouldPrepareApprovalReplayTools(input: {
+    session: HarnessSession;
+    stepInput?: import("#harness/types.js").StepInput;
+  }) {
+    return selectApprovalReplayBatch(input.session, input.stepInput) !== undefined;
+  }
   function sessionWithRequests(
     requests: InputRequest[] = [request],
     responseAuthRequiredRequestIds?: string[],

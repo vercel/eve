@@ -1,10 +1,8 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { TurnDeliveryIdsKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { setChannelContext } from "#execution/channel-context.js";
+import { publishChannelEvent } from "#execution/publish-channel-event.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import {
   createDurableSessionState,
@@ -20,11 +18,7 @@ import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emiss
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
-import {
-  encodeMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-  stampMessageStreamEvent,
-} from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -76,17 +70,15 @@ export async function settleCancelledTurnStep(input: {
   try {
     const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
       const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-        const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-        setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
-        // Stamp once: the persisted chunk and the hooks must agree on the id.
-        const stamped = stampMessageStreamEvent(transformed, ctx.get(TurnDeliveryIdsKey));
-        await writer.write(encodeMessageStreamEvent(stamped));
-        void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
-        await dispatchStreamEventHooks({
+        const stamped = await publishChannelEvent({
+          adapter,
+          adapterCtx,
           ctx,
-          event: stamped,
-          registry: bundle.hookRegistry,
+          writer,
+          event,
+          deliveryIds: ctx.get(TurnDeliveryIdsKey),
         });
+        void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
       };
       const emit =
         instrumentation?.createHandleEvent({

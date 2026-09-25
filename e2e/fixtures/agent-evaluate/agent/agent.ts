@@ -10,6 +10,25 @@ export default defineAgent({
   // Worker calls start detached tasks; the script reads their results.
   model: fixtureModel(
     waitForTasks(async (request) => {
+      if (request.userMessages.some((text) => text.includes("auto-resume-question"))) {
+        const result = request.toolResults.find((entry) => entry.name === "ask_question");
+        if (result) return `Question answered: ${JSON.stringify(result.output)}`;
+        return {
+          toolCalls: [
+            {
+              id: "auto-resume-question-1",
+              name: "ask_question",
+              input: {
+                question: "Which environment should receive the release?",
+                options: [
+                  { label: "Staging", description: "Deploy to staging first." },
+                  { label: "Production", description: "Deploy directly to production." },
+                ],
+              },
+            },
+          ],
+        };
+      }
       if (request.userMessages.some((text) => text.includes("automatic-review"))) {
         const result = request.toolResults.find((entry) => entry.name === "automatic-review");
         if (result) return JSON.stringify({ isError: result.isError, output: result.output });

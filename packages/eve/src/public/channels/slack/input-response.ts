@@ -10,6 +10,7 @@ import type {
   SlackInputResponseSubmission,
   SlackChannelState,
 } from "#public/channels/slack/slackChannel.js";
+import type { SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 const log = createLogger("slack.interactions");
 
@@ -29,6 +30,7 @@ export function approvalResponderStatePatch(
 export async function authorizeInputResponse(input: {
   readonly channelId: string;
   readonly deps: {
+    readonly api: SlackTransportOptions | undefined;
     readonly config: SlackChannelConfig;
     readonly onInputResponse: NonNullable<SlackChannelConfig["onInputResponse"]>;
   };
@@ -45,6 +47,7 @@ export async function authorizeInputResponse(input: {
     userName: input.submission.user.username ?? input.submission.user.name,
   });
   const { thread, slack } = buildSlackBinding({
+    api: input.deps.api,
     botToken: input.deps.config.credentials?.botToken,
     channelId: input.channelId,
     threadTs: input.threadTs,

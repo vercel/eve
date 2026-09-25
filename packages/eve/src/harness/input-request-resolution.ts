@@ -14,6 +14,7 @@ export interface ResolvedInputBatch {
     readonly outcome: "answered" | ApprovalTerminalStatus;
     readonly request: InputRequest;
     readonly response?: InputResponse;
+    readonly toolReplayIdentity?: string;
   }[];
 }
 
@@ -21,6 +22,7 @@ export function buildResolvedInputBatch(
   batch: {
     readonly event?: PendingInputBatchEvent;
     readonly requests: readonly InputRequest[];
+    readonly toolReplayIdentities?: Readonly<Record<string, string>>;
   },
   responses: readonly InputResponse[],
 ): ResolvedInputBatch | undefined {
@@ -38,6 +40,11 @@ export function buildResolvedInputBatch(
             : "answered",
         request,
         response,
+        ...(batch.toolReplayIdentities?.[request.requestId] === undefined
+          ? {}
+          : {
+              toolReplayIdentity: batch.toolReplayIdentities[request.requestId],
+            }),
       };
     }),
   };

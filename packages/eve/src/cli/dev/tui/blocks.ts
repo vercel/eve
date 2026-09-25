@@ -84,7 +84,7 @@ export interface Block {
   /** Structured remediation shown between an error's body and its detail. */
   hint?: string;
 
-  /** Tool, connection, or synthetic command lifecycle status. */
+  /** Tool, connection, or completed command lifecycle status. */
   status?: ToolStatus;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
@@ -148,6 +148,10 @@ export interface ToolGroupItem {
 export interface RenderBlockContext {
   /** Current shared square-pulse frame for live activity blocks. */
   activityPulse: string;
+  /** An open setup panel owns the pulse, so a running command's gutter holds still. */
+  setupFlowOpen?: boolean;
+  /** A transient panel keeps its command echo live without a progress glyph. */
+  transientPanelOpen?: boolean;
   /** Whether prose responses are parsed and styled as Markdown. */
   renderMarkdown?: boolean;
   /**
@@ -233,7 +237,7 @@ function renderBody(
     case "flow":
       return renderFlow(block, width, theme);
     case "command":
-      return renderCommand(block, theme);
+      return renderCommand(block, theme, context);
     case "question":
     case "connection-auth":
       return renderPreformatted(block, width, theme);
@@ -263,11 +267,9 @@ function renderBody(
 
 function renderUser(block: Block, width: number, theme: Theme): string[] {
   const bar =
-    block.promptOrigin === "steer"
-      ? theme.colors.yellow(theme.glyph.user)
-      : theme.colors.cyan(theme.glyph.user);
+    block.promptOrigin === "steer" ? theme.colors.yellow(theme.glyph.user) : theme.glyph.user;
   const lines = wrap(block.body ?? "", width - 2);
-  return lines.map((line) => `${bar} ${line}`);
+  return lines.map((line) => `${bar} ${theme.colors.bold(line)}`);
 }
 
 function renderProse(
@@ -432,44 +434,32 @@ function paintCommands(line: string, theme: Theme): string {
 }
 
 /**
- * A slash command invocation under the user gutter. Automatic commands use
- * the same row so their result can follow it. The `❯` glyph remains
- * exclusive to live input because the TUI tests use `❯` to detect a ready prompt.
+ * A slash command invocation. While it runs, its gutter pulses — or holds a
+ * still `▪` beside an open setup panel, which pulses itself. It then carries
+ * a settled `*`. A settled summary replaces the invocation, dimmed as a
+ * record. The `❯` glyph remains exclusive to live input because the TUI tests
+ * use `❯` to detect a ready prompt.
  */
-function renderCommand(block: Block, theme: Theme): string[] {
+function renderCommand(block: Block, theme: Theme, context: RenderBlockContext): string[] {
   const c = theme.colors;
-  const status = block.status === "error" ? `${c.red(theme.glyph.error)} ` : "";
-  return [`${c.cyan(theme.glyph.user)} ${status}${c.bold(block.body ?? "")}`];
+  const gutter =
+    block.live !== true
+      ? block.status === "done"
+        ? c.gray("*")
+        : theme.glyph.user
+      : context.transientPanelOpen === true
+        ? theme.glyph.user
+        : context.setupFlowOpen === true
+          ? c.gray(theme.glyph.square)
+          : c.gray(context.activityPulse);
+  return [`${gutter} ${block.result === undefined ? (block.body ?? "") : c.dim(block.result)}`];
 }
 
-/**
- * One persistent setup-flow line: progress the user must keep (the Slack
- * Connect URL, a written env file). The tone travels in `title`; info dims,
- * the other tones keep the body at full intensity behind their glyph.
- */
-function paintOutcomeMarker(line: string, theme: Theme, source = line): string {
-  const marker = source.trimStart().slice(0, 1);
-  if (marker === "✓") return line.replace(marker, theme.colors.green(theme.glyph.success));
-  if (marker === "⨯") return line.replace(marker, theme.colors.red(theme.glyph.error));
-  if (marker === "–") return line.replace(marker, theme.colors.yellow(theme.glyph.dash));
-  return line;
-}
-
+/** One persistent setup-flow line retained after a panel closes. */
 function renderFlow(block: Block, width: number, theme: Theme): string[] {
-  const c = theme.colors;
-  const tone = block.title ?? "info";
-  const glyph =
-    tone === "success"
-      ? c.green(theme.glyph.success)
-      : tone === "warning"
-        ? c.yellow(theme.glyph.warning)
-        : tone === "error"
-          ? c.red(theme.glyph.error)
-          : c.dim(theme.glyph.dot);
   const lines = wrap(block.body ?? "", width - 2);
-  const paint = (line: string): string =>
-    tone === "info" ? c.dim(line) : paintOutcomeMarker(line, theme);
-  return lines.map((line, index) => `${index === 0 ? glyph : " "} ${paint(line)}`);
+  const marker = theme.colors.dim("*");
+  return lines.map((line, index) => `${index === 0 ? marker : " "} ${line}`);
 }
 
 /**
@@ -479,28 +469,13 @@ function renderFlow(block: Block, width: number, theme: Theme): string[] {
  */
 function renderResult(block: Block, width: number, theme: Theme): string[] {
   const lines = wrap(block.body ?? "", width - 7);
-  if (block.status === "done") {
-    const elbow = theme.colors.dim(theme.glyph.elbow);
-    const success = theme.colors.green(theme.glyph.success);
-    const rule = theme.colors.dim(theme.glyph.rule);
-    const corner = theme.colors.dim(theme.glyph.corner);
-    if (lines.length === 0) return [`   ${elbow}  ${success}`];
-    return lines.map((line, index) => {
-      if (index === 0) return `   ${elbow}  ${success} ${line}`;
-      const marker = index === lines.length - 1 ? corner : rule;
-      return `      ${marker} ${line}`;
-    });
-  }
-
   const marker = theme.colors.dim(theme.glyph.elbow);
   if (lines.length === 0) return [`   ${marker}`];
   // SGR 22 closes bold and dim together, so a result that bolds a span (the
   // /model reply's model name) would drop the rest of the line out of dim;
   // re-open dim after each close so the whole line stays quiet.
-  const dim = (line: string): string => {
-    const body = theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
-    return paintOutcomeMarker(body, theme, line);
-  };
+  const dim = (line: string): string =>
+    theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
   return lines.map((line, index) =>
     index === 0 ? `   ${marker}  ${dim(line)}` : `      ${dim(line)}`,
   );

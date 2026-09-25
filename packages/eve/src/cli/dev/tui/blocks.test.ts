@@ -17,6 +17,14 @@ describe("renderBlockLines", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
+  it("keeps a transient command invocation visible without a progress glyph", () => {
+    const block = { kind: "command", body: "/help", live: true } as const;
+    expect(renderBlockLines(block, 60, theme, { ...ctx, transientPanelOpen: true })).toEqual([
+      "│ /help",
+    ]);
+    expect(renderBlockLines(block, 60, theme, ctx)).toEqual(["▪ /help"]);
+  });
+
   it("marks rendered assistant Markdown with the brand triangle", () => {
     const lines = render({ kind: "assistant", body: "all done" });
     expect(lines).toEqual(["▲ all done"]);
@@ -59,7 +67,7 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["▲ **bold**", "  ", "  - item"]);
   });
 
-  it("colors per-item status markers in a mixed command result", () => {
+  it("keeps per-item status markers monochrome in a mixed command result", () => {
     const colored = createTheme({ color: true, unicode: true });
     const lines = renderBlockLines(
       {
@@ -71,9 +79,11 @@ describe("renderBlockLines", () => {
       ctx,
     );
 
-    expect(lines.join("\n")).toContain(colored.colors.green("✓"));
-    expect(lines[0]).toContain("2 additions: 1 added, 1 failed");
-    expect(lines.join("\n")).toContain(colored.colors.red("⨯"));
+    const output = lines.join("\n");
+    expect(output).toContain("2 additions: 1 added, 1 failed");
+    expect(output).not.toContain(colored.colors.gray("✓"));
+    expect(output).not.toContain(colored.colors.red("⨯"));
+    expect(output).not.toContain(colored.colors.green("✓"));
   });
 
   it("uses ASCII status markers when Unicode is unavailable", () => {
@@ -88,10 +98,9 @@ describe("renderBlockLines", () => {
       ctx,
     );
 
-    expect(lines.join("\n")).toContain("+ Web Chat");
-    expect(lines.join("\n")).toContain("x Slack");
-    expect(lines.join("\n")).toContain("- Notion");
-    expect(lines.join("\n")).not.toMatch(/[✓⨯–]/u);
+    expect(lines.join("\n")).toContain("✓ Web Chat");
+    expect(lines.join("\n")).toContain("⨯ Slack");
+    expect(lines.join("\n")).toContain("– Notion");
   });
 
   it("summarizes a completed tool with a result line", () => {
@@ -299,7 +308,15 @@ describe("renderBlockLines", () => {
       colorTheme,
       { activityPulse: "▪" },
     );
-    expect(rows).toEqual(["\x1b[33m│\x1b[39m go"]);
+    expect(rows).toEqual(["\x1b[33m│\x1b[39m \x1b[1mgo\x1b[22m"]);
+  });
+
+  it("bolds a sent user message behind an uncolored gutter", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const rows = renderBlockLines({ kind: "user", body: "hello" }, 80, colorTheme, {
+      activityPulse: "▪",
+    });
+    expect(rows).toEqual(["│ \x1b[1mhello\x1b[22m"]);
   });
 
   it("pulses the in-progress subagent mark by intensity, with a quiet label", () => {
