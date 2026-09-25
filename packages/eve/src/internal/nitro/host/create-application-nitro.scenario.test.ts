@@ -614,8 +614,8 @@ describe("application Nitro creation", () => {
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
-    expect(traceDeps).toEqual(expect.arrayContaining(["sharp", "fixture-external"]));
-    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
+    expect(traceDeps).toEqual(expect.arrayContaining(["sharp*", "fixture-external*"]));
+    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp*")).toHaveLength(
       1,
     );
     expect(traceDeps).not.toContain("eve");
@@ -657,7 +657,7 @@ describe("application Nitro creation", () => {
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
-    expect(traceDeps).toEqual(expect.arrayContaining(["zod*", "sharp", "sharp*"]));
+    expect(traceDeps).toEqual(expect.arrayContaining(["zod*", "sharp*"]));
     const plugins = createNitroMock.mock.calls[0]?.[0].rollupConfig.plugins;
     const externalPlugin = plugins.find(
       (plugin: { name?: string }) => plugin.name === "eve-extension-external-dependency",
@@ -719,8 +719,8 @@ describe("application Nitro creation", () => {
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
-    expect(traceDeps).toEqual(expect.arrayContaining(["subagent-external", "sharp"]));
-    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
+    expect(traceDeps).toEqual(expect.arrayContaining(["subagent-external*", "sharp*"]));
+    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp*")).toHaveLength(
       1,
     );
   });
@@ -923,12 +923,12 @@ describe("application Nitro creation", () => {
 
     const traceDeps = createNitroMock.mock.calls[0]?.[0].traceDeps;
     expect(traceDeps).toEqual(
-      expect.arrayContaining(["@napi-rs/keyring", "sharp", "fixture-external"]),
+      expect.arrayContaining(["@napi-rs/keyring*", "sharp*", "fixture-external*"]),
     );
     expect(
-      traceDeps.filter((dependencyName: string) => dependencyName === "@napi-rs/keyring"),
+      traceDeps.filter((dependencyName: string) => dependencyName === "@napi-rs/keyring*"),
     ).toHaveLength(1);
-    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp")).toHaveLength(
+    expect(traceDeps.filter((dependencyName: string) => dependencyName === "sharp*")).toHaveLength(
       1,
     );
   });

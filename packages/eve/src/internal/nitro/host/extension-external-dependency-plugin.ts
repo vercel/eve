@@ -43,7 +43,7 @@ export function resolveExtensionExternalDependencyPaths(
   for (const [dependency, anchors] of collectDependencyAnchors(mounts)) {
     for (const anchor of anchors) {
       try {
-        resolvedPaths[dependency] = resolveDependencyEntry(dependency, anchor);
+        resolvedPaths[dependency] = resolveExternalDependencyEntry(dependency, anchor);
         break;
       } catch {}
     }
@@ -56,7 +56,7 @@ export function resolveExtensionExternalDependencyPaths(
   return resolvedPaths;
 }
 
-function resolveDependencyEntry(dependency: string, anchor: string): string {
+export function resolveExternalDependencyEntry(dependency: string, anchor: string): string {
   const require = createRequire(anchor);
   try {
     return require.resolve(dependency);

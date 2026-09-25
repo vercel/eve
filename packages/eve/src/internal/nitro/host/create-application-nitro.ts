@@ -24,6 +24,7 @@ import {
   createExtensionExternalDependencyPlugin,
   resolveExtensionExternalDependencyPaths,
 } from "#internal/nitro/host/extension-external-dependency-plugin.js";
+import { resolveConfiguredExternalDependencyPaths } from "#internal/nitro/host/configured-external-dependency-paths.js";
 import {
   configureDevelopmentNitroRoutes,
   configureProductionNitroRoutes,
@@ -99,14 +100,7 @@ function collectHostedTraceDependencies(
   const extensionExternalDependencies = new Set(
     collectExtensionExternalDependencies(preparedHost.compileResult.manifest),
   );
-  const configuredExternalDependencies = [
-    ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
-    ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
-      subagent.configResolver === undefined
-        ? (subagent.agent.config.build?.externalDependencies ?? [])
-        : (subagent.configResolver.build?.externalDependencies ?? []),
-    ),
-  ];
+  const configuredExternalDependencies = collectConfiguredExternalDependencies(preparedHost);
   // Nitro already classifies known native and non-bundleable packages through
   // its nf3 database. traceDeps is only for eve-owned or author-configured
   // additions to that upstream policy.
@@ -118,13 +112,26 @@ function collectHostedTraceDependencies(
     // so a resolvable-but-unrequested install adds nothing to hosted
     // output.
     ...configuredOptionalEnginePackages,
-    ...configuredExternalDependencies,
+    ...configuredExternalDependencies.map((dependencyName) => `${dependencyName}*`),
     ...[...extensionExternalDependencies].map((dependencyName) => `${dependencyName}*`),
   ]);
   return [...merged].filter(
     (dependencyName) =>
       dependencyName !== EVE_PACKAGE_NAME && dependencyName !== `${EVE_PACKAGE_NAME}*`,
   );
+}
+
+function collectConfiguredExternalDependencies(preparedHost: PreparedApplicationHost): string[] {
+  return [
+    ...new Set([
+      ...(preparedHost.compileResult.manifest.config.build?.externalDependencies ?? []),
+      ...preparedHost.compileResult.manifest.subagents.flatMap((subagent) =>
+        subagent.configResolver === undefined
+          ? (subagent.agent.config.build?.externalDependencies ?? [])
+          : (subagent.configResolver.build?.externalDependencies ?? []),
+      ),
+    ]),
+  ];
 }
 
 function collectExtensionExternalDependencies(manifest: CompiledAgentManifest): string[] {
@@ -604,11 +611,22 @@ function createApplicationNitroBundlerConfiguration(
   };
   // Nitro inherits rollupConfig in its Rolldown builder, concatenating plugin arrays.
   const nitroRollupConfig = createNitroBundlerConfig(nitroBundlerPlugins);
-  const tracedAppDependencies = collectHostedTraceDependencies(
-    preparedHost,
-    configuredOptionalEnginePackages,
+  const tracedAppDependencyPaths = Object.fromEntries(
+    Object.entries({
+      ...resolveConfiguredExternalDependencyPaths(
+        preparedHost.appRoot,
+        collectConfiguredExternalDependencies(preparedHost),
+      ),
+      ...resolveExtensionExternalDependencyPaths(extensionMounts),
+    }).filter(([dependencyName]) => dependencyName !== EVE_PACKAGE_NAME),
   );
-  const tracedAppDependencyPaths = resolveExtensionExternalDependencyPaths(extensionMounts);
+  const tracedAppDependencies = [
+    ...collectHostedTraceDependencies(preparedHost, configuredOptionalEnginePackages),
+    // Nitro accepts absolute trace inputs in addition to package selectors.
+    // Including the importer-resolved entries seeds nf3 before it tries to
+    // resolve the bare selectors from the app root.
+    ...Object.values(tracedAppDependencyPaths),
+  ];
 
   return {
     nitroRolldownConfig,
