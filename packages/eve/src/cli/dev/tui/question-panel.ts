@@ -12,6 +12,7 @@ import type { AgentTUIInputOption } from "./runner.js";
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import { clipVisible, renderInputWithBlockCursor, wrapVisibleLine } from "#cli/ui/terminal-text.js";
+import { renderOptionRow } from "#setup/cli/option-row.js";
 
 const FREEFORM_ROW_LABEL = "Type your own answer";
 
@@ -25,12 +26,6 @@ export interface QuestionPanelState {
   /** The freeform row's inline editor; focused while the cursor rests on it. */
   readonly editor: LineState;
   readonly caretVisible: boolean;
-}
-
-/** Rows under the cursor paint like the setup panel's selected option. */
-function selectedRow(text: string, theme: Theme): string {
-  const c = theme.colors;
-  return `${c.bold(` ${theme.glyph.selectedPointer} ${text}`)} ${c.dim("↵")}`;
 }
 
 export function renderQuestionPanel(
@@ -54,13 +49,13 @@ export function renderQuestionPanel(
   }
   rows.push("");
 
-  for (const [index, option] of state.options.entries()) {
-    rows.push(...optionRows(option.label, option.description, index, state, theme));
-  }
+  rows.push(...renderQuestionChoices(state.options, state.cursor, theme));
   if (state.allowFreeform) {
     const index = state.options.length;
     const focused = state.cursor === index;
-    rows.push(...optionRows(FREEFORM_ROW_LABEL, undefined, index, state, theme));
+    rows.push(
+      ...renderQuestionChoices([{ id: "freeform", label: FREEFORM_ROW_LABEL }], 0, theme, focused),
+    );
     if (focused || state.editor.text.length > 0) {
       rows.push(`        ${c.dim(g.elbow)} ${freeformEditorBody(state, focused, theme, width)}`);
     }
@@ -69,27 +64,36 @@ export function renderQuestionPanel(
   return rows.map((row) => clipVisible(row, width));
 }
 
-function optionRows(
-  label: string,
-  description: string | undefined,
-  index: number,
-  state: QuestionPanelState,
+export function renderQuestionChoices(
+  options: readonly AgentTUIInputOption[],
+  cursor: number,
   theme: Theme,
+  forceCursor = false,
 ): string[] {
-  const c = theme.colors;
-  const numbered = `${index + 1}. ${label}`;
-  // Both variants put the number at column 5 and the label at column 8 —
-  // the selected row's extra cells are its pointer and padding, so moving
-  // the cursor never shifts the text horizontally.
-  const rows = [
-    state.cursor === index
-      ? `  ${selectedRow(numbered, theme)}`
-      : `     ${c.dim(`${index + 1}.`)} ${label}`,
-  ];
-  if (description !== undefined && description.length > 0) {
-    rows.push(`        ${c.dim(description)}`);
-  }
-  return rows;
+  return options.flatMap((option, index) => {
+    const isCursor = forceCursor || cursor === index;
+    const row = renderOptionRow({
+      colors: theme.colors,
+      glyphs: {
+        pointer: theme.glyph.pointer,
+        selectedPointer: theme.glyph.selectedPointer,
+        success: theme.glyph.success,
+        placeholder: theme.glyph.option,
+        dot: theme.glyph.dot,
+        warning: theme.glyph.warning,
+      },
+      label: option.label,
+      isCursor,
+      state: { kind: "available", checked: false },
+      placeholder: false,
+      presentation: "minimal",
+    });
+    const rows = [`  ${row}`];
+    if (option.description !== undefined && option.description.length > 0) {
+      rows.push(`     ${theme.colors.dim(option.description)}`);
+    }
+    return rows;
+  });
 }
 
 function freeformEditorBody(

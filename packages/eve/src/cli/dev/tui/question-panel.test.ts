@@ -36,19 +36,19 @@ describe("renderQuestionPanel", () => {
 
     expect(rows[0]).toBe("  What type of options would you like to see?");
     expect(rows).toContain("  What type of options would you like to see?");
-    expect(rows.find((row) => row.includes("1. Available Tools"))).toContain("›");
-    expect(rows).toContain("        See 4 tools I can use");
-    expect(rows).toContain("     2. Connected Services");
+    expect(rows.find((row) => row.includes("Available Tools"))).toBe("     Available Tools");
+    expect(rows).toContain("     See 4 tools I can use");
+    expect(rows).toContain("     Connected Services");
     expect(rows[1]).toBe("");
-    expect(rows.at(-1)).toBe("     3. Type your own answer");
+    expect(rows.at(-1)).toBe("     Type your own answer");
   });
 
   it("marks only the cursor row with the pointer and enter badge", () => {
     const rows = render({ cursor: 1 });
     const selected = rows.find((row) => row.includes("Connected Services"));
 
-    expect(selected).toContain(" › 2. Connected Services ");
-    expect(selected).toContain("↵");
+    expect(selected).toBe("     Connected Services");
+    expect(selected).not.toContain("↵");
     expect(rows.find((row) => row.includes("Available Tools"))).not.toContain("›");
   });
 
@@ -56,7 +56,7 @@ describe("renderQuestionPanel", () => {
     const columnsOf = (rows: string[]) =>
       rows
         .filter((row) => row.includes("Connected Services"))
-        .map((row) => row.indexOf("2. Connected Services"));
+        .map((row) => row.indexOf("Connected Services"));
 
     // Selected and unselected variants of the same row must not drift.
     expect(columnsOf(render({ cursor: 1 }))).toEqual(columnsOf(render({ cursor: 0 })));

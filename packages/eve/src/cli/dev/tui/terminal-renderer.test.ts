@@ -2927,7 +2927,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders the question overlay with numbered rows and a bold cursor", async () => {
+  it("renders the question drawer with shared option rows", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.readInputQuestion({
@@ -2943,25 +2943,27 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     const lines = snapshot.split("\n");
     const selected = lines.find((line) => line.includes("AI Gateway"));
-    expect(selected).toContain(" › 1. AI Gateway ");
-    expect(selected).toContain("↵");
+    expect(selected).toBe("     AI Gateway");
+    expect(selected).not.toContain("↵");
+    expect(selected).not.toContain("1.");
     expect(screen.rawOutput()).not.toContain("\x1b[7m");
     expect(screen.rawOutput()).toContain("\x1b[1m");
     // Every option's description rides its own row, cursor or not.
-    expect(lines).toContain("        Managed access");
-    expect(lines).toContain("        Direct access");
-    // The drawer carries the question's navigation controls; no status row
+    expect(lines).toContain("     Managed access");
+    expect(lines).toContain("     Direct access");
+    // The drawer carries selection and dismissal controls; no status row
     // appears beneath it.
-    expect(snapshot).toContain("Esc dismiss");
-    expect(snapshot).toContain("Enter select");
-    expect(countOccurrences(snapshot, "Esc dismiss")).toBe(1);
+    expect(snapshot).toContain("esc to dismiss");
+    expect(snapshot).toContain("enter to select");
+    expect(snapshot).not.toContain("↑/↓ move");
+    expect(countOccurrences(snapshot, "esc to dismiss")).toBe(1);
 
     input.send("j");
     const unselected = screen
       .snapshot()
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
-    expect(unselected).toContain("1. AI Gateway");
+    expect(unselected).toContain("AI Gateway");
     expect(unselected).not.toContain("›");
     input.send("k");
 
@@ -2990,7 +2992,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         { id: "external", label: "Other providers", description: "Direct access" },
       ],
     });
-    expect(screen.snapshot()).toContain("Esc dismiss");
+    expect(screen.snapshot()).toContain("esc to dismiss");
 
     await escape();
     // No answer travels; the runner returns to the prompt and the question
@@ -3020,13 +3022,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
       options: [{ id: "gateway", label: "AI Gateway" }],
       allowFreeform: true,
     });
-    input.type("2");
+    input.down();
     input.type("draft answer");
     expect(screen.snapshot()).toContain("⎿ draft answer");
 
     await escape();
     expect(screen.snapshot()).not.toContain("draft answer");
-    expect(screen.snapshot()).toContain("Esc dismiss");
+    expect(screen.snapshot()).toContain("esc to dismiss");
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
@@ -3084,24 +3086,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).not.toContain("Ask Pick a color.");
   });
 
-  it("selects a question option directly by its number key", async () => {
-    const { input, renderer } = makeRenderer();
-
-    const answer = renderer.readInputQuestion({
-      requestId: "q1",
-      prompt: "Choose access",
-      display: "select",
-      options: [
-        { id: "gateway", label: "AI Gateway" },
-        { id: "external", label: "Other providers" },
-      ],
-    });
-    input.type("2");
-
-    await expect(answer).resolves.toEqual({ optionId: "external" });
-    renderer.shutdown();
-  });
-
   it("focuses the freeform editor when the cursor reaches its row", async () => {
     const { screen, input, renderer } = makeRenderer();
 
@@ -3116,10 +3100,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
       allowFreeform: true,
     });
 
-    expect(screen.snapshot()).toContain("3. Type your own answer");
-    // The freeform row's number moves focus into its inline editor; typing
-    // lands there without a separate enter.
-    input.type("3");
+    expect(screen.snapshot()).toContain("Type your own answer");
+    // Moving to the freeform row focuses its inline editor; typing lands
+    // there without a separate enter.
+    input.down();
+    input.down();
     input.type("neither");
     expect(screen.snapshot()).toContain("⎿ neither");
     input.enter();
@@ -4049,11 +4034,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("Approve random_color?");
-    expect(snapshot).toContain("Yes");
+    const yes = snapshot.split("\n").find((row) => row.includes("Yes"));
+    expect(yes).toBe("     Yes");
     expect(snapshot).toContain("No");
     expect(snapshot).toContain("y yes · n no · Ctrl-C cancel");
     expect(snapshot).not.toContain("(y/n)");
-    input.type("y");
+    input.down();
+    expect(
+      screen
+        .snapshot()
+        .split("\n")
+        .find((row) => row.includes("No")),
+    ).toBe("     No");
+    input.up();
+    input.enter();
 
     await expect(approval).resolves.toEqual({ approved: true });
     renderer.shutdown();

@@ -149,7 +149,7 @@ import {
 } from "./tool-presentation.js";
 import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
-import { renderQuestionPanel } from "./question-panel.js";
+import { renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
@@ -1290,9 +1290,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#interrupted = false;
+    let approvalCursor = 0;
     this.#questionPanel = (width) =>
       renderTransientDrawer(
-        [`  Approve ${formatToolApprovalTitle(request)}?`, "", "  Yes", "  No"],
+        [
+          `  ${this.#theme.colors.bold(`Approve ${formatToolApprovalTitle(request)}?`)}`,
+          "",
+          ...renderQuestionChoices(
+            [
+              { id: "yes", label: "Yes" },
+              { id: "no", label: "No" },
+            ],
+            approvalCursor,
+            this.#theme,
+          ),
+        ],
         ["y yes · n no · Ctrl-C cancel"],
         this.#theme,
         width,
@@ -1300,6 +1312,23 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
 
     return await new Promise((resolve, reject) => {
+      const approve = () => {
+        this.#questionPanel = undefined;
+        this.#startWorking();
+        this.#status = STATUS.processing;
+        this.#detachInput();
+        this.#paint();
+        resolve({ approved: true });
+      };
+      const deny = () => {
+        this.#questionPanel = undefined;
+        this.#startWorking();
+        this.#status = STATUS.processing;
+        this.#markToolDenied(request.toolCallId);
+        this.#detachInput();
+        this.#paint();
+        resolve({ approved: false, reason: "Denied by user." });
+      };
       this.#rejectActiveReader = reject;
       this.#consumeKey = (key) => {
         switch (key.type) {
@@ -1308,24 +1337,24 @@ export class TerminalRenderer implements AgentTUIRenderer {
             // accident; terminal framing is not an authentication signal.
             if (key.framing !== "unframed") break;
             const value = key.value.toLowerCase();
-            if (value === "y") {
-              this.#questionPanel = undefined;
-              this.#startWorking();
-              this.#status = STATUS.processing;
-              this.#detachInput();
-              this.#paint();
-              resolve({ approved: true });
-            } else if (value === "n") {
-              this.#questionPanel = undefined;
-              this.#startWorking();
-              this.#status = STATUS.processing;
-              this.#markToolDenied(request.toolCallId);
-              this.#detachInput();
-              this.#paint();
-              resolve({ approved: false, reason: "Denied by user." });
-            }
+            if (value === "y") approve();
+            else if (value === "n") deny();
             break;
           }
+          case "up":
+          case "ctrl-p":
+            approvalCursor = 0;
+            this.#paint();
+            break;
+          case "down":
+          case "ctrl-n":
+            approvalCursor = 1;
+            this.#paint();
+            break;
+          case "enter":
+            if (approvalCursor === 0) approve();
+            else deny();
+            break;
           case "ctrl-r":
             this.#paint();
             break;
@@ -1388,7 +1417,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#theme,
           width,
         ),
-        ["↑/↓ move · Enter select · Esc dismiss"],
+        ["enter to select · esc to dismiss"],
         this.#theme,
         width,
       );
@@ -1576,19 +1605,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
                 if (edited !== undefined) {
                   editor = edited;
                   this.#showCaret();
-                  this.#paint();
-                }
-                break;
-              }
-              // A number press selects its row directly; the freeform row's
-              // number moves focus into its inline editor instead.
-              if (key.type === "text" && /^[1-9]$/u.test(key.value)) {
-                const rowIndex = Number(key.value) - 1;
-                if (rowIndex < optionList.length) {
-                  selectOptionAt(rowIndex);
-                } else if (rowIndex === optionList.length && hasFreeformRow) {
-                  cursorIndex = rowIndex;
-                  syncFreeformCaret();
                   this.#paint();
                 }
               }
