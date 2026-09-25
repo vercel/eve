@@ -7,6 +7,7 @@ import type { ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { publishChannelEvent } from "#execution/publish-channel-event.js";
+import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
 import {
   createDurableSessionState,
   type DurableSession,
@@ -123,8 +124,9 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      // The child event is already routed; do not forward it again or apply
-      // the parent's scheduled-turn suppression from createSessionEventSink.
+      // A remote session must forward even requests originating in its own
+      // workflow tools; only the outermost parent owns channel delivery.
+      if (await forwardTaskEventToSessionCallback(ctx, event)) return;
       await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
     };
 

@@ -346,7 +346,6 @@ describe("startRemoteAgentSession", () => {
         "find the marker",
       ].join("\n"),
       capabilities: { requestInput: true },
-      mode: "conversation",
     });
     expect(
       readForwardedParentSessionBaggage(

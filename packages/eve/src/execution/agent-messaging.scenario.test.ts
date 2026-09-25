@@ -5,6 +5,7 @@ import type { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { Client } from "#client/client.js";
+import type { ClientSession } from "#client/session.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/scenario-app.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
@@ -15,6 +16,9 @@ const EVENT_TIMEOUT_MS = 30_000;
 const CODEWORD = "LANTERN-COMET-7319";
 const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
+const HITL_ANSWER = "approved-by-parent";
+const HITL_CHILD_RESULT = `CHILD_APPROVED=${HITL_ANSWER}`;
+const HITL_PARENT_RESULT = `REMOTE_HITL_RESULT=${HITL_ANSWER}`;
 
 function createScriptedParentAgentSource(subagentName: string): string {
   const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
@@ -136,6 +140,105 @@ export default workflow({ maxSubagents: 2 });
 `;
 }
 
+function createHitlParentAgentSource(): string {
+  return `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+const model = mockModel((request) => {
+  const taskResult = request.messages.map((message) => message.text).join("\\n");
+  if (taskResult.includes(${JSON.stringify(HITL_CHILD_RESULT)})) return ${JSON.stringify(HITL_PARENT_RESULT)};
+  if (request.toolResults.some((entry) => entry.id === "remote-hitl-1")) return "Background child is working.";
+  return {
+    toolCalls: [{ id: "remote-hitl-1", name: "delegate-approval", input: {} }],
+  };
+});
+
+export default defineAgent({ model, modelContextWindowTokens: 32_000 });
+`;
+}
+
+const HITL_PARENT_TOOL_SOURCE = `import { defineWorkflowTool } from "eve/tools";
+
+export default defineWorkflowTool({
+  description: "Delegate approval to the remote child.",
+  execution: "background",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  async execute(_input, ctx) {
+    "use workflow";
+    return await ctx.agent("remote-hitl-child", { message: "Ask the parent for approval." });
+  },
+});
+`;
+
+const HITL_CHILD_AGENT_SOURCE = `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+const model = mockModel((request) => {
+  const result = request.toolResults.find((entry) => entry.id === "ask-parent-1");
+  if (result !== undefined) return typeof result.output === "string" ? "CHILD_APPROVED=" + result.output : "BAD_ANSWER";
+  return { toolCalls: [{
+    id: "ask-parent-1",
+    name: "ask-parent",
+    input: {},
+  }] };
+});
+
+export default defineAgent({ model, modelContextWindowTokens: 32_000 });
+`;
+
+const HITL_TOOL_SOURCE = `import { defineWorkflowTool } from "eve/tools";
+
+export default defineWorkflowTool({
+  description: "Ask the parent for approval.",
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  outputSchema: { type: "string" },
+  async execute(_input, ctx) {
+    "use workflow";
+    const answer = await ctx.ask({
+      prompt: "What is the approval word?",
+      allowFreeform: true,
+    });
+    return answer.text ?? answer.optionId ?? "NO_ANSWER";
+  },
+});
+`;
+
+const REMOTE_HITL_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
+  files: {
+    "agent/agent.ts": HITL_CHILD_AGENT_SOURCE,
+    "agent/channels/eve.ts": AUTHENTICATED_EVE_CHANNEL_SOURCE.replace(
+      "  auth(request) {",
+      "  trustedForwarders: (forwarder) => forwarder.principalId === 'remote-memory-parent',\n  auth(request) {",
+    ),
+    "agent/instructions.md": "Ask the parent for approval.\n",
+    "agent/tools/ask-parent.ts": HITL_TOOL_SOURCE,
+  },
+  installDependencies: true,
+  name: "remote-hitl-agent",
+};
+
+function createRemoteHitlParentDescriptor(remoteUrl: string): ScenarioAppDescriptor {
+  return {
+    files: {
+      "agent/agent.ts": createHitlParentAgentSource(),
+      "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
+      "agent/instructions.md": "Delegate the approval question.\n",
+      "agent/tools/delegate-approval.ts": HITL_PARENT_TOOL_SOURCE,
+      "agent/subagents/remote-hitl-child.ts": `import { defineRemoteAgent } from "eve";
+import { bearer } from "eve/agents/auth";
+
+export default defineRemoteAgent({
+  auth: bearer(${JSON.stringify(REMOTE_MEMORY_TOKEN)}),
+  description: "Ask the parent for approval.",
+  url: ${JSON.stringify(remoteUrl)},
+});
+`,
+    },
+    installDependencies: true,
+    name: "remote-hitl-parent",
+  };
+}
+
 const AGENT_MESSAGING_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.ts": createScriptedParentAgentSource("memory-child"),
@@ -207,6 +310,90 @@ describe("agent messaging", () => {
         );
       } finally {
         await server.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "proxies HITL from a background remote child to an input-capable parent",
+    async () => {
+      const remoteApp = await scenarioApp(REMOTE_HITL_AGENT_DESCRIPTOR);
+      const remoteServer = await startScriptedEveDev(remoteApp.appRoot);
+
+      try {
+        const parentApp = await scenarioApp(createRemoteHitlParentDescriptor(remoteServer.url));
+        const parentServer = await startScriptedEveDev(parentApp.appRoot);
+
+        try {
+          const client = new Client({ host: parentServer.url });
+          const { session: parentSession, response } = await client.sessions.create({
+            message: "Delegate the approval question to the remote child.",
+          });
+          const firstTurn = await response.result();
+          expect(firstTurn.status).toBe("waiting");
+          expect(firstTurn.message).toContain("working");
+
+          const parentEvents = await waitForParentEvents({
+            session: parentSession,
+            label: "proxied question",
+            ready: (events) => filterEventsByType(events, "input.requested").length > 0,
+          });
+          const inputRequests = filterEventsByType(parentEvents, "input.requested");
+
+          expect(inputRequests).toHaveLength(1);
+          const request = inputRequests[0]?.data.requests[0];
+          expect(request).toMatchObject({
+            kind: "question",
+            prompt: "What is the approval word?",
+          });
+          if (request === undefined) throw new Error("Expected a proxied input request.");
+
+          expect(indexesOf(parentEvents, "session.waiting")[0]).toBeLessThan(
+            indexesOf(parentEvents, "input.requested")[0]!,
+          );
+          await parentSession.respond([{ requestId: request.requestId, text: HITL_ANSWER }]);
+
+          // Background completion is a later notification, not the answer delivery's boundary.
+          const finalEvents = await waitForParentEvents({
+            session: parentSession,
+            label: "child result on parent",
+            ready: (events) =>
+              filterEventsByType(events, "message.completed").some(
+                (event) => event.data.message === HITL_PARENT_RESULT,
+              ),
+          });
+          expect(filterEventsByType(finalEvents, "session.failed")).toHaveLength(0);
+          const calls = filterEventsByType(finalEvents, "subagent.called");
+          expect(calls).toHaveLength(1);
+          const childSessionId = calls[0]?.data.childSessionId;
+          if (childSessionId === undefined) throw new Error("Missing child session id.");
+          const remoteClient = new Client({
+            host: remoteServer.url,
+            auth: { bearer: REMOTE_MEMORY_TOKEN },
+          });
+          const childSnapshot = await remoteClient.sessions.attach(childSessionId).snapshot();
+          expect(
+            filterEventsByType(childSnapshot.events, "message.completed").map(
+              (event) => event.data.message,
+            ),
+          ).toContain(HITL_CHILD_RESULT);
+          expect(filterEventsByType(childSnapshot.events, "session.failed")).toHaveLength(0);
+        } catch (error) {
+          throw new Error(
+            [
+              `parent stdout:\n${parentServer.stdout()}`,
+              `parent stderr:\n${parentServer.stderr()}`,
+              `remote stdout:\n${remoteServer.stdout()}`,
+              `remote stderr:\n${remoteServer.stderr()}`,
+            ].join("\n\n"),
+            { cause: error },
+          );
+        } finally {
+          await parentServer.stop();
+        }
+      } finally {
+        await remoteServer.stop();
       }
     },
     SCENARIO_TIMEOUT_MS,
@@ -322,6 +509,28 @@ async function expectRetainedChildConversation(input: {
       (event) => event.data.message === CODEWORD,
     ),
   ).toBe(true);
+}
+
+async function waitForParentEvents(input: {
+  readonly session: ClientSession;
+  readonly label: string;
+  readonly ready: (events: readonly HandleMessageStreamEvent[]) => boolean;
+}): Promise<readonly HandleMessageStreamEvent[]> {
+  const signal = AbortSignal.timeout(EVENT_TIMEOUT_MS);
+  let events: readonly HandleMessageStreamEvent[] = [];
+  try {
+    while (!signal.aborted) {
+      ({ events } = await input.session.snapshot({ signal }));
+      if (filterEventsByType(events, "session.failed").length > 0) {
+        throw new Error("Parent session failed.");
+      }
+      if (input.ready(events)) return events;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("Timed out.");
+  } catch (cause) {
+    throw new Error(`Waiting for ${input.label}: ${JSON.stringify(events)}`, { cause });
+  }
 }
 
 async function collectStreamToEnd(input: {
