@@ -35,6 +35,7 @@ import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harne
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import { createTurnInputMessages } from "#harness/messages.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
@@ -3270,6 +3271,61 @@ describe("turnStep", () => {
         resolverSlug: "current",
       }),
     ]);
+  });
+
+  it("keeps a callback-only authorization resume user-final after an assistant reply", async () => {
+    const challenge = {
+      attemptId: "attempt-statuspage",
+      challenge: {
+        instructions: "Sign in to continue",
+        url: "https://idp.example/authorize",
+      },
+      hookUrl: "https://app.example/eve/v1/connections/statuspage/callback/sess-test:auth",
+      name: "statuspage",
+      principal: { type: "app" } as const,
+    };
+    const emissionState = { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" };
+    const session = createStubSession({
+      history: [{ content: "Both updates are blocked on a sign-in.", role: "assistant" }],
+      state: setPendingAuthorization(
+        { "eve.harness.emission": emissionState },
+        { challenges: [challenge] },
+      ),
+    });
+    installSessionStoreMocks([session]);
+
+    let modelMessages: readonly ModelMessage[] = [];
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession, stepInput): Promise<StepResult> => {
+        modelMessages = [...stepSession.history, ...createTurnInputMessages(stepInput)];
+        return { next: null, session: stepSession };
+      };
+    });
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: challenge.attemptId,
+              callback: { params: { code: "approved" } },
+              connectionName: challenge.name,
+            },
+          },
+        ],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({ emissionState }),
+    });
+
+    expect(modelMessages.at(-1)).toEqual(
+      expect.objectContaining({
+        content: expect.stringContaining("Authorization for statuspage completed"),
+        role: "user",
+      }),
+    );
   });
 
   it.each([
