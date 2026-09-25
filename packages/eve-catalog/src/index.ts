@@ -326,6 +326,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "stripe-link",
+    name: "Stripe Link",
+    kind: "extension",
+    tagline: "Give your eve agent guarded access to Link wallet and purchase tools.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "kernel",
     name: "KERNEL",
     kind: "extension",

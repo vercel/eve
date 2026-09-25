@@ -1920,6 +1920,38 @@ The extension also supports inline screenshots, session naming, proxies, and pro
       },
     ],
   },
+  "stripe-link": {
+    logo: "stripe-link",
+    docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve",
+    keywords: ["stripe", "link", "wallet", "payments", "checkout", "spend requests", "approval"],
+    install: `Install the Stripe Link extension for eve:
+
+\`\`\`bash
+eve add extension/stripe-link
+\`\`\`
+
+The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
+    quickStart: `Add a Link access token to the agent's server environment:
+
+\`\`\`bash title=".env.local"
+LINK_ACCESS_TOKEN=...
+\`\`\`
+
+The registry mounts the extension under \`agent/extensions/link.ts\`:
+
+\`\`\`ts title="agent/extensions/link.ts"
+import link from "@stripe/link-integrations-eve";
+
+export default link({
+  accessToken: process.env.LINK_ACCESS_TOKEN!,
+});
+\`\`\`
+
+The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
+    configure: `Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+
+Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. The skill tells the agent not to repeat credentials in chat, but applications remain responsible for transcript access and retention. Keep the token out of prompts and source control; a 401 requires the operator to configure a replacement token. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+  },
 };
 
 /**
