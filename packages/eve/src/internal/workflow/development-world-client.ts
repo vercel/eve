@@ -20,6 +20,7 @@ import {
   withDevelopmentWorkflowGeneration,
 } from "#internal/workflow/development-generation-context.js";
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
+import { isMissingDevelopmentRunError } from "#internal/workflow/is-inactive-development-run-error.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -189,6 +190,7 @@ function createQueueHandler(
     try {
       const appRoot = readRequiredEnvironment(DEVELOPMENT_WORKER_APP_ROOT_ENV);
       const generationId = await resolveDeliveryGenerationId(message);
+      if (generationId === undefined) return Response.json({ ok: true });
       const runtimeAppRoot = await readGenerationRuntimeAppRoot(appRoot, generationId);
       const result = await withDevelopmentWorkflowGeneration(
         {
@@ -237,7 +239,7 @@ function createQueueHandler(
  * the parent's queue and authenticated with the transport secret; nothing
  * an untrusted caller controls participates.
  */
-async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
+async function resolveDeliveryGenerationId(message: unknown): Promise<string | undefined> {
   // Capability probes may name a run before start() persists its record.
   if (!isRecord(message) || message.__healthCheck === true) {
     return await call<string>("resolveLatestDeploymentId");
@@ -252,11 +254,16 @@ async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
   if (runId === undefined) {
     return await call<string>("resolveLatestDeploymentId");
   }
-  const run = await call<{ readonly deploymentId: string }>("runs.get", [
-    runId,
-    { resolveData: "none" },
-  ]);
-  return run.deploymentId;
+  try {
+    const run = await call<{ readonly deploymentId: string }>("runs.get", [
+      runId,
+      { resolveData: "none" },
+    ]);
+    return run.deploymentId;
+  } catch (error) {
+    if (!isMissingDevelopmentRunError(error)) throw error;
+    return undefined;
+  }
 }
 
 function resolveDeliveryRunId(message: unknown): string | undefined {

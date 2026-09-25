@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     suspend: vi.fn(async () => undefined),
   };
   const mocksWorldInstance = {
+    reconcileExpiredRuns: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined),
     handleRequest: vi.fn(async () => undefined),
     start: vi.fn(async () => undefined),

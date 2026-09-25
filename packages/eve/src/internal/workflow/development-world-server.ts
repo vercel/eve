@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
-import { onDevelopmentRuntimePruned } from "#internal/nitro/dev-runtime-prune-listeners.js";
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
@@ -46,6 +45,7 @@ export interface ParentDevelopmentWorkflowWorld {
   close(): Promise<void>;
   handleRequest(request: Request): Promise<Response | undefined>;
   start(): Promise<void>;
+  reconcileExpiredRuns(): Promise<void>;
 }
 
 export function createParentDevelopmentWorkflowWorld(input: {
@@ -65,7 +65,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #world: World;
   #closed = false;
   #started = false;
-  #unsubscribePruning: (() => void) | undefined;
   #reconciliation: Promise<void> = Promise.resolve();
 
   constructor(input: {
@@ -92,17 +91,19 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     if (this.#started) {
       return;
     }
-    this.#unsubscribePruning ??= onDevelopmentRuntimePruned(this.#appRoot, () =>
-      this.#reconcileExpiredRuns(),
-    );
     await this.#world.start?.();
-    await this.#reconcileExpiredRuns();
     this.#started = true;
-    await reenqueueActiveDevelopmentRuns({
-      enqueue: this.#queue.bind(this),
-      prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
-      world: this.#world,
-    });
+    try {
+      await this.#reconcileExpiredRuns();
+      await reenqueueActiveDevelopmentRuns({
+        enqueue: this.#queue.bind(this),
+        prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
+        world: this.#world,
+      });
+    } catch (error) {
+      this.#started = false;
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
@@ -111,12 +112,9 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     this.#closed = true;
     this.#started = false;
-    this.#unsubscribePruning?.();
-    try {
-      await this.#reconciliation;
-    } finally {
-      await this.#world.close?.();
-    }
+    // Reconciliation failures belong to their caller, not a later shutdown.
+    await this.#reconciliation.catch(() => undefined);
+    await this.#world.close?.();
   }
 
   async handleRequest(request: Request): Promise<Response | undefined> {
@@ -128,6 +126,11 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       return await this.#handleStream(request, url);
     }
     return undefined;
+  }
+
+  async reconcileExpiredRuns(): Promise<void> {
+    if (!this.#started || this.#closed) return;
+    await this.#reconcileExpiredRuns();
   }
 
   #reconcileExpiredRuns(): Promise<void> {
