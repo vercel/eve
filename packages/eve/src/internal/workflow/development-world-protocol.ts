@@ -40,6 +40,7 @@ export const DEVELOPMENT_WORLD_OPERATIONS = [
   "hooks.getByToken",
   "hooks.list",
   "getDeploymentId",
+  "getGenerationAvailability",
   "queue",
   "resolveLatestDeploymentId",
   "runs.experimentalSetAttributes",

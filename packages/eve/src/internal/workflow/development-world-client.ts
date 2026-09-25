@@ -6,8 +6,7 @@ import type {
   World,
 } from "#compiled/@workflow/world/index.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import type { DevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 
 import {
   decodeDevelopmentWorldJson,
@@ -191,7 +190,14 @@ function createQueueHandler(
       const appRoot = readRequiredEnvironment(DEVELOPMENT_WORKER_APP_ROOT_ENV);
       const generationId = await resolveDeliveryGenerationId(message);
       if (generationId === undefined) return Response.json({ ok: true });
-      const runtimeAppRoot = await readGenerationRuntimeAppRoot(appRoot, generationId);
+      const availability = await call<DevelopmentGenerationAvailability>(
+        "getGenerationAvailability",
+        [generationId],
+      );
+      if (availability.kind === "missing")
+        throw new MissingDevelopmentGenerationError(generationId);
+      if (availability.kind === "incompatible") return Response.json({ ok: true });
+      const runtimeAppRoot = availability.runtimeAppRoot;
       const result = await withDevelopmentWorkflowGeneration(
         {
           generationId,
@@ -273,53 +279,6 @@ function resolveDeliveryRunId(message: unknown): string | undefined {
     : typeof message.workflowRunId === "string"
       ? message.workflowRunId
       : undefined;
-}
-
-async function readGenerationRuntimeAppRoot(
-  appRoot: string,
-  generationId: string,
-): Promise<string> {
-  if (
-    generationId.length === 0 ||
-    generationId === "." ||
-    generationId === ".." ||
-    basename(generationId) !== generationId
-  ) {
-    throw new Error(`Workflow run references invalid development generation "${generationId}".`);
-  }
-  const metadataPath = join(
-    appRoot,
-    ".eve",
-    "dev-runtime",
-    "snapshots",
-    generationId,
-    "generation.json",
-  );
-  let source: string;
-  try {
-    source = await readFile(metadataPath, "utf8");
-  } catch (error) {
-    if (isFileNotFoundError(error)) {
-      throw new MissingDevelopmentGenerationError(generationId, error);
-    }
-    throw error;
-  }
-  let metadata: unknown;
-  try {
-    metadata = JSON.parse(source);
-  } catch (error) {
-    throw new Error(`Development generation "${generationId}" has invalid metadata.`, {
-      cause: error,
-    });
-  }
-  if (!isRecord(metadata) || typeof metadata.runtimeAppRoot !== "string") {
-    throw new Error(`Development generation "${generationId}" has invalid metadata.`);
-  }
-  return metadata.runtimeAppRoot;
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

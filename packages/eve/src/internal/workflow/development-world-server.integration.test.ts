@@ -1,3 +1,4 @@
+import { getDevelopmentFrameworkFingerprint } from "#internal/workflow/development-runtime-compatibility.js";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -223,11 +224,22 @@ describe("parent development Workflow World", () => {
   it("recovers retained runs across restarts without recovering cancelled orphans", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
     await seedGeneration(appRoot, "retained");
+    await seedGeneration(appRoot, "incompatible", { frameworkFingerprint: "old-framework" });
+    await seedGeneration(appRoot, "legacy", { frameworkFingerprint: undefined });
+    await seedGeneration(appRoot, "changed-workflow", {
+      workflowSourceFingerprint: "old-workflow",
+    });
     const first = createWorld({ activeGenerationId: () => "retained", appRoot });
     await first.start();
     const runIds: string[] = [];
     try {
-      for (const deploymentId of ["retained", "missing"]) {
+      for (const deploymentId of [
+        "retained",
+        "missing",
+        "incompatible",
+        "legacy",
+        "changed-workflow",
+      ]) {
         runIds.push(
           readCreatedRunId(
             await callWorld(first, "events.create", [
@@ -265,6 +277,17 @@ describe("parent development Workflow World", () => {
       await expect(callWorld(restarted, "runs.get", [runIds[1]])).resolves.toMatchObject({
         status: "cancelled",
       });
+      connectWorkerToWorld(restarted, appRoot);
+      for (const runId of runIds.slice(2)) {
+        await expect(deliverToWorker({ runId })).resolves.toBeUndefined();
+        await expect(deliverToWorker({ workflowRunId: runId })).resolves.toBeUndefined();
+        await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
+          status: "pending",
+        });
+      }
+      await expect(
+        deliverToWorker({ runId: RUN_ID, runInput: { deploymentId: "incompatible" } }),
+      ).resolves.toBeUndefined();
     } finally {
       await restarted.close();
     }
@@ -640,11 +663,18 @@ function deliveryHeaders(input: { readonly secret?: string }): Record<string, st
   };
 }
 
-async function seedGeneration(appRoot: string, generationId: string): Promise<void> {
+async function seedGeneration(
+  appRoot: string,
+  generationId: string,
+  overrides: { frameworkFingerprint?: string | undefined; workflowSourceFingerprint?: string } = {},
+): Promise<void> {
   const snapshotRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", generationId);
   const runtimeAppRoot = join(snapshotRoot, "source", "app");
   await mkdir(runtimeAppRoot, { recursive: true });
-  await writeFile(join(snapshotRoot, "generation.json"), `${JSON.stringify({ runtimeAppRoot })}\n`);
+  await writeFile(
+    join(snapshotRoot, "generation.json"),
+    `${JSON.stringify({ runtimeAppRoot, frameworkFingerprint: await getDevelopmentFrameworkFingerprint(), ...overrides })}\n`,
+  );
 }
 
 function readCreatedRunId(value: unknown): string {
