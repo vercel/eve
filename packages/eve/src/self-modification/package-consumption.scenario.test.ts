@@ -180,6 +180,11 @@ describe("packed package consumption", () => {
       appRoot,
     );
     await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
+    await run(
+      "node",
+      ["--input-type=module", "-e", 'await import("eve/extensions/code/sandbox")'],
+      appRoot,
+    );
     await writeAppFile(
       appRoot,
       "verify-development-extension.mjs",
