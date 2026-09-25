@@ -1,4 +1,6 @@
-import { rm } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { getDevelopmentFrameworkFingerprint } from "#internal/workflow/development-runtime-compatibility.js";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
@@ -57,6 +59,15 @@ export async function stageDevelopmentGeneration(
       prepared,
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
+
+    await writeFile(
+      join(snapshot.snapshotRoot, "generation.json"),
+      `${JSON.stringify({
+        runtimeAppRoot: snapshot.runtimeAppRoot,
+        frameworkFingerprint: await getDevelopmentFrameworkFingerprint(),
+        workflowSourceFingerprint: prepared.workflowSourceFingerprint,
+      })}\n`,
+    );
 
     return prepared.workflowSourceFingerprint === undefined
       ? {
