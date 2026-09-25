@@ -12,7 +12,6 @@ import {
   createSessionFailedEvent,
   createSessionWaitingEvent,
   createTurnCancelledEvent,
-  createTurnCompletedEvent,
   createTurnStartedEvent,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
@@ -442,59 +441,6 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.status).toBe("ready");
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
     expect(store.snapshot.session?.streamIndex).toBe(6);
-  });
-
-  it("is ready at a held turn's waiting boundary and renders the turn's later reply", async () => {
-    const live = controlledStreamResponse();
-    const accepted = Promise.withResolvers<Response>();
-    vi.spyOn(globalThis, "fetch")
-      .mockReturnValueOnce(accepted.promise)
-      .mockResolvedValueOnce(live.response)
-      .mockImplementation(async () => startedResponse());
-    const store = createStore({ reducer: defaultMessageReducer() });
-    const [received, started, interim, heldCompleted, heldWaiting, final, completed, waiting] =
-      stampTestEvents([
-        createMessageReceivedEvent({ message: "Look up Q3.", sequence: 0, turnId: "turn_0" }),
-        createTurnStartedEvent({ sequence: 0, turnId: "turn_0" }),
-        createMessageCompletedEvent({
-          message: "Started the lookup.",
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn_0",
-        }),
-        createTurnCompletedEvent({ held: true, sequence: 0, turnId: "turn_0" }),
-        createSessionWaitingEvent(),
-        createMessageCompletedEvent({
-          message: "Q3 revenue is 4.2M.",
-          sequence: 0,
-          stepIndex: 1,
-          turnId: "turn_0",
-        }),
-        createTurnCompletedEvent({ sequence: 0, turnId: "turn_0" }),
-        createSessionWaitingEvent(),
-      ] as UnstampedMessageStreamEvent[]).map((event) => ({
-        ...event,
-        meta: { ...event.meta, deliveryIds: ["delivery_1"] },
-      }));
-
-    const sending = store.send({ message: "Look up Q3." });
-    accepted.resolve(startedResponse());
-    await vi.waitFor(() => expect(store.snapshot.status).toBe("submitted"));
-    for (const event of [received, started, interim, heldCompleted, heldWaiting]) {
-      live.emit(event!);
-    }
-    // The person can keep writing while the turn holds on its tasks.
-    await sending;
-    expect(store.snapshot.status).toBe("ready");
-
-    for (const event of [final, completed, waiting]) live.emit(event!);
-    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(8));
-    expect(store.snapshot.status).toBe("ready");
-    const replies = store.snapshot.data.messages.filter((message) => message.role === "assistant");
-    expect(replies.map((message) => message.metadata)).toEqual([
-      expect.objectContaining({ closed: true, turnId: "turn_0" }),
-      expect.objectContaining({ closed: true, turnId: "turn_0" }),
-    ]);
   });
 
   it("projects a background turn that arrives while another message is being accepted", async () => {

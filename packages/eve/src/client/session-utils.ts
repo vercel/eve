@@ -78,23 +78,29 @@ export async function collectTurnEvents(
 }
 
 /**
- * Follows one stream to the end of its turn. A held turn's waiting boundary
- * (`turn.completed` with `held: true`, then `session.waiting`) keeps the turn
- * open, so it is not the end, unless a request this stream saw is still
- * unanswered there: the stream stops so the caller can answer it.
+ * Follows one response to the end of its turn. `session.waiting` opens the
+ * session to input, but a turn held on its tasks is still open there (the
+ * response saw it start or receive its message, and not complete, fail, or
+ * get cancelled), so the response goes on to the turn's end, unless a request
+ * it streamed awaits an answer.
  */
 export class TurnEndTracker {
-  #held = false;
+  #openTurn = false;
   readonly #pendingRequests = new Set<string>();
 
-  /** Whether the stream last reached a held turn's waiting boundary. */
-  get held(): boolean {
-    return this.#held;
-  }
-
-  /** Observes the next event and returns whether it ends the turn. */
+  /** Observes the next event and returns whether it ends the response. */
   observe(event: UnstampedMessageStreamEvent): boolean {
     switch (event.type) {
+      // A message sent while a turn holds joins it: its response starts there.
+      case "turn.started":
+      case "message.received":
+        this.#openTurn = true;
+        break;
+      case "turn.completed":
+      case "turn.cancelled":
+      case "turn.failed":
+        this.#openTurn = false;
+        break;
       case "input.requested":
         for (const request of event.data.requests) this.#pendingRequests.add(request.requestId);
         break;
@@ -103,30 +109,18 @@ export class TurnEndTracker {
           this.#pendingRequests.delete(resolution.requestId);
         }
         break;
-      case "turn.completed":
-        this.#held = event.data.held === true;
-        return false;
-      case "turn.started":
-      case "turn.cancelled":
-      case "turn.failed":
-        this.#held = false;
-        break;
       default:
         break;
     }
     if (!isCurrentTurnBoundaryEvent(event)) return false;
-    return event.type !== "session.waiting" || !this.#held || this.#pendingRequests.size > 0;
+    return event.type !== "session.waiting" || !this.#openTurn || this.#pendingRequests.size > 0;
   }
 }
 
 function isFinalMessageCompleted(
   event: UnstampedMessageStreamEvent,
 ): event is MessageCompletedStreamEvent {
-  return (
-    event.type === "message.completed" &&
-    event.data.finishReason !== "tool-calls" &&
-    event.data.interim !== true
-  );
+  return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
 }
 
 export function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {

@@ -388,25 +388,19 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "result.completed":
       return updateAssistantMetadata(data, event.data.turnId, { result: event.data.result });
 
-    // A turn that stays open, held on its tasks or waiting on a task's
-    // question, shows `turn.completed` marked `held` at each waiting
-    // boundary, and a cancelled one then ends with `turn.cancelled` for the
-    // same turn ID. Each boundary, held or final, closes the turn's open
-    // assistant message; the turn's next output starts a new one after
-    // whatever arrived in between.
     case "turn.completed":
-      return closeAssistantMessage(data, event.data.turnId, (message) => ({
+      return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
-        metadata: { ...message.metadata, closed: true, status: "complete" },
+        metadata: { ...message.metadata, status: "complete" },
         parts: removeStreamingToolParts(message.parts),
       }));
 
     case "turn.cancelled":
       // Finalize whatever the cancelled turn streamed: no message.completed
       // or reasoning.completed will follow a partial append.
-      return closeAssistantMessage(data, event.data.turnId, (message) => ({
+      return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
-        metadata: { ...message.metadata, closed: true, status: "complete" },
+        metadata: { ...message.metadata, status: "complete" },
         parts: removeStreamingToolParts(
           message.parts.map((part) =>
             (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
@@ -485,38 +479,18 @@ function resolveInputRequest(data: EveMessageData, resolution: InputResolution):
   });
 }
 
-/**
- * Updates the turn's open assistant message, or starts one: every assistant
- * message is its own entry, and a turn that resumes after a waiting boundary
- * produces another.
- */
 function updateAssistantMessage(
   data: EveMessageData,
   turnId: string,
   update: (message: EveAssistantMessage) => EveAssistantMessage,
 ): EveMessageData {
-  const messages = turnAssistantMessages(data, turnId);
-  const open = messages.findLast((message) => message.metadata?.closed !== true);
-  return upsertMessage(data, update(open ?? createAssistantMessage(turnId, messages.length)));
-}
-
-/** Closes the turn's open assistant message; a repeated boundary changes nothing. */
-function closeAssistantMessage(
-  data: EveMessageData,
-  turnId: string,
-  close: (message: EveAssistantMessage) => EveAssistantMessage,
-): EveMessageData {
-  const messages = turnAssistantMessages(data, turnId);
-  const repeated =
-    messages.length > 0 && messages.every((message) => message.metadata?.closed === true);
-  return repeated ? data : updateAssistantMessage(data, turnId, close);
-}
-
-function turnAssistantMessages(data: EveMessageData, turnId: string): EveAssistantMessage[] {
-  return data.messages.filter(
+  const existing = data.messages.find(
     (message): message is EveAssistantMessage =>
       message.role === "assistant" && message.metadata?.turnId === turnId,
   );
+
+  const message = existing ?? createAssistantMessage(turnId);
+  return upsertMessage(data, update(message));
 }
 
 function updateAssistantMetadata(
@@ -533,9 +507,9 @@ function updateAssistantMetadata(
   }));
 }
 
-function createAssistantMessage(turnId: string, index: number): EveAssistantMessage {
+function createAssistantMessage(turnId: string): EveAssistantMessage {
   return {
-    id: index === 0 ? `${turnId}:assistant` : `${turnId}:assistant:${index}`,
+    id: `${turnId}:assistant`,
     metadata: {
       status: "streaming",
       turnId,
@@ -545,14 +519,13 @@ function createAssistantMessage(turnId: string, index: number): EveAssistantMess
   };
 }
 
-/** One `step-start` per step since the message's first: a resumed held turn starts mid-turn. */
 function ensureStepStartPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
   const stepStartCount = message.parts.filter((part) => part.type === "step-start").length;
-  const steps = message.parts.flatMap((part) =>
-    "stepIndex" in part && typeof part.stepIndex === "number" ? [part.stepIndex] : [],
-  );
-  const missingCount = stepIndex - Math.min(stepIndex, ...steps) - stepStartCount + 1;
-  if (missingCount <= 0) return message;
+  if (stepStartCount > stepIndex) {
+    return message;
+  }
+
+  const missingCount = stepIndex - stepStartCount + 1;
   return {
     ...message,
     parts: [

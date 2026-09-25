@@ -70,7 +70,7 @@ export function defaultOnVoiceTranscription(
 /** Built-in Twilio event handlers for text delivery and terminal errors. */
 export const defaultEvents: TwilioChannelEvents = {
   async "message.completed"(event, channel, _ctx) {
-    if (event.finishReason === "tool-calls" || event.interim === true || !event.message) return;
+    if (event.finishReason === "tool-calls" || !event.message) return;
     await channel.twilio.sendMessage(event.message);
   },
 

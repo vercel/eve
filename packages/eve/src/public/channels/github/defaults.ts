@@ -104,7 +104,7 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     },
 
     async "message.completed"(event, channel, _ctx) {
-      if (event.finishReason === "tool-calls" || event.interim === true || !event.message) return;
+      if (event.finishReason === "tool-calls" || !event.message) return;
       await postCommentChunks(channel, event.message);
     },
 

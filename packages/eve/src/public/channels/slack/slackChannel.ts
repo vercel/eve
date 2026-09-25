@@ -810,7 +810,7 @@ const activityOwnedMessageCompleted: NonNullable<SlackChannelEvents["message.com
   channel,
 ) => {
   channel.state.pendingToolCallMessage = null;
-  if (event.finishReason !== "tool-calls" && event.interim !== true && event.message) {
+  if (event.finishReason !== "tool-calls" && event.message) {
     await postCompletedSlackReply(channel, event.message);
   }
 };

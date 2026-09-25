@@ -80,14 +80,13 @@ tells them apart. [Task stream events](../concepts/tasks#task-stream-events)
 describes their fields and ordering, and links recorded streams you can replay
 through your handlers in a contract test.
 
-A turn cannot end while tasks it started are working, so a handler that posts
-replies must tell a turn's reply from text written while the turn holds on its
-tasks. Skip `message.completed` events with `interim: true`: in a turn a
-schedule started, a subagent's turn, or a task-mode run, that text is not the
-reply yet, and the built-in channels do not post it. In an interactive root
-session, a held turn instead emits `turn.completed` with `held: true` and stays open
-under the same `turnId`, so expect more than one `turn.completed` for one turn.
-See [Held turns](../concepts/sessions-runs-and-streaming#held-turns).
+A turn cannot end while tasks it started are working. The model often says
+something before it waits, such as that work started, and that text streams as
+an ordinary `message.completed`, followed later by the reply to the results.
+The built-in channels post both. In an interactive root session, a held turn
+also emits `session.waiting` before its `turn.completed`, so treat
+`turn.completed`, not `session.waiting`, as the end of a turn. See
+[Held turns](../concepts/sessions-runs-and-streaming#held-turns).
 
 `channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not

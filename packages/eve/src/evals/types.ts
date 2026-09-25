@@ -230,8 +230,9 @@ export interface EveEvalLiveTurn {
   /** Request cooperative cancellation of this turn's session. */
   cancel(): Promise<CancelSessionResult>;
   /**
-   * Wait for the turn's end, past any held boundaries, and return the recorded immutable
-   * result. Use {@link waitForEvent} to observe a held turn's first `session.waiting`.
+   * Wait for the turn's end and return the recorded immutable result. A turn
+   * held on its tasks ends at its `turn.completed`; use {@link waitForEvent} to
+   * observe its `session.waiting` before that.
    */
   result(): Promise<EveEvalTurn>;
   /** Wait until the live stream emits one typed event matching `options`. */
@@ -269,7 +270,7 @@ export interface EveEvalSessionDriver {
   ): Promise<EveEvalLiveTurn>;
   /** Resolve every pending request with the same option id. */
   respondAll(optionId: string): Promise<EveEvalTurn>;
-  /** Send one turn through this session and wait for its end, held boundaries included. */
+  /** Send one turn through this session and wait for its end, as {@link EveEvalLiveTurn.result}. */
   send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
   /** Start one text turn and return as soon as its session is accepted. */
   start(message: string, options?: SendTurnOptions): Promise<EveEvalLiveTurn>;

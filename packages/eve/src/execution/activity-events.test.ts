@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
-import { createTurnCompletedEvent } from "#protocol/message.js";
 import { MAX_ACTIVITY_TEXT_LENGTH } from "#shared/presentation-text.js";
 
 const lineage = {
@@ -13,24 +12,6 @@ const lineage = {
 };
 
 describe("projectActivityEvents", () => {
-  it("keeps root work running across a held turn's boundary and settles it at the turn's end", () => {
-    const project = (held: boolean) =>
-      projectActivityEvents({
-        at: "2026-01-01T00:00:00Z",
-        event: createTurnCompletedEvent({ held, sequence: 0, turnId: "turn" }),
-        lineage,
-      });
-
-    expect(project(true)).toEqual([]);
-    expect(project(false)).toEqual([
-      expect.objectContaining({
-        kind: "work.settled",
-        outcome: "completed",
-        workId: "work:root:turn",
-      }),
-    ]);
-  });
-
   it("projects tools and skills without inputs", () => {
     expect(
       projectActivityEvents({

@@ -42,6 +42,7 @@ export default defineEval({
       ),
     );
     turn.event("task.ended", { count: 2 });
-    turn.notEvent("turn.completed", { data: { held: true } });
+    // Both waits took their results, so the turn never held.
+    turn.event("session.waiting", { count: 1 });
   },
 });

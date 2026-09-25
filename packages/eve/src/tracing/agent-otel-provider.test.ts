@@ -702,6 +702,32 @@ describe("createAgentOtelInstrumentation", () => {
     });
   });
 
+  it("keeps a held turn's activation open across its waiting boundary", async () => {
+    const runtime = createRuntime();
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-held",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    // A turn held on its tasks opens the session to input before it ends.
+    await runtime.hooks.publish({
+      idempotencyKey: sessionIdempotencyKey("session-held"),
+      sessionId: "session-held",
+      turnId: "turn-1",
+      type: "session.waiting",
+    });
+    await runtime.provider.forceFlush();
+    expect(byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")).toHaveLength(0);
+
+    await completeTurn(runtime.hooks, "session-held", "turn-1");
+    await runtime.provider.forceFlush();
+    const turns = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather");
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.attributes["agent.turn.outcome"]).toBe("completed");
+    await runtime.provider.shutdown();
+  });
+
   it("links a delegated activation to the exact caller from its own trace", async () => {
     const runtime = createRuntime();
     const parent = {

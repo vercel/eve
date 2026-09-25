@@ -310,7 +310,8 @@ export function createAgentOtelInstrumentation(
     }
     if (event.turnId !== undefined) {
       const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
-      if (turn !== undefined) {
+      // A held turn opens to input before it ends; its span ends after its terminal event.
+      if (turn !== undefined && (event.type !== "session.waiting" || turn.terminal !== undefined)) {
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
           const agentName = session?.agentName ?? turn.subagentName;

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  MessageCompletedStreamEvent,
-  UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 import { collectTurnEvents, summarizeTurnEvents, TurnEndTracker } from "./session-utils.js";
 
@@ -99,81 +96,92 @@ describe("collectTurnEvents", () => {
   });
 });
 
-const WAITING = {
-  type: "session.waiting",
-  data: { continuationToken: "session-id", wait: "next-user-message" },
-} satisfies UnstampedMessageStreamEvent;
-
-function reply(message: string, interim = false): UnstampedMessageStreamEvent {
-  const data: MessageCompletedStreamEvent["data"] = { ...eventData, finishReason: "stop", message };
-  if (interim) data.interim = true;
-  return { type: "message.completed", data };
-}
-
 describe("TurnEndTracker", () => {
-  it("streams past a held turn's waiting boundary to the turn's end", () => {
+  const turn = { sequence: 1, turnId: "turn_1" };
+  const waiting: UnstampedMessageStreamEvent = {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  };
+  const answer = (message: string): UnstampedMessageStreamEvent => ({
+    type: "message.completed",
+    data: { ...turn, finishReason: "stop", message, stepIndex: 0 },
+  });
+  const request = {
+    action: { callId: "call_1", input: {}, kind: "tool-call" as const, toolName: "deploy" },
+    display: "confirmation" as const,
+    kind: "tool-approval" as const,
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "Deploy?",
+    requestId: "request_1",
+  };
+  const ends = (events: readonly UnstampedMessageStreamEvent[]) => {
     const tracker = new TurnEndTracker();
-    const ends = [
-      reply("Started the lookup."),
-      { type: "turn.completed", data: { held: true, sequence: 1, turnId: "turn_1" } },
-      WAITING,
-      reply("Q3 revenue is 4.2M."),
-      { type: "turn.completed", data: { sequence: 1, turnId: "turn_1" } },
-      WAITING,
-    ].map((event) => tracker.observe(event as UnstampedMessageStreamEvent));
+    return events.map((event) => tracker.observe(event));
+  };
 
-    expect(ends).toEqual([false, false, false, false, false, true]);
+  it("follows a held turn past its session.waiting to its end", () => {
+    expect(
+      ends([
+        { type: "turn.started", data: turn },
+        answer("I started a lookup."),
+        waiting,
+        answer("Q3 was $4.2M."),
+        { type: "turn.completed", data: turn },
+        waiting,
+      ]),
+    ).toEqual([false, false, false, false, false, true]);
   });
 
-  it("stops at a held boundary where a task's question waits on a person", () => {
-    const tracker = new TurnEndTracker();
-    const request = {
-      action: { callId: "call_1", input: {}, kind: "tool-call" as const, toolName: "deploy" },
-      kind: "question" as const,
-      prompt: "Which region?",
-      requestId: "q-1",
-    };
-    tracker.observe({ type: "input.requested", data: { ...eventData, requests: [request] } });
-    tracker.observe({
-      type: "turn.completed",
-      data: { held: true, sequence: 1, turnId: "turn_1" },
-    });
-
-    expect(tracker.held).toBe(true);
-    expect(tracker.observe(WAITING)).toBe(true);
+  it("follows a message that joined a held turn to that turn's end", () => {
+    expect(
+      ends([
+        { type: "message.received", data: { ...turn, message: "Any update?" } },
+        answer("Still working on it."),
+        waiting,
+        answer("Q3 was $4.2M."),
+        { type: "turn.completed", data: turn },
+        waiting,
+      ]),
+    ).toEqual([false, false, false, false, false, true]);
   });
 
-  it("ends a held turn that is cancelled after its boundary", () => {
-    const tracker = new TurnEndTracker();
-    tracker.observe({
-      type: "turn.completed",
-      data: { held: true, sequence: 1, turnId: "turn_1" },
-    });
-    expect(tracker.observe(WAITING)).toBe(false);
-    tracker.observe({ type: "turn.cancelled", data: { sequence: 1, turnId: "turn_1" } });
-    expect(tracker.observe(WAITING)).toBe(true);
+  it("ends at an approval park, which ends its turn", () => {
+    expect(
+      ends([
+        { type: "turn.started", data: turn },
+        { type: "input.requested", data: { ...turn, requests: [request], stepIndex: 0 } },
+        { type: "turn.completed", data: turn },
+        waiting,
+      ]),
+    ).toEqual([false, false, false, true]);
   });
-});
 
-describe("held turns", () => {
-  it("collect to the turn's end, and the interim message is never the turn's message", async () => {
-    async function* stream(): AsyncGenerator<UnstampedMessageStreamEvent> {
-      yield reply("Started the lookup.", true);
-      yield { type: "turn.completed", data: { held: true, sequence: 1, turnId: "turn_1" } };
-      yield WAITING;
-      yield reply("Q3 revenue is 4.2M.");
-      yield { type: "turn.completed", data: { sequence: 1, turnId: "turn_1" } };
-      yield WAITING;
-      yield { type: "session.completed" };
-    }
+  it("stops at an open turn's session.waiting while a request awaits an answer", () => {
+    expect(
+      ends([
+        { type: "turn.started", data: turn },
+        { type: "input.requested", data: { ...turn, requests: [request], stepIndex: 0 } },
+        waiting,
+      ]),
+    ).toEqual([false, false, true]);
+  });
 
-    const events = await collectTurnEvents(stream());
-
-    expect(events).toHaveLength(6);
-    expect(summarizeTurnEvents(events)).toMatchObject({
-      message: "Q3 revenue is 4.2M.",
-      status: "waiting",
-    });
-    expect(summarizeTurnEvents([reply("Started the lookup.", true)]).message).toBeUndefined();
+  it("ends at session.failed and a turn that failed", () => {
+    expect(
+      ends([
+        { type: "turn.started", data: turn },
+        { type: "turn.failed", data: { ...turn, code: "MODEL_ERROR", message: "Failed." } },
+        waiting,
+      ]),
+    ).toEqual([false, false, true]);
+    expect(
+      ends([
+        { type: "turn.started", data: turn },
+        {
+          type: "session.failed",
+          data: { code: "MODEL_ERROR", message: "Failed.", sessionId: "session-id" },
+        },
+      ]),
+    ).toEqual([false, true]);
   });
 });

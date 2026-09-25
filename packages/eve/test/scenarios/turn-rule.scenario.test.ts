@@ -101,8 +101,8 @@ export default defineAgent({
 });
 `;
 
-// Posts the way the built-in channels do: only a turn's reply, never tool-call
-// narration or an interim message.
+// Posts the way the built-in channels do: every message the model says, never
+// tool-call narration.
 const BOARD_CHANNEL = `import { defineChannel, POST } from "eve/channels";
 
 export default defineChannel<undefined, void, { id: string }>({
@@ -112,7 +112,7 @@ export default defineChannel<undefined, void, { id: string }>({
   },
   events: {
     "message.completed"(event) {
-      if (event.finishReason === "tool-calls" || event.interim === true || !event.message) return;
+      if (event.finishReason === "tool-calls" || !event.message) return;
       console.log("BOARD_POST " + JSON.stringify(event.message));
     },
   },
@@ -155,13 +155,16 @@ async function readUntil(
   return events;
 }
 
-/** Whether the events end at a held turn's waiting boundary. */
+/** Whether the events end at a held turn's `session.waiting`: the turn has not ended. */
 function atHeldBoundary(events: readonly MessageStreamEvent[]): boolean {
-  const [completed, waiting] = events.slice(-2);
   return (
-    completed?.type === "turn.completed" &&
-    completed.data.held === true &&
-    waiting?.type === "session.waiting"
+    events.at(-1)?.type === "session.waiting" &&
+    !events.some(
+      (event) =>
+        event.type === "turn.completed" ||
+        event.type === "turn.cancelled" ||
+        event.type === "turn.failed",
+    )
   );
 }
 
@@ -237,7 +240,7 @@ function count(events: readonly MessageStreamEvent[], type: MessageStreamEvent["
   return events.filter((event) => event.type === type).length;
 }
 
-/** Every assistant text that ends a step, interim messages included. */
+/** Every assistant text that ends a step. */
 function replies(events: readonly MessageStreamEvent[]): string[] {
   return events.flatMap((event) =>
     event.type === "message.completed" &&
@@ -337,11 +340,6 @@ describe("the turn rule", () => {
       expect(count(child, "turn.completed")).toBe(1);
       expect(count(child, "session.waiting")).toBe(1);
       expect(replies(child)).toEqual(["Analyst started a lookup.", "Analyst: Q3 revenue is 4.2M"]);
-      // With no boundary, the child's interim text says it is not the reply yet.
-      expect(completedMessages(child, "Analyst started")).toEqual([
-        expect.objectContaining({ interim: true }),
-      ]);
-      expect(completedMessages(child, "Analyst: Q3")[0]?.interim).toBeUndefined();
       const lookupSettled = indexOf(child, (event) => event.type === "task.settled");
       const answer = indexOf(child, (event) =>
         replies([event]).includes("Analyst: Q3 revenue is 4.2M"),
@@ -360,20 +358,14 @@ describe("the turn rule", () => {
       const { session, response } = await client.sessions.create({ message: "Look up Q3." });
       const turn = response[Symbol.asyncIterator]();
 
-      // The response does not end at the held boundary; read up to it.
+      // The response does not end at the held turn's session.waiting; read up to it.
       const first = await readUntil(turn, atHeldBoundary);
       const turnStarted = first.find((event) => event.type === "turn.started");
       const id = turnStarted?.type === "turn.started" ? turnStarted.data.turnId : undefined;
       expect(id).toBeTruthy();
-      expect(dataOf(first.slice(-2), "turn.completed")).toEqual({
-        held: true,
-        sequence: expect.any(Number),
-        turnId: id,
-      });
-      // In an interactive session the interim message is an ordinary reply.
-      expect(completedMessages(first, "Started the Q3")).toEqual([
-        expect.not.objectContaining({ interim: true }),
-      ]);
+      // The model's reply streams as usual, and the turn opens to input without ending.
+      expect(completedMessages(first, "Started the Q3")).toHaveLength(1);
+      expect(count(first, "turn.completed")).toBe(0);
       expect(count(first, "task.settled")).toBe(0);
 
       // The same person writes while the turn holds: it answers within the turn,
@@ -385,11 +377,9 @@ describe("the turn rule", () => {
         turnId: id,
       });
       expect(replies(second.events)[0]).toBe("Still working on Q3.");
-      const heldAgain = indexOf(
-        second.events,
-        (event) => event.type === "turn.completed" && event.data.held === true,
-      );
+      const heldAgain = indexOf(second.events, (event) => event.type === "session.waiting");
       expect(heldAgain).toBeGreaterThan(-1);
+      expect(count(second.events.slice(0, heldAgain), "turn.completed")).toBe(0);
       // The result and the final answer arrive in the same turn.
       expect(second.events.slice(heldAgain)).toContainEqual(
         expect.objectContaining({
@@ -400,7 +390,7 @@ describe("the turn rule", () => {
       expect(second.message).toMatch(/^Final: <task_result [^>]*status="completed">/u);
       expect(second.message).toContain("4.2M");
       expect(types(second.events).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
-      expect(dataOf(second.events.slice(-2), "turn.completed")).not.toHaveProperty("held");
+      expect(count(second.events, "turn.completed")).toBe(1);
 
       // The first message's response ends at the same final boundary.
       const rest = await readUntil(turn, endsWithFinal);
@@ -474,12 +464,9 @@ describe("the turn rule", () => {
       );
       expect(settled).toBeGreaterThan(-1);
       expect(result).toBeGreaterThan(settled);
-      // The run's one result is its last message; the interim one is marked as not the reply.
+      // Both of the model's messages stream; the run's result is its last.
+      expect(completedMessages(events, "Started the Q2")).toHaveLength(1);
       expect(replies(events).filter((reply) => reply.startsWith("Final: "))).toHaveLength(1);
-      expect(completedMessages(events, "Started the Q2")).toEqual([
-        expect.objectContaining({ interim: true }),
-      ]);
-      expect(completedMessages(events, "Final: ")[0]?.interim).toBeUndefined();
       expect(replies(events).at(-1)).toContain("3.9M");
       expect(indexOf(events, (event) => event.type === "turn.completed")).toBeGreaterThan(result);
     },
@@ -515,7 +502,7 @@ describe("the turn rule", () => {
         }),
       );
       expect(count(later, "task.settled")).toBe(1);
-      // turn.completed at the waiting boundary, then turn.cancelled for the same turn ID.
+      // The held turn ends once, with turn.cancelled for its own ID.
       expect(later).toContainEqual(
         expect.objectContaining({
           data: expect.objectContaining({ turnId: id }),
@@ -530,7 +517,7 @@ describe("the turn rule", () => {
   );
 
   it(
-    "holds a scheduled turn without a boundary, so its channel posts exactly one message",
+    "holds a scheduled turn without a boundary, and its channel posts each thing the model says",
     async () => {
       const dispatched = await fetch(new URL("/eve/v1/dev/schedules/board-q1", server.url), {
         method: "POST",
@@ -547,24 +534,21 @@ describe("the turn rule", () => {
 
       expect(count(events, "turn.started")).toBe(1);
       expect(count(events, "turn.completed")).toBe(1);
-      expect(dataOf(events, "turn.completed")).not.toHaveProperty("held");
+      // No one can write into a scheduled turn, so it opens to input only at its end.
       expect(count(events, "session.waiting")).toBe(1);
-      expect(completedMessages(events, "Started the Q1")).toEqual([
-        expect.objectContaining({ interim: true }),
-      ]);
-      const final = completedMessages(events, "Final: ");
-      expect(final).toHaveLength(1);
-      expect(final[0]?.interim).toBeUndefined();
+      expect(completedMessages(events, "Started the Q1")).toHaveLength(1);
+      expect(completedMessages(events, "Final: ")).toHaveLength(1);
 
-      // The channel posted the turn's reply once, and never the interim message.
+      // The channel posted what the model said while the lookup ran, then its answer.
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       const posts = server
         .stdout()
         .split("\n")
         .filter((line) => line.includes("BOARD_POST "));
-      expect(posts).toHaveLength(1);
-      expect(posts[0]).toContain("Final: ");
-      expect(posts[0]).toContain("3.9M");
+      expect(posts).toHaveLength(2);
+      expect(posts[0]).toContain("Started the Q1");
+      expect(posts[1]).toContain("Final: ");
+      expect(posts[1]).toContain("3.9M");
     },
     SCENARIO_TIMEOUT_MS,
   );

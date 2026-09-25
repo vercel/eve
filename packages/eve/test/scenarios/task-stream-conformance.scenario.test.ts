@@ -423,7 +423,7 @@ export default defineRemoteAgent({
     ]);
     return {
       description:
-        "An agent call the model does not wait on: the call returns a receipt and the model ends its turn, so eve holds the turn. The interactive turn shows turn.completed and session.waiting but stays open; the answer arrives as a task.result input in the same turn, which closes under the same turn ID again. The child's task.started can land before or after the waiting boundary. The writer is resumable, so it stays available until the session is reset, which ends it with task.ended before session.completed.",
+        "An agent call the model does not wait on: the call returns a receipt and the model ends its turn, so eve holds the turn. The interactive turn emits session.waiting but stays open; the answer arrives as a task.result input in the same turn, which then ends with its one turn.completed. The child's task.started can land before or after that session.waiting. The writer is resumable, so it stays available until the session is reset, which ends it with task.ended before session.completed.",
       events,
       sessionId: session.state.sessionId,
     };

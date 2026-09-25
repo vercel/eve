@@ -58,6 +58,7 @@ export default defineEval({
       ),
     );
     turn.event("task.ended", { count: 1, data: { taskId } });
-    turn.notEvent("turn.completed", { data: { held: true } });
+    // The wait took the result, so the turn never held: it opened to input only at its end.
+    turn.event("session.waiting", { count: 1 });
   },
 });

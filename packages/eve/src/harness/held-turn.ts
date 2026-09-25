@@ -3,32 +3,15 @@ import { contextStorage } from "#context/container.js";
 import { AuthKey } from "#context/keys.js";
 import {
   advanceStep,
-  emitTurnHeld,
   setHarnessEmissionState,
   type HarnessEmissionState,
 } from "#harness/emission.js";
 import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { createSessionWaitingEvent } from "#protocol/message.js";
 import type { HarnessEmitFn, HarnessSession, StepFn, StepResult } from "#harness/types.js";
 import { showsHeldTurnBoundary } from "#tasks/interactive.js";
 import { renderFinalOutputWhileTasksWork } from "#tasks/render.js";
 import { pendingTaskResultIds, workingTaskIds } from "#tasks/results.js";
-
-/**
- * Whether text the model ends this step with is not the turn's reply yet
- * (`message.completed` `interim`): the turn would hold on tasks it started,
- * or deliver a result first, and shows no waiting boundary. A text-only step
- * starts no task and settles none, so the step's starting task table decides
- * it, as it decides the hold in {@link holdTurnOnTasks}.
- */
-export function endsWithInterimReply(session: HarnessSession, turnSequence: number): boolean {
-  const ctx = contextStorage.getStore();
-  if (showsHeldTurnBoundary(ctx, turnSequence)) return false;
-  const principal = ctx?.get(AuthKey) ?? null;
-  return (
-    workingTaskIds(session, principal).length > 0 ||
-    pendingTaskResultIds(session, principal).length > 0
-  );
-}
 
 /**
  * The turn rule where the model ends a turn: no turn ends while tasks it
@@ -36,8 +19,8 @@ export function endsWithInterimReply(session: HarnessSession, turnSequence: numb
  * principal is delivered at once: the model is called again, with no
  * boundary. Otherwise the step holds the turn on its working tasks, and the
  * session's turn loop calls the model again once one of them settles or the
- * principal steers. An interactive root turn shows a waiting boundary that
- * keeps the turn open; other turns hold without one. A `final_output` call
+ * principal steers. An interactive root turn shows `session.waiting` without
+ * ending the turn, so the person can write; other turns hold without it. A `final_output` call
  * made meanwhile gets an error that names the tasks, so no tool call is left
  * unanswered, and the next model call still waits for them. Returns
  * `undefined` when nothing keeps the turn open.
@@ -91,7 +74,8 @@ export async function holdTurnOnTasks(input: {
     emit !== undefined &&
     showsHeldTurnBoundary(ctx, input.emissionState.sequence)
   ) {
-    await emitTurnHeld(emit, input.emissionState);
+    // The turn stays open under its ID; it ends with one turn.completed later.
+    await emit(createSessionWaitingEvent());
   }
   return { heldTaskIds: working, next: null, session: next(session) };
 }

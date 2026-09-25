@@ -477,8 +477,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "message.completed"(event, channel, _ctx) {
-    // An interim message is not the reply yet: eve calls the model again.
-    if (event.finishReason === "tool-calls" || event.interim === true) {
+    if (event.finishReason === "tool-calls") {
       channel.state.pendingToolCallMessage = event.message
         ? (firstNonEmptyLine(event.message) ?? null)
         : null;

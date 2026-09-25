@@ -519,15 +519,18 @@ describe("Session.send (stream)", () => {
           turnId: "turn_001",
         }),
       );
+      stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
       stream.pushEvent(createSessionWaitingEvent());
     }, 0);
 
     await iterationPromise;
 
-    expect(collected).toHaveLength(3);
-    expect(collected[0]?.type).toBe("turn.started");
-    expect(collected[1]?.type).toBe("message.completed");
-    expect(collected[2]?.type).toBe("session.waiting");
+    expect(collected.map((event) => event.type)).toEqual([
+      "turn.started",
+      "message.completed",
+      "turn.completed",
+      "session.waiting",
+    ]);
   });
 
   it("provides sessionId before streaming begins", async () => {

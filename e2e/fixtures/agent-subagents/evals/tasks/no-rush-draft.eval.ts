@@ -1,7 +1,13 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { heldReply, receiptTaskIds, taskResultDeliveries, taskStarts } from "./helpers";
+import {
+  heldBoundary,
+  heldReply,
+  receiptTaskIds,
+  taskResultDeliveries,
+  taskStarts,
+} from "./helpers";
 
 const REQUEST = [
   "Hi, this is Alice from the product team.",
@@ -45,9 +51,7 @@ export default defineEval({
     // One delegation, reported once after the waiting boundary: no polling,
     // no repeated calls, no cancellation.
     turn.eventsSatisfy("the draft arrives after the turn's waiting boundary", (events) => {
-      const boundary = events.findIndex(
-        (event) => event.type === "turn.completed" && event.data.held === true,
-      );
+      const boundary = heldBoundary(events);
       const result = events.findIndex(
         (event) => event.type === "message.received" && event.data.kind === "task.result",
       );

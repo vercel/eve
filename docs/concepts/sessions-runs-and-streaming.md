@@ -85,7 +85,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `reasoning.appended`      | A reasoning text delta.                                                                                                          |
 | `reasoning.completed`     | The finalized reasoning block.                                                                                                   |
 | `message.appended`        | An assistant text delta.                                                                                                         |
-| `message.completed`       | A finalized assistant text block. `interim: true` marks text that is not the turn's reply yet ([held turns](#held-turns)).       |
+| `message.completed`       | A finalized assistant text block.                                                                                                |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                    |
 | `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                                   |
 | `compaction.completed`    | A compaction checkpoint was written to durable history.                                                                          |
@@ -93,10 +93,10 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                        |
 | `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                         |
 | `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                      |
-| `turn.completed`          | The turn finished. `held: true` marks a held turn's waiting boundary instead: the turn stays open ([held turns](#held-turns)).   |
+| `turn.completed`          | The turn finished. Each turn ends once, with this, `turn.failed`, or `turn.cancelled`.                                           |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                                          |
 | `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                                   |
-| `session.waiting`         | The session parked and is ready for the next message.                                                                            |
+| `session.waiting`         | The session is ready for the next message; a [held turn](#held-turns) keeps running.                                             |
 | `session.failed`          | The session failed.                                                                                                              |
 | `session.completed`       | The session reached a terminal end.                                                                                              |
 
@@ -140,12 +140,11 @@ a failed result.
 
 ### Held turns
 
-A turn held on its tasks marks what it streams, so a consumer can tell it from a finished one:
+A turn held on its tasks streams like any other turn. What the model says before the hold streams as an ordinary `message.completed`, and the built-in channels post it. The turn ends once, with `turn.completed`, after its tasks settle and the model replies to their results.
 
-- **`turn.completed` with `held: true`.** In an interactive root session, the model's message before the hold is an ordinary reply, followed by `turn.completed` with `held: true` and `session.waiting`. The turn stays open: a person can keep writing, and its later events, including the final `turn.completed` without `held`, carry the same `turnId` with no new `turn.started`. If a held turn is cancelled, `turn.cancelled` follows for the same ID. The same boundary appears when a task asks a person a question during the turn.
-- **`message.completed` with `interim: true`.** A scheduled turn, a subagent's turn, and a task-mode run hold without a boundary. The model's text before the hold streams as `message.completed` with `interim: true`: it is not the turn's reply yet, and eve calls the model again once a task settles. The built-in channels post only messages without `interim`, so a schedule posts once.
+In an interactive root session, a held turn also emits `session.waiting` without `turn.completed`: the session is open to input while the turn keeps running. A person can keep writing, and the turn's later events carry the same `turnId` with no new `turn.started`. A cancelled held turn ends with `turn.cancelled` for that ID. The same happens when a task asks a person a question during the turn. A scheduled turn, a subagent's turn, and a task-mode run hold without `session.waiting`, since no one writes into them.
 
-The TypeScript client's `send(...).result()` and response iterators follow a held turn to its end, past `held` boundaries, unless a request the response streamed, such as a task's question, is still unanswered at the boundary; then they stop there so you can answer it. To stop at every `held` boundary instead, iterate the response yourself. `useEveAgent` returns to `ready` at a `held` boundary and keeps streaming the turn's later output.
+To tell a held turn from a finished one, watch for its `turn.completed`: a `session.waiting` with no `turn.completed` since the turn started means the turn is still running. The TypeScript client's `send(...).result()` and response iterators follow a held turn to its `turn.completed`, unless a request the response streamed, such as a task's question, is still unanswered at `session.waiting`; then they stop there so you can answer it. `useEveAgent` returns to `ready` at `session.waiting` and keeps streaming the turn's later output into the same assistant message.
 
 ## The event envelope
 

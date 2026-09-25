@@ -75,7 +75,7 @@ import { resolveTasksInstruction, withoutTaskTools } from "#tasks/surface.js";
 import { getTaskTable } from "#tasks/state.js";
 import { takeTaskResultMessage } from "#harness/task-results.js";
 import { isTaskOf, takeTaskResults } from "#tasks/results.js";
-import { endsWithInterimReply, holdTurnOnTasks } from "#harness/held-turn.js";
+import { holdTurnOnTasks } from "#harness/held-turn.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -1652,7 +1652,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             interruptStreamOnFailure(streamResult.fullStream, generation.signal),
             {
               excludedActionToolNames,
-              interimReply: endsWithInterimReply(session, emissionState.sequence),
               tools: advertisedHarnessTools,
             },
           );

@@ -14,10 +14,7 @@ import {
   mockChannelContext,
   type ObservedChannelDelivery,
 } from "#internal/testing/mocks/mock-channel-operations.js";
-import {
-  createMessageCompletedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { experimental_slackActivityStatus } from "#public/channels/slack/activity.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
@@ -700,37 +697,6 @@ describe("slackChannel() default event handlers", () => {
       "https://slack.com/api/chat.postMessage",
     );
   });
-
-  it.each([
-    ["the default", {}],
-    ["an activity-owned", { activity: { renderers: [experimental_slackActivityStatus()] } }],
-  ])(
-    "%s message.completed never posts an interim message, only the turn's reply",
-    async (_label, config) => {
-      const adapter = withState(
-        getAdapter(slackChannel({ ...config, credentials: { botToken: "xoxb-test" } })),
-        THREAD_STATE,
-      );
-      const ctx = buildAdapterContext(adapter, stubAccessor());
-      const completed = (message: string, interim: boolean) =>
-        makeEvent(
-          "message.completed",
-          createMessageCompletedEvent({ interim, message, sequence: 0, stepIndex: 0, turnId: "t1" })
-            .data,
-        );
-
-      // A scheduled turn holds on its lookup: the interim text is not the reply.
-      await callEvent(adapter, completed("Started the lookup.", true), ctx);
-      await callEvent(adapter, completed("Q3 revenue is 4.2M.", false), ctx);
-
-      const posts = fetchMock.mock.calls.filter(([input]) =>
-        String(input).endsWith("/chat.postMessage"),
-      );
-      expect(
-        posts.map(([, init]) => parseSlackRequestBody(init as RequestInit).markdown_text),
-      ).toEqual(["Q3 revenue is 4.2M."]);
-    },
-  );
 
   it("message.completed skips post when finishReason is tool-calls", async () => {
     const adapter = withState(

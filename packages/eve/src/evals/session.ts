@@ -443,7 +443,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     record: (events: readonly MessageStreamEvent[]) => EveEvalTurn,
   ): Promise<EveEvalTurn> {
     try {
-      // A held turn's waiting boundary keeps the turn open, as it does for
+      // A held turn's `session.waiting` does not end it, as for
       // `send().result()`; `waitForEvent` still observes it.
       const turnEnd = new TurnEndTracker();
       let sawBoundary = false;

@@ -104,12 +104,12 @@ No turn ends while tasks it started are working, including work started by its s
 
 Only `session.cancel()`, the session's expiry or reset, or a turn failure ends a held turn early, and each one cancels the turn's working tasks first. Task [time limits](#time-limits) and the session's lifetime bound every hold. Work meant for much later, such as a reminder next week, belongs in a [schedule](../schedules), not a task.
 
-How a held turn looks depends on the session:
+What the model says before the hold streams as an ordinary `message.completed`, and the built-in channels post it, so a person sees that work started. The turn ends once, with `turn.completed`, after the model replies to the results. How the wait looks depends on the session:
 
-- **Interactive root session.** A root session in conversation mode that no caller created, such as one a channel or `client.sessions.create()` starts. After the model's message, the stream carries `turn.completed` with `held: true`, then `session.waiting`, but the turn stays open. A person can keep writing, and a message from the turn's own principal joins the held turn. Its later events, including the final `turn.completed` without `held`, carry the same `turnId` with no new `turn.started`. Cancelling a held turn ends it with `turn.cancelled` for that ID.
-- **Every other session.** A subagent's turn, a turn that a schedule started, and a task-mode run hold without a boundary. The model's text before the hold streams as `message.completed` with `interim: true`: it is not the turn's reply yet, and eve calls the model again. The built-in channels do not post an `interim` message, so a schedule posts once and a subagent answers its caller once, after its tasks settle.
+- **Interactive root session.** A root session in conversation mode that no caller created, such as one a channel or `client.sessions.create()` starts. After the model's message, the stream carries `session.waiting` without `turn.completed`: the session is open to input while the turn keeps running. A person can keep writing, and a message from the turn's own principal joins the held turn. Its later events carry the same `turnId` with no new `turn.started`. Cancelling a held turn ends it with `turn.cancelled` for that ID.
+- **Every other session.** A subagent's turn, a turn that a schedule started, and a task-mode run hold without `session.waiting`, since no one writes into them. A subagent answers its caller once, with its final reply, after its tasks settle.
 
-See [Held turns](./sessions-runs-and-streaming#held-turns) for how clients and channels read these markers.
+See [Held turns](./sessions-runs-and-streaming#held-turns) for how clients read a held turn.
 
 The hold covers every working task that the turn's principal started, not only tasks with the current `turnId`, because a turn that parks on an approval or a sign-in resumes under a new turn ID and still holds on the work it started.
 

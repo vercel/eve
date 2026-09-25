@@ -69,9 +69,8 @@ export async function settleCancelledTurnStep(input: {
     sessionId: session.sessionId,
   });
 
-  // A turn that showed a waiting boundary while it stayed open (it held on
-  // its tasks, or a task asked a person) ends here with `turn.cancelled` for
-  // the same turn ID, after that `turn.completed`.
+  // A turn that stayed open past `session.waiting` (it held on its tasks, or
+  // a task asked a person) ends here with `turn.cancelled` for its turn ID.
   let emissionState = getHarnessEmissionState(durableSession.state);
   const writer = input.sessionWritable.getWriter();
   try {

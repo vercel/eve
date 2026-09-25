@@ -174,16 +174,12 @@ describe("surfaceTaskInputStep", () => {
     const result = await surface(ownerState([working]), asked);
 
     const events = published();
-    expect(events.map((event) => event.type)).toEqual([
-      "input.requested",
-      "turn.completed",
-      "session.waiting",
-    ]);
+    // The turn opens to input without ending.
+    expect(events.map((event) => event.type)).toEqual(["input.requested", "session.waiting"]);
     // `dismissible` stays on the owner's record; the stream carries the public shape.
     expect(events[0]).toMatchObject({
       data: { ...COORDINATES, requests: [QUESTION], taskId: TASK_ID },
     });
-    expect(events[1]).toMatchObject({ data: { held: true, turnId: "turn_3" } });
     expect(seen).toEqual([TASK_ID]);
     expect(record(result.sessionState)).toMatchObject({
       clockStoppedAt: NOW,
@@ -192,7 +188,7 @@ describe("surfaceTaskInputStep", () => {
     });
     expect(ctx.require(ChannelKey).state).toEqual({ pending: ["q-1"] });
     expect(result.sessionState.continuationToken).toBe("http:question-thread");
-    // The boundary keeps the turn open: it resumes, or is cancelled, under the same ID.
+    // The turn stays open: it resumes, or is cancelled, under the same ID.
     expect(result.sessionState.emissionState).toMatchObject({ sequence: 3, turnId: "turn_3" });
     expect(result.refused).toEqual([]);
   });
@@ -311,13 +307,12 @@ describe("surfaceTaskInputStep", () => {
     const events = published();
     expect(events.map((event) => event.type)).toEqual([
       "authorization.required",
-      "turn.completed",
       "session.waiting",
       "approval.settled",
     ]);
     expect(events[0]).toMatchObject({ data: { name: "linear", taskId: TASK_ID } });
-    expect(events[3]).toMatchObject({ data: { requestId: "a-1", taskId: TASK_ID } });
-    // Neither records a request: a sign-in does not stop the task's clock.
+    expect(events[2]).toMatchObject({ data: { requestId: "a-1", taskId: TASK_ID } });
+    // Neither records an input request.
     expect(record(afterSignIn.sessionState)).not.toHaveProperty("input");
     // The turn stays open under its ID.
     expect(afterSignIn.sessionState.emissionState.turnId).toBe("turn_3");

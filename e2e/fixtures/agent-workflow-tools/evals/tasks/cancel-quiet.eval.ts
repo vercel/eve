@@ -18,7 +18,7 @@ export default defineEval({
     const started = await conversation.start(
       "Alice would like a reminder about the office plants. BG-CANCEL-START",
     );
-    await started.waitForEvent("turn.completed", { data: { held: true } });
+    await started.waitForEvent("session.waiting");
     const [taskId] = await t.require(
       startedTaskIds(started.events, "remind_later"),
       satisfies(

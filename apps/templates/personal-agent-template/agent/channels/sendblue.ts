@@ -354,8 +354,7 @@ export default defineChannel<SendblueChannelState, SendblueChannelContext>({
 
       channel.state.pendingToolCallMessage = null;
 
-      // An interim message is not the reply yet: eve calls the model again.
-      if (!event.message || event.interim) {
+      if (!event.message) {
         return;
       }
 

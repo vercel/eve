@@ -44,7 +44,10 @@ function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"):
 describe("executeTask", () => {
   it("creates accepted sessions without consuming events and reuses them for sends", async () => {
     const server = createScriptedServer([
-      { sessionId: "session_1", events: [turnStarted("turn_0", TRACE_A), sessionWaiting()] },
+      {
+        sessionId: "session_1",
+        events: [turnStarted("turn_0", TRACE_A), turnCompleted("turn_0"), sessionWaiting()],
+      },
     ]);
     let evalSignal: AbortSignal;
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
@@ -87,17 +90,28 @@ describe("executeTask", () => {
     const server = createScriptedServer([
       {
         sessionId: "alice",
-        events: [turnStarted("turn_0"), messageCompleted("Alice", "turn_0"), sessionWaiting()],
+        events: [
+          turnStarted("turn_0"),
+          messageCompleted("Alice", "turn_0"),
+          turnCompleted("turn_0"),
+          sessionWaiting(),
+        ],
       },
       {
         sessionId: "bob",
-        events: [turnStarted("turn_0"), messageCompleted("Bob", "turn_0"), sessionWaiting()],
+        events: [
+          turnStarted("turn_0"),
+          messageCompleted("Bob", "turn_0"),
+          turnCompleted("turn_0"),
+          sessionWaiting(),
+        ],
       },
       {
         sessionId: "alice",
         events: [
           turnStarted("turn_1"),
           messageCompleted("Welcome back Alice", "turn_1"),
+          turnCompleted("turn_1"),
           sessionWaiting(),
         ],
       },
@@ -466,11 +480,10 @@ describe("executeTask", () => {
     expect(server.posts[0]?.body).toEqual({ message: "case prompt" });
   });
 
-  it("follows a held turn past its waiting boundary to its final reply", async () => {
+  it("follows a held turn past its session.waiting to its final reply", async () => {
     const heldTurn = [
       turnStarted("turn_1"),
       messageCompleted("Checking with the researcher.", "turn_1"),
-      { data: { held: true, sequence: 2, turnId: "turn_1" }, type: "turn.completed" },
       sessionWaiting(),
       messageCompleted("The researcher found three sources.", "turn_1"),
       turnCompleted("turn_1"),
@@ -490,9 +503,9 @@ describe("executeTask", () => {
         turn.messageIncludes("three sources");
         expect(turn.events.filter((event) => event.type === "session.waiting")).toHaveLength(2);
 
-        // A live turn still observes the first, held boundary.
+        // A live turn still observes the held turn's session.waiting.
         const live = await (await t.session()).start("Research this.");
-        await live.waitForEvent("turn.completed", { data: { held: true } });
+        await live.waitForEvent("session.waiting");
         await expect(live.result()).resolves.toMatchObject({
           message: "The researcher found three sources.",
         });

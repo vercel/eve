@@ -58,12 +58,7 @@ export async function dispatchMemoryLifecycleEvent(input: {
       memories: input.memories,
       messages,
     });
-  } else if (
-    input.event.type === "turn.completed" &&
-    // A held turn's boundary is not its end; memory captures the turn once.
-    input.event.data.held !== true &&
-    input.messages !== undefined
-  ) {
+  } else if (input.event.type === "turn.completed" && input.messages !== undefined) {
     try {
       await dispatchMemoryTurnCompleted({
         abortSignal: input.abortSignal,

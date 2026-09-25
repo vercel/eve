@@ -64,20 +64,8 @@ export function createInstrumentationHandleEvent(
   const publishedActions = new Set<string>();
   const publishedInputs = new Set<string>();
   let activeTurnId = input.turnId;
-  // A held turn's boundary (`turn.completed` marked `held`, then
-  // `session.waiting`) keeps the turn open, so it publishes no lifecycle end.
-  let heldBoundary = false;
   return async (event, messages) => {
     await handleEvent(event, messages);
-    if (event.type === "turn.completed" && event.data.held === true) {
-      heldBoundary = true;
-      return;
-    }
-    if (heldBoundary && event.type === "session.waiting") {
-      heldBoundary = false;
-      return;
-    }
-    heldBoundary = false;
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
     if (

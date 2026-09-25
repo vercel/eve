@@ -2501,8 +2501,7 @@ async function* eveEventsToTUIStream(
       case "turn.cancelled":
         // Explicit cooperative cancellation preserves the session.
         // `session.waiting` follows and finishes the stream normally. A turn
-        // that stayed open past a waiting boundary (held on its tasks) is
-        // cancelled in a later segment, after its own `turn.completed`.
+        // held on its tasks, open to input, is cancelled in a later segment.
         onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);

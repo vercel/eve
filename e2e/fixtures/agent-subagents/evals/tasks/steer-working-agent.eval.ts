@@ -28,7 +28,7 @@ export default defineEval({
   async test(t) {
     const conversation = await t.session();
     const live = await conversation.start(REQUEST);
-    await live.waitForEvent("turn.completed", { data: { held: true } });
+    await live.waitForEvent("session.waiting");
     // The writer reports its start through the parent's inbox, which can land
     // after the waiting boundary.
     const started = await live.waitForEvent("task.started", { data: { name: "launch-writer" } });

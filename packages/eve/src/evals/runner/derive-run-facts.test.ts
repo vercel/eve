@@ -332,33 +332,6 @@ describe("deriveRunFacts", () => {
     expect(facts.messageCount).toBe(2);
   });
 
-  it("leaves out the interim messages of a turn held on its tasks", () => {
-    const facts = derive([
-      {
-        type: "message.completed",
-        data: {
-          finishReason: "stop",
-          interim: true,
-          message: "Waiting on the research.",
-          sequence: 1,
-          stepIndex: 0,
-          turnId: "t1",
-        },
-      },
-      {
-        type: "message.completed",
-        data: {
-          finishReason: "stop",
-          message: "Here it is.",
-          sequence: 2,
-          stepIndex: 1,
-          turnId: "t1",
-        },
-      },
-    ]);
-    expect(facts.messageCount).toBe(1);
-  });
-
   it("counts reasoning.completed events", () => {
     const events: UnstampedMessageStreamEvent[] = [
       {

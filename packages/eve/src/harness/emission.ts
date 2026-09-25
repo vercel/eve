@@ -243,25 +243,6 @@ export async function emitTurnEpilogue(
 }
 
 /**
- * Emits a waiting boundary, `turn.completed` marked `held` then
- * `session.waiting`, that keeps the turn open: an interactive turn held on
- * its tasks, or one whose task asked a person. The turn ID stays, so the turn
- * resumes under it (`emitTurnPreamble` re-enters an open turn) and one turn
- * ID can close more than once. A turn cancelled after such a boundary ends
- * with `turn.cancelled` for the same ID.
- */
-export async function emitTurnHeld(
-  emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
-): Promise<HarnessEmissionState> {
-  await emitFn(
-    createTurnCompletedEvent({ held: true, sequence: state.sequence, turnId: state.turnId }),
-  );
-  await emitFn(createSessionWaitingEvent());
-  return state;
-}
-
-/**
  * Result of consuming one step's `fullStream`.
  *
  * Inline results avoid duplicate post-step events. Approval-resume
@@ -277,8 +258,6 @@ interface EmittedStreamContent {
 
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
-  /** Text that ends the step is not the turn's reply yet (`message.completed` `interim`). */
-  readonly interimReply?: boolean;
   readonly tools: HarnessToolMap;
 }
 
@@ -685,7 +664,6 @@ async function consumeStreamContent(
 
   // Channel adapters deliver terminal completions, so the reserved marker
   // becomes a null completion without delaying normal streaming deltas.
-  const interim = finishReason !== "tool-calls" && options?.interimReply === true;
   if (
     finishReason !== "content-filter" &&
     finishReason !== "tool-calls" &&
@@ -694,7 +672,6 @@ async function consumeStreamContent(
     await emitFn(
       createMessageCompletedEvent({
         finishReason,
-        interim,
         message: null,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
@@ -705,7 +682,6 @@ async function consumeStreamContent(
     await emitFn(
       createMessageCompletedEvent({
         finishReason,
-        interim,
         message: currentMessage,
         sequence: state.sequence,
         stepIndex: state.stepIndex,

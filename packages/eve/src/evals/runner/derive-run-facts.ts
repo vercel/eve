@@ -52,8 +52,8 @@ const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new S
  * Tool calls pair each `actions.requested` entry with its matching
  * `action.result` by call id; agent calls join each generation's
  * `task.started` with its `task.settled` the same way, and `task.ended`
- * marks every call of the task. Interim messages of a held turn are not
- * counted. These facts power checks, scorers, and reporters.
+ * marks every call of the task. These facts power checks, scorers, and
+ * reporters.
  */
 export function deriveRunFacts(
   events: readonly MessageStreamEvent[],
@@ -110,8 +110,8 @@ export function deriveRunFacts(
   for (const event of events) {
     switch (event.type) {
       case "turn.started": {
-        // A turn that resumes after a waiting boundary keeps its ID and emits
-        // no second `turn.started`, so it stays one turn here.
+        // A held turn that resumes after `session.waiting` keeps its ID and
+        // emits no second `turn.started`, so it stays one turn here.
         turnIndex += 1;
         break;
       }
@@ -196,7 +196,7 @@ export function deriveRunFacts(
       }
 
       case "message.completed": {
-        if (event.data.finishReason !== "tool-calls" && event.data.interim !== true) {
+        if (event.data.finishReason !== "tool-calls") {
           messageCount += 1;
         }
         break;

@@ -4,6 +4,7 @@ import { MessageResponse } from "#client/message-response.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
   createSessionWaitingEvent,
+  createTurnCompletedEvent,
   createTurnStartedEvent,
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -27,8 +28,9 @@ describe("MessageResponse cancellation", () => {
   it("queues one guarded cancellation until this response identifies its turn", async () => {
     const start = createDeferred<void>();
     const settle = createDeferred<void>();
-    const [turnStarted, boundary] = stampTestEvents([
+    const [turnStarted, completed, boundary] = stampTestEvents([
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+      createTurnCompletedEvent({ sequence: 0, turnId: "turn_1" }),
       createSessionWaitingEvent(),
     ] as UnstampedMessageStreamEvent[]);
     const cancelTurn = vi.fn(async () => acceptedCancellation());
@@ -38,6 +40,7 @@ describe("MessageResponse cancellation", () => {
         await start.promise;
         yield turnStarted!;
         await settle.promise;
+        yield completed!;
         yield boundary!;
       },
       sessionId: "session_1",
@@ -54,7 +57,7 @@ describe("MessageResponse cancellation", () => {
     expect(cancelTurn).toHaveBeenCalledWith("turn_1");
 
     settle.resolve();
-    await expect(consumed).resolves.toEqual([turnStarted, boundary]);
+    await expect(consumed).resolves.toEqual([turnStarted, completed, boundary]);
     await expect(response.cancel()).resolves.toEqual({ status: "no_active_turn" });
   });
 

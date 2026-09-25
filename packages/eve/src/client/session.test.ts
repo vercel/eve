@@ -1017,6 +1017,7 @@ describe("ClientSession", () => {
         }
 
         return createStreamResponse([
+          { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
           {
             type: "session.waiting",
             data: { continuationToken: "session-id", wait: "next-user-message" },
@@ -1028,7 +1029,7 @@ describe("ClientSession", () => {
       vi.useFakeTimers();
       try {
         const eventTypes = await collectEventTypes(await session.send("first"));
-        expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+        expect(eventTypes).toEqual(["turn.started", "turn.completed", "session.waiting"]);
       } finally {
         vi.useRealTimers();
       }
@@ -1083,6 +1084,7 @@ describe("ClientSession", () => {
       }
 
       return createStreamResponse([
+        { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
         {
           type: "session.waiting",
           data: { continuationToken: "session-id", wait: "next-user-message" },
@@ -1094,7 +1096,7 @@ describe("ClientSession", () => {
     vi.useFakeTimers();
     try {
       const eventTypes = await collectEventTypes(await session.send("first"));
-      expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+      expect(eventTypes).toEqual(["turn.started", "turn.completed", "session.waiting"]);
     } finally {
       vi.useRealTimers();
     }
@@ -1157,7 +1159,7 @@ describe("ClientSession", () => {
     expect(session.state.streamIndex).toBe(4);
   });
 
-  it("resolves result() at a held turn's end, with its final reply, not at its waiting boundary", async () => {
+  it("resolves result() at a held turn's end, with its final reply, not at its session.waiting", async () => {
     const turn = { sequence: 0, turnId: "turn_0" };
     const waiting = {
       type: "session.waiting",
@@ -1171,7 +1173,6 @@ describe("ClientSession", () => {
           type: "message.completed",
           data: { ...turn, finishReason: "stop", message: "Started the lookup.", stepIndex: 0 },
         },
-        { type: "turn.completed", data: { ...turn, held: true } },
         waiting,
         {
           type: "message.completed",
@@ -1189,7 +1190,6 @@ describe("ClientSession", () => {
     expect(result.events.map((event) => event.type)).toEqual([
       "turn.started",
       "message.completed",
-      "turn.completed",
       "session.waiting",
       "message.completed",
       "turn.completed",
@@ -1197,7 +1197,7 @@ describe("ClientSession", () => {
     ]);
     expect(result).toMatchObject({ message: "Q3 revenue is 4.2M.", status: "waiting" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(session.state.streamIndex).toBe(7);
+    expect(session.state.streamIndex).toBe(6);
   });
 
   it("stops at a non-blocking authorization parking boundary", async () => {
@@ -1354,6 +1354,7 @@ describe("ClientSession", () => {
       streamStartIndices.push(new URL(url).searchParams.get("startIndex"));
       return createStreamResponse([
         { type: "turn.started", data: {} },
+        { type: "turn.completed", data: {} },
         {
           type: "session.waiting",
           data: { continuationToken: "eve:test", wait: "next-user-message" },
@@ -1372,15 +1373,16 @@ describe("ClientSession", () => {
         if (event.type === "session.waiting") idleAbort.abort();
       }
 
-      expect(session.state.streamIndex).toBe(2);
+      expect(session.state.streamIndex).toBe(3);
       expect(await collectEventTypes(await session.send("follow up"))).toEqual([
         "turn.started",
+        "turn.completed",
         "session.waiting",
       ]);
     } finally {
       vi.useRealTimers();
     }
-    expect(streamStartIndices).toEqual([null, "2"]);
+    expect(streamStartIndices).toEqual([null, "3"]);
   });
 });
 

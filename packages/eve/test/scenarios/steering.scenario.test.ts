@@ -58,7 +58,9 @@ export default defineAgent({
           .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
         expect(steps).toHaveLength(2);
         expect(new Set(steps).size).toBe(steps.length);
-        expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+        // The turn holds, open to input: session.waiting, with no turn.completed yet.
+        expect(events.at(-1)?.type).toBe("session.waiting");
+        expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(0);
         // A one-second lease expires mid-step, so the backstop must meet the
         // single-flight guard. The default lease still logs this in some CI
         // runs for a reason not yet identified, so there the step and turn

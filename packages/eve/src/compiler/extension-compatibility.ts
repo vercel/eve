@@ -97,7 +97,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       50: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
       51: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       53: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
-      54: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns.",
+      54: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages.",
     },
   },
   channel: {
@@ -116,7 +116,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       30: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
-      31: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns. Session.cancel takes no task options, and StepInput no longer carries taskResults.",
+      31: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages. Session.cancel takes no task options, and StepInput no longer carries taskResults.",
     },
   },
   schedule: {
@@ -124,7 +124,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
-      15: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns. Session.cancel takes no task options.",
+      15: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages. Session.cancel takes no task options.",
     },
   },
   subagent: {
@@ -136,7 +136,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
-      19: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns. Agents and remote agents accept timeout.",
+      19: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages. Agents and remote agents accept timeout.",
     },
   },
   connection: {
@@ -147,7 +147,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       25: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
-      26: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns.",
+      26: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages.",
     },
   },
   hook: {
@@ -175,7 +175,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       19: "subagent.called, subagent.started, and subagent.completed were replaced by task.started and task.settled.",
       24: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       26: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
-      27: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns.",
+      27: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages.",
     },
   },
   skill: { current: 2, supported: [1, 2], dropped: {} },
@@ -184,7 +184,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 22],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
-      21: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns.",
+      21: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
@@ -193,7 +193,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 23],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
-      22: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages, and turn.completed gains held and message.completed gains interim for held turns.",
+      22: "subagent.called, subagent.started, and subagent.completed were replaced by the task.started, task.settled, and task.ended lifecycle, with a generation per resumable task's work; background results arrive as task.result messages.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

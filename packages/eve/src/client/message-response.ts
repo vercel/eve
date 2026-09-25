@@ -70,9 +70,8 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
   /**
    * Consumes the full event stream and returns the aggregated
    * {@link MessageResult}. The stream ends at the turn's end: a turn held on
-   * its tasks streams past its waiting boundaries (`turn.completed` with
-   * `held: true`) until its final reply, unless a request this response
-   * streamed is still unanswered at the boundary.
+   * its tasks goes on past its `session.waiting` to its `turn.completed`,
+   * unless a request this response streamed awaits an answer.
    */
   async result(): Promise<MessageResult<TOutput>> {
     const events: MessageStreamEvent[] = [];

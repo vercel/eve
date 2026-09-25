@@ -33,13 +33,11 @@ export function taskResultDeliveries(events: SessionEvents): readonly (readonly 
 }
 
 /**
- * The assistant's reply at the turn's first waiting boundary, where an
- * interactive turn holds on its tasks and shows what it has so far.
+ * The assistant's reply at the turn's first `session.waiting` before it ends,
+ * where an interactive turn holds on its tasks and shows what it has so far.
  */
 export function heldReply(turn: EveEvalTurn): string | undefined {
-  const boundary = turn.events.findIndex(
-    (event) => event.type === "turn.completed" && event.data.held === true,
-  );
+  const boundary = heldBoundary(turn.events);
   if (boundary < 0) return undefined;
   return turn.events
     .slice(0, boundary)
@@ -51,4 +49,11 @@ export function heldReply(turn: EveEvalTurn): string | undefined {
         : [],
     )
     .at(-1);
+}
+
+/** Index of a held turn's `session.waiting`: one that comes before the turn ends, or -1. */
+export function heldBoundary(events: EveEvalTurn["events"]): number {
+  const waiting = events.findIndex((event) => event.type === "session.waiting");
+  const ended = events.findIndex((event) => event.type === "turn.completed");
+  return waiting >= 0 && (ended < 0 || waiting < ended) ? waiting : -1;
 }

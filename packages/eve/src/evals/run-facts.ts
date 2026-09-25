@@ -70,7 +70,7 @@ export interface EveEvalDerivedFacts {
   readonly inputRequests: readonly InputRequest[];
   /** True when the run ended parked on unanswered HITL input requests. */
   readonly parked: boolean;
-  /** Assistant messages that ended a step without tool calls, except a held turn's interim ones. */
+  /** Assistant messages that ended a step without tool calls. */
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
   readonly failureCode?: string;

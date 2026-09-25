@@ -460,7 +460,9 @@ describe("resumable tasks", () => {
         output: { status: "working", taskId },
       });
       expect(replies(third).at(-1)).toBe("Started the pricing page.");
-      expect(types(third).slice(-2)).toEqual(["turn.completed", "session.waiting"]);
+      // The turn holds, open to input without ending.
+      expect(types(third).at(-1)).toBe("session.waiting");
+      expect(types(third)).not.toContain("turn.completed");
 
       // A correction joins the running work and brings the output schema its result takes.
       const fourth = (

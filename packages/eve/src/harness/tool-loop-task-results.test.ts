@@ -310,18 +310,22 @@ describe("detached result delivery in the tool loop", () => {
     expect(result.next).toBeNull();
     expect(result.heldTaskIds).toEqual(["remind-q4x1ze"]);
     expect(result.settledTurn).toBeUndefined();
-    // The waiting boundary keeps the turn open under the same ID.
+    // The reply is an ordinary message; the turn opens to input without ending.
     expect(events.map((event) => event.type).slice(-2)).toEqual([
-      "turn.completed",
+      "step.completed",
       "session.waiting",
     ]);
-    expect(events.at(-2)).toEqual({
-      data: { held: true, sequence: 0, turnId: "turn_0" },
-      type: "turn.completed",
+    expect(events.map((event) => event.type)).not.toContain("turn.completed");
+    expect(events.find((event) => event.type === "message.completed")).toEqual({
+      data: {
+        finishReason: "stop",
+        message: "I set the reminder; I'll tell you when it fires.",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_0",
+      },
+      type: "message.completed",
     });
-    // The interim message is an ordinary reply; the held boundary tells it apart.
-    const reply = events.find((event) => event.type === "message.completed");
-    expect(reply?.type === "message.completed" && reply.data.interim).toBeUndefined();
     expect(getHarnessEmissionState(session.state)).toMatchObject({
       sequence: 0,
       stepIndex: 2,
@@ -346,13 +350,9 @@ describe("detached result delivery in the tool loop", () => {
     expect(types).not.toContain("turn.completed");
     expect(types).not.toContain("session.waiting");
     expect(types).not.toContain("session.completed");
-    // With no boundary, the message itself says it is not the reply yet.
+    // The reply is still published as an ordinary message.
     expect(events).toContainEqual({
-      data: expect.objectContaining({
-        finishReason: "stop",
-        interim: true,
-        message: "Started the reminder.",
-      }),
+      data: expect.objectContaining({ finishReason: "stop", message: "Started the reminder." }),
       type: "message.completed",
     });
   });

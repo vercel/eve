@@ -15,11 +15,11 @@ export function isInteractiveRootSession(
 }
 
 /**
- * Whether a held turn shows its waiting boundary: only a turn of an
- * interactive root session that a schedule did not start. A scheduled,
- * child, or task-mode turn holds without one, so a schedule posts once and a
- * caller gets one reply. A schedule starts the first turn of a session it
- * created, and any turn its delivery starts in an existing session.
+ * Whether a held turn emits `session.waiting` while it holds: only a turn of
+ * an interactive root session that a schedule did not start. No person can
+ * steer a scheduled, child, or task-mode turn, so it holds without one. A
+ * schedule starts the first turn of a session it created, and any turn its
+ * delivery starts in an existing session.
  */
 export function showsHeldTurnBoundary(
   ctx: ContextReader | undefined,

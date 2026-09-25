@@ -35,9 +35,10 @@ export default defineEval({
       data: { generation: 1, mode: "detached", resumable: false, taskId },
     });
 
-    // One turn: the reply at the waiting boundary, then the result and the final reply.
+    // One turn: the reply, session.waiting while it holds, then the result and the final reply.
     turn.event("turn.started", { count: 1 });
-    turn.event("turn.completed", { count: 1, data: { held: true } });
+    turn.event("turn.completed", { count: 1 });
+    turn.event("session.waiting", { count: 2 });
     turn.event("message.completed", { count: 1, data: { message: "TASKS-STILL-WORKING" } });
     t.check(
       taskResultDeliveries(turn.events),
@@ -48,9 +49,7 @@ export default defineEval({
       ),
     );
     turn.eventsSatisfy("the result arrives after the waiting boundary", (events) => {
-      const boundary = events.findIndex(
-        (event) => event.type === "turn.completed" && event.data.held === true,
-      );
+      const boundary = events.findIndex((event) => event.type === "session.waiting");
       const delivered = events.findIndex(
         (event) => event.type === "message.received" && event.data.kind === "task.result",
       );

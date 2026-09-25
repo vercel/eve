@@ -26,7 +26,7 @@ export default defineEval({
     drafted.messageIncludes("Draft 1: the agenda");
 
     const reminding = await conversation.start("Alice would like two reminders. TASKS-REMIND");
-    await reminding.waitForEvent("turn.completed", { data: { held: true } });
+    await reminding.waitForEvent("session.waiting");
     const reminderIds = await waitForStarts(reminding, "remind_later", 2);
 
     const cancelled = await conversation.cancel();

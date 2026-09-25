@@ -263,8 +263,7 @@ export interface DeliverHookPayload {
   readonly payloads: readonly DeliverPayload[];
   /**
    * Authored schedule whose dispatch sent every payload. A turn it starts is
-   * a scheduled turn: it holds on its tasks without a waiting boundary, so it
-   * posts one final reply.
+   * a scheduled turn: it holds on its tasks without `session.waiting`.
    */
   readonly scheduleId?: string;
   /**

@@ -29,13 +29,6 @@ export interface EveMessage {
  * once the turn finalizes.
  */
 export interface EveMessageMetadata {
-  /**
-   * A turn boundary closed this assistant message: the turn's end, or a
-   * waiting boundary of a turn held on its tasks (`turn.completed` with
-   * `held: true`). Nothing more streams into it; a held turn streams its next
-   * output into a new message, so one turn ID can own several.
-   */
-  readonly closed?: true;
   readonly optimistic?: true;
   readonly result?: unknown;
   readonly status?: "complete" | "failed" | "streaming" | "submitted";

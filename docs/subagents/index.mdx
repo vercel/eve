@@ -24,7 +24,7 @@ progress, by calling the same agent tool with the agent's `taskId`; see
 A subagent answers its caller only after the tasks its own turn started have settled. If the
 subagent starts agents or workflow tool tasks and ends its turn while they work, eve holds the
 turn: the parent's task stays working, and its result is the reply the subagent gives after those
-results arrive. An interim reply never settles the parent's task.
+results arrive. What the subagent says while it waits never settles the parent's task.
 
 ## Wait for an agent
 
