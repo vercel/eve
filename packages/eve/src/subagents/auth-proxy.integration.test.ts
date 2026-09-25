@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
 import type {
@@ -11,8 +11,9 @@ import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import type { StreamEventHook } from "#public/definitions/hook.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   BundleKey,
   ChannelKey,
@@ -47,7 +48,10 @@ const turnAgent = {
   workspaceSpec: {} as never,
 };
 
-function buildBundle(adapter: ChannelAdapter): CompiledBundle {
+function buildBundle(
+  adapter: ChannelAdapter,
+  hook: StreamEventHook<MessageStreamEvent>,
+): CompiledBundle {
   return {
     adapterRegistry: {
       adaptersByKind: new Map([[adapter.kind, adapter]]),
@@ -60,7 +64,22 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
         turnAgent,
       },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([
+      {
+        events: {
+          "authorization.required": hook,
+          "authorization.completed": hook,
+          "approval.candidate": hook,
+          "approval.settled": hook,
+          "turn.completed": hook,
+          "session.waiting": hook,
+        },
+        logicalPath: "hooks/audit.ts",
+        slug: "audit",
+        sourceId: "hooks/audit.ts",
+        sourceKind: "module",
+      },
+    ]),
     resolvedAgent: { config: {} },
     subagentRegistry: {},
     toolRegistry: {},
@@ -71,8 +90,10 @@ function buildBundle(adapter: ChannelAdapter): CompiledBundle {
 function buildContext(input: { readonly adapter: ChannelAdapter; readonly sessionId: string }): {
   readonly bundle: ReturnType<typeof buildBundle>;
   readonly ctx: ContextContainer;
+  readonly hook: Mock<StreamEventHook<MessageStreamEvent>>;
 } {
-  const bundle = buildBundle(input.adapter);
+  const hook = vi.fn<StreamEventHook<MessageStreamEvent>>();
+  const bundle = buildBundle(input.adapter, hook);
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, bundle);
@@ -80,7 +101,7 @@ function buildContext(input: { readonly adapter: ChannelAdapter; readonly sessio
   ctx.set(ContinuationTokenKey, "http:parent");
   ctx.set(ModeKey, "conversation");
   ctx.set(SessionIdKey, input.sessionId);
-  return { bundle, ctx };
+  return { bundle, ctx, hook };
 }
 
 function rehydrateContext(input: {
@@ -141,7 +162,10 @@ describe("subagent authorization proxy", () => {
   it("preserves approval candidate and settlement events", async () => {
     const parentSessionId = "parent-approval-session";
     const session = createSession(parentSessionId);
-    const { ctx } = buildContext({ adapter: authorizationAdapter, sessionId: parentSessionId });
+    const { ctx, hook } = buildContext({
+      adapter: authorizationAdapter,
+      sessionId: parentSessionId,
+    });
     const chunks: Uint8Array[] = [];
     const sessionWritable = createCapturingWritable(chunks);
     const candidateEvent: SubagentAuthorizationEvent = {
@@ -183,11 +207,13 @@ describe("subagent authorization proxy", () => {
 
     expect(decodeEvent(chunks[0]!)).toMatchObject(candidateEvent);
     expect(decodeEvent(chunks[1]!)).toMatchObject(settledEvent);
+    expect(hook.mock.calls.map(([event]) => event)).toEqual(chunks.map(decodeEvent));
+    expect(hook.mock.calls.every(([, ctx]) => ctx.session.id === parentSessionId)).toBe(true);
   });
   it("preserves required/completed events as standalone parent turns", async () => {
     const parentSessionId = "parent-session";
     const session = createSession(parentSessionId);
-    const { bundle, ctx } = buildContext({
+    const { bundle, ctx, hook } = buildContext({
       adapter: authorizationAdapter,
       sessionId: parentSessionId,
     });
@@ -253,5 +279,7 @@ describe("subagent authorization proxy", () => {
     expect(decodeEvent(chunks[3]!)).toMatchObject(completedEvent);
     expect(decodeEvent(chunks[4]!).type).toBe("turn.completed");
     expect(decodeEvent(chunks[5]!).type).toBe("session.waiting");
+    expect(hook.mock.calls.map(([event]) => event)).toEqual(chunks.map(decodeEvent));
+    expect(hook.mock.calls.every(([, ctx]) => ctx.session.id === parentSessionId)).toBe(true);
   });
 });
