@@ -886,6 +886,7 @@ export const logos = {
   mux: muxLogo,
   browserbase: browserbaseLogo,
   jetty: jettyLogo,
+  "stripe-link": stripeLogo,
   "agent-browser": agentBrowserLogo,
 } as const;
 

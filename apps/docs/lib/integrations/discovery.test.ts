@@ -73,6 +73,19 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders the Stripe Link extension setup and security guidance", () => {
+    const stripeLink = getIntegration("stripe-link");
+    expect(stripeLink).toBeDefined();
+
+    const markdown = integrationMarkdown(stripeLink!);
+    expect(markdown).toContain("eve add extension/stripe-link");
+    expect(markdown).toContain('import link from "@stripe/link-integrations-eve"');
+    expect(markdown).toContain("LINK_ACCESS_TOKEN");
+    expect(markdown).toContain("approval on every call");
+    expect(markdown).toContain("shared by every caller");
+    expect(integrationSearchText(stripeLink!)).toContain("wallet");
+  });
+
   it("renders related resources after Configure and omits the section when empty", () => {
     const kernel = getIntegration("kernel");
     expect(kernel).toBeDefined();
