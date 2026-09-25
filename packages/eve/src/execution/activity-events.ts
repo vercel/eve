@@ -62,7 +62,6 @@ export function projectActivityEvents(input: {
   if (event.type === "action.result") {
     const result = event.data.result;
     if (result.kind === "subagent-result") {
-      if ("backgroundTask" in result && result.backgroundTask !== undefined) return [];
       const workId = deriveChildActivityWorkId({
         callId: result.callId,
         parentSessionId: lineage.sessionId ?? lineage.rootSessionId,

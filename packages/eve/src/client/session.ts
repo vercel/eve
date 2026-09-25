@@ -165,10 +165,9 @@ export class ClientSession {
     );
   }
 
-  /** Requests cooperative cancellation of this session's active turn and optionally its tasks. */
+  /** Requests cooperative cancellation of this session's active turn. */
   async cancel(options?: {
     readonly signal?: AbortSignal;
-    readonly tasks?: boolean;
     readonly turnId?: string;
   }): Promise<CancelSessionResult> {
     return await cancelClientSession({
@@ -500,9 +499,6 @@ function createMessageBody(
   }
   if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
     body.turnPolicy = input.turnPolicy;
-  }
-  if (input.message !== undefined && input.taskDeliveryPolicy !== undefined) {
-    body.taskDeliveryPolicy = input.taskDeliveryPolicy;
   }
   if (input.clientContext !== undefined) body.clientContext = input.clientContext;
   const outputSchema = serializeOutputSchema(input.outputSchema);

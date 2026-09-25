@@ -67,37 +67,37 @@ curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
 
 The stream is newline-delimited JSON (NDJSON), one event per line:
 
-| Event                     | Meaning                                                                                                                                            |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.started`         | A durable session was created; carries `trace` when the runtime is traced.                                                                         |
-| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                                                           |
-| `message.received`        | Input reached a turn; carries flattened text plus structured text/file parts. Task-authored input sets `data.kind` to `execution.background_task`. |
-| `step.started`            | A model step began.                                                                                                                                |
-| `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                                                            |
-| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                                                      |
-| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                                           |
-| `action.result`           | A tool call returned.                                                                                                                              |
-| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                           |
-| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                             |
-| `subagent.called`         | A subagent was delegated; carries `childSessionId` and the `childStreamPath` that `session.streamSubagent()` follows.                              |
-| `subagent.completed`      | The parent recorded a successful subagent invocation result; carries the actual output.                                                            |
-| `reasoning.appended`      | A reasoning text delta.                                                                                                                            |
-| `reasoning.completed`     | The finalized reasoning block.                                                                                                                     |
-| `message.appended`        | An assistant text delta.                                                                                                                           |
-| `message.completed`       | A finalized assistant text block.                                                                                                                  |
-| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                                      |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.                                    |
-| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.                                  |
-| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                                         |
-| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                          |
-| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                           |
-| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                                        |
-| `turn.completed`          | The turn finished.                                                                                                                                 |
-| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                                                            |
-| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                                                     |
-| `session.waiting`         | The session parked and is ready for the next message.                                                                                              |
-| `session.failed`          | The session failed.                                                                                                                                |
-| `session.completed`       | The session reached a terminal end.                                                                                                                |
+| Event                     | Meaning                                                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `session.started`         | A durable session was created; carries `trace` when the runtime is traced.                                               |
+| `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                                 |
+| `message.received`        | Input reached a turn; carries flattened text plus structured text/file parts.                                            |
+| `step.started`            | A model step began.                                                                                                      |
+| `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                                  |
+| `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                            |
+| `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                                 |
+| `action.result`           | A tool call returned.                                                                                                    |
+| `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`. |
+| `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                   |
+| `subagent.called`         | A subagent was delegated; carries `childSessionId` and the `childStreamPath` that `session.streamSubagent()` follows.    |
+| `subagent.completed`      | The parent recorded a successful subagent invocation result; carries the actual output.                                  |
+| `reasoning.appended`      | A reasoning text delta.                                                                                                  |
+| `reasoning.completed`     | The finalized reasoning block.                                                                                           |
+| `message.appended`        | An assistant text delta.                                                                                                 |
+| `message.completed`       | A finalized assistant text block.                                                                                        |
+| `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                            |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.          |
+| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.        |
+| `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                               |
+| `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                |
+| `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                 |
+| `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                              |
+| `turn.completed`          | The turn finished.                                                                                                       |
+| `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                                  |
+| `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                           |
+| `session.waiting`         | The session parked and is ready for the next message.                                                                    |
+| `session.failed`          | The session failed.                                                                                                      |
+| `session.completed`       | The session reached a terminal end.                                                                                      |
 
 The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
 
@@ -117,9 +117,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 `message.completed` can fire more than once in a turn: the agent often emits interim assistant text before a tool call. To tell tool-call narration from a terminal reply, check `message.completed.data.finishReason`. `step.completed.data.finishReason` mirrors the step outcome, and usage lives on `step.completed`.
 
-When a task explicitly requires conditional delivery and there is nothing new to report, the agent can finish with exactly `<eve-empty-delivery/>`. eve emits `message.completed` with `message: null` for that intentional silence. The marker must be the entire response, apart from surrounding whitespace; the HTML-escaped form `&lt;eve-empty-delivery/&gt;` is also accepted. A response that quotes the marker in prose or code is delivered normally.
-
-A delegated subagent publishes progress on its own child-session stream. The parent emits `subagent.called` with a `childSessionId` and a `childStreamPath`, which a client follows with `session.streamSubagent()`. Both blocking and background calls emit `subagent.completed` with the actual output after the parent records a successful outcome. A background working receipt is an `action.result` tool output; it does not emit completion. Older streams can contain receipt-bearing completion events marked by `data.backgroundTask`; those are admission only. Completion does not mean that the reusable child session has ended. Background task terminal outcomes also arrive as task-triggered `message.received` notifications with `data.kind: "execution.background_task"`. The default frontend reducer retains these events in `events` but does not project their runtime-authored text as participant messages.
+A delegated subagent publishes progress on its own child-session stream. The parent emits `subagent.called` with a `childSessionId` and a `childStreamPath`, which a client follows with `session.streamSubagent()`. Every call emits `subagent.completed` with the actual output after the parent records a successful outcome. Completion does not mean that the reusable child session has ended.
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
@@ -209,7 +207,7 @@ Message sends default to `"steer"`. Before assistant output begins, eve interrup
 
 If the session is waiting on a human-in-the-loop approval, respond with the channel’s Approve or Cancel controls. Text messages do not decide an approval; unrelated text starts an ordinary turn while the approval stays pending and answerable. A later structured `inputResponses` answer keyed by its `requestId` still resumes the original tool call, even after intervening turns.
 
-A pending `ctx.ask()` question from a blocking tool, such as `ask_question`, can be answered with plain text. When it is the only pending question, a message that matches an option answers it, and so does any message when the question allows free text. Otherwise eve does not guess which question the text addresses: the message follows the normal `turnPolicy`, questions created with `dismissible: true` resolve as `dismissed`, and other questions stay open. Questions from background tools and subagents always need a structured response. Use structured responses to target requests unambiguously.
+A pending `ctx.ask()` question from a tool, such as `ask_question`, can be answered with plain text. When it is the only pending question, a message that matches an option answers it, and so does any message when the question allows free text. Otherwise eve does not guess which question the text addresses: the message follows the normal `turnPolicy`, questions created with `dismissible: true` resolve as `dismissed`, and other questions stay open. Questions from subagents always need a structured response. Use structured responses to target requests unambiguously.
 
 A structured response matches any currently pending request by ID, not only the newest batch. It becomes stale only after that request was answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
 
@@ -226,15 +224,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-By default, background tasks that were already admitted survive initiating-turn cancellation. Pass `tasks: true` to cancel every background task owned by the session as well. This works while the session is parked, so you can stop background work without resetting the session:
-
-```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel \
-  -H 'content-type: application/json' \
-  -d '{"tasks":true}'
-```
-
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. Inspect task state in a later turn to confirm task cancellation. The session then accepts the next message normally. Background work that has not yet been admitted is rejected with the cancelled step. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; plain cancellation is a no-op there, while `tasks: true` still cancels indexed tasks. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. The session then accepts the next message normally. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; cancellation is a no-op there. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 The HTTP route returns `202` for `"accepted"` and `200` for
 `"no_active_turn"`. Only the accepted result includes `sessionId`.

@@ -265,16 +265,6 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("does not install task_update from the framework registry", async () => {
-    const compiled = await compileAgentManifest(manifest());
-
-    expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
-    expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
-    expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
-      "tools/task_update.ts",
-    );
-  });
-
   it("does not install ask_question from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
@@ -304,29 +294,7 @@ describe("compileAgentManifest source graph", () => {
       availableInSubagents: false,
       behavior: { availability: [] },
       description: "Route delegated work.",
-      execution: undefined,
     });
-  });
-
-  it.each(["task_cancel"])("rejects overriding closed framework tool %s", async (toolName) => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: `tools/${toolName}.ts`,
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement tool.",
-            execute: async () => null,
-            inputSchema: {},
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-    );
   });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
@@ -355,7 +323,7 @@ describe("compileAgentManifest source graph", () => {
         kind: "workflow-tool",
         workflowId: "workflow//example/tool//execute",
       },
-      shape: { lifetime: "step", suspend: "workflow" },
+      shape: { suspend: "workflow" },
     });
   });
 

@@ -32,7 +32,6 @@ describe("postSessionCallbackRequest", () => {
           body: {
             kind,
             callId: "call-1",
-            taskId: "task-1",
             sessionId: "child-session",
             subagentName: "research",
             message: "private update",
@@ -49,7 +48,6 @@ describe("postSessionCallbackRequest", () => {
         expect.objectContaining({
           kind,
           callId: "call-1",
-          taskId: "task-1",
           sessionId: "child-session",
           subagentName: "research",
           callbackOrigin: "https://agent.example.com",
@@ -78,7 +76,7 @@ describe("postSessionCallbackRequest", () => {
 
       await expect(
         postSessionCallbackRequest({
-          body: { kind: "session.completed", taskId: "task-1" },
+          body: { kind: "session.completed" },
           url: callbackUrl,
           timeoutMs: 123,
         }),
@@ -86,7 +84,7 @@ describe("postSessionCallbackRequest", () => {
 
       expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
         "[eve:execution.session-callback] callback delivery failed",
-        expect.objectContaining({ failure, timeoutMs: 123, taskId: "task-1" }),
+        expect.objectContaining({ failure, timeoutMs: 123 }),
       );
       expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("opaque-token");
       expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret-credential");

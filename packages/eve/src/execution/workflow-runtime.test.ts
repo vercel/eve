@@ -946,22 +946,6 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
-  it("passes explicit task ownership to the durable session workflow", async () => {
-    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-    mockBundleAndRun(compiledArtifactsSource);
-    startMock.mockResolvedValue({ runId: "subagent-run" });
-    getHookByTokenMock.mockResolvedValue({ runId: "subagent-run" });
-
-    await buildRuntime(compiledArtifactsSource).createSession({
-      adapter: { kind: "subagent", state: { parentContinuationToken: "opaque-reply-hook" } },
-      auth: null,
-      input: { message: "research this" },
-      taskId: "task-1",
-    });
-
-    expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({ taskId: "task-1" });
-  });
-
   it("lets the Workflow world provide its current deployment when Vercel has no id", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);

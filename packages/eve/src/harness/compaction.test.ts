@@ -758,7 +758,7 @@ describe("compactMessages: forced summary", () => {
       const messages = [
         user("Keep the original request."),
         assistant("Work is in progress."),
-        user("A background task completed."),
+        user("A scheduled report completed."),
       ];
       const original = structuredClone(messages);
 

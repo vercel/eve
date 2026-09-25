@@ -65,7 +65,7 @@ describe("agent invocation input", () => {
   });
 });
 
-describe("background agent invocation routing", () => {
+describe("workflow agent invocation routing", () => {
   it("stops waiting when the workflow body is cancelled", async () => {
     const controller = new AbortController();
     mocks.createHook.mockReturnValue({
@@ -76,7 +76,6 @@ describe("background agent invocation routing", () => {
     attachWorkflowToolRunContext(ctx, {
       from: {
         callId: "call-1",
-        execution: "background",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -131,7 +130,6 @@ describe("background agent invocation routing", () => {
     mocks.resumeHook.mockImplementation(async () => undefined);
     const from: WorkflowToolRunRef = {
       callId: "call-1",
-      execution: "background",
       input: { message: "Find it" },
       runId: "run-1",
       sequence: 0,
@@ -200,7 +198,6 @@ describe("background agent invocation routing", () => {
     attachWorkflowToolRunContext(ctx, {
       from: {
         callId: "call-1",
-        execution: "blocking",
         input: {},
         runId: "run-1",
         sequence: 0,
@@ -265,7 +262,6 @@ describe("background agent invocation routing", () => {
     attachWorkflowToolRunContext(ctx, {
       from: {
         callId: "call-1",
-        execution: "blocking",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -282,7 +278,7 @@ describe("background agent invocation routing", () => {
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
     expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-inbox", {
       kind: "request",
-      from: expect.objectContaining({ execution: "blocking", runId: "run-1" }),
+      from: expect.objectContaining({ runId: "run-1" }),
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },
@@ -319,7 +315,6 @@ describe("background agent invocation routing", () => {
       attachWorkflowToolRunContext(ctx, {
         from: {
           callId: "call-1",
-          execution: "blocking",
           input: {},
           runId: "run-1",
           sequence: 0,
@@ -384,7 +379,6 @@ describe("background agent invocation routing", () => {
     attachWorkflowToolRunContext(ctx, {
       from: {
         callId: "call-1",
-        execution: "blocking",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -466,7 +460,6 @@ describe("background agent invocation routing", () => {
       mocks.resumeHook.mockImplementation(async () => undefined);
       const from: WorkflowToolRunRef = {
         callId: "call-1",
-        execution: "background",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -507,7 +500,7 @@ describe("background agent invocation routing", () => {
     },
   );
 
-  it("forwards background authorization as an owner authorization request", async () => {
+  it("forwards child authorization as an owner authorization request", async () => {
     const replies: AgentInvocationReply[] = [
       {
         callId: "call-1",
@@ -551,7 +544,6 @@ describe("background agent invocation routing", () => {
     mocks.resumeHook.mockImplementation(async () => undefined);
     const from: WorkflowToolRunRef = {
       callId: "call-1",
-      execution: "background",
       input: { message: "Find it", target: "research" },
       runId: "run-1",
       sequence: 0,

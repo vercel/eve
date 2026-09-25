@@ -115,9 +115,6 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
-/** Capability route used by a parent task to answer a remote child HITL batch. */
-export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
-
 /** Capability route for best-effort activity batches. */
 export const EVE_ACTIVITY_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/activity/:token`;
 

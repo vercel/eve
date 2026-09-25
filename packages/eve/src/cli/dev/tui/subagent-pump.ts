@@ -35,8 +35,6 @@ const childStreamReconnectPolicy = {
 export interface SubagentView {
   /** Opens a call's section the moment its dispatch is announced. */
   begin(update: { callId: string; name: string }): void;
-  /** Keeps a receipt-returned background call mutable across parent turns. */
-  background(update: { callId: string }): void;
   upsertStep(update: SubagentStepUpdate): void;
   upsertTool(update: SubagentToolUpdate): void;
   /** Drops a child tool row whose call never materialized. */
@@ -74,8 +72,6 @@ export type SubagentRun = {
   childSessionId: string;
   /** Parent turn that originated this dispatch; cancellation is scoped to it. */
   parentTurnId: string;
-  /** A receipt-returned task survives cancellation of its originating turn. */
-  background: boolean;
   /** Parent completion is provisional; only a child boundary is authoritative. */
   status: "open" | "provisional" | "authoritative";
   /** Dispatch event whose parent-origin child stream this run follows. */
@@ -135,8 +131,6 @@ export class SubagentPump {
     | ((subagentName: string, toolName: string, output: unknown) => Promise<void>)
     | undefined;
   readonly #runs = new Map<string, SubagentRun>();
-  // Task admission can return its receipt before the child dispatch event arrives.
-  readonly #pendingBackgroundCalls = new Set<string>();
   readonly #pumps = new Map<string, AbortController>();
   /** Durable child cursor shared by repeated calls into one conversation subagent. */
   readonly #childStreamIndices = new Map<string, number>();
@@ -168,7 +162,6 @@ export class SubagentPump {
         name: called.data.name,
         childSessionId: called.data.childSessionId,
         parentTurnId: called.data.turnId,
-        background: false,
         status: "open",
         called,
         steps: new Map(),
@@ -182,7 +175,6 @@ export class SubagentPump {
     this.#view?.markChildToolCallId(callId);
     if (existing !== undefined && existing.status !== "open") return;
     this.#view?.begin({ callId, name: called.data.name });
-    if (this.#pendingBackgroundCalls.delete(callId)) this.background(callId);
     if (existing !== undefined) return;
     this.#activateOrQueue(callId);
   }
@@ -196,41 +188,21 @@ export class SubagentPump {
     this.#finalizeRun(callId, false);
   }
 
-  /**
-   * The originating call returned a task receipt, not the child's result.
-   * Keep the section open until the child stream reaches its own boundary.
-   * A child that already settled before the receipt raced in stays settled.
-   */
-  background(callId: string): void {
-    const run = this.#runs.get(callId);
-    if (run === undefined) {
-      this.#pendingBackgroundCalls.add(callId);
-      return;
-    }
-    run.background = true;
-    if (run.status === "authoritative") return;
-    this.#view?.background({ callId });
-  }
-
   abortAll(): void {
     for (const controller of this.#pumps.values()) {
       controller.abort();
     }
     this.#pumps.clear();
     this.#runs.clear();
-    this.#pendingBackgroundCalls.clear();
     this.#childStreamIndices.clear();
     this.#activeChildCalls.clear();
     this.#queuedChildCalls.clear();
   }
 
-  /**
-   * Settles and aborts only foreground descendants of the cancelled parent
-   * turn. Background tasks survive even when that same turn started them.
-   */
+  /** Settles and aborts the descendants of the cancelled parent turn. */
   settleCancelledTurn(turnId: string): void {
     for (const [callId, run] of this.#runs) {
-      if (run.parentTurnId !== turnId || run.background) continue;
+      if (run.parentTurnId !== turnId) continue;
       this.#finalizeRun(callId, true);
       this.#pumps.get(callId)?.abort();
       this.#pumps.delete(callId);
@@ -484,7 +456,7 @@ export class SubagentPump {
       }
       case "message.completed": {
         const { key, step } = openCurrentSubagentSection(run);
-        if (event.data.message !== null && step.message.length === 0) {
+        if (step.message.length === 0) {
           // Some channels emit only `message.completed` without per-delta
           // `message.appended` events. Capture the full text in that case.
           step.message = event.data.message;

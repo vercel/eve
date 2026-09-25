@@ -367,12 +367,11 @@ describe("exported agent telemetry contract", () => {
           turnId: "turn_0",
           sessionState: {
             "eve.workflowTool": {
-              version: 3,
+              version: 4,
               runs: [
                 {
                   callId: "workflow",
                   toolName: "coordinate",
-                  lifetime: "turn" as const,
                   origin: { turnId: "turn-1", stepIndex: 0 },
                   address: { runId: "workflow-run", hookToken: "hook" },
                 },

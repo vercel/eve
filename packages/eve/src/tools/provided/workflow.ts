@@ -4,10 +4,7 @@ import {
 } from "#execution/dynamic-workflow/schema.js";
 import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
 import type { JsonValue } from "#shared/json.js";
-import {
-  defineWorkflowTool,
-  type BlockingWorkflowToolDefinition,
-} from "#tools/workflow-definition.js";
+import { defineWorkflowTool, type WorkflowToolDefinition } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
@@ -20,7 +17,7 @@ export interface WorkflowToolInput {
   readonly js: string;
 }
 
-export type WorkflowTool = BlockingWorkflowToolDefinition<WorkflowToolInput, JsonValue>;
+export type WorkflowTool = WorkflowToolDefinition<WorkflowToolInput, JsonValue>;
 
 const workflowProgramAgentContract =
   "Call ctx.agent(name, { message: string, agentId?: string, outputSchema?: object }). It resolves directly to the child's JSON-serializable output; when outputSchema is provided, the output matches that schema. It does not return an agent metadata wrapper. Use an agentId from the conversation's <agents> block to continue that child. The owning agent resolves the target and applies its existing availability and authorization checks.";

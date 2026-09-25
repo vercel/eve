@@ -5,7 +5,6 @@ import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
-import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";
@@ -157,53 +156,6 @@ describe("proxied stream hooks", () => {
       ]);
     },
   );
-
-  it("retains pre-recorded task response destinations and child request IDs", async () => {
-    const f = fixture();
-    const childRequestId = f.request.requestId;
-    const requestId = `task-1:${childRequestId}`;
-    const route = {
-      childContinuationToken: "child-token",
-      childRequestId,
-      childResponseUrl: "https://child.example/eve/input",
-      kind: "session-limit",
-      taskId: "task-1",
-    } as const;
-    const result = await emitProxiedSubagentEvent({
-      ...f,
-      recordProxyInputRequests: false,
-      durableSession: {
-        ...f.durableSession,
-        state: {
-          ...f.durableSession.state,
-          "eve.runtime.proxyInputRequests": { [requestId]: route },
-        },
-      },
-      hookPayload: {
-        ...f.hookPayload,
-        event: { ...f.hookPayload.event, requests: [{ ...f.request, requestId }] },
-      },
-    });
-    expect(f.typed.mock.calls.filter(([event]) => event.type === "input.requested")).toHaveLength(
-      1,
-    );
-    const state = result.sessionState.snapshot.session.state;
-    expect(getProxyInputRequests(state).get(requestId)).toEqual(route);
-    expect(
-      routeDeliverPayload({
-        payload: { inputResponses: [{ requestId, optionId: "continue" }] },
-        state,
-      }).forChildren,
-    ).toEqual([
-      {
-        childContinuationToken: route.childContinuationToken,
-        childResponseUrl: route.childResponseUrl,
-        taskId: route.taskId,
-        payload: { inputResponses: [{ requestId: childRequestId, optionId: "continue" }] },
-        retireRequestIds: [requestId],
-      },
-    ]);
-  });
 
   it("propagates hook failures after publication and releases the writer", async () => {
     const f = fixture();

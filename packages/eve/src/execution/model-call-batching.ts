@@ -46,9 +46,7 @@ function shouldRunAnotherModelCall(input: {
 }): boolean {
   if (
     input.completedModelCalls >= input.modelCallsPerStep ||
-    typeof input.result.next !== "function" ||
-    input.result.backgroundTaskSession !== undefined ||
-    input.result.backgroundTasks !== undefined
+    typeof input.result.next !== "function"
   ) {
     return false;
   }

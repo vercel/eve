@@ -33,27 +33,18 @@ describe("validateSessionCheckpointStep", () => {
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
   });
 
-  it("rejects an incompatible settled task with the current checkpoint version", async () => {
+  it("rejects an incompatible workflow tool run with the current checkpoint version", async () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
         "eve.workflowTool": {
-          version: 3,
+          version: 4,
           runs: [
             {
-              callId: "task",
+              callId: "call",
               toolName: "research",
-              lifetime: "session" as const,
               origin: { turnId: "turn", stepIndex: 0 },
               address: { runId: "run", hookToken: 42 },
-              task: {
-                taskId: "task",
-                metadata: { kind: "tool", name: "research" },
-                outcome: {
-                  status: "cancelled",
-                },
-                dispatchContext: { auth: { current: null, initiator: null } },
-              },
             },
           ],
         },

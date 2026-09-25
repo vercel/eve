@@ -74,7 +74,6 @@ interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
-  readonly taskId?: string;
 }
 
 /** Creates a fresh {@link HarnessSession} from the current `turnAgent`. */
@@ -101,9 +100,6 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   session.limits = resolveSessionLimits(input);
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
-  }
-  if (input.taskId !== undefined) {
-    session.taskId = input.taskId;
   }
 
   return session;
@@ -196,7 +192,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sandboxState?: HarnessSession["sandboxState"];
     sessionId: string;
     state?: HarnessSession["state"];
-    taskId?: string;
   } = {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
@@ -227,9 +222,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   }
   if (session.state !== undefined) {
     durable.state = session.state;
-  }
-  if (session.taskId !== undefined) {
-    durable.taskId = session.taskId;
   }
   return durable;
 }
@@ -281,9 +273,6 @@ export function hydrateDurableSession(input: {
   }
   if (durable.state !== undefined) {
     session.state = durable.state;
-  }
-  if (durable.taskId !== undefined) {
-    session.taskId = durable.taskId;
   }
   return session;
 }

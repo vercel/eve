@@ -68,7 +68,6 @@ function callbackLogFields(input: { readonly body: unknown; readonly url: string
     for (const key of [
       "kind",
       "callId",
-      "taskId",
       "sessionId",
       "childSessionId",
       "subagentName",

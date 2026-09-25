@@ -94,8 +94,6 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
-  /** Framework task that owns this durable session, when present. */
-  readonly taskId?: string;
 }
 
 export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
@@ -212,15 +210,6 @@ export interface SettledTurn {
  */
 export interface StepResult {
   readonly steered?: true;
-  /** Background-tool effects projected onto the session that entered this step. */
-  readonly backgroundTaskSession?: HarnessSession;
-  /** Durable tasks started by background tools and awaiting the parent commit barrier. */
-  readonly backgroundTasks?: readonly {
-    readonly callId?: string;
-    readonly taskInboxToken: string;
-    readonly taskId: string;
-    readonly taskRunId: string;
-  }[];
   readonly next: StepNext;
   readonly session: HarnessSession;
   /**
@@ -296,8 +285,6 @@ export interface ToolLoopHarnessConfig {
    * Omitted in production until an instrumentation runtime opts in.
    */
   readonly instrumentation?: SessionInstrumentation;
-  /** Whether this node enables framework background-task behavior. */
-  readonly tasksEnabled?: boolean;
   /** Restores runtime resources for the originating turn before approval work. */
   readonly prepareApprovalTurn?: (event: {
     readonly sequence: number;

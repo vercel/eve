@@ -34,7 +34,6 @@ import {
   createTurnFailedEvent,
   createTurnStartedEvent,
 } from "#protocol/message.js";
-import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -61,7 +60,6 @@ import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorizat
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
-import { frameworkMessageKindForStepInput } from "#harness/messages.js";
 
 export {
   getHarnessEmissionState,
@@ -99,10 +97,8 @@ export async function emitTurnPreamble(
   }
 
   if (input.message !== undefined) {
-    const kind = frameworkMessageKindForStepInput(input);
     await emitFn(
       createMessageReceivedEvent({
-        kind: kind === "execution.background_task" ? kind : undefined,
         message: input.message,
         sequence: state.sequence,
         turnId,
@@ -666,23 +662,7 @@ async function consumeStreamContent(
     );
   }
 
-  // Channel adapters deliver terminal completions, so the reserved marker
-  // becomes a null completion without delaying normal streaming deltas.
-  if (
-    finishReason !== "content-filter" &&
-    finishReason !== "tool-calls" &&
-    hasEmptyDeliverySentinel(currentMessage)
-  ) {
-    await emitFn(
-      createMessageCompletedEvent({
-        finishReason,
-        message: null,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
-  } else if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
+  if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
         finishReason,

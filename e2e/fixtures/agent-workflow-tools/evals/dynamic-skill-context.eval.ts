@@ -28,7 +28,7 @@ function expectedAuth(actor: "alice" | "bob") {
   };
 }
 
-export default (["direct", "waiting", "background"] as const).map((mode) =>
+export default (["direct", "waiting"] as const).map((mode) =>
   defineEval({
     description: `${mode} delegation preserves every dynamic-skill resolver context field across session start and later turns.`,
     async test(t) {
@@ -40,20 +40,8 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       const initial = await t.target.watchTurn(started.sessionId).result();
       initial.expectOk();
       initial.calledTool("load_skill", { count: 1, status: "completed" });
-      const completed =
-        mode === "waiting"
-          ? initial
-          : await t.target
-              .watchTurn(started.sessionId, { startIndex: initial.session.state.streamIndex })
-              .result();
-      completed.expectOk();
-      const marker =
-        mode === "direct"
-          ? "Alice's hook audit"
-          : `hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
-      const completion = [...initial.events, ...completed.events].find(
-        (event) => event.type === "subagent.completed",
-      );
+      const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
+      const completion = initial.events.find((event) => event.type === "subagent.completed");
       if (completion?.type !== "subagent.completed")
         throw new Error("The delegated child's completion event is missing.");
       const childOutput = completion.data.output;
@@ -61,9 +49,9 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
         "child returned its report",
       );
       t.check(childOutput.includes(marker), equals(true)).label("child report includes its task");
-      completed.messageIncludes(childOutput);
+      initial.messageIncludes(childOutput);
 
-      const startIndex = completed.session.state.streamIndex;
+      const startIndex = initial.session.state.streamIndex;
       const resumed = await send(t.target, threadId, "bob", followUp);
       t.check(resumed.sessionId, equals(started.sessionId)).label(
         "same parent session after delegation",
@@ -80,12 +68,7 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       const observations = output as DynamicSkillContextObservation[];
       t.check(
         observations.map((entry) => entry.event),
-        equals([
-          "session.started",
-          "turn.started",
-          ...(mode === "waiting" ? [] : ["turn.started"]),
-          "turn.started",
-        ]),
+        equals(["session.started", "turn.started", "turn.started"]),
       ).label("resolver runs once at session start and at every parent turn boundary");
 
       for (const [index, { context, event }] of observations.entries()) {

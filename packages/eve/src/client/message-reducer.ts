@@ -104,7 +104,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "message.received":
-      if (event.data.kind === "execution.background_task") return data;
       return upsertMessage(data, {
         id: `${receivedMessageEventId(event)}:user`,
         metadata: {
@@ -359,10 +358,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) => {
-        if (event.data.message === null) {
-          return removeTextPart(message, event.data.stepIndex);
-        }
-
         return messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
@@ -528,24 +523,6 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
     metadata: {
       ...message.metadata,
       status: next.type === "text" && next.state === "done" ? "complete" : "streaming",
-    },
-    parts,
-  };
-}
-
-function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
-  const parts = message.parts.filter(
-    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
-  );
-  if (parts.length === message.parts.length) {
-    return message;
-  }
-
-  return {
-    ...message,
-    metadata: {
-      ...message.metadata,
-      status: "complete",
     },
     parts,
   };
