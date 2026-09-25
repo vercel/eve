@@ -129,12 +129,17 @@ describe("session callback route", () => {
     resumeHookMock.mockResolvedValue(undefined);
     const event = {
       data: {
+        authorization: {
+          displayName: "Linear",
+          instructions: "Sign in to continue.",
+          url: "https://linear.example/authorize",
+          userCode: "LINEAR-123",
+        },
         description: "Authorize Linear",
         name: "linear",
         sequence: 3,
         stepIndex: 2,
         turnId: "turn-child",
-        url: "https://linear.example/authorize",
       },
       type: "authorization.required",
     };

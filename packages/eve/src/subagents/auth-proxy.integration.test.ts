@@ -225,6 +225,7 @@ describe("subagent authorization proxy", () => {
           displayName: "Linear",
           instructions: "Sign in to continue.",
           url: "https://idp.example/authorize",
+          userCode: "LINEAR-123",
         },
         description: "Authorization required for linear",
         name: "linear",
