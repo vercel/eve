@@ -2,7 +2,7 @@
 "eve": minor
 ---
 
-Agents and `resumable: true` workflow tools now take more input by `taskId`: calling the tool again with a task's `taskId` sends that task a correction or its next piece of work, validated by the tool's own input schema. A resumable workflow body reads each send with `ctx.receive()` and settles each piece of work with one `ctx.reply()`.
+Agents and `resumable: true` workflow tools now take more input by `taskId`: calling the tool again with a task's `taskId` sends that task a correction or its next piece of work, validated by the tool's own input schema. A resumable workflow body reads each send with `ctx.receive()` and settles each piece of work with one `ctx.reply()`. A send with an `outputSchema` to a working agent replaces the schema of the agent's current work, so its result matches the latest schema given; a send without one leaves the schema as it is.
 
 Upgrading:
 

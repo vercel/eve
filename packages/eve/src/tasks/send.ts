@@ -9,10 +9,9 @@ import type {
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import { taskEvents } from "#tasks/events.js";
-import { checkSend, retireIdleTasks } from "#tasks/owner-calls.js";
+import { checkSend, retireIdleTasks, unknownSend } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus, type TaskCommand } from "#tasks/protocol.js";
 import { sendReceiptResult, taskToolErrorResult } from "#tasks/receipts.js";
-import { renderUnknownSendTask } from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
 import { findTask, TASK_CANCEL_CONFIRM_MS, type TaskTable } from "#tasks/table.js";
 import {
@@ -166,10 +165,7 @@ export async function applyWorkflowSend<T extends Session>(input: {
           turnId: input.call.turn.id,
         })
       : undefined;
-  const error = refused ?? {
-    code: "UNKNOWN_TASK",
-    message: renderUnknownSendTask(request.taskId, request.toolName),
-  };
+  const error = refused ?? unknownSend(request.taskId, request.toolName);
   if (sent === undefined) {
     return { events: [], results: [taskToolErrorResult(request, error)], session };
   }

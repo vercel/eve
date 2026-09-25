@@ -146,6 +146,10 @@ export type {
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
+// Structured outputs of task tool calls, read from `action.result`.
+export type { TaskCancelOutput, TaskReceipt } from "#tasks/render.js";
+export type { TaskWaitOutput } from "#tasks/wait-tool.js";
+
 export type { InputOption, InputRequest, InputRequestKind, InputResponse } from "#shared/input.js";
 export {
   isInputRequest,

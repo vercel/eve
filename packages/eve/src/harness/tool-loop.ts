@@ -74,7 +74,7 @@ import { resolveTasksAnnouncement } from "#tasks/render.js";
 import { resolveTasksInstruction, withoutTaskTools } from "#tasks/surface.js";
 import { getTaskTable } from "#tasks/state.js";
 import { takeTaskResultMessage } from "#harness/task-results.js";
-import { takeTaskResults } from "#tasks/results.js";
+import { isTaskOf, takeTaskResults } from "#tasks/results.js";
 import { endsWithInterimReply, holdTurnOnTasks } from "#harness/held-turn.js";
 import type { InputRequest } from "#shared/input.js";
 import {
@@ -1028,10 +1028,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // between an approval response and its tool call, and ahead of the step's
     // own input, in history order on the stream too. The records are marked
     // delivered below, which drops them from the note.
+    // Task results and the [Tasks] note belong to the turn's principal (D20).
+    const principal = store?.get(AuthKey) ?? null;
     const taskResults =
       withinTurn && !hasUnansweredToolCall(pending.messages)
         ? await takeTaskResultMessage({
-            principal: store?.get(AuthKey) ?? null,
+            principal,
             session: pending.session,
             tools: config.tools,
           })
@@ -1131,7 +1133,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     session = continuation.session;
 
     if (taskResults !== undefined) {
-      session = takeTaskResults(session, store?.get(AuthKey) ?? null).session;
+      session = takeTaskResults(session, principal).session;
     }
 
     // Announce the task listing as framework-injected user-role content,
@@ -1143,7 +1145,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (!hasUnansweredToolCall(messages)) {
       const announcement = resolveTasksAnnouncement({
         messages: projectHistory(messages, session.state),
-        records: getTaskTable(session).records,
+        records: getTaskTable(session).records.filter((record) => isTaskOf(record, principal)),
       });
       if (announcement !== undefined) {
         messages.push(createFrameworkUserMessage("context.state", announcement));
@@ -1511,7 +1513,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ? undefined
           : resolveTasksAnnouncement({
               messages: projectHistory(messages, session.state),
-              records: getTaskTable(session).records,
+              records: getTaskTable(session).records.filter((record) =>
+                isTaskOf(record, principal),
+              ),
             });
         if (restoredNote !== undefined) {
           const inputIndex = messages.findIndex((message) =>

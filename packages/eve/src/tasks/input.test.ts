@@ -6,6 +6,7 @@ import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   admitTaskInputEvent,
+  applySignInEvent,
   applyTaskInputEvent,
   hasOwnPendingInput,
   hasPendingTaskInput,
@@ -128,6 +129,31 @@ describe("applyTaskInputEvent", () => {
     expect(applyTaskInputEvent(both, resolved("billing-q"))).toEqual([
       { ...batch([request("support-q")]), from: "support-bbbbbb" },
     ]);
+  });
+});
+
+describe("applySignInEvent", () => {
+  const signIn = (type: "authorization.required" | "authorization.completed", taskId?: string) => {
+    const data = { name: "github", sequence: 0, stepIndex: 1, turnId: "turn_c" };
+    return type === "authorization.required"
+      ? { data: { ...data, description: "Sign in to GitHub.", taskId }, type }
+      : { data: { ...data, outcome: "authorized" as const, taskId }, type };
+  };
+
+  it("holds one sign-in per source and asking task until it completes", () => {
+    // Bob's agent needs GitHub, and so does the reviewer agent it delegated to.
+    const own = applySignInEvent([], signIn("authorization.required"));
+    const both = applySignInEvent(own, signIn("authorization.required", "reviewer-aaaaaa"));
+    expect(both).toEqual(["github", "reviewer-aaaaaa/github"]);
+    // A newer attempt for the same source replaces the older one.
+    expect(applySignInEvent(both, signIn("authorization.required"))).toEqual([
+      "reviewer-aaaaaa/github",
+      "github",
+    ]);
+    expect(applySignInEvent(both, signIn("authorization.completed"))).toEqual([
+      "reviewer-aaaaaa/github",
+    ]);
+    expect(applySignInEvent([], signIn("authorization.completed"))).toEqual([]);
   });
 });
 

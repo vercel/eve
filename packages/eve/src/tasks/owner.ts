@@ -289,7 +289,7 @@ export async function startAgentTasks(input: {
       }
       // Over the cap, the start commits nothing.
       const rejected = detached
-        ? tooManyTasksResult({ callId: call.callId, table, toolName })
+        ? tooManyTasksResult({ callId: call.callId, caller: prepared.auth, table, toolName })
         : undefined;
       if (rejected !== undefined) {
         results.push(rejected);

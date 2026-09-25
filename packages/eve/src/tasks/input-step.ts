@@ -22,6 +22,7 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import type { InputRequest } from "#shared/input.js";
 import {
   admitTaskInputEvent,
+  applySignInEvent,
   applyTaskInputEvent,
   sentAnswerResolutions,
   type TaskAnswers,
@@ -203,21 +204,24 @@ function withTaskId(event: TaskInputEvent, taskId: string): TaskInputEvent {
   }
 }
 
-/** Applies the owner's snapshot of the requests a task waits on, stopping or resuming its clock. */
+/** Applies the owner's snapshot of what a task waits on, stopping or resuming its clock. */
 function recordTaskInput(
   session: HarnessSession,
   event: TaskInputEvent,
   taskId: string,
   now: string,
 ): HarnessSession {
-  if (event.type !== "input.requested" && event.type !== "input.resolved") return session;
+  if (event.type === "approval.candidate" || event.type === "approval.settled") return session;
   const table = getTaskTable(session);
   const record = findTask(table, taskId);
   if (record === undefined) return session;
-  const input = applyTaskInputEvent(record.input ?? [], event);
+  const signIn =
+    event.type === "authorization.required" || event.type === "authorization.completed";
+  const input = signIn ? (record.input ?? []) : applyTaskInputEvent(record.input ?? [], event);
+  const signIns = signIn ? applySignInEvent(record.signIns ?? [], event) : record.signIns;
   const applied = applyTaskMessage(
     table,
-    { generation: record.generation, input, kind: "task.input", taskId },
+    { generation: record.generation, input, kind: "task.input", signIns, taskId },
     now,
   );
   return applied.table === table ? session : setTaskTable(session, applied.table);

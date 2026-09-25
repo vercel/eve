@@ -161,9 +161,9 @@ export class SelfModificationHarness {
     const call = parent.requireToolCall(SELF_MODIFICATION_AGENT, {
       status: parent.status === "waiting" ? "pending" : "completed",
     });
-    const agentId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
-    const message = agentId === undefined ? undefined : call.input.message;
-    if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
+    const taskId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
+    const message = taskId === undefined ? undefined : call.input.message;
+    if (taskId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");
 
     const started = [...this.#turns]
@@ -173,9 +173,7 @@ export class SelfModificationHarness {
         (event) =>
           event.type === "task.started" &&
           event.data.name === SELF_MODIFICATION_AGENT &&
-          (agentId === undefined
-            ? liveParent.events.includes(event)
-            : event.data.taskId === agentId),
+          (taskId === undefined ? liveParent.events.includes(event) : event.data.taskId === taskId),
       );
     if (started?.type !== "task.started" || started.data.child === undefined) {
       throw new Error("The parent turn did not delegate to the self-modification agent.");

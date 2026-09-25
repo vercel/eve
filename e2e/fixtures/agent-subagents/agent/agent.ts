@@ -86,8 +86,8 @@ const workspaceDispatcher = mockModel({
     if (request.messages.slice(requestIndex + 1).some((message) => message.role === "tool")) {
       return "The workspace lookup was submitted.";
     }
-    const agentId = listedAgentId(request.messages, "remote-loopback");
-    if (requestCount > 1 && agentId === undefined) {
+    const taskId = listedTaskId(request.messages, "remote-loopback");
+    if (requestCount > 1 && taskId === undefined) {
       throw new Error("Workspace continuation has no listed remote-loopback agent.");
     }
     return {
@@ -95,7 +95,7 @@ const workspaceDispatcher = mockModel({
         {
           id: callId,
           name: "remote-loopback",
-          input: { message: WORKSPACE_LOOKUP_MESSAGE, taskId: agentId },
+          input: { message: WORKSPACE_LOOKUP_MESSAGE, taskId },
         },
       ],
     };
@@ -132,7 +132,7 @@ const scheduledRemoteModel = mockModel({
  * then names the first user's agent, so a later caller's refusal proves it
  * could not reach that agent.
  */
-function listedAgentId(messages: readonly MockModelMessage[], name: string): string | undefined {
+function listedTaskId(messages: readonly MockModelMessage[], name: string): string | undefined {
   const pattern = new RegExp(`<task id="([^"]+)" tool="${name}">`, "gu");
   for (const message of [...messages].reverse()) {
     if (message.role !== "user" || !message.text.startsWith("[Tasks]")) continue;

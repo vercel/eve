@@ -19,7 +19,8 @@ import {
   renderUnknownSendTask,
   renderUnknownTask,
 } from "#tasks/render.js";
-import { readTaskCreator, sameTaskPrincipal } from "#tasks/results.js";
+import { MAX_TASK_ID_LENGTH } from "#tasks/ids.js";
+import { isTaskOf } from "#tasks/results.js";
 import { isTerminalTaskStatus, type TaskError } from "#tasks/protocol.js";
 import {
   findTask,
@@ -60,8 +61,7 @@ export function retireIdleTasks(
   const idle = table.records.filter(isIdleTask);
   const excess = idle.length - MAX_RETAINED_IDLE_TASKS;
   if (excess <= 0) return { effects: [], retired: [], table };
-  const others = (record: TaskRecord) =>
-    sameTaskPrincipal(readTaskCreator(record.creator).auth, caller) ? 0 : 1;
+  const others = (record: TaskRecord) => (isTaskOf(record, caller) ? 0 : 1);
   const retired = idle
     .toSorted(
       (left, right) =>
@@ -113,7 +113,7 @@ export function checkSend(input: {
   ) {
     return unknownSend(taskId, toolName);
   }
-  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
+  if (!isTaskOf(record, input.caller)) {
     return { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) };
   }
   if (
@@ -143,10 +143,24 @@ export function checkSend(input: {
     };
   }
   if (working || input.fromWorkflow === true) return undefined;
-  const busy = workingDetachedTaskIds(input.table);
-  return busy.length < MAX_WORKING_TASKS
-    ? undefined
-    : { code: "TOO_MANY_TASKS", message: renderTooManyTasks(busy, MAX_WORKING_TASKS) };
+  return tooManyTasks(input.table, input.caller);
+}
+
+/**
+ * `TOO_MANY_TASKS` for a start while the session's working detached tasks
+ * fill the cap. Every principal's tasks count, but the message names only
+ * the caller's, the only ones it can wait on or cancel.
+ */
+export function tooManyTasks(
+  table: TaskTable,
+  caller: SessionAuthContext | null,
+): TaskError | undefined {
+  const working = new Set(workingDetachedTaskIds(table));
+  if (working.size < MAX_WORKING_TASKS) return undefined;
+  const own = table.records.flatMap((record) =>
+    working.has(record.id) && isTaskOf(record, caller) ? [record.id] : [],
+  );
+  return { code: "TOO_MANY_TASKS", message: renderTooManyTasks(own, MAX_WORKING_TASKS) };
 }
 
 /**
@@ -170,7 +184,7 @@ export function findCallerTask(input: {
   ) {
     return { error: { code: "UNKNOWN_TASK", message: renderUnknownTask(input.taskId) } };
   }
-  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
+  if (!isTaskOf(record, input.caller)) {
     return {
       error: { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) },
     };
@@ -190,9 +204,13 @@ export function readDynamicRemoteAgent(input: {
   return selection?.kind === "remote" ? selection.remoteAgent : undefined;
 }
 
-/** The error of a send to a task the session does not have open. */
+/**
+ * The error of a send to a task the session does not have open. A
+ * `ctx.agent` call's `taskId` has no schema bound, so the echo gets one.
+ */
 export function unknownSend(taskId: string, toolName: string): TaskError {
-  return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, toolName) };
+  const echoed = taskId.slice(0, MAX_TASK_ID_LENGTH);
+  return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(echoed, toolName) };
 }
 
 /** A send's input for an agent: its message, and the output schema its reply must match. */

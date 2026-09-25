@@ -338,14 +338,17 @@ export function applyTaskMessage(
       return { effects, table: replaceRecord(table, next) };
     }
     case "task.input": {
-      // The clock rule: it stops while any surfaced request waits on a person.
+      // The clock rule: it stops while any surfaced question, approval, or sign-in waits on a person.
       if (isTerminalTaskStatus(record.status)) return { effects: [], table };
-      const waiting = message.input.length > 0;
+      const input = message.input.length > 0 ? message.input : undefined;
+      const signIns = message.signIns?.length ? message.signIns : undefined;
+      const waiting = input !== undefined || signIns !== undefined;
       const next = withoutUndefined<TaskRecord>({
         ...record,
         clockStoppedAt: waiting ? (record.clockStoppedAt ?? now) : undefined,
         deadlineAt: waiting ? record.deadlineAt : resumeDeadline(record, now),
-        input: waiting ? message.input : undefined,
+        input,
+        signIns,
         status: waiting ? "input_required" : "working",
       });
       return { effects: [], table: replaceRecord(table, next) };
@@ -563,6 +566,7 @@ function settleRecord(record: TaskRecord, outcome: TaskOutcome): TaskRecord {
     deadlineAt: undefined,
     input: undefined,
     lastStatus: renderLastStatus(outcome),
+    signIns: undefined,
     status: outcome.status,
   });
 }

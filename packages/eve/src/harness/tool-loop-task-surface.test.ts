@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DelegatedSessionKey } from "#context/keys.js";
+import { createWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -14,13 +15,15 @@ import { renderTasksInstruction } from "#tasks/render.js";
 import { TASK_WAIT_WORKFLOW_ID } from "#tasks/wait-tool.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 
-const RESEARCHER: HarnessToolDefinition = {
-  description: "Investigate a question before the parent replies.",
-  inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
-  name: "researcher",
+const RESEARCHER: HarnessToolDefinition = createWorkflowToolHarnessDefinition({
+  definition: {
+    description: "Investigate a question before the parent replies.",
+    inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+    name: "researcher",
+  },
   nodeId: "subagents/researcher",
   workflowId: AGENT_TASK_WORKFLOW_ID,
-};
+});
 
 const ASK: HarnessToolDefinition = {
   attached: true,
@@ -97,7 +100,7 @@ describe("the task surface", () => {
       "task_wait",
     ]);
     expect(system).toContain(renderTasksInstruction({ agents: true, resumable: true }));
-    // Agent tools keep their one input schema; there is no per-session parameter.
+    // Agent tools get taskId with their harness definition; there is no per-session parameter.
     const schema = request.tools.find((tool) => tool.name === "researcher")?.inputSchema as {
       readonly properties?: Record<string, unknown>;
     };

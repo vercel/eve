@@ -994,7 +994,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.beginSubagent({ callId: "background", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "background" });
+    renderer.detachSubagent({ callId: "background" });
     renderer.upsertConnectionAuth({
       name: "linear",
       description: "Authorization required for linear",
@@ -1158,11 +1158,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("keeps late background child output inside its section across parent turns", async () => {
+  it("keeps late detached child output inside its section across parent turns", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "s1" });
+    renderer.detachSubagent({ callId: "s1" });
 
     await renderer.renderStream(
       streamOf([
@@ -1316,11 +1316,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("commits an authoritative background completion out of the live prompt region", async () => {
+  it("commits an authoritative detached completion out of the live prompt region", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "s1" });
+    renderer.detachSubagent({ callId: "s1" });
     renderer.upsertSubagentTool({
       callId: "s1",
       subagentName: "researcher",
@@ -1344,13 +1344,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("keeps the activity ticker running while a background subagent remains live", async () => {
+  it("keeps the activity ticker running while a detached subagent remains live", async () => {
     vi.useFakeTimers();
     try {
       const { screen, renderer } = makeRenderer();
       renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
       renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
+      renderer.detachSubagent({ callId: "background" });
       renderer.upsertSubagentTool({
         callId: "background",
         subagentName: "researcher",
@@ -1378,14 +1378,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     }
   });
 
-  it("keeps the ticker running when one of two background subagents completes", async () => {
+  it("keeps the ticker running when one of two detached subagents completes", async () => {
     vi.useFakeTimers();
     try {
       const { screen, renderer } = makeRenderer();
       renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      const startBackground = (callId: string) => {
+      const startDetached = (callId: string) => {
         renderer.beginSubagent({ callId, name: "hang-worker" });
-        renderer.backgroundSubagent({ callId });
+        renderer.detachSubagent({ callId });
         renderer.upsertSubagentTool({
           callId,
           subagentName: "hang-worker",
@@ -1396,7 +1396,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         });
       };
 
-      startBackground("first");
+      startDetached("first");
       await renderer.renderStream(streamOf([{ type: "finish" }]), {
         continueSession: true,
         submittedPrompt: "start first background worker",
@@ -1408,7 +1408,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         ]),
         { continueSession: true, submittedPrompt: "a" },
       );
-      startBackground("second");
+      startDetached("second");
       await renderer.renderStream(streamOf([{ type: "finish" }]), {
         continueSession: true,
         submittedPrompt: "start second background worker",
@@ -1429,13 +1429,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     }
   });
 
-  it("stops background activity ticking when a session boundary abandons its child", async () => {
+  it("stops detached activity ticking when a session boundary abandons its child", async () => {
     vi.useFakeTimers();
     try {
       const { screen, renderer } = makeRenderer();
       renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
       renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
+      renderer.detachSubagent({ callId: "background" });
       renderer.upsertSubagentTool({
         callId: "background",
         subagentName: "researcher",
@@ -1455,7 +1455,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     }
   });
 
-  it("commits completed foreground turns ahead of a live background subagent", async () => {
+  it("commits completed foreground turns ahead of a live detached subagent", async () => {
     const { screen, renderer } = makeRenderer(48, 8);
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.beginSubagent({ callId: "background", name: "researcher" });
@@ -1464,7 +1464,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // formerly leading live cohort.
     renderer.renderNotice("EARLY_SETTLED_FOREGROUND_ONE");
     renderer.renderNotice("EARLY_SETTLED_FOREGROUND_TWO");
-    renderer.backgroundSubagent({ callId: "background" });
+    renderer.detachSubagent({ callId: "background" });
     renderer.upsertSubagentStep({
       callId: "background",
       subagentName: "researcher",
@@ -1547,7 +1547,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       const { screen, renderer } = makeRenderer();
       renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
       renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
+      renderer.detachSubagent({ callId: "background" });
       renderer.upsertSubagentTool({
         callId: "background",
         subagentName: "researcher",
@@ -4541,7 +4541,7 @@ describe("TerminalRenderer setup flow session", () => {
       const { screen, renderer } = makeRenderer();
       renderer.setupFlow.begin("Add integration", "pulse");
       renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
+      renderer.detachSubagent({ callId: "background" });
       let release!: () => void;
       const inherited = renderer.setupFlow.withInheritedStdio(
         () => new Promise<void>((resolve) => (release = resolve)),

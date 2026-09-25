@@ -5,18 +5,12 @@ import {
   createPreparedRuntimeSubagentTool,
   createRuntimeSubagentRegistry,
 } from "../src/runtime/subagents/registry.js";
-import { SUBAGENT_TOOL_INPUT_SCHEMA as subagentToolInputSchema } from "../src/tools/framework/agent-contract.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 import { AGENT_TASK_WORKFLOW_ID } from "../src/tasks/agent-tool.js";
 
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    taskId: {
-      type: ["string", "null"],
-      description:
-        "Only to correct or continue a task this tool started: that task's id, from its receipt or the latest [Tasks] note. An idle task starts on this input; a working one uses it in its current work or starts on it right after. Omit it to start a new task.",
-    },
     message: {
       type: "string",
       description:
@@ -28,15 +22,6 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
-  it("accepts null as an omitted taskId", () => {
-    expect(
-      subagentToolInputSchema["~standard"].validate({
-        message: "Investigate this",
-        taskId: null,
-      }),
-    ).toEqual({ value: { message: "Investigate this", taskId: null } });
-  });
-
   it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {
     const registry = createRuntimeSubagentRegistry({
       subagents: [

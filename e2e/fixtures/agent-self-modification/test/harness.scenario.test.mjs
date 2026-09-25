@@ -387,7 +387,7 @@ for (const emitsCalled of [false, true]) {
     };
     repairParent.result = async () => ({
       ...completedTurn("parent"),
-      requireToolCall: () => ({ input: { agentId: "agent-1", message } }),
+      requireToolCall: () => ({ input: { taskId: "agent-1", message } }),
     });
     const diagnostic = liveTurn("child", [
       { type: "message.received", data: { message: "Diagnose only." } },

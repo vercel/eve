@@ -19,7 +19,7 @@ export default defineEval({
     const started = await parent.waitForEvent("task.started", {
       data: { name: "sleeper" },
     });
-    const agentId = started.data.taskId;
+    const taskId = started.data.taskId;
     const childSessionId = started.data.child?.sessionId;
     if (childSessionId === undefined)
       throw new Error("Cancelled sleeper task has no child session.");
@@ -52,7 +52,7 @@ export default defineEval({
     parentTurn.event("turn.cancelled", { count: 1 });
     parentTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
     // The owner reports the cancelled task once; the child's confirmation adds nothing.
-    parentTurn.event("task.settled", { count: 1, data: { status: "cancelled", taskId: agentId } });
+    parentTurn.event("task.settled", { count: 1, data: { status: "cancelled", taskId } });
     parentTurn.notEvent("task.settled", { data: { status: "completed" } });
     parentTurn.notEvent("turn.failed");
     parentTurn.notEvent("session.failed");
@@ -76,7 +76,7 @@ export default defineEval({
     const resumed = await session.send(
       [
         "Use the workflow tool exactly once.",
-        `In its JavaScript, call ctx.agent for sleeper with taskId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
+        `In its JavaScript, call ctx.agent for sleeper with taskId ${JSON.stringify(taskId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
         "Return the inline result and reply with it verbatim. Do not call sleeper outside workflow.",
       ].join(" "),
     );
@@ -84,9 +84,9 @@ export default defineEval({
     resumed.messageIncludes(RECOVERY_RESULT);
     resumed.event("task.started", {
       count: 1,
-      data: { child: { sessionId: childSessionId }, name: "sleeper", taskId: agentId },
+      data: { child: { sessionId: childSessionId }, name: "sleeper", taskId },
     });
-    resumed.event("task.settled", { count: 1, data: { status: "completed", taskId: agentId } });
+    resumed.event("task.settled", { count: 1, data: { status: "completed", taskId } });
 
     t.event("turn.cancelled", { count: 2 });
     t.event("task.started", { count: 2, data: { name: "sleeper" } });

@@ -24,9 +24,8 @@ export interface WorkflowToolHarnessDefinitionInput {
  * The harness definition of a tool whose calls start tasks. Every resumable
  * tool, agents included, gets `taskId` once here and one sentence appended
  * to its description, after one that tells the model an agent does not see
- * the conversation; a call with `taskId` is a send. An agent's input
- * schema declares `taskId` itself; an authored workflow tool's schema is
- * wrapped, so the author's schema validates the rest.
+ * the conversation; a call with `taskId` is a send. The tool's schema is
+ * wrapped, so it validates the rest of a send like a start.
  */
 export function createWorkflowToolHarnessDefinition(
   input: WorkflowToolHarnessDefinitionInput,
@@ -51,7 +50,7 @@ export function createWorkflowToolHarnessDefinition(
     ...workflow,
     description: `${definition.description.trimEnd()} ${appended}`,
     execute: undefined,
-    inputSchema: agent ? definition.inputSchema : withTaskIdParameter(definition.inputSchema),
+    inputSchema: withTaskIdParameter(definition.inputSchema),
   };
 }
 

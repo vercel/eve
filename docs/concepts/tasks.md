@@ -23,7 +23,7 @@ A detached call returns a receipt right away, and a new message never stops its 
 | `ctx.agent` in a workflow body                                                                       | The body awaits it                        | Not applicable                                           |
 | Plain tools and MCP tools                                                                            | Inside the model step; they are not tasks | Applied at the next step boundary                        |
 
-Calls that the model makes in one step run in parallel. A detached call's tool result is a receipt. Clients read it on `action.result` as `output: { status: "working", taskId }`, and the model reads:
+Calls that the model makes in one step run in parallel. A detached call's tool result is a receipt. Clients read it on `action.result` as `output: { status: "working", taskId }`, typed as `TaskReceipt` from `eve/client`, and the model reads:
 
 ```text
 Started task researcher-7k2m9q. Call researcher again with taskId researcher-7k2m9q to send it more input; use task_wait for its result.
@@ -54,7 +54,7 @@ task_wait({ taskId: string; timeout?: number }); // timeout in milliseconds
 
 To wait on several tasks, the model calls `task_wait` once for each in the same step. The step ends when every wait has returned, and a new message interrupts all of them. If two waits in one step name the same task, the earlier call gets the result and the later one fails with `TASK_ALREADY_WAITED`. A wait covers only the caller's own tasks: a task another principal started fails with `TASK_OTHER_PRINCIPAL`.
 
-Clients read the wait's outcome on `action.result`: `{ status: "settled", taskId, name, outcome }`, where `outcome` is `{ status: "completed", output }`, `{ status: "failed", error: { code, message } }`, or `{ status: "cancelled" }`, or `{ status: "timed_out" | "interrupted" | "idle", taskId }`. The model reads one of these forms:
+Clients read the wait's outcome on `action.result`, typed as `TaskWaitOutput` from `eve/client`: `{ status: "settled", taskId, name, outcome }`, where `outcome` is `{ status: "completed", output }`, `{ status: "failed", error: { code, message } }`, or `{ status: "cancelled" }`, or `{ status: "timed_out" | "interrupted" | "idle", taskId }`. The model reads one of these forms:
 
 ```text
 <task_result id="d0-2b0c1a" tool="d0" status="completed">
@@ -136,7 +136,7 @@ researcher({ message: "Only EMEA matters.", taskId: "researcher-7k2m9q" });
 release_notes({ request: "Make it shorter.", taskId: "release_notes-4hd8sa" });
 ```
 
-The tool's own input schema validates a send, so a send carries the same fields as a start. Without `taskId`, each call starts a new task. eve adds a sentence that says so to every resumable tool's description, and adds `taskId` to its input schema.
+The tool's own input schema validates a send, so a send carries the same fields as a start. Without `taskId`, each call starts a new task. eve adds a sentence that says so to every resumable tool's description, agents included, and adds `taskId`, a string of at most 128 characters, to its input schema. A send whose other fields do not match the schema fails like any invalid call, and its error adds that a call with `taskId` uses the tool's input schema too.
 
 Each piece of work on a task is a generation, from the input that starts it to its one result. A non-resumable task has one generation.
 
@@ -181,7 +181,7 @@ The model learns which tasks are out and which it can continue from the `[Tasks]
 </idle>
 ```
 
-`<tasks>` lists every detached task whose result has not reached history, with its status: `working`, `input_required` while it waits on a person, or its outcome once it settles. Attached calls and cancelled work are not listed. `<idle>` lists the 10 most recently started idle tasks, agents and resumable workflow tools alike, each with the tool that takes its `taskId` and a summary of its latest result of at most 200 characters. A session that never had a detached or idle task gets no note. eve never appends the note while a tool call is unanswered, such as between a tool approval response and its tool call.
+A turn's note lists only tasks its principal started, the only ones the turn can wait on, cancel, or send to. `<tasks>` lists every such detached task whose result has not reached history, with its status: `working`, `input_required` while it waits on a person, or its outcome once it settles. Attached calls and cancelled work are not listed. `<idle>` lists the 10 most recently started idle tasks, agents and resumable workflow tools alike, each with the tool that takes its `taskId` and a summary of its latest result of at most 200 characters. A session that never had a detached or idle task gets no note. eve never appends the note while a tool call is unanswered, such as between a tool approval response and its tool call.
 
 eve keeps a task's record only as long as it needs it: until the task has ended and its results have reached history. A report that arrives after its record is gone matches no record and is dropped, like a duplicate. Every report names the call it answers, so a late report can never settle another task.
 
@@ -199,7 +199,7 @@ An answer that can never reach a remote agent fails its task: with `AGENT_SESSIO
 
 ## Cancel tasks
 
-The model stops one task with [`task_cancel`](./built-in-tools#task_cancel). It passes one `taskId` and gets back `{ status: "cancelled" }`, or `{ status: "already_finished" }` when the task had already settled, in which case its result is still delivered. `task_cancel` stops the task's current work and every send queued for it. A task another principal started fails with `TASK_OTHER_PRINCIPAL`, and an attached call the turn still holds fails with `UNKNOWN_TASK`.
+The model stops one task with [`task_cancel`](./built-in-tools#task_cancel). It passes one `taskId` and gets back `{ status: "cancelled" }`, or `{ status: "already_finished" }` when the task had already settled (typed as `TaskCancelOutput` from `eve/client`), in which case its result is still delivered. `task_cancel` stops the task's current work and every send queued for it. A task another principal started fails with `TASK_OTHER_PRINCIPAL`, and an attached call the turn still holds fails with `UNKNOWN_TASK`.
 
 Application code cancels through `session.cancel()` on a [client session](../guides/client/overview#sessions), a channel session handle, or `POST /eve/v1/session/:sessionId/cancel`. It cancels the active turn, its attached calls, and every working task, whichever turn started it, then ends the turn. Pass the observed `turnId` to keep a late request from cancelling a newer turn. With no active turn, it still cancels working tasks: every one, or, when the request passes a `turnId`, only those that turn started. `session.cancel()` takes no task options: the `taskId` and `tasks` options are removed, a channel session handle throws a `TypeError` for either, and the cancel route answers `400`. Any caller with access to a session can cancel it. See [Cancel the in-flight turn](./sessions-runs-and-streaming#cancel-the-in-flight-turn) for the route's statuses and race behavior.
 
@@ -225,7 +225,7 @@ Two settings bound a task's work, and a third bounds only a wait:
 | `timeout` on `defineWorkflowTool`                 | Each generation of the tool's tasks   | None; the session's lifetime bounds it | The generation fails with `TIMED_OUT`, and eve cancels the run          |
 | `timeout` on a `task_wait` call                   | That wait                             | None                                   | The wait returns `timed_out`, and the task keeps working                |
 
-Durations are milliseconds. `timeout: false` removes the limit, but the session's lifetime, `limits.sessionTimeoutMs`, still bounds every task. On the root agent, `timeout` applies to calls of the built-in `agent` tool. Each generation starts a fresh clock. The clock stops while the task is idle or waits on a question or approval that reached the root session's channel, and resumes once every such request is resolved. A sign-in prompt does not stop the clock.
+Durations are milliseconds. `timeout: false` removes the limit, but the session's lifetime, `limits.sessionTimeoutMs`, still bounds every task. On the root agent, `timeout` applies to calls of the built-in `agent` tool. Each generation starts a fresh clock. The clock stops while the task is idle or waits on a question, approval, or sign-in that reached the root session's channel, and resumes once every such request is resolved.
 
 A generation that times out settles `failed` with the `TIMED_OUT` error: an attached call gets it as its tool result, and a detached task delivers it like any result. Before a generation times out, eve checks its child once, so a child that finished but whose report was lost still settles the generation with its result. For a remote agent, eve reads the remote session's result for that call. For a workflow tool, eve reads the run's status and the outcome the run returned; a run that failed before it reported fails the generation with `EXECUTION_FAILED`. A local agent is not read, because it reports through the session's durable inbox, which eve does not hand off to another deployment while any task is working. A generation with no time limit gets no such check: if its child's report never arrives, it keeps working until the session ends. See [Limit a call with `timeout`](../tools/workflows#limit-a-call-with-timeout) and the subagent `timeout` in [What the parent sees](../subagents#what-the-parent-sees).
 
@@ -233,7 +233,7 @@ A generation that times out settles `failed` with the `TIMED_OUT` error: an atta
 
 A session has three fixed limits, which are not configurable:
 
-- **20 working tasks.** Every working detached generation counts. A start over the limit, including a send that would start an idle task's next generation, does not start. Its tool result is an error with code `TOO_MANY_TASKS`, which lists the working task IDs and tells the model to wait for one or stop one first. Such a call emits no `task.*` event.
+- **20 working tasks.** Every working detached generation counts. A start over the limit, including a send that would start an idle task's next generation, does not start. Its tool result is an error with code `TOO_MANY_TASKS`. Every principal's tasks count toward the limit, but the error lists only the IDs of the caller's own working tasks and tells the model to wait for one or stop one first. Such a call emits no `task.*` event.
 - **50 idle tasks.** Each time the session starts tasks past that, eve ends the idle tasks that started least recently, the calling principal's own first, so in a shared session one person's new tasks retire another person's only when the first has none idle. A retired task emits `task.ended`, and a later send with its ID fails with `UNKNOWN_TASK`. If the request to end a retired local agent does not reach it, for example because the agent is moving to another deployment, eve sends it again 30 seconds later and stops the agent outright only if that request also fails.
 - **20 unread sends per task.** A send past that fails with `TASK_BUSY` and tells the model to wait for the task's next result first. Sends that a cancel stopped do not count.
 

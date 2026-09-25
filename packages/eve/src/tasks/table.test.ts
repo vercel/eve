@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { taskLifecycleViolations } from "#internal/testing/task-lifecycle.js";
 import { taskTable } from "#internal/testing/task-records.js";
+import type { JsonObject } from "#shared/json.js";
+import { taskEvents } from "#tasks/events.js";
 import type { TaskMessage } from "#tasks/protocol.js";
 import { decodeTaskRecord } from "#tasks/record.js";
 import {
@@ -198,6 +201,35 @@ describe("applyTaskMessage", () => {
       status: "working",
     });
     expect(resumed.table.records[0]).not.toHaveProperty("input");
+    expect(resumed.table.records[0]).not.toHaveProperty("clockStoppedAt");
+  });
+
+  it("stops the clock while a sign-in is pending, until every question and sign-in is resolved", () => {
+    const task = started(undefined, { timeoutMs: 60_000 });
+    const input = [{ requests: [QUESTION], sequence: 3, stepIndex: 1, turnId: "turn_c" }];
+    const signIn = { ...inputMessage(task.record.id, []), signIns: ["github"] };
+    const waiting = applyTaskMessage(task.table, signIn, NOW);
+    expect(waiting.table.records[0]).toMatchObject({
+      clockStoppedAt: NOW,
+      signIns: ["github"],
+      status: "input_required",
+    });
+    expect(waiting.table.records[0]).not.toHaveProperty("input");
+    expect(nextTaskWakeAt(waiting.table)).toBeUndefined();
+    // A question answered while the sign-in waits leaves the clock stopped.
+    const asked = applyTaskMessage(waiting.table, { ...signIn, input }, NOW);
+    const answered = applyTaskMessage(asked.table, signIn, "2026-09-24T14:30:00.000Z");
+    expect(answered.table.records[0]).toMatchObject({ clockStoppedAt: NOW, signIns: ["github"] });
+    const resumed = applyTaskMessage(
+      answered.table,
+      inputMessage(task.record.id, []),
+      "2026-09-24T15:02:00.000Z",
+    );
+    expect(resumed.table.records[0]).toMatchObject({
+      deadlineAt: "2026-09-24T15:03:00.000Z",
+      status: "working",
+    });
+    expect(resumed.table.records[0]).not.toHaveProperty("signIns");
     expect(resumed.table.records[0]).not.toHaveProperty("clockStoppedAt");
   });
 
@@ -534,6 +566,14 @@ describe("persistence", () => {
         reason: "invalid input",
       });
     }
+    const signingIn = { ...started().record, signIns: ["github"], status: "input_required" };
+    expect(decodeTaskRecord(signingIn)).toEqual({ ok: true, record: signingIn });
+    for (const signIns of ["github", [], [""]]) {
+      expect(decodeTaskRecord({ ...signingIn, signIns })).toMatchObject({
+        ok: false,
+        reason: "invalid signIns",
+      });
+    }
   });
 
   it("prunes delivered workflow tasks but keeps idle agents", () => {
@@ -578,39 +618,110 @@ describe("persistence", () => {
 });
 
 describe("single writer convergence", () => {
-  it("converges on the same records for shuffled and duplicated message sequences", () => {
-    const base = started(started().table, { callId: "call_2", name: "review" });
-    const [first, second] = base.table.records;
-    const messages: Exclude<TaskMessage, { kind: "task.deadline" }>[] = [];
-    for (const record of [first!, second!]) {
-      messages.push(
-        { child, generation: 1, kind: "task.started", taskId: record.id },
-        {
-          generation: 1,
-          kind: "task.settled",
-          outcome: { output: record.id, status: "completed" },
-          taskId: record.id,
-        },
-      );
+  type Report = Exclude<TaskMessage, { kind: "task.deadline" }>;
+
+  /** Applies reports in order, collecting the stream events their effects publish. */
+  function apply(table: TaskTable, reports: readonly Report[]) {
+    const events: ReturnType<typeof taskEvents> = [];
+    for (const report of reports) {
+      const applied = applyTaskMessage(table, report, NOW);
+      table = applied.table;
+      events.push(...taskEvents(applied.effects, "session_1"));
     }
-    const reference = messages.reduce(
-      (table, message) => applyTaskMessage(table, message, NOW).table,
-      base.table,
-    );
+    return { events, table };
+  }
+
+  const byTask = (events: ReturnType<typeof taskEvents>) =>
+    Map.groupBy(events, (event) => event.data.taskId);
+
+  it("converges on the same records and one lifecycle per task for interleaved and repeated reports", () => {
+    // Bob's deploy runs once; his release notes read one request, start work for the
+    // next, and end before reading the last; his researcher reads a correction.
+    const deploy = started(undefined, { mode: "detached" });
+    const notes = started(deploy.table, {
+      callId: "call_2",
+      mode: "detached",
+      name: "release_notes",
+      resumable: true,
+    });
+    const research = started(notes.table, {
+      callId: "call_3",
+      kind: "agent",
+      mode: "detached",
+      name: "researcher",
+      resumable: true,
+    });
+    let base = research.table;
+    const sendTo = (taskId: string, callId: string, input: JsonObject) => {
+      const sent = sendTask(base, { callId, input, now: NOW, taskId, turnId: "turn_0" });
+      if (sent?.kind !== "sent") throw new Error(`send ${callId} was refused`);
+      base = sent.table;
+    };
+    sendTo(notes.record.id, "call_4", { request: "shorter" });
+    sendTo(notes.record.id, "call_5", { request: "publish" });
+    sendTo(notes.record.id, "call_6", { request: "tweak" });
+    sendTo(research.record.id, "call_7", { message: "Only EMEA matters." });
+    const settled = (taskId: string, generation: number, output: string) =>
+      ({
+        generation,
+        kind: "task.settled",
+        outcome: { output, status: "completed" },
+        taskId,
+      }) as const;
+    const notesRun = { commandToken: "hook_2", kind: "workflow", runId: "run_2" } as const;
+    const agentSession = { continuationToken: "c", kind: "local", sessionId: "s" } as const;
+    // Each child reports in order; reports of different children interleave.
+    const perTask: readonly (readonly Report[])[] = [
+      [
+        { child, generation: 1, kind: "task.started", taskId: deploy.record.id },
+        settled(deploy.record.id, 1, "deployed"),
+      ],
+      [
+        { child: notesRun, generation: 1, kind: "task.started", taskId: notes.record.id },
+        { ...settled(notes.record.id, 1, "draft"), read: [1] },
+        { generation: 2, kind: "task.started", send: 2, taskId: notes.record.id },
+        settled(notes.record.id, 2, "published"),
+        { kind: "task.ended", taskId: notes.record.id, unread: [3] },
+      ],
+      [
+        { child: agentSession, generation: 1, kind: "task.started", taskId: research.record.id },
+        { ...settled(research.record.id, 1, "EMEA grew 4%."), steers: 1 },
+      ],
+    ];
+    const reference = apply(base, perTask.flat());
+    expect(taskLifecycleViolations(reference.events)).toEqual([]);
+    expect(findTask(reference.table, notes.record.id)).toMatchObject({
+      ended: true,
+      generation: 3,
+      status: "failed",
+    });
+    expect(findTask(reference.table, research.record.id)).toMatchObject({ status: "completed" });
+    expect(findTask(reference.table, research.record.id)).not.toHaveProperty("sends");
+
     let seed = 7;
     const random = () => {
       seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
       return seed / 2 ** 31;
     };
     for (let run = 0; run < 200; run++) {
-      const sequence = [...messages, ...messages.filter(() => random() < 0.5)].toSorted(
-        () => random() - 0.5,
-      );
-      const table = sequence.reduce(
-        (current, message) => applyTaskMessage(current, message, NOW).table,
-        base.table,
-      );
-      expect(table).toEqual(reference);
+      // A random merge of the children's reports, with retries of reports already sent.
+      const queues = perTask.map((reports) => [...reports]);
+      const sent: Report[] = [];
+      const sequence: Report[] = [];
+      while (queues.some((queue) => queue.length > 0)) {
+        if (sent.length > 0 && random() < 0.3) {
+          sequence.push(sent[Math.floor(random() * sent.length)]!);
+          continue;
+        }
+        const live = queues.filter((queue) => queue.length > 0);
+        const next = live[Math.floor(random() * live.length)]!.shift()!;
+        sequence.push(next);
+        sent.push(next);
+      }
+      const result = apply(base, sequence);
+      expect(result.table).toEqual(reference.table);
+      expect(taskLifecycleViolations(result.events)).toEqual([]);
+      expect(byTask(result.events)).toEqual(byTask(reference.events));
     }
   });
 });

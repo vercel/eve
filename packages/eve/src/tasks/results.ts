@@ -64,6 +64,17 @@ export function sameTaskPrincipal(
   );
 }
 
+/**
+ * Whether `principal` started the task or result: only its turns list, wait
+ * on, cancel, send to, or read it.
+ */
+export function isTaskOf(
+  task: { readonly creator?: JsonObject },
+  principal: SessionAuthContext | null,
+): boolean {
+  return sameTaskPrincipal(readTaskCreator(task.creator).auth, principal);
+}
+
 export function readPendingTaskResults(
   state: SessionStateMap | undefined,
 ): readonly PendingTaskResult[] {
@@ -111,9 +122,7 @@ export function takeTaskResults<T extends { readonly state?: SessionStateMap }>(
   session: T,
   principal: SessionAuthContext | null,
 ): { readonly results: readonly PendingTaskResult[]; readonly session: T } {
-  const taken = readPendingTaskResults(session.state).filter((entry) =>
-    sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal),
-  );
+  const taken = readPendingTaskResults(session.state).filter((entry) => isTaskOf(entry, principal));
   if (taken.length === 0) return { results: [], session };
   let table = getTaskTable(session);
   for (const entry of taken) table = markTaskDelivered(table, entry.taskId, entry.generation);
@@ -167,7 +176,7 @@ export function workingTaskIds(
         record.mode === "detached" &&
         record.workflowCaller === undefined &&
         !isTerminalTaskStatus(record.status) &&
-        sameTaskPrincipal(readTaskCreator(record.creator).auth, principal),
+        isTaskOf(record, principal),
     )
     .map(({ id }) => id);
 }
@@ -184,7 +193,7 @@ export function pendingTaskResultIds(
   return [
     ...new Set(
       readPendingTaskResults(session.state)
-        .filter((entry) => sameTaskPrincipal(readTaskCreator(entry.creator).auth, principal))
+        .filter((entry) => isTaskOf(entry, principal))
         .map(({ taskId }) => taskId),
     ),
   ];

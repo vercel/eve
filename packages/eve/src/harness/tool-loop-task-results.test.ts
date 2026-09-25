@@ -264,13 +264,39 @@ describe("detached result delivery in the tool loop", () => {
 
     expect(hasResultMessage(requests[0]!)).toBe(false);
     expect(readPendingTaskResults(session.state)).toHaveLength(1);
-    // Still undelivered, so the note keeps listing the task.
-    expect(
-      requests[0]!.messages.some(
-        (message) =>
-          message.text.startsWith(TASKS_NOTE_LABEL) && message.text.includes("remind-q4x1ze"),
-      ),
-    ).toBe(true);
+    // Bob's turn could not use Alice's task, so its note does not list it.
+    expect(requests[0]!.messages.some((message) => message.text.includes("remind-q4x1ze"))).toBe(
+      false,
+    );
+  });
+
+  it("lists only the turn principal's idle tasks in the [Tasks] note", async () => {
+    const idle = (id: string, auth: SessionAuthContext) =>
+      createTaskRecord({
+        child: { continuationToken: `token-${id}`, kind: "local", sessionId: `child-${id}` },
+        creator: encodeTaskCreator({ auth }),
+        delivered: true,
+        id,
+        lastStatus: `Summary for ${auth.principalId}.`,
+        status: "completed",
+      });
+    const { requests } = await runStep({
+      auth: BOB,
+      respond: () => "Hi Bob.",
+      session: {
+        ...sessionWithResult({
+          creator: BOB,
+          history: [createUserMessage("user", "Bob here.")],
+          turnId: "turn_0",
+        }),
+        state: taskTableState([idle("research-a1ice0", ALICE), idle("research-b0b000", BOB)]),
+      },
+    });
+
+    const note = requests[0]!.messages.find((message) => message.text.startsWith(TASKS_NOTE_LABEL));
+    expect(note?.text).toContain('<task id="research-b0b000" tool="research">Summary for U-bob.');
+    expect(note?.text).not.toContain("research-a1ice0");
+    expect(note?.text).not.toContain("U-alice");
   });
 
   it("holds an interactive turn the model ends while its tasks work, keeping the turn ID", async () => {

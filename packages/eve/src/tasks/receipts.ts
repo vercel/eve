@@ -1,17 +1,18 @@
+import type { SessionAuthContext } from "#channel/types.js";
 import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
+import { tooManyTasks } from "#tasks/owner-calls.js";
 import type { TaskError } from "#tasks/protocol.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
   renderSendReceipt,
   renderStartReceipt,
-  renderTooManyTasks,
   renderUnconfirmedSendReceipt,
   type TaskReceipt,
 } from "#tasks/render.js";
-import { MAX_WORKING_TASKS, workingDetachedTaskIds, type TaskTable } from "#tasks/table.js";
+import type { TaskTable } from "#tasks/table.js";
 
 // Immediate tool results of calls the turn does not wait for. Clients read
 // the structured receipt; the model reads its text.
@@ -62,18 +63,12 @@ function receiptResult(
  */
 export function tooManyTasksResult(input: {
   readonly callId: string;
+  readonly caller: SessionAuthContext | null;
   readonly table: TaskTable;
   readonly toolName: string;
 }): RuntimeToolResultActionResult | undefined {
-  const working = workingDetachedTaskIds(input.table);
-  if (working.length < MAX_WORKING_TASKS) return undefined;
-  return {
-    callId: input.callId,
-    isError: true,
-    kind: "tool-result",
-    output: { code: "TOO_MANY_TASKS", message: renderTooManyTasks(working, MAX_WORKING_TASKS) },
-    toolName: input.toolName,
-  };
+  const error = tooManyTasks(input.table, input.caller);
+  return error === undefined ? undefined : taskToolErrorResult(input, error);
 }
 
 /** The error result of a `task_wait` or `task_cancel` call, such as `UNKNOWN_TASK`. */

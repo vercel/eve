@@ -376,7 +376,7 @@ describe("registryHandoffAddress", () => {
       suspendPromptForInput: () => promptSuspended.resolve(),
       subagents: {
         begin: vi.fn(),
-        background: vi.fn(),
+        detach: vi.fn(),
         upsertStep: vi.fn(),
         upsertTool: vi.fn(),
         removeTool: vi.fn(),
@@ -1289,7 +1289,7 @@ describe("EveTUIRunner idle session follow", () => {
     );
   });
 
-  it("answers a background-task approval that arrives while the prompt is idle", async () => {
+  it("answers a detached-task approval that arrives while the prompt is idle", async () => {
     const session = stubSession();
     const prompt = createDeferred<string | undefined>();
     const requestId = "task_123:approval-1";
@@ -3598,7 +3598,7 @@ describe("EveTUIRunner renderer teardown", () => {
         }),
         subagents: {
           begin: vi.fn(),
-          background: vi.fn(),
+          detach: vi.fn(),
           upsertStep: vi.fn(),
           upsertTool: vi.fn(),
           removeTool: vi.fn(),
@@ -3663,7 +3663,7 @@ describe("EveTUIRunner renderer teardown", () => {
     );
     const view = {
       begin: vi.fn(),
-      background: vi.fn(),
+      detach: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),
@@ -3719,7 +3719,7 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-child" });
   });
 
-  it("keeps a detached call open as a background section", async () => {
+  it("keeps a detached call open as a detached section", async () => {
     const client = stubClient();
     vi.stubGlobal(
       "fetch",
@@ -3741,7 +3741,7 @@ describe("EveTUIRunner renderer teardown", () => {
     );
     const view = {
       begin: vi.fn(),
-      background: vi.fn(),
+      detach: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),
@@ -3784,7 +3784,7 @@ describe("EveTUIRunner renderer teardown", () => {
       ]),
     }).run();
 
-    expect(view.background).toHaveBeenCalledExactlyOnceWith({ callId: "call-child" });
+    expect(view.detach).toHaveBeenCalledExactlyOnceWith({ callId: "call-child" });
     expect(view.complete).not.toHaveBeenCalled();
   });
 
@@ -4899,7 +4899,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     ]);
     const view = {
       begin: vi.fn(),
-      background: vi.fn(),
+      detach: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),

@@ -1227,7 +1227,7 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
-  it("notifies each delegated conversation turn and remains available via agentId", async () => {
+  it("notifies each delegated conversation turn and remains available via taskId", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "workflow-entry-delegated-conversation" },
     });

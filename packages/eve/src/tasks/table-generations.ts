@@ -465,6 +465,7 @@ function nextGeneration(
     sends: continues
       ? record.sends
       : nonEmpty(record.sends?.filter((entry) => entry.seq !== send.seq)),
+    signIns: undefined,
     startedAt: now,
     startedBy: send.seq,
     status: "working",

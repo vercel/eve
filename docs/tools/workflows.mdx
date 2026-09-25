@@ -668,9 +668,9 @@ tool result, a detached call delivers it as a failed task result, and `task.sett
 `failed` with the same error. For a resumable tool, the limit applies to each generation, and each
 generation starts a fresh clock. eve then cancels the run, which unwinds as
 described in [Cancel and clean up](#cancel-and-clean-up-ctxabortsignal). Time the run spends waiting
-on `ctx.ask` or an approval does not count toward the limit. A `ctx.ask` request that a
-`Promise.race` moved past still waits, so the clock stays stopped until the request is answered or
-the run ends. `timeout: false` is the same as leaving it unset.
+on `ctx.ask`, an approval, or a sign-in does not count toward the limit. A `ctx.ask` request that
+a `Promise.race` moved past still waits, so the clock stays stopped until the request is answered
+or the run ends. `timeout: false` is the same as leaving it unset.
 
 At the limit, eve first reads the run once. A run that already finished but whose outcome never
 reached the session settles the call with that outcome instead of `TIMED_OUT`. A call without a

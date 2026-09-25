@@ -35,8 +35,8 @@ const childStreamReconnectPolicy = {
 export interface SubagentView {
   /** Opens a call's section the moment its dispatch is announced. */
   begin(update: { callId: string; name: string }): void;
-  /** Keeps a receipt-returned background call mutable across parent turns. */
-  background(update: { callId: string }): void;
+  /** Keeps a detached call, which returned a receipt, mutable across parent turns. */
+  detach(update: { callId: string }): void;
   upsertStep(update: SubagentStepUpdate): void;
   upsertTool(update: SubagentToolUpdate): void;
   /** Drops a child tool row whose call never materialized. */
@@ -78,7 +78,7 @@ export type SubagentRun = {
   /** Parent turn that originated this dispatch; cancellation is scoped to it. */
   parentTurnId: string;
   /** A receipt-returned task survives cancellation of its originating turn. */
-  background: boolean;
+  detached: boolean;
   /** Parent completion is provisional; only a child boundary is authoritative. */
   status: "open" | "provisional" | "authoritative";
   /** Start event whose parent-origin child stream this run follows. */
@@ -141,7 +141,7 @@ export class SubagentPump {
     | undefined;
   readonly #runs = new Map<string, SubagentRun>();
   // Task admission can return its receipt before the child dispatch event arrives.
-  readonly #pendingBackgroundCalls = new Set<string>();
+  readonly #pendingDetachedCalls = new Set<string>();
   readonly #pumps = new Map<string, AbortController>();
   /** Durable child cursor shared by repeated calls into one conversation subagent. */
   readonly #childStreamIndices = new Map<string, number>();
@@ -183,7 +183,7 @@ export class SubagentPump {
         generation: started.data.generation,
         childSessionId: child.sessionId,
         parentTurnId: started.data.turnId,
-        background: false,
+        detached: false,
         status: "open",
         started,
         parentSessionId,
@@ -198,7 +198,7 @@ export class SubagentPump {
     this.#view?.markChildToolCallId(callId);
     if (existing !== undefined && existing.status !== "open") return;
     this.#view?.begin({ callId, name: started.data.name });
-    if (this.#pendingBackgroundCalls.delete(callId)) this.background(callId);
+    if (this.#pendingDetachedCalls.delete(callId)) this.detach(callId);
     if (existing !== undefined) return;
     this.#activateOrQueue(callId);
   }
@@ -210,8 +210,8 @@ export class SubagentPump {
    */
   settle(settled: { readonly callId: string; readonly generation: number }): void {
     const { callId } = settled;
-    // A settled call no longer needs a background mark held for its child.
-    this.#pendingBackgroundCalls.delete(callId);
+    // A settled call no longer needs a detached mark held for its child.
+    this.#pendingDetachedCalls.delete(callId);
     if (this.#runs.get(callId)?.generation !== settled.generation) return;
     this.#finalizeRun(callId, false);
   }
@@ -237,15 +237,15 @@ export class SubagentPump {
    * reaches its own boundary. A child
    * that already settled before the receipt raced in stays settled.
    */
-  background(callId: string): void {
+  detach(callId: string): void {
     const run = this.#runs.get(callId);
     if (run === undefined) {
-      this.#pendingBackgroundCalls.add(callId);
+      this.#pendingDetachedCalls.add(callId);
       return;
     }
-    run.background = true;
+    run.detached = true;
     if (run.status === "authoritative") return;
-    this.#view?.background({ callId });
+    this.#view?.detach({ callId });
   }
 
   abortAll(): void {
@@ -254,7 +254,7 @@ export class SubagentPump {
     }
     this.#pumps.clear();
     this.#runs.clear();
-    this.#pendingBackgroundCalls.clear();
+    this.#pendingDetachedCalls.clear();
     this.#childStreamIndices.clear();
     this.#activeChildCalls.clear();
     this.#queuedChildCalls.clear();
@@ -262,11 +262,11 @@ export class SubagentPump {
 
   /**
    * Settles and aborts only foreground descendants of the cancelled parent
-   * turn. Background tasks survive even when that same turn started them.
+   * turn. Detached tasks survive even when that same turn started them.
    */
   settleCancelledTurn(turnId: string): void {
     for (const [callId, run] of this.#runs) {
-      if (run.parentTurnId !== turnId || run.background) continue;
+      if (run.parentTurnId !== turnId || run.detached) continue;
       this.#finalizeRun(callId, true);
       this.#pumps.get(callId)?.abort();
       this.#pumps.delete(callId);

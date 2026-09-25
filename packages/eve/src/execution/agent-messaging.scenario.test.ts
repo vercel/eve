@@ -17,18 +17,18 @@ const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
 function createScriptedParentAgentSource(subagentName: string): string {
-  const agentIdPattern = `<task id="([^"]+)" tool="${subagentName}"(?: [^>]*)?>`;
+  const taskIdPattern = `<task id="([^"]+)" tool="${subagentName}"(?: [^>]*)?>`;
   const toolName = "run-program";
   const firstProgram = `return ctx.agent(${JSON.stringify(subagentName)}, { message: ${JSON.stringify(`Remember the codeword ${CODEWORD}. Confirm that you stored it.`)} });`;
-  const secondProgram = (agentIdExpression: string) =>
-    `return ctx.agent(${JSON.stringify(subagentName)}, { taskId: ${agentIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
+  const secondProgram = (taskIdExpression: string) =>
+    `return ctx.agent(${JSON.stringify(subagentName)}, { taskId: ${taskIdExpression}, message: "What codeword did I ask you to remember? Reply with the codeword." });`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 
 const CODEWORD = ${JSON.stringify(CODEWORD)};
 const SUBAGENT_NAME = ${JSON.stringify(subagentName)};
-const AGENT_ID_PATTERN = new RegExp(${JSON.stringify(agentIdPattern)}, "u");
+const TASK_ID_PATTERN = new RegExp(${JSON.stringify(taskIdPattern)}, "u");
 
 // Each program call starts a detached task; the script waits on its receipt.
 const receiptTaskId = (result) => /Started task ([\\w-]+)\\./u.exec(String(result?.output))?.[1];
@@ -65,8 +65,8 @@ const model = mockModel((request) => {
     }
     if (result("memory-exchange-2") !== undefined) return waitOn(result("memory-exchange-2"));
     const agentsSnippet = request.messages.map((message) => message.text).join("\\n");
-    const agentId = AGENT_ID_PATTERN.exec(agentsSnippet)?.[1];
-    if (agentId === undefined) {
+    const taskId = TASK_ID_PATTERN.exec(agentsSnippet)?.[1];
+    if (taskId === undefined) {
       throw new Error(\`Parent model did not receive a \${SUBAGENT_NAME} task id.\`);
     }
     return {
@@ -74,7 +74,7 @@ const model = mockModel((request) => {
         {
           id: "memory-exchange-2",
           input: {
-            js: ${JSON.stringify(secondProgram("__AGENT_ID__"))}.replace("__AGENT_ID__", JSON.stringify(agentId)),
+            js: ${JSON.stringify(secondProgram("__TASK_ID__"))}.replace("__TASK_ID__", JSON.stringify(taskId)),
           },
           name: ${JSON.stringify(toolName)},
         },

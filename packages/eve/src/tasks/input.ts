@@ -48,6 +48,25 @@ export function applyTaskInputEvent(
   return [...batches, withoutUndefined({ from, requests, sequence, stepIndex, turnId })];
 }
 
+/**
+ * The sign-ins a task waits on after an `authorization.required` or
+ * `authorization.completed` for it. They are keyed by source, not attempt: a
+ * session's own park names no attempt, and a newer attempt completes the
+ * older one first.
+ */
+export function applySignInEvent(
+  signIns: readonly string[],
+  event: Extract<
+    TaskInputEvent,
+    { readonly type: "authorization.required" | "authorization.completed" }
+  >,
+): readonly string[] {
+  const { name, taskId: from } = event.data;
+  const key = from === undefined ? name : `${from}/${name}`;
+  const others = signIns.filter((entry) => entry !== key);
+  return event.type === "authorization.required" ? [...others, key] : others;
+}
+
 /** One request a task waits on, with the batch it arrived in. */
 export interface PendingTaskInput {
   readonly batch: TaskInputBatch;

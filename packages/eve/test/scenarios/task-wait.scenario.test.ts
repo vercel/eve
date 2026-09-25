@@ -9,7 +9,8 @@ import { throughFirstBoundary } from "./first-boundary.js";
 
 // task_wait end to end over detached agent calls: a settled result, a
 // timeout whose result arrives later in the same held turn, a wait a steering
-// message interrupts, and two waits in one step.
+// message interrupts, two waits in one step, and a wait's timeout next to
+// the task's own time limit.
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -24,7 +25,7 @@ const PLANS = {
   "Research sre briefly.": { message: "source=sre seconds=15", timeout: 2000 },
   "Research plain.": { message: "source=plain seconds=15" },
 };
-const idOf = (output) => /researcher-[0-9a-z]{6}/u.exec(String(output))?.[0] ?? "missing";
+const idOf = (output) => /(?:researcher|auditor)-[0-9a-z]{6}/u.exec(String(output))?.[0] ?? "missing";
 const research = (message) => ({ name: "researcher", input: { message } });
 
 export default defineAgent({
@@ -45,6 +46,14 @@ export default defineAgent({
         };
       }
       return "FanIn: " + outputs.slice(2).join(" | ");
+    }
+    if (userMessages[0] === "Audit the ledger.") {
+      if (toolResults.length === 0) return { toolCalls: [{ name: "auditor", input: { message: "source=ledger seconds=20" } }] };
+      const taskId = idOf(outputs[0]);
+      // A short wait times out first; the next wait lasts until the audit's own limit.
+      if (toolResults.length === 1) return { toolCalls: [{ name: "task_wait", input: { taskId, timeout: 1000 } }] };
+      if (toolResults.length === 2) return { toolCalls: [{ name: "task_wait", input: { taskId } }] };
+      return "Audited: " + outputs.at(-1);
     }
     const plan = PLANS[userMessages[0]];
     if (plan === undefined) return "Unexpected: " + lastUserMessage;
@@ -77,6 +86,12 @@ export default defineAgent({
   modelContextWindowTokens: 32_000,
 });
 `;
+
+// The researcher with a 5-second limit on each piece of its work.
+const AUDITOR_AGENT = RESEARCHER_AGENT.replace(
+  "modelContextWindowTokens: 32_000,",
+  "modelContextWindowTokens: 32_000,\n  timeout: 5_000,",
+);
 
 const GATHER_TOOL = `import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "workflow";
@@ -170,11 +185,11 @@ function outputOf(events: readonly MessageStreamEvent[], callId: string | undefi
   return event?.type === "action.result" ? event.data.result.output : undefined;
 }
 
-function researcherTaskIds(events: readonly MessageStreamEvent[]): string[] {
+function receiptTaskIds(events: readonly MessageStreamEvent[], toolName = "researcher"): string[] {
   return events.flatMap((event) =>
     event.type === "action.result" &&
     event.data.result.kind === "tool-result" &&
-    event.data.result.toolName === "researcher"
+    event.data.result.toolName === toolName
       ? [(event.data.result.output as { readonly taskId: string }).taskId]
       : [],
   );
@@ -193,7 +208,7 @@ function lastReply(events: readonly MessageStreamEvent[]): string {
 
 describe("task_wait", () => {
   it(
-    "returns a detached result, times out, yields to a steering message, and fans in",
+    "returns a detached result, times out, yields to a steering message, fans in, and returns the task's own timeout",
     async () => {
       const app = await scenarioApp({
         dependencies: { zod: "^4.3.6" },
@@ -203,6 +218,9 @@ describe("task_wait", () => {
           "agent/subagents/researcher/agent.ts": RESEARCHER_AGENT,
           "agent/subagents/researcher/instructions.md": "Gather notes, then report.\n",
           "agent/subagents/researcher/tools/gather.ts": GATHER_TOOL,
+          "agent/subagents/auditor/agent.ts": AUDITOR_AGENT,
+          "agent/subagents/auditor/instructions.md": "Gather notes, then report.\n",
+          "agent/subagents/auditor/tools/gather.ts": GATHER_TOOL,
         },
         installDependencies: true,
         name: "task-wait",
@@ -214,7 +232,7 @@ describe("task_wait", () => {
         // 1. Settled: the wait receives the result as its own tool result, exactly once.
         const d0 = await client.sessions.create({ message: "Research d0." });
         const first = await throughFirstBoundary(d0.response);
-        const [d0Task] = researcherTaskIds(first.events);
+        const [d0Task] = receiptTaskIds(first.events);
         const [d0Wait] = waitCallIds(first.events);
         expect(outputOf(first.events, d0Wait)).toEqual({
           name: "researcher",
@@ -234,7 +252,7 @@ describe("task_wait", () => {
         // result arrives once.
         const sre = await client.sessions.create({ message: "Research sre briefly." });
         const timed = await throughFirstBoundary(sre.response);
-        const [sreTask] = researcherTaskIds(timed.events);
+        const [sreTask] = receiptTaskIds(timed.events);
         const [sreWait] = waitCallIds(timed.events);
         expect(outputOf(timed.events, sreWait)).toEqual({ status: "timed_out", taskId: sreTask });
         expect(lastReply(timed.events)).toContain("Waited: Stopped waiting after");
@@ -250,7 +268,7 @@ describe("task_wait", () => {
         await turn.reached;
         await throughFirstBoundary(await plain.session.send("Actually, hold off on plain."));
         const interrupted = await turn.finished;
-        const [plainTask] = researcherTaskIds(interrupted);
+        const [plainTask] = receiptTaskIds(interrupted);
         const [plainWait] = waitCallIds(interrupted);
         expect(outputOf(interrupted, plainWait)).toEqual({
           status: "interrupted",
@@ -277,6 +295,33 @@ describe("task_wait", () => {
         }
         expect(lastReply(fanned.events)).toMatch(/Found d1 healthy\.[\s\S]*Found d2 healthy\./u);
         expect(taskResultMessages(fanned.events)).toBe(0);
+
+        // 5. A wait's timeout ends only the wait, and the audit keeps working; the audit's
+        // own 5-second limit then fails it with TIMED_OUT, which the next wait returns.
+        const audit = await client.sessions.create({ message: "Audit the ledger." });
+        const audited = (await audit.response.result()).events;
+        const [auditTask] = receiptTaskIds(audited, "auditor");
+        const [shortWait, longWait] = waitCallIds(audited);
+        expect(outputOf(audited, shortWait)).toEqual({ status: "timed_out", taskId: auditTask });
+        expect(outputOf(audited, longWait)).toMatchObject({
+          name: "auditor",
+          outcome: { error: { code: "TIMED_OUT" }, status: "failed" },
+          status: "settled",
+          taskId: auditTask,
+        });
+        expect(
+          audited.flatMap((event) =>
+            event.type === "task.settled" && event.data.taskId === auditTask ? [event.data] : [],
+          ),
+        ).toEqual([
+          expect.objectContaining({
+            error: expect.objectContaining({ code: "TIMED_OUT" }),
+            status: "failed",
+          }),
+        ]);
+        expect(lastReply(audited)).toContain(
+          `<task_result id="${auditTask}" tool="auditor" status="failed" code="TIMED_OUT">`,
+        );
       } finally {
         await server.stop();
       }

@@ -78,14 +78,14 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     if (result !== undefined) {
       return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
     }
-    const agentId = /taskId ("[^"]+")/u.exec(message)?.[1];
-    if (agentId === undefined) throw new Error("Recovery prompt has no sleeper agent id.");
+    const taskId = /taskId ("[^"]+")/u.exec(message)?.[1];
+    if (taskId === undefined) throw new Error("Recovery prompt has no sleeper task id.");
     return {
       toolCalls: [
         {
           id: "resume-sleeper",
           input: {
-            js: `return await ctx.agent("sleeper", { taskId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
+            js: `return await ctx.agent("sleeper", { taskId: ${taskId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
           },
           name: "workflow",
         },

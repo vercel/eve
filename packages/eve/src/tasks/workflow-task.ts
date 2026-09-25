@@ -91,7 +91,12 @@ export async function startWorkflowTask<
       : { events: [], result: receipt, session };
   }
   const rejected = detached
-    ? tooManyTasksResult({ callId: request.callId, table, toolName: request.toolName })
+    ? tooManyTasksResult({
+        callId: request.callId,
+        caller: input.creator?.auth ?? null,
+        table,
+        toolName: request.toolName,
+      })
     : undefined;
   if (rejected !== undefined) return { events: [], result: rejected, session };
   const { record } = started;

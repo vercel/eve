@@ -3,7 +3,12 @@ import type {
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 
-import { SEND_INPUT_SCHEMA_HINT, TASK_ID_SEND_PARAMETER_DESCRIPTION } from "#tasks/render.js";
+import { MAX_TASK_ID_LENGTH } from "#tasks/ids.js";
+import {
+  SEND_INPUT_SCHEMA_HINT,
+  TASK_ID_INVALID_MESSAGE,
+  TASK_ID_SEND_PARAMETER_DESCRIPTION,
+} from "#tasks/render.js";
 import { deriveToolSchema, isToolSchema, type ToolSchema } from "#tools/schema.js";
 
 /** The input a resumable tool's call carries to send to one of its tasks. */
@@ -46,7 +51,11 @@ export function withTaskIdParameter(schema: unknown): ToolSchema {
       ...json,
       properties: {
         ...(json.properties as Record<string, unknown> | undefined),
-        [TASK_ID_PARAMETER]: { description: TASK_ID_SEND_PARAMETER_DESCRIPTION, type: "string" },
+        [TASK_ID_PARAMETER]: {
+          description: TASK_ID_SEND_PARAMETER_DESCRIPTION,
+          maxLength: MAX_TASK_ID_LENGTH,
+          type: "string",
+        },
       },
       type: "object",
     };
@@ -63,12 +72,8 @@ export function withTaskIdParameter(schema: unknown): ToolSchema {
         if (taskId === null || taskId === undefined || taskId === "") {
           return await standard.validate(rest);
         }
-        if (typeof taskId !== "string") {
-          return {
-            issues: [
-              { message: `${TASK_ID_PARAMETER} must be a string.`, path: [TASK_ID_PARAMETER] },
-            ],
-          };
+        if (typeof taskId !== "string" || taskId.length > MAX_TASK_ID_LENGTH) {
+          return { issues: [{ message: TASK_ID_INVALID_MESSAGE, path: [TASK_ID_PARAMETER] }] };
         }
         const result = await standard.validate(rest);
         if (result.issues !== undefined) {

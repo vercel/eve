@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { jsonSchema } from "ai";
 import { AGENT_TASK_WORKFLOW_ID } from "#tasks/agent-tool.js";
+import { SEND_INPUT_SCHEMA_HINT, TASK_ID_INVALID_MESSAGE } from "#tasks/render.js";
+import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import { serializeInputSchema, type ToolSchema } from "#tools/schema.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -9,19 +11,39 @@ import {
 } from "./harness-definition.js";
 
 describe("createWorkflowToolHarnessDefinition", () => {
+  const research = createWorkflowToolHarnessDefinition({
+    definition: {
+      description: "Delegate research.",
+      execute: () => undefined,
+      inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+      name: "research",
+    },
+    nodeId: "subagents/research",
+    workflowId: AGENT_TASK_WORKFLOW_ID,
+  });
+  const validate = async (value: unknown) =>
+    await (research.inputSchema as ToolSchema)["~standard"].validate(value);
+
   it("preserves agent identity on workflow-backed tools", () => {
-    expect(
-      createWorkflowToolHarnessDefinition({
-        definition: {
-          description: "Delegate research.",
-          execute: () => undefined,
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "research",
-        },
-        nodeId: "subagents/research",
-        workflowId: AGENT_TASK_WORKFLOW_ID,
-      }),
-    ).toMatchObject({ nodeId: "subagents/research" });
+    expect(research).toMatchObject({ nodeId: "subagents/research" });
+  });
+
+  it("gives an agent tool the same bounded taskId as every resumable tool", async () => {
+    expect(serializeInputSchema(research.inputSchema as ToolSchema)).toMatchObject({
+      properties: { taskId: { maxLength: 128, type: "string" } },
+      required: ["message"],
+    });
+    await expect(validate({ message: "Dig into Alice's report.", taskId: null })).resolves.toEqual({
+      value: { message: "Dig into Alice's report." },
+    });
+    await expect(validate({ message: "More.", taskId: "x".repeat(129) })).resolves.toEqual({
+      issues: [{ message: TASK_ID_INVALID_MESSAGE, path: ["taskId"] }],
+    });
+  });
+
+  it("tells the model a send to an agent uses the agent tool's input schema", async () => {
+    const result = await validate({ taskId: "research-7k2m9q", text: "Also check Bob's notes." });
+    expect(result.issues?.at(-1)).toEqual({ message: SEND_INPUT_SCHEMA_HINT });
   });
 });
 

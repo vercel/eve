@@ -92,6 +92,8 @@ export type TaskMessage =
       readonly generation: number;
       /** Every batch still unanswered, replacing the last snapshot. `[]` means all were resolved. */
       readonly input: readonly TaskInputBatch[];
+      /** Every sign-in still pending, replacing the last snapshot. Absent means none. */
+      readonly signIns?: readonly string[];
     }
   | {
       readonly kind: "task.settled";

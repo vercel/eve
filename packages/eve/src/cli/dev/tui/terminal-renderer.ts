@@ -433,8 +433,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #updateSequence = 0;
   /** Call ids per subagent name, for the sections' ordinal subtitles. */
   readonly #subagentCallsByName = new Map<string, string[]>();
-  /** Background sections kept at the live edge until their child boundary. */
-  readonly #backgroundSubagentCallIds = new Set<string>();
+  /** Detached sections kept at the live edge until their child boundary. */
+  readonly #detachedSubagentCallIds = new Set<string>();
   /** Parent-completed sections retained as mutable until the child boundary. */
   readonly #provisionalSubagentCallIds = new Set<string>();
   /** Session-local file contents, so write blocks can render real diffs. */
@@ -865,7 +865,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
     this.#start(options);
-    this.#syncBackgroundActivityTicker();
+    this.#syncDetachedActivityTicker();
     this.#commitTurnStats();
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -1208,7 +1208,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
-      this.#syncBackgroundActivityTicker();
+      this.#syncDetachedActivityTicker();
       this.#status = completedTurnStatus({
         interrupted: this.#interrupted,
         cancelled: this.#turnCancelled,
@@ -1222,7 +1222,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // prefix wedged and freeze scrollback for the rest of the session.
       if (this.#interrupted || turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
-      this.#syncBackgroundActivityTicker();
+      this.#syncDetachedActivityTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
 
@@ -1274,7 +1274,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#sweepPreparingToolBlocks(turnState);
       if (turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
-      this.#syncBackgroundActivityTicker();
+      this.#syncDetachedActivityTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
     }
@@ -1741,7 +1741,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly subagents: SubagentView = {
     begin: (update) => this.beginSubagent(update),
-    background: (update) => this.backgroundSubagent(update),
+    detach: (update) => this.detachSubagent(update),
     upsertStep: (update) => this.upsertSubagentStep(update),
     upsertTool: (update) => this.upsertSubagentTool(update),
     removeTool: (update) => this.removeSubagentTool(update),
@@ -1769,20 +1769,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * A background receipt closes the model tool call, not the child. Mark the
+   * A detached call's receipt closes the model tool call, not the child. Mark the
    * header running so turn finalization cannot commit immutable scrollback
    * before the child pump has folded in its later events.
    */
-  backgroundSubagent(update: { callId: string }): void {
+  detachSubagent(update: { callId: string }): void {
     const header = this.#blockById.get(subagentHeaderId(update.callId));
     if (header === undefined || this.#committedIds.has(subagentHeaderId(update.callId))) return;
     header.status = "running";
     header.live = true;
     header.updateSeq = ++this.#updateSequence;
-    const wasBackground = this.#backgroundSubagentCallIds.has(update.callId);
-    this.#backgroundSubagentCallIds.add(update.callId);
-    if (!wasBackground) this.#moveSubagentCohortToBackgroundTail(update.callId);
-    this.#syncBackgroundActivityTicker();
+    const wasDetached = this.#detachedSubagentCallIds.has(update.callId);
+    this.#detachedSubagentCallIds.add(update.callId);
+    if (!wasDetached) this.#moveSubagentCohortToDetachedTail(update.callId);
+    this.#syncDetachedActivityTicker();
     this.#paint();
   }
 
@@ -1796,7 +1796,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (header === undefined) return;
     header.status = "done";
     if (update.authoritative) {
-      this.#backgroundSubagentCallIds.delete(update.callId);
+      this.#detachedSubagentCallIds.delete(update.callId);
       this.#provisionalSubagentCallIds.delete(update.callId);
       for (const block of this.#blocks) {
         if (block.subagentCallId === update.callId) block.live = false;
@@ -1807,7 +1807,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (block.subagentCallId === update.callId) block.live = true;
       }
     }
-    this.#syncBackgroundActivityTicker();
+    this.#syncDetachedActivityTicker();
     this.#paint();
   }
 
@@ -1935,14 +1935,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
-    this.#backgroundSubagentCallIds.clear();
+    this.#detachedSubagentCallIds.clear();
     this.#provisionalSubagentCallIds.clear();
     this.#subagentCallsByName.clear();
     this.#messageQueue.reset();
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
     this.#turnClock.reset();
-    this.#syncBackgroundActivityTicker();
+    this.#syncDetachedActivityTicker();
   }
 
   /**
@@ -3006,7 +3006,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#startTicker();
         this.#armFlowIdleTrap();
       } else {
-        this.#syncBackgroundActivityTicker();
+        this.#syncDetachedActivityTicker();
       }
       this.#live.reset();
       this.#paint();
@@ -3468,7 +3468,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #stopTicker() {
-    if (this.#hasLiveBackgroundActivity()) return;
+    if (this.#hasLiveDetachedActivity()) return;
     this.#clearTicker();
   }
 
@@ -3479,19 +3479,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  #hasLiveBackgroundActivity(): boolean {
+  #hasLiveDetachedActivity(): boolean {
     return this.#blocks.some(
       (block) =>
         block.live &&
         block.subagentCallId !== undefined &&
-        (this.#backgroundSubagentCallIds.has(block.subagentCallId) ||
+        (this.#detachedSubagentCallIds.has(block.subagentCallId) ||
           this.#provisionalSubagentCallIds.has(block.subagentCallId)),
     );
   }
 
   /** Keeps mutable subagent sections visibly active after their parent turn settles. */
-  #syncBackgroundActivityTicker(): void {
-    if (this.#hasLiveBackgroundActivity()) {
+  #syncDetachedActivityTicker(): void {
+    if (this.#hasLiveDetachedActivity()) {
       this.#startTicker();
     } else if (!this.#streamDraftActive && this.#turnIndicator.kind === "idle") {
       this.#clearTicker();
@@ -3510,18 +3510,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
     block.updateSeq = ++this.#updateSequence;
-    const isBackgroundChild =
-      block.subagentCallId !== undefined &&
-      this.#backgroundSubagentCallIds.has(block.subagentCallId);
-    const backgroundIndex = isBackgroundChild
+    const isDetachedChild =
+      block.subagentCallId !== undefined && this.#detachedSubagentCallIds.has(block.subagentCallId);
+    const detachedIndex = isDetachedChild
       ? -1
       : this.#blocks.findIndex(
           (candidate) =>
             candidate.subagentCallId !== undefined &&
-            this.#backgroundSubagentCallIds.has(candidate.subagentCallId),
+            this.#detachedSubagentCallIds.has(candidate.subagentCallId),
         );
-    if (backgroundIndex < 0) this.#blocks.push(block);
-    else this.#blocks.splice(backgroundIndex, 0, block);
+    if (detachedIndex < 0) this.#blocks.push(block);
+    else this.#blocks.splice(detachedIndex, 0, block);
     if (block.id) this.#blockById.set(block.id, block);
   }
 
@@ -3655,7 +3654,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * Inserts a new child beside the rest of its call's cohort instead of at
-   * the transcript's live edge. Background children can emit after parent
+   * the transcript's live edge. Detached children can emit after parent
    * and user blocks from later turns; arrival order must not split their
    * section.
    */
@@ -3689,11 +3688,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * Background children may outlive several foreground turns. Keep their
+   * Detached children may outlive several foreground turns. Keep their
    * mutable cohort at the live edge so it cannot hold those settled turns in
    * the renderer's leading-prefix commit queue.
    */
-  #moveSubagentCohortToBackgroundTail(callId: string): void {
+  #moveSubagentCohortToDetachedTail(callId: string): void {
     const cohort = this.#blocks.filter((block) => block.subagentCallId === callId);
     if (cohort.length === 0) return;
     this.#blocks = this.#blocks.filter((block) => block.subagentCallId !== callId);

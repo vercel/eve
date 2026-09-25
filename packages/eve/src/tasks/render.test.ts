@@ -305,8 +305,21 @@ describe("renderTasksInstruction", () => {
 
 describe("renderTooManyTasks", () => {
   it("names the working tasks and says how to make room", () => {
+    const ids = Array.from({ length: 20 }, (_, index) => `a-${String(index)}`);
+    expect(renderTooManyTasks(ids, 20)).toBe(
+      `20 tasks are already working (${ids.join(", ")}). Wait for one with task_wait or stop one with task_cancel, then try again.`,
+    );
+  });
+
+  it("says how many are the caller's when other callers' tasks count too", () => {
     expect(renderTooManyTasks(["a-1", "b-2"], 20)).toBe(
-      "20 tasks are already working (a-1, b-2). Wait for one with task_wait or stop one with task_cancel, then try again.",
+      "20 tasks are already working, 2 of them yours (a-1, b-2). Wait for one with task_wait or stop one with task_cancel, then try again.",
+    );
+  });
+
+  it("names no task when only other callers' tasks fill the cap", () => {
+    expect(renderTooManyTasks([], 20)).toBe(
+      "20 tasks other callers started are already working in this session, so no task can start until some finish.",
     );
   });
 });

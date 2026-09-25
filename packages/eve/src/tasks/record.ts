@@ -49,8 +49,13 @@ export interface TaskRecord {
    * among them is also one of `sends`, so the unread cap bounds them.
    */
   readonly pendingCommands?: readonly TaskCommand[];
-  /** The `input.requested` batches the task waits on; present exactly while `input_required`. */
+  /**
+   * The `input.requested` batches the task waits on. The task is
+   * `input_required` exactly while it or `signIns` is present.
+   */
   readonly input?: readonly TaskInputBatch[];
+  /** The sign-ins the task waits on, one per authorization source and the task that asked. */
+  readonly signIns?: readonly string[];
   /** One-line summary of the latest result, listed with idle tasks in the `[Tasks]` note. */
   readonly lastStatus?: string;
   /** The task takes more input by `taskId`: every agent, and a `resumable: true` workflow tool. */
@@ -335,6 +340,11 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
     (!Array.isArray(value.input) || !value.input.every(isInputBatch))
   )
     return fail("invalid input");
+  if (
+    value.signIns !== undefined &&
+    (!Array.isArray(value.signIns) || value.signIns.length === 0 || !value.signIns.every(isString))
+  )
+    return fail("invalid signIns");
   if (value.lastStatus !== undefined && typeof value.lastStatus !== "string")
     return fail("invalid lastStatus");
   if (value.resumable !== undefined && value.resumable !== true) return fail("invalid resumable");

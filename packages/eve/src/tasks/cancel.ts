@@ -20,8 +20,7 @@ import { taskToolErrorResult } from "#tasks/receipts.js";
 import type { TaskRecord } from "#tasks/record.js";
 import {
   discardTaskResults,
-  readTaskCreator,
-  sameTaskPrincipal,
+  isTaskOf,
   workingTaskIds,
   type PendingTaskResult,
 } from "#tasks/results.js";
@@ -357,8 +356,7 @@ function selectResults(
           (record) => record.id === result.taskId && record.turnId === selector.turnId,
         );
     case "held":
-      return (result) =>
-        sameTaskPrincipal(readTaskCreator(result.creator).auth, selector.principal);
+      return (result) => isTaskOf(result, selector.principal);
     case "workflow-run":
     case "agent-call":
       return () => false;

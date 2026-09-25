@@ -1637,7 +1637,7 @@ export class EveTUIRunner {
         onTaskStarted: (started) => {
           if (sourceSession === undefined) return;
           this.#subagentPump.begin(started, sourceSession.state.sessionId);
-          if (started.data.mode === "detached") this.#subagentPump.background(started.data.callId);
+          if (started.data.mode === "detached") this.#subagentPump.detach(started.data.callId);
         },
         onTaskSettled: (settled) => this.#subagentPump.settle(settled),
         onTaskEnded: (taskId) => this.#subagentPump.ended(taskId),

@@ -1,5 +1,4 @@
 import type { JsonObject } from "#shared/json.js";
-import { TASK_ID_SEND_PARAMETER_DESCRIPTION } from "#tasks/render.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export const AGENT_TOOL_NAME = "agent";
@@ -11,9 +10,11 @@ export const AGENT_TOOL_DESCRIPTION = [
   "A new child has fresh history and state but reuses your tools and sandbox, so give parallel writers non-overlapping scopes.",
 ].join(" ");
 
-/** Input of every agent tool; with `taskId`, a call sends to an agent task this tool started. */
+/**
+ * Input of every agent tool. Its harness definition adds `taskId`, with
+ * which a call sends to an agent task this tool started.
+ */
 export interface SubagentToolInput {
-  taskId?: string | null;
   message: string;
   outputSchema?: JsonObject;
 }
@@ -21,10 +22,6 @@ export interface SubagentToolInput {
 export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
   type: "object",
   properties: {
-    taskId: {
-      type: ["string", "null"],
-      description: TASK_ID_SEND_PARAMETER_DESCRIPTION,
-    },
     message: {
       type: "string",
       description:

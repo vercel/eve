@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { SEND_INPUT_SCHEMA_HINT, TASK_ID_SEND_PARAMETER_DESCRIPTION } from "#tasks/render.js";
+import {
+  SEND_INPUT_SCHEMA_HINT,
+  TASK_ID_INVALID_MESSAGE,
+  TASK_ID_SEND_PARAMETER_DESCRIPTION,
+} from "#tasks/render.js";
 import { defineJsonSchema, serializeInputSchema, type ToolSchema } from "#tools/schema.js";
 import { resumableInputSchemaError, withTaskIdParameter } from "#tools/task-id-schema.js";
 
@@ -24,7 +28,11 @@ describe("withTaskIdParameter", () => {
     expect(serializeInputSchema(wrapped())).toEqual({
       additionalProperties: false,
       properties: {
-        taskId: { description: TASK_ID_SEND_PARAMETER_DESCRIPTION, type: "string" },
+        taskId: {
+          description: TASK_ID_SEND_PARAMETER_DESCRIPTION,
+          maxLength: 128,
+          type: "string",
+        },
         version: { type: "string" },
       },
       required: ["version"],
@@ -47,10 +55,12 @@ describe("withTaskIdParameter", () => {
     });
   });
 
-  it("rejects a taskId that is not a string", async () => {
-    await expect(validate(wrapped(), { taskId: 7, version: "0.67" })).resolves.toEqual({
-      issues: [{ message: "taskId must be a string.", path: ["taskId"] }],
-    });
+  it("rejects a taskId that is not a string of at most 128 characters", async () => {
+    for (const taskId of [7, "x".repeat(129)]) {
+      await expect(validate(wrapped(), { taskId, version: "0.67" })).resolves.toEqual({
+        issues: [{ message: TASK_ID_INVALID_MESSAGE, path: ["taskId"] }],
+      });
+    }
   });
 
   it("tells the model a send uses the tool's input schema too", async () => {

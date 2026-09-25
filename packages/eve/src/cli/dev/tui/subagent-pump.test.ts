@@ -20,7 +20,7 @@ afterEach(() => {
 function fakeView(): SubagentView {
   return {
     begin: vi.fn(),
-    background: vi.fn(),
+    detach: vi.fn(),
     upsertStep: vi.fn(),
     upsertTool: vi.fn(),
     removeTool: vi.fn(),
@@ -189,12 +189,12 @@ function completedEvent(index: number): MessageStreamEvent {
 
 describe("SubagentPump.settleCancelledTurn", () => {
   it("cancels only foreground descendants of the exact turn", async () => {
-    const backgroundA = pushableChildStream();
-    const backgroundB = pushableChildStream();
+    const detachedA = pushableChildStream();
+    const detachedB = pushableChildStream();
     const foregroundB = pushableChildStream();
     const streams = new Map([
-      ["/eve/v1/session/child_background-a/stream", backgroundA],
-      ["/eve/v1/session/child_background-b/stream", backgroundB],
+      ["/eve/v1/session/child_detached-a/stream", detachedA],
+      ["/eve/v1/session/child_detached-b/stream", detachedB],
       ["/eve/v1/session/child_foreground-b/stream", foregroundB],
     ]);
     const requests = serveChildStreams(({ path, signal }) => {
@@ -204,10 +204,10 @@ describe("SubagentPump.settleCancelledTurn", () => {
     });
     const { pump, view } = createPump();
 
-    pump.begin(taskStarted("background-a", "turn-a"), "parent");
-    pump.background("background-a");
-    pump.begin(taskStarted("background-b", "turn-b"), "parent");
-    pump.background("background-b");
+    pump.begin(taskStarted("detached-a", "turn-a"), "parent");
+    pump.detach("detached-a");
+    pump.begin(taskStarted("detached-b", "turn-b"), "parent");
+    pump.detach("detached-b");
     pump.begin(taskStarted("foreground-b", "turn-b"), "parent");
     await vi.waitFor(() => expect(requests).toHaveLength(3));
 
@@ -219,8 +219,8 @@ describe("SubagentPump.settleCancelledTurn", () => {
       callId: "foreground-b",
     });
     expect(foregroundB.aborted).toBe(true);
-    expect(backgroundA.aborted).toBe(false);
-    expect(backgroundB.aborted).toBe(false);
+    expect(detachedA.aborted).toBe(false);
+    expect(detachedB.aborted).toBe(false);
     pump.abortAll();
   });
 
@@ -258,14 +258,14 @@ describe("SubagentPump.settleCancelledTurn", () => {
   });
 });
 
-describe("SubagentPump background receipts", () => {
+describe("SubagentPump detached receipts", () => {
   it("retains a receipt that arrives before child dispatch", () => {
     const view = fakeView();
     const pump = new SubagentPump({ view, formatActionResultError: () => "failed" });
-    pump.background("call-1");
+    pump.detach("call-1");
     pump.begin(taskStarted("call-1"), "parent");
     pump.settleCancelledTurn("turn-1");
-    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.detach).toHaveBeenCalledWith({ callId: "call-1" });
     expect(view.complete).not.toHaveBeenCalled();
   });
 
@@ -275,9 +275,9 @@ describe("SubagentPump background receipts", () => {
     const { pump, view } = createPump();
 
     pump.begin(taskStarted("call-1"), "parent");
-    pump.background("call-1");
+    pump.detach("call-1");
 
-    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
+    expect(view.detach).toHaveBeenCalledWith({ callId: "call-1" });
     expect(view.complete).not.toHaveBeenCalled();
 
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -297,7 +297,7 @@ describe("SubagentPump background receipts", () => {
     const { pump, view } = createPump();
 
     pump.begin(taskStarted("call-1"), "parent");
-    pump.background("call-1");
+    pump.detach("call-1");
 
     await vi.waitFor(() =>
       expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
@@ -642,14 +642,14 @@ describe("SubagentPump child stream transport", () => {
     serveChildStreams(() => responseOf([]));
     const { pump, view } = createPump();
 
-    pump.background("detached");
+    pump.detach("detached");
     pump.begin(taskStarted("detached"), "parent");
-    expect(view.background).toHaveBeenCalledExactlyOnceWith({ callId: "detached" });
+    expect(view.detach).toHaveBeenCalledExactlyOnceWith({ callId: "detached" });
 
-    pump.background("settled");
+    pump.detach("settled");
     pump.settle({ callId: "settled", generation: 1 });
     pump.begin(taskStarted("settled"), "parent");
-    expect(view.background).toHaveBeenCalledTimes(1);
+    expect(view.detach).toHaveBeenCalledTimes(1);
     pump.abortAll();
   });
 

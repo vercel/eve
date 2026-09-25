@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { createTaskRecord, taskTable } from "#internal/testing/task-records.js";
-import { checkSend, MAX_RETAINED_IDLE_TASKS, retireIdleTasks } from "#tasks/owner-calls.js";
+import {
+  checkSend,
+  MAX_RETAINED_IDLE_TASKS,
+  retireIdleTasks,
+  tooManyTasks,
+  unknownSend,
+} from "#tasks/owner-calls.js";
 import { findTask, MAX_UNREAD_SENDS, MAX_WORKING_TASKS, pruneTaskTable } from "#tasks/table.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 
@@ -211,5 +217,43 @@ describe("checkSend", () => {
     );
     expect(check([...busy, agent])).toMatchObject({ code: "TOO_MANY_TASKS" });
     expect(check([...busy, { ...agent, status: "working" }])).toBeUndefined();
+  });
+});
+
+describe("unknownSend", () => {
+  it("echoes at most 128 characters of a taskId, the bound a tool call's input has", () => {
+    const { code, message } = unknownSend(`research-${"z".repeat(300)}`, "research");
+    expect(code).toBe("UNKNOWN_TASK");
+    expect(message).toContain(`"research-${"z".repeat(119)}"`);
+    expect(message).not.toContain("z".repeat(120));
+  });
+});
+
+describe("tooManyTasks", () => {
+  const working = (index: number, starter: SessionAuthContext) =>
+    createTaskRecord({
+      callId: `call-${String(index)}`,
+      creator: encodeTaskCreator({ auth: starter }),
+      id: `lookup-${String(index).padStart(6, "0")}`,
+      kind: "workflow",
+      mode: "detached",
+      name: "lookup",
+    });
+
+  it("counts every principal's working tasks but names only the caller's", () => {
+    const alice = principal("alice");
+    const bob = principal("bob");
+    const tasks = Array.from({ length: MAX_WORKING_TASKS }, (_, index) =>
+      working(index, index < 2 ? bob : alice),
+    );
+
+    expect(tooManyTasks(taskTable(tasks.slice(1)), bob)).toBeUndefined();
+    const refused = tooManyTasks(taskTable(tasks), bob);
+    expect(refused?.code).toBe("TOO_MANY_TASKS");
+    expect(refused?.message).toContain("(lookup-000000, lookup-000001)");
+    expect(refused?.message).not.toContain("lookup-000002");
+    expect(tooManyTasks(taskTable(tasks), principal("carol"))?.message).toBe(
+      "20 tasks other callers started are already working in this session, so no task can start until some finish.",
+    );
   });
 });

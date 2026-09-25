@@ -64,6 +64,10 @@ export const AGENT_TOOL_CONTEXT_DESCRIPTION =
 export const TASK_ID_SEND_PARAMETER_DESCRIPTION =
   "Only to correct or continue a task this tool started: that task's id, from its receipt or the latest [Tasks] note. An idle task starts on this input; a working one uses it in its current work or starts on it right after. Omit it to start a new task.";
 
+/** Error message for a `taskId` that is not a string of at most 128 characters. */
+export const TASK_ID_INVALID_MESSAGE =
+  "taskId must be the id of one task: a string of at most 128 characters.";
+
 /** Error message for a send whose input does not match the tool's input schema. */
 export const SEND_INPUT_SCHEMA_HINT =
   "A call with taskId sends input, so it uses this tool's input schema too.";
@@ -379,9 +383,16 @@ export function renderTasksInstruction(options: {
   return `Tasks\n${sentences.join(" ")}`;
 }
 
-/** `TOO_MANY_TASKS` error message for a start over the working-task cap. */
+/**
+ * `TOO_MANY_TASKS` error message for a start over the working-task cap.
+ * `ids` are the caller's own working tasks; other callers' count too.
+ */
 export function renderTooManyTasks(ids: readonly string[], limit: number): string {
-  return `${limit} tasks are already working (${ids.join(", ")}). Wait for one with task_wait or stop one with task_cancel, then try again.`;
+  if (ids.length === 0) {
+    return `${limit} tasks other callers started are already working in this session, so no task can start until some finish.`;
+  }
+  const yours = ids.length < limit ? `, ${ids.length} of them yours` : "";
+  return `${limit} tasks are already working${yours} (${ids.join(", ")}). Wait for one with task_wait or stop one with task_cancel, then try again.`;
 }
 
 /**
