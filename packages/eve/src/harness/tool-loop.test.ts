@@ -30,6 +30,7 @@ import {
   SessionKey,
   SessionIdKey,
   SessionDynamicInstructionsKey,
+  SessionDynamicToolMetadataKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicSubagentSelectionsKey,
   StepDynamicToolMetadataKey,
@@ -3562,6 +3563,79 @@ describe("createToolLoopHarness", () => {
       stepIndex: 0,
       status: "completed",
       turnId: "turn_0",
+    });
+  });
+
+  it("presents labels for a dynamic tool", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ input: {}, toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" }],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: { ok: true },
+                toolCallId: "lookup-1",
+                toolName: "lookup",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [{ input: {}, toolCallId: "lookup-1", toolName: "lookup", type: "tool-call" }],
+      toolResults: [
+        {
+          input: {},
+          output: { ok: true },
+          toolCallId: "lookup-1",
+          toolName: "lookup",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const ctx = new ContextContainer();
+    const owner = {
+      entryKey: "session:lookup",
+      name: "lookup",
+      resolverSlug: "lookup",
+      scope: "session" as const,
+      sessionId: "test-session",
+    };
+    ctx.set(SessionIdKey, owner.sessionId);
+    registerDurableDynamicCallback({ callback: () => ({ ok: true }), owner, phase: "execute" });
+    registerDurableDynamicCallback({ callback: () => "Looking it up", owner, phase: "labelStart" });
+    registerDurableDynamicCallback({ callback: () => "Done", owner, phase: "labelComplete" });
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: { closure: {} },
+          label: { complete: { closure: {} }, start: { closure: {} } },
+        },
+        description: "Look something up.",
+        entryKey: owner.entryKey,
+        inputSchema: { type: "object" },
+        name: owner.name,
+        resolverSlug: owner.resolverSlug,
+      },
+    ]);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
+
+    expect.soft(events.find((event) => event.type === "actions.requested")?.data).toMatchObject({
+      presentation: { "lookup-1": { label: "Looking it up" } },
+    });
+    expect.soft(events.find((event) => event.type === "action.result")?.data).toMatchObject({
+      presentation: { "lookup-1": { label: "Done" } },
     });
   });
 
