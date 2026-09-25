@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SlackThreadMessage } from "#public/channels/slack/api.js";
-import { loadThreadContextMessages } from "#public/channels/slack/thread.js";
+import type { SlackMessage } from "#public/channels/slack/inbound.js";
+import {
+  hydrateCopiedSlackMessage,
+  loadThreadContextMessages,
+} from "#public/channels/slack/thread.js";
 
 function threadMessage(input: {
   readonly isMe?: boolean;
@@ -20,6 +24,89 @@ function threadMessage(input: {
     user: "U01",
   };
 }
+
+function slackMessage(text: string): SlackMessage {
+  return {
+    attachments: [],
+    author: undefined,
+    channelId: "C_DESTINATION",
+    markdown: text,
+    raw: { channel_type: "channel", text },
+    teamId: "T01",
+    text,
+    threadTs: "1700000000.000001",
+    ts: "1700000000.000001",
+  };
+}
+
+describe("hydrateCopiedSlackMessage", () => {
+  it("waits for and uses a copied Slack message unfurl", async () => {
+    const initial = slackMessage(
+      ":crosspost: <https://example.slack.com/archives/C012ABC/p1700000000000100>",
+    );
+    const messages: SlackThreadMessage[] = [];
+    const refresh = vi.fn(async () => {
+      messages.push(
+        threadMessage({
+          text: ":crosspost:\nThe copied report body",
+          threadTs: initial.threadTs,
+          ts: initial.ts,
+        }),
+      );
+    });
+    const wait = vi.fn(async () => {});
+
+    await expect(
+      hydrateCopiedSlackMessage({ recentMessages: messages, refresh }, initial, wait),
+    ).resolves.toMatchObject({
+      markdown: ":crosspost:\nThe copied report body",
+      raw: { channel_type: "channel" },
+      text: ":crosspost:\nThe copied report body",
+    });
+    expect(wait).toHaveBeenCalledWith(500);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("recognizes a copied permalink after a leading app mention", async () => {
+    const initial = slackMessage(
+      "<@U012BOT> :crosspost: <https://example.enterprise.slack.com/archives/C012ABC/p1700000000000100?thread_ts=1700000000.000100>",
+    );
+    const refresh = vi.fn(async () => {});
+
+    await hydrateCopiedSlackMessage({ recentMessages: [], refresh }, initial, async () => {});
+
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not refresh native forwards or ordinary Slack links", async () => {
+    const refresh = vi.fn(async () => {});
+    const wait = vi.fn(async () => {});
+
+    for (const text of [
+      ":crosspost:\nThe forwarded report body",
+      "Please review <https://example.slack.com/archives/C012ABC/p1700000000000100>",
+    ]) {
+      const message = slackMessage(text);
+      await expect(
+        hydrateCopiedSlackMessage({ recentMessages: [], refresh }, message, wait),
+      ).resolves.toBe(message);
+    }
+
+    expect(wait).not.toHaveBeenCalled();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("preserves the original message when the unfurl is still unavailable", async () => {
+    const initial = slackMessage(
+      ":crosspost: <https://example.slack.com/archives/C012ABC/p1700000000000100>",
+    );
+    const refresh = vi.fn(async () => {});
+
+    await expect(
+      hydrateCopiedSlackMessage({ recentMessages: [], refresh }, initial, async () => {}),
+    ).resolves.toBe(initial);
+  });
+});
 
 describe("loadThreadContextMessages", () => {
   it("returns an empty array without refreshing when the message is the thread root", async () => {
