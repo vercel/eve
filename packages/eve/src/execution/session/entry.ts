@@ -48,13 +48,40 @@ import type {
 export async function workflowEntry(input: WorkflowEntryInput): Promise<WorkflowEntryResult> {
   "use workflow";
 
+  if (isLegacyWorkflowEntryInput(input)) {
+    const sessionId = getWorkflowMetadata().workflowRunId;
+    const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
+    return await failSession({
+      error: new Error(
+        "This session was created by an older eve execution model and cannot be resumed after this upgrade.",
+      ),
+      mode: serializedContext["eve.mode"] as RunMode,
+      serializedContext,
+      sessionId,
+      sessionState: undefined,
+      sessionWritable: getWritable<Uint8Array>(),
+    });
+  }
+
+  const currentInput = input as InitialWorkflowEntryInput | HandoffWorkflowEntryInput;
   const boot =
-    input.kind === "initial"
-      ? await bootInitialOwner(input, getWorkflowMetadata().workflowRunId)
-      : await bootHandoffOwner(input);
+    currentInput.kind === "initial"
+      ? await bootInitialOwner(currentInput, getWorkflowMetadata().workflowRunId)
+      : await bootHandoffOwner(currentInput);
   if (boot === undefined) return { output: "" };
   const result = await runPreparedSession(boot.session, boot.inbox);
   return { output: result.output };
+}
+
+interface LegacyWorkflowEntryInput {
+  readonly input: RunInput["input"];
+  readonly limits?: RunInput["limits"];
+  readonly sessionTimeoutMs?: number | false;
+  readonly serializedContext: Record<string, unknown>;
+}
+
+function isLegacyWorkflowEntryInput(value: unknown): value is LegacyWorkflowEntryInput {
+  return typeof value === "object" && value !== null && !("kind" in value);
 }
 
 interface BootOutcome {

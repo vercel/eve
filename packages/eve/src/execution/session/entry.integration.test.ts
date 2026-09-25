@@ -221,6 +221,32 @@ function expectSingleTurn(events: readonly MessageStreamEvent[], turnId: string)
 }
 
 describe("workflowEntry integration", () => {
+  it("emits a terminal failure for a parked pre-0.57 workflowEntry run", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "legacy-workflow-entry-upgrade" } });
+
+    await runtime.run(async () => {
+      // eve 0.47 persisted this input shape before the kind discriminator and
+      // handoff checkpoint were introduced.
+      const legacyInput = {
+        input: {},
+        serializedContext: buildSerializedContext({
+          channelKind: "http",
+          mode: "conversation",
+        }),
+      };
+      const run = await start(workflowEntry, [legacyInput as never]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const events = await stream.nextTurn();
+        expect(filterEventsByType(events, "session.failed")).toHaveLength(1);
+        await expect(run.returnValue).rejects.toThrow("Agent workflow failed");
+      } finally {
+        stream.dispose();
+      }
+    });
+  });
+
   it("parks before initialization and initializes with the first message identity and title", async () => {
     let initializedSessions = 0;
     let initializedAuth: unknown;
