@@ -1,6 +1,7 @@
 import { defineEval } from "eve/evals";
 import type { EveEvalContext, EveEvalSession, EveEvalTurn } from "eve/evals";
 import { equals } from "eve/evals/expect";
+import { checkInputHookDelivery } from "./input-hook-audit";
 
 const GOOG_PRICE = "178.92";
 
@@ -17,7 +18,7 @@ type SessionCursor = Pick<
  */
 export default defineEval({
   tags: ["session-inbox"],
-  description: "Subagent tool approval proxied through the parent session.",
+  description: "Subagent approval reaches the parent channel and hook, then resumes the child.",
   timeoutMs: 90_000,
 
   async test(t) {
@@ -34,6 +35,7 @@ export default defineEval({
     // Background delegation returns its receipt first. The child's approval
     // then wakes the parent in a separate server-initiated turn.
     const blocked = await waitForInput(t, started.session, "get_stock_price");
+    const request = blocked.requireInputRequest({ toolName: "get_stock_price" });
     const resumed = await blocked.respondAll("approve");
     t.check(resumed.inputRequests, equals([]));
     resumed.noFailedActions();
@@ -41,6 +43,9 @@ export default defineEval({
       ? resumed
       : await waitForMessage(t, blocked, GOOG_PRICE);
     completed.messageIncludes(GOOG_PRICE);
+
+    // Regression for #3784: receiving the prompt over HTTP alone does not prove hook delivery.
+    await checkInputHookDelivery(t, completed.session, request.requestId);
 
     t.succeeded();
     t.calledSubagent("stock-price", { status: "completed", count: 1 });

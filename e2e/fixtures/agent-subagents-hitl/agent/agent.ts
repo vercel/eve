@@ -8,6 +8,18 @@ const STOCK_PRICE = "178.92";
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
   const prompt = request.messages.map((entry) => entry.text).join("\n");
+  if (message.includes("INPUT-HOOKS:AUDIT")) {
+    return request.toolResults.some((result) => result.name === "read-input-hooks")
+      ? "Input hook audit complete."
+      : { toolCalls: [{ name: "read-input-hooks" }] };
+  }
+  if (message.includes("INPUT-HOOKS:DIRECT")) {
+    return request.toolResults.some((result) => result.name === "collision-gate")
+      ? "INPUT-HOOKS:DIRECT approved."
+      : {
+          toolCalls: [{ name: "collision-gate", input: { marker: "INPUT-HOOKS:DIRECT" } }],
+        };
+  }
   if (message.includes("Call the stock-price subagent exactly once")) {
     return request.toolResults.some((result) => result.name === "stock-price")
       ? "The stock price is being fetched."
