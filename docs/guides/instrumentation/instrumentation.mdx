@@ -51,6 +51,11 @@ export default defineInstrumentation({
 `ctx.state` is JSON storage scoped to this file and operation. It survives
 durable suspension and is released after the terminal event.
 
+Use `setup` for asynchronous initialization. In `eve dev` and built servers,
+eve awaits every provider's setup before loading the server entry. A setup
+failure stops startup. Modules imported by an instrumentation file load before
+setup, so keep dependencies that need initialization out of those imports.
+
 ## Control inputs and outputs
 
 Each lifecycle file created with `defineInstrumentation(...)` has an

@@ -37,10 +37,6 @@ export type {
  * set. Destinations are the plural half and live in `otelIntegration()`.
  *
  * `contextManager` is deliberately absent: eve's span nesting depends on it.
- * `instrumentations` is accepted so providers can opt into Node auto-
- * instrumentations (e.g. `@opentelemetry/auto-instrumentations-node`); the
- * packages patch modules eve already imported, so their effects are limited
- * to code loaded after registration.
  */
 export interface OtelOptions {
   /**
@@ -87,11 +83,10 @@ export interface OtelOptions {
   readonly propagators?: readonly PropagatorOrName[];
   /**
    * OpenTelemetry `Instrumentation` instances passed through to
-   * `registerOTel`. Use them to patch Node.js built-ins (HTTP, DNS, fs, etc.)
-   * for automatic spans around outbound work. Disabled by default because eve
-   * already imports the model SDK before registration, so patching cannot
-   * reach it — but code loaded after registration (tool modules, connection
-   * clients) will be instrumented.
+   * `registerOTel` before the server entry loads. Disabled by default.
+   * Keep packages that rely on Node.js module hooks in
+   * `build.externalDependencies` and out of instrumentation modules' import
+   * graphs so they load after registration.
    */
   readonly instrumentations?: readonly unknown[];
 }
