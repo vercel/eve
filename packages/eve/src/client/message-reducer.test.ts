@@ -1314,6 +1314,35 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("inserts a steered user message before its streaming assistant response", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+      createMessageAppendedEvent({
+        messageDelta: "Working on it",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageReceivedEvent({
+        message: "Also include examples",
+        sequence: 2,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(
+      data.messages.map((message) => [
+        message.role,
+        message.parts[0]?.type === "text" ? message.parts[0].text : "assistant",
+      ]),
+    ).toEqual([
+      ["user", "First"],
+      ["user", "Also include examples"],
+      ["assistant", "assistant"],
+    ]);
+  });
+
   it("preserves separate participant messages received within one turn", () => {
     const reducer = defaultMessageReducer();
     const events = stampTestEvents([
