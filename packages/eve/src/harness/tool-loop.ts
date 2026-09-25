@@ -85,6 +85,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
+import { stubContentOutputFileParts } from "#harness/compaction-prompt.js";
 import { createCurrentMessages } from "#harness/current-messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
@@ -2990,6 +2991,10 @@ async function finishTurn(input: {
   const { emit, history, result, schema, stepOutput } = input;
   let { emissionState, session } = input;
   session = clearTurnClientContextState(session);
+  const historyWithoutCompletedToolFilePayloads = stubCompletedToolResultFileParts(session.history);
+  if (historyWithoutCompletedToolFilePayloads !== session.history) {
+    session = replaceSessionHistory(session, historyWithoutCompletedToolFilePayloads);
+  }
 
   if (schema === undefined) {
     if (emit) {
@@ -3026,6 +3031,44 @@ async function finishTurn(input: {
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
   return { next: null, session, settledTurn };
+}
+
+/**
+ * Drops raw file payloads once a turn is settled. During an active tool loop,
+ * later model steps still need the original results; afterward a text stub
+ * retains the tool result's provenance without persisting binary data again.
+ */
+function stubCompletedToolResultFileParts(messages: HarnessModelMessage[]): HarnessModelMessage[] {
+  let historyChanged = false;
+  const history = messages.map((message) => {
+    if (message.role !== "tool" || typeof message.content === "string") {
+      return message;
+    }
+
+    let messageChanged = false;
+    const content = message.content.map((part) => {
+      if (part.type !== "tool-result") {
+        return part;
+      }
+
+      const output = stubContentOutputFileParts(part.output) as typeof part.output;
+      if (output === part.output) {
+        return part;
+      }
+
+      messageChanged = true;
+      return { ...part, output };
+    });
+
+    if (!messageChanged) {
+      return message;
+    }
+
+    historyChanged = true;
+    return { ...message, content };
+  });
+
+  return historyChanged ? history : messages;
 }
 
 function createNextCompactionConfig(
