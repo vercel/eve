@@ -231,7 +231,19 @@ describe("local instrumentation runtime", () => {
                   ? "execute_tool"
                   : exported.name.startsWith("chat ")
                     ? "chat"
-                    : exported.name,
+                    : "workflow",
+            },
+          },
+          {
+            key: "gen_ai.operation.name",
+            value: {
+              stringValue: exported.name.startsWith("invoke_agent ")
+                ? "invoke_agent"
+                : exported.name.startsWith("execute_tool ")
+                  ? "execute_tool"
+                  : exported.name.startsWith("chat ")
+                    ? "chat"
+                    : "workflow",
             },
           },
         ]),

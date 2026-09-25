@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 
 import type ddTrace from "dd-trace";
@@ -349,6 +350,14 @@ class DatadogReporter implements EvalReporter {
 }
 
 const DD_TRACE_PACKAGE = "dd-trace";
+// Keep this namespace aligned with dd-go's APM-to-LLMObs trace-indexer processor.
+// It derives the indexed LLMObs trace ID as UUID v5 (SHA-1) of the canonical
+// APM trace ID. Datadog's OTLP intake currently exposes the lower 64 bits of
+// Eve's W3C trace ID to that processor, zero-padded to 128 bits. LLMObs span IDs
+// are the same unsigned 64-bit value in decimal rather than W3C hexadecimal.
+const DATADOG_LLMOBS_TRACE_ID_NAMESPACE = Buffer.from("f47ac10b58cc4372a5670e02b2c3d479", "hex");
+const W3C_TRACE_ID_PATTERN = /^[0-9a-f]{32}$/iu;
+const W3C_SPAN_ID_PATTERN = /^[0-9a-f]{16}$/iu;
 const EXPECTED_OUTPUT_METADATA_KEYS: ReadonlySet<string> = new Set([
   "expectedOutput",
   "expected",
@@ -521,6 +530,10 @@ function resolveResultMetadata(
     eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
     eveParked: result.result.derived.parked,
   });
+  const runtimeTraceLinks = resolveRuntimeTraceLinks(result.result.traceContexts);
+  if (runtimeTraceLinks.length > 0) {
+    metadata.experimentRuntimeTraceLinks = runtimeTraceLinks;
+  }
   if (recordAssertionDetails) {
     const failedAssertions = result.assertions
       .filter((assertion) => !assertion.passed)
@@ -533,6 +546,67 @@ function resolveResultMetadata(
     metadata.eveFailureCode = result.result.derived.failureCode;
   }
   return metadata;
+}
+
+function resolveRuntimeTraceLinks(traceContexts: EveEvalResult["result"]["traceContexts"]) {
+  const links = new Map<
+    string,
+    {
+      relation: "experiment_runtime";
+      traceId: string;
+      spanId: string;
+      sessionId: string;
+      primary: boolean;
+    }
+  >();
+
+  for (const traceContext of traceContexts) {
+    if ((traceContext.traceFlags & 1) === 0) continue;
+    const traceId = toDatadogLlmobsTraceId(traceContext.traceId);
+    const spanId = toDatadogLlmobsSpanId(traceContext.spanId);
+    if (traceId === undefined || spanId === undefined) continue;
+
+    const key = `${traceId}:${spanId}`;
+    const existing = links.get(key);
+    if (existing?.primary || (existing && !traceContext.primary)) continue;
+
+    links.set(key, {
+      relation: "experiment_runtime",
+      traceId,
+      spanId,
+      sessionId: traceContext.sessionId,
+      primary: traceContext.primary,
+    });
+  }
+
+  return [...links.values()];
+}
+
+function toDatadogLlmobsTraceId(traceId: string): string | undefined {
+  const canonicalTraceId = traceId.toLowerCase();
+  if (
+    !W3C_TRACE_ID_PATTERN.test(canonicalTraceId) ||
+    canonicalTraceId === "00000000000000000000000000000000"
+  ) {
+    return undefined;
+  }
+
+  const canonicalApmTraceId = canonicalTraceId.slice(-16).padStart(32, "0");
+  const hash = createHash("sha1")
+    .update(DATADOG_LLMOBS_TRACE_ID_NAMESPACE)
+    .update(canonicalApmTraceId)
+    .digest()
+    .subarray(0, 16);
+  hash[6] = (hash[6]! & 0x0f) | 0x50;
+  hash[8] = (hash[8]! & 0x3f) | 0x80;
+  return hash.toString("hex");
+}
+
+function toDatadogLlmobsSpanId(spanId: string): string | undefined {
+  if (!W3C_SPAN_ID_PATTERN.test(spanId) || spanId === "0000000000000000") {
+    return undefined;
+  }
+  return BigInt(`0x${spanId}`).toString(10);
 }
 
 function resolveEvaluationMetrics(
@@ -590,7 +664,11 @@ function elapsedMs(startedAt: string, completedAt: string): number | undefined {
   const start = Date.parse(startedAt);
   const completed = Date.parse(completedAt);
   if (!Number.isFinite(start) || !Number.isFinite(completed)) return undefined;
-  return Math.max(0, completed - start);
+
+  // ISO timestamps have millisecond precision, so fast failures can start and
+  // finish in the same millisecond. Datadog Experiment spans require a
+  // positive duration; use the smallest representable duration in these units.
+  return Math.max(1, completed - start);
 }
 
 function toOptionalDatadogJsonValue(value: unknown): DatadogJsonValue | undefined {

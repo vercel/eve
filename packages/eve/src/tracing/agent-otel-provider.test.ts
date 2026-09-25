@@ -1430,6 +1430,8 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
       "agent.model.provider": "anthropic",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
       "agent.usage.cache_read_tokens": 4,
       "agent.usage.cache_write_tokens": 2,
       "agent.usage.input_tokens": 10,
@@ -1447,6 +1449,8 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.action.kind": "tool-call",
       "agent.action.name": "weather",
       "agent.framework.name": "eve",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
     });
     expect(tool.kind).toBe(SpanKind.INTERNAL);
     expect(tool.attributes).toMatchObject({
@@ -1635,7 +1639,10 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.workflow.name": "coordinate",
     });
     expect(wait.name).toBe("agent.action");
-    expect(wait.attributes).not.toHaveProperty("gen_ai.operation.name");
+    expect(wait.attributes).toMatchObject({
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
+    });
     expect(sampledWorkflow).toMatchObject({
       attributes: {
         "gen_ai.operation.name": "invoke_workflow",
@@ -1760,8 +1767,14 @@ describe("createAgentOtelInstrumentation", () => {
       "operation.name": "invoke_workflow",
       "resource.name": "invoke_workflow coordinate",
     });
-    expect(first.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(second.attributes).not.toHaveProperty("gen_ai.operation.name");
+    expect(first.attributes).toMatchObject({
+      "gen_ai.operation.name": "invoke_agent",
+      "operation.name": "invoke_agent",
+    });
+    expect(second.attributes).toMatchObject({
+      "gen_ai.operation.name": "invoke_agent",
+      "operation.name": "invoke_agent",
+    });
     expect(tool.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
     expect(first.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
     expect(second.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
@@ -2381,9 +2394,10 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.approval.request": expect.stringContaining("Approve weather?"),
       "agent.approval.request_id": "approval-1",
       "agent.approval.response": expect.stringContaining("approve"),
-      "operation.name": "agent.approval",
-      "resource.name": "agent.approval",
       "gen_ai.conversation.id": "session-1",
+      "gen_ai.operation.name": "workflow",
+      "operation.name": "workflow",
+      "resource.name": "agent.approval",
       "agent.step.index": 0,
       "agent.turn.id": "turn-1",
     });
@@ -2919,7 +2933,10 @@ describe("createAgentOtelInstrumentation", () => {
     ).toBe(false);
     expect(action?.attributes).not.toHaveProperty("gen_ai.tool.call.arguments");
     expect(action?.attributes).not.toHaveProperty("gen_ai.tool.call.result");
-    expect(action?.attributes).not.toHaveProperty("gen_ai.operation.name");
+    expect(action?.attributes).toMatchObject({
+      "gen_ai.operation.name": "invoke_agent",
+      "operation.name": "invoke_agent",
+    });
     expect(byName(spans, "invoke_agent weather")).toHaveLength(1);
     expect(byName(spans, "execute_tool weather")).toHaveLength(1);
   });
@@ -2938,6 +2955,12 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const model = byName(spans, "chat claude-test")[0]!;
     const tool = byName(spans, "execute_tool weather")[0]!;
+    const turn = byName(spans, "invoke_agent weather")[0]!;
+    expect(turn.attributes).toMatchObject({
+      "gen_ai.input.messages":
+        '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
+      "gen_ai.output.messages": expect.stringContaining("Checking the weather."),
+    });
     expect(model.attributes["ai.prompt.system"]).toBe(
       "You are a weather assistant (system prompt).",
     );
@@ -2988,6 +3011,12 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.input.messages",
+    );
+    expect(byName(spans, "invoke_agent weather")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.output.messages",
+    );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
       "gen_ai.input.messages",
     );

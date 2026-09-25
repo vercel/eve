@@ -208,6 +208,7 @@ describe("Datadog", () => {
     expect(submittedSpan).not.toHaveProperty("metadata.expectedOutput");
     expect(submittedSpan).not.toHaveProperty("metadata.expected");
     expect(submittedSpan).not.toHaveProperty("metadata.expected_output");
+    expect(submittedSpan).not.toHaveProperty("metadata.experimentRuntimeTraceLinks");
     expect(experiment.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
       expect.objectContaining({ label: "gate_succeeded", value: 1 }),
       expect.objectContaining({ label: "similarity", value: 0.9 }),
@@ -225,6 +226,188 @@ describe("Datadog", () => {
       ]),
     );
   });
+
+  it("uses a positive duration for evals completed within the same millisecond", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const evaluation = makeEval();
+    const result = makeEvalResult({
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    await reporter.onRunStart([evaluation], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 1 }));
+  });
+
+  it("records deduplicated runtime trace links across sessions", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const evaluation = makeEval();
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 1,
+            sessionId: "secondary-session",
+            primary: false,
+          },
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 1,
+            sessionId: "primary-session",
+            primary: true,
+          },
+          {
+            traceId: "fedcba9876543210fedcba9876543210",
+            spanId: "fedcba9876543210",
+            traceFlags: 1,
+            sessionId: "secondary-session",
+            primary: false,
+          },
+        ],
+      },
+    });
+
+    await reporter.onRunStart([evaluation], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          experimentRuntimeTraceLinks: [
+            {
+              relation: "experiment_runtime",
+              traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
+              spanId: "81985529216486895",
+              sessionId: "primary-session",
+              primary: true,
+            },
+            {
+              relation: "experiment_runtime",
+              traceId: "d8464e48436c5124a7b8b5b463a20f61",
+              spanId: "18364758544493064720",
+              sessionId: "secondary-session",
+              primary: false,
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("stores the Datadog-indexed IDs for a real W3C runtime context", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "010280a6f337b4e3117b3db95c1ad3fe",
+            spanId: "140edab97d7fb4ef",
+            traceFlags: 1,
+            sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
+            primary: true,
+          },
+        ],
+      },
+    });
+
+    await reporter.onRunStart([makeEval()], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          experimentRuntimeTraceLinks: [
+            {
+              relation: "experiment_runtime",
+              traceId: "e4eea2b9661c5e3890ed96de9715238e",
+              spanId: "1445333020641834223",
+              sessionId: "wrun_01M3533VV7F1M7FF5J8NQ3W7G8",
+              primary: true,
+            },
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("omits unsampled and invalid runtime trace contexts", async () => {
+    const { config, experiment } = makeConfig();
+    const reporter = Datadog(config);
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 0,
+            sessionId: "unsampled",
+            primary: true,
+          },
+          {
+            traceId: "invalid",
+            spanId: "invalid",
+            traceFlags: 1,
+            sessionId: "invalid",
+            primary: false,
+          },
+        ],
+      },
+    });
+
+    await reporter.onRunStart([makeEval()], makeTarget());
+    await reporter.onEvalComplete(result);
+
+    expect(experiment.submitSpan.mock.calls[0]?.[0]).not.toHaveProperty(
+      "metadata.experimentRuntimeTraceLinks",
+    );
+  });
+
+  it.each(["failed", "waiting"] as const)(
+    "records runtime trace links for %s evals",
+    async (status) => {
+      const { config, experiment } = makeConfig();
+      const reporter = Datadog(config);
+      const result = makeEvalResult({
+        result: {
+          ...makeEvalResult().result,
+          status,
+          traceContexts: [
+            {
+              traceId: "0123456789abcdef0123456789abcdef",
+              spanId: "0123456789abcdef",
+              traceFlags: 1,
+              sessionId: "session-123",
+              primary: true,
+            },
+          ],
+        },
+      });
+
+      await reporter.onRunStart([makeEval()], makeTarget());
+      await reporter.onEvalComplete(result);
+
+      expect(experiment.submitSpan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            experimentRuntimeTraceLinks: [
+              expect.objectContaining({ relation: "experiment_runtime", primary: true }),
+            ],
+          }),
+        }),
+      );
+    },
+  );
 
   it("redacts target URL secrets and execution errors by default", async () => {
     const { client, config, experiment } = makeConfig();
@@ -372,7 +555,20 @@ describe("Datadog", () => {
       recordExpectedOutputs: true,
     });
     const reporter = Datadog(config);
-    const result = makeEvalResult();
+    const result = makeEvalResult({
+      result: {
+        ...makeEvalResult().result,
+        traceContexts: [
+          {
+            traceId: "0123456789abcdef0123456789abcdef",
+            spanId: "0123456789abcdef",
+            traceFlags: 1,
+            sessionId: "session-123",
+            primary: true,
+          },
+        ],
+      },
+    });
 
     await reporter.onRunStart([makeEval()], makeTarget());
     await reporter.onEvalComplete(result);
@@ -411,6 +607,14 @@ describe("Datadog", () => {
         output: "actual output",
         expectedOutput: "helpful onboarding answer",
         datasetRecordId: "record-1",
+        metadata: expect.objectContaining({
+          experimentRuntimeTraceLinks: [
+            expect.objectContaining({
+              traceId: "c6a8d65cb7d45f2cbbcd2b8e57bdd074",
+              spanId: "81985529216486895",
+            }),
+          ],
+        }),
       }),
     );
     expect(lines.join("\n")).toContain("Datadog dataset URL: https://dd.test/dataset");

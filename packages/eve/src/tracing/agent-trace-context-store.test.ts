@@ -5,6 +5,7 @@ import { SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { INSTRUMENTATION_PRINCIPAL_TYPES } from "#instrumentation/lifecycle.js";
 import { deserializeAgentTraceContextState } from "#tracing/agent-trace-context-codec.js";
+import { CONTENT_ATTRIBUTE_LIMIT } from "#tracing/agent-otel-content.js";
 import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
@@ -36,7 +37,9 @@ describe("ContextAgentTraceStateStore", () => {
         context: spanContext("1", "3"),
         currentPrincipal: { id: "user-123", type: "user" },
         initiatorPrincipal: { type: "none" },
+        inputMessagesAttribute: '[{"parts":[{"content":"hello","type":"text"}],"role":"user"}]',
         modelUsage: { inputTokens: 12, outputTokens: 4 },
+        outputMessagesAttribute: '[{"parts":[{"content":"hi","type":"text"}],"role":"assistant"}]',
         caller: { ...spanContext("4", "2"), isRemote: true },
         rootSessionId: "session-1",
         sequence: 0,
@@ -66,7 +69,9 @@ describe("ContextAgentTraceStateStore", () => {
         },
         currentPrincipal: { id: "user-123", type: "user" },
         initiatorPrincipal: { type: "none" },
+        inputMessagesAttribute: '[{"parts":[{"content":"hello","type":"text"}],"role":"user"}]',
         modelUsage: { inputTokens: 12, outputTokens: 4 },
+        outputMessagesAttribute: '[{"parts":[{"content":"hi","type":"text"}],"role":"assistant"}]',
         caller: { ...spanContext("4", "2"), isRemote: true },
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
@@ -81,6 +86,25 @@ describe("ContextAgentTraceStateStore", () => {
         message: "failed",
       });
     });
+  });
+
+  it("rejects oversized persisted turn content attributes", () => {
+    const state = deserializeAgentTraceContextState({
+      turns: {
+        turn: {
+          context: spanContext("1", "2"),
+          inputMessagesAttribute: "x".repeat(CONTENT_ATTRIBUTE_LIMIT + 1),
+          outputMessagesAttribute: "x".repeat(CONTENT_ATTRIBUTE_LIMIT + 1),
+          rootSessionId: "session-1",
+          sequence: 0,
+          startTimeMs: 1,
+        },
+      },
+    });
+
+    expect(state.turns.turn).toBeDefined();
+    expect(state.turns.turn?.inputMessagesAttribute).toBeUndefined();
+    expect(state.turns.turn?.outputMessagesAttribute).toBeUndefined();
   });
 
   it.each([
