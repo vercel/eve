@@ -48,6 +48,14 @@ describe("filterOptions", () => {
     expect(filterOptions(options, "installed")).toEqual(options);
   });
 
+  it("matches hidden keywords without filtering out trailing actions", () => {
+    const option = { value: "blooio", label: "Blooio", keywords: ["iMessage", "SMS"] };
+    const done = { value: "done", label: "Done", trailingAction: true, keywords: ["iMessage"] };
+    expect(filterOptions([option, done], " IMESSAGE ")).toEqual([option, done]);
+    expect(filterOptions([option, done], "sms")).toEqual([option, done]);
+    expect(filterOptions([option, done], "email")).toEqual([done]);
+  });
+
   it("returns nothing when no option matches", () => {
     const done = { value: "done", label: "Done", trailingAction: true };
     expect(filterOptions([...OPTIONS, done], "zzz")).toEqual([done]);
@@ -108,6 +116,14 @@ describe("reduceSelect", () => {
     expect(reduceSelect(initial, { type: "backspace" }, context())).toBe(initial);
     const state = { filter: "😀", cursor: 0, selected: new Set<string>() };
     expect(reduceSelect(state, { type: "backspace" }, context()).filter).toBe("");
+  });
+
+  it("deletes to the previous readline-style word boundary", () => {
+    expect(reduceSelect(initial, { type: "delete-word-backward" }, context())).toBe(initial);
+    const state = { filter: "one,  two_three 世界", cursor: 2, selected: new Set<string>() };
+    const next = reduceSelect(state, { type: "delete-word-backward" }, context());
+    expect(next.filter).toBe("one,  two_three ");
+    expect(next.cursor).toBe(0);
   });
 
   it("wraps the cursor across the visible list", () => {

@@ -25,17 +25,14 @@ function getLogFilePaths(log) {
     return [];
   }
 
-  return [
-    log.id,
-    ...(log.ids ?? []),
-    log.loc?.file,
-    typeof log.pluginCode === "string" ? log.pluginCode : undefined,
-  ].filter((value) => typeof value === "string");
+  return [log.id, ...(log.ids ?? []), log.loc?.file].filter((value) => typeof value === "string");
 }
 
 function isVendoredDependencyWarning(log) {
-  return getLogFilePaths(log).some(
-    (filePath) => isNodeModulesPath(filePath) || isCompiledVendorPath(filePath),
+  const filePaths = getLogFilePaths(log);
+  return (
+    filePaths.length > 0 &&
+    filePaths.every((filePath) => isNodeModulesPath(filePath) || isCompiledVendorPath(filePath))
   );
 }
 

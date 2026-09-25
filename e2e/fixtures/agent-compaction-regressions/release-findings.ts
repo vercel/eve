@@ -1,0 +1,33 @@
+export const repositoryFindings = [
+  "Application startup loads configuration before registering the catalog, cart, checkout, and order routes. An invalid currency setting prevents the application from accepting requests and identifies the setting that needs correction.",
+  "The catalog exposes product identifiers, display names, prices in cents, and availability. Product identifiers remain stable when a display name changes, so a saved cart continues to identify the intended product.",
+  "Catalog searches return an empty collection when nothing matches. The storefront distinguishes that state from a failed search and offers a clear way to remove filters without losing the customer's current cart.",
+  "The cart accepts positive integer quantities and rejects zero, negative, and fractional values. Adding an existing product updates its quantity, while removing the final product leaves an empty cart that can still be displayed.",
+  "Checkout obtains current prices from the catalog instead of trusting totals submitted by the browser. A price change is shown for confirmation before the order is accepted, allowing the customer to review the revised amount.",
+  "Inventory is checked again when an order is submitted. An unavailable product produces an explanation while preserving the other cart contents, so the customer can remove that item and continue without rebuilding the cart.",
+  "Order persistence stores product descriptions and prices alongside quantities. Order history therefore continues to show what the customer purchased even if a product is later renamed, repriced, or removed from the catalog.",
+  "The order confirmation reads the saved order rather than recalculating it from current catalog values. Its subtotal, delivery charge, and final total agree with the amounts presented at the time the order was accepted.",
+  "Confirmation notifications are scheduled only after the order write succeeds. A delivery failure is recorded separately from the purchase, and retrying the notification does not create another order or charge the customer again.",
+  "Order history uses a bounded page size and a continuation cursor. Results have a stable ordering for orders created at the same time, preventing duplicates or omissions when a customer moves between adjacent history pages.",
+  "Cancellation checks the saved order status before changing inventory. Repeated cancellation requests return the already cancelled order, while an order that has entered fulfillment receives a clear explanation of why cancellation is unavailable.",
+  "Customer supplied names and address labels are rendered as text in the storefront and confirmation. Long values wrap within their sections, and empty optional address lines do not create blank labels or misleading punctuation.",
+  "The shared error response distinguishes invalid input, unavailable inventory, and temporary service failure. Customer messages omit internal details, while server diagnostics retain the originating error for the support investigation.",
+  "The review covers startup, catalog, cart, checkout, saved orders, and notifications. Release validation should now concentrate on the purchase and cancellation journeys, including retries, without repeating this repository inspection.",
+];
+
+export const handoffNotes = [
+  "Repository review is complete for application startup, catalog browsing, cart updates, checkout, order history, and notifications. Carry these findings into release validation; the next reviewer should not repeat the completed inspection.",
+  "Start release validation with a catalog containing available and unavailable products. Confirm that filters show an empty state when appropriate and that clearing a filter restores the product list while preserving the current cart contents.",
+  "Exercise cart updates with a new product, an existing product, and removal of the final item. Include invalid quantities and confirm that rejected updates leave the last valid cart visible, with an explanation tied to the offending input.",
+  "For the purchase journey, compare displayed prices, accepted prices, and the saved confirmation. Introduce a catalog price change before submission and verify that the customer must confirm the revised amount before an order is accepted.",
+  "Test an inventory change between browsing and checkout. The unavailable item should be identified without discarding the rest of the cart, and removing it should allow the customer to continue through the same checkout session.",
+  "Keep the resulting order identifier with the release evidence. Compare its stored line items and total against the confirmation, then update the catalog and confirm that the historical receipt still reflects the original purchase.",
+  "Check the notification path after a successful purchase. A temporary delivery failure should be visible to operations without turning the accepted purchase into a failure, and a retry should reference the same order identifier.",
+  "Validate cancellation before fulfillment and repeat the request. Confirm that the order stays cancelled, inventory changes only once, and a later attempt to cancel an order already in fulfillment receives an understandable response.",
+  "Use enough saved orders to cross a history page boundary. Include equal creation times and verify stable ordering across consecutive pages, with no duplicate order cards and no missing records when following the continuation cursor.",
+  "Review the customer-facing screens with long product names and address labels. Content should remain readable without being interpreted as markup, and optional empty address lines should not produce stray labels or confusing separators.",
+  "During failure testing, record the customer-visible message and the corresponding internal error reference separately. Confirm that the customer can choose a recovery action without receiving private addresses, credentials, or server implementation details.",
+  "The release owner should collect results for the purchase, cancellation, and notification journeys before approval. A failed journey needs its own reproduction and recovery check; a passed repository review does not replace that behavioral evidence.",
+  "Keep unresolved release checks distinct from completed review work in the handoff. If validation exposes a new defect, record the new observation and affected journey rather than reopening the repository inspection without additional evidence.",
+  "After the release checks are recorded, publish the concise handoff with the completed review result and checkpoint status. Link each recorded release check to the journey it covers so later reviewers can trace every result back to this plan.",
+];

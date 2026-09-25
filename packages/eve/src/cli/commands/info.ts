@@ -1,6 +1,6 @@
 import { type ApplicationInspection, inspectApplication } from "#services/inspect-application.js";
 import type { CompiledInstructionsDefinition } from "#compiler/manifest.js";
-import { type CliRow, createCliTheme, renderCliBanner, renderCliSection } from "#cli/ui/output.js";
+import { type CliRow, createCliTheme, renderCliSection } from "#cli/ui/output.js";
 
 interface CliInfoLogger {
   log(message: string): void;
@@ -69,16 +69,12 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
     subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
     schedules: (compiledState?.manifest.schedules ?? []).map((schedule) => schedule.name),
-    channels: (compiledState?.manifest.channels ?? []).map((channel) =>
-      channel.kind === "channel"
-        ? {
-            name: channel.name,
-            kind: channel.adapterKind ?? null,
-            method: channel.method,
-            urlPath: channel.urlPath,
-          }
-        : { name: channel.name, kind: "disabled", method: null, urlPath: null },
-    ),
+    channels: (compiledState?.manifest.channelRoutes.effective ?? []).map((channel) => ({
+      name: channel.name,
+      kind: channel.adapterKind ?? null,
+      method: channel.method,
+      urlPath: channel.urlPath,
+    })),
     messaging: {
       create: messaging.createSessionRoutePath,
       messages: messaging.sessionMessagesRoutePattern,
@@ -130,6 +126,11 @@ export async function printApplicationInfo(
     return;
   }
 
+  logger.log(renderApplicationInfo(inspection));
+}
+
+/** Renders the human-readable `eve info` report for CLI and TUI surfaces. */
+export function renderApplicationInfo(inspection: ApplicationInspection): string {
   const compiledState = inspection.compiledState;
   const info = inspection.application;
   const theme = createCliTheme();
@@ -244,60 +245,53 @@ export async function printApplicationInfo(
     });
   }
 
-  logger.log(
-    [
-      renderCliBanner(theme, {
-        subtitle: "Resolved application paths and the active message contract.",
-        title: "eve Info",
-      }),
-      "",
-      renderCliSection(theme, {
-        rows: applicationRows,
-        title: "Application",
-      }),
-      "",
-      renderCliSection(theme, {
-        rows: artifactRows,
-        title: "Artifacts",
-      }),
-      ...(compiledState === null
-        ? []
-        : [
-            "",
-            renderCliSection(theme, {
-              rows: instructionsRows,
-              title: "Instructions",
-            }),
-          ]),
-      "",
-      renderCliSection(theme, {
-        rows: [
-          {
-            label: "Workflow ID",
-            value: info.workflowId,
-          },
-          {
-            label: "Source Dir",
-            value: info.workflowSourceDir,
-          },
-          {
-            label: "Create",
-            tone: "info",
-            value: `POST ${inspection.messaging.createSessionRoutePath}`,
-          },
-          {
-            label: "Messages",
-            tone: "info",
-            value: `POST ${inspection.messaging.sessionMessagesRoutePattern}`,
-          },
-          {
-            label: "Stream",
-            tone: "info",
-            value: `GET ${inspection.messaging.streamRoutePattern}`,
-          },
-        ],
-        title: "Messaging",
-      }),
-    ].join("\n"),
-  );
+  return [
+    renderCliSection(theme, {
+      rows: applicationRows,
+      title: "Application",
+    }),
+    "",
+    renderCliSection(theme, {
+      rows: artifactRows,
+      title: "Artifacts",
+    }),
+    ...(compiledState === null
+      ? []
+      : [
+          "",
+          renderCliSection(theme, {
+            rows: instructionsRows,
+            title: "Instructions",
+          }),
+        ]),
+    "",
+    renderCliSection(theme, {
+      rows: [
+        {
+          label: "Workflow ID",
+          value: info.workflowId,
+        },
+        {
+          label: "Source Dir",
+          value: info.workflowSourceDir,
+        },
+        {
+          label: "Create",
+          tone: "info",
+          value: `POST ${inspection.messaging.createSessionRoutePath}`,
+        },
+        {
+          label: "Messages",
+          tone: "info",
+          value: `POST ${inspection.messaging.sessionMessagesRoutePattern}`,
+        },
+        {
+          label: "Stream",
+          tone: "info",
+          value: `GET ${inspection.messaging.streamRoutePattern}`,
+        },
+      ],
+      title: "Messaging",
+    }),
+  ].join("\n");
 }

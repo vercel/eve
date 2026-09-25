@@ -1,0 +1,153 @@
+import { describe, expect, it } from "vitest";
+
+import { withInstrumentationDecision } from "#instrumentation/content.js";
+import type {
+  InstrumentationInputRequestedEvent,
+  InstrumentationInputResolvedEvent,
+  InstrumentationSessionStartedEvent,
+} from "#instrumentation/lifecycle.js";
+
+const scope = {
+  attemptId: "attempt-1",
+  attemptIndex: 0,
+  sessionId: "session-1",
+  stepIndex: 0,
+  turnId: "turn-1",
+};
+
+describe("withInstrumentationDecision", () => {
+  it("treats the session title as input content", () => {
+    const event = {
+      agentName: "general",
+      channelAudience: "public",
+      idempotencyKey: "session:session-1",
+      rootSessionId: "session-1",
+      scheduleId: "daily-report",
+      sessionId: "session-1",
+      title: "Private title",
+      type: "session.started",
+    } satisfies InstrumentationSessionStartedEvent;
+
+    expect(
+      withInstrumentationDecision(event, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      }),
+    ).toEqual(expect.objectContaining({ scheduleId: "daily-report", title: undefined }));
+  });
+
+  it("treats input requests as outputs and user responses as inputs", () => {
+    const requested = withInstrumentationDecision(
+      {
+        action: { callId: "call-1", name: "approve" },
+        idempotencyKey: "request-1",
+        kind: "tool-approval",
+        request: { prompt: "Approve?" },
+        requestId: "request-1",
+        scope,
+        type: "input.requested",
+      } satisfies InstrumentationInputRequestedEvent,
+      { action: "record", recordInputs: true, recordOutputs: false },
+    );
+    const resolved = withInstrumentationDecision(
+      {
+        error: new Error("failed"),
+        idempotencyKey: "request-1",
+        kind: "tool-approval",
+        outcome: "approved",
+        requestId: "request-1",
+        response: { text: "yes" },
+        scope,
+        type: "input.resolved",
+      } satisfies InstrumentationInputResolvedEvent,
+      { action: "record", recordInputs: true, recordOutputs: false },
+    );
+
+    expect(requested).toEqual(expect.objectContaining({ request: undefined }));
+    expect(resolved).toEqual(
+      expect.objectContaining({ error: undefined, response: { text: "yes" } }),
+    );
+  });
+
+  it("keeps output-side requests and errors while removing user responses", () => {
+    const requested = {
+      action: { callId: "call-1", name: "approve" },
+      idempotencyKey: "request-1",
+      kind: "tool-approval",
+      request: { prompt: "Approve?" },
+      requestId: "request-1",
+      scope,
+      type: "input.requested",
+    } satisfies InstrumentationInputRequestedEvent;
+    const error = new Error("failed");
+    const resolved = {
+      error,
+      idempotencyKey: "request-1",
+      kind: "tool-approval",
+      outcome: "failed",
+      requestId: "request-1",
+      response: { text: "no" },
+      scope,
+      type: "input.resolved",
+    } satisfies InstrumentationInputResolvedEvent;
+    const decision = { action: "record", recordInputs: false, recordOutputs: true } as const;
+
+    expect(withInstrumentationDecision(requested, decision)).toBe(requested);
+    expect(withInstrumentationDecision(resolved, decision)).toEqual(
+      expect.objectContaining({ error, response: undefined }),
+    );
+  });
+
+  it("treats recalled memory records as inputs", () => {
+    const completed = {
+      idempotencyKey: "memory-1",
+      operationName: "search_memory",
+      outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+      phase: "turn.started",
+      recordCount: 1,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      slot: "profile",
+      storeId: "memscope1_scope",
+      turnId: "turn-1",
+      type: "memory.operation.completed",
+    } as const;
+
+    expect(
+      withInstrumentationDecision(completed, {
+        action: "record",
+        recordInputs: true,
+        recordOutputs: false,
+      }),
+    ).toBe(completed);
+    expect(
+      withInstrumentationDecision(completed, {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      }),
+    ).toEqual(expect.objectContaining({ outputRecords: undefined }));
+  });
+
+  it("reduces provider metadata to structural output when outputs are disabled", () => {
+    const projected = withInstrumentationDecision(
+      {
+        idempotencyKey: "attempt-1",
+        providerMetadata: {
+          gateway: { cost: "0.01", generationId: "gen-1", secret: "hidden" },
+          secret: "hidden",
+        },
+        scope,
+        type: "step.attempt.metadata",
+      },
+      { action: "record", recordInputs: true, recordOutputs: false },
+    );
+
+    expect(projected).toEqual(
+      expect.objectContaining({
+        providerMetadata: { gateway: { cost: "0.01", generationId: "gen-1" } },
+      }),
+    );
+  });
+});

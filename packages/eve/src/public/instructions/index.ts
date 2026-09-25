@@ -11,4 +11,4 @@ export {
   type InstructionsDefinition,
 } from "#public/definitions/instructions.js";
 
-export type { DynamicResolveContext, DynamicSentinel } from "#shared/dynamic-tool-definition.js";
+export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";

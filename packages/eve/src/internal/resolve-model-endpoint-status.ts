@@ -1,5 +1,6 @@
 import type { ModelRouting } from "#shared/agent-definition.js";
-import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
+import type { ChatGptEndpointState, ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /**
  * Presence of the two gateway credentials, read from wherever the caller can
@@ -11,6 +12,8 @@ export interface GatewayCredentialPresence {
   readonly apiKey: boolean;
   /** A Vercel OIDC token is available (`VERCEL_OIDC_TOKEN` or a linked project). */
   readonly oidc: boolean;
+  readonly account?: boolean;
+  readonly team?: string;
 }
 
 /** True when an environment value is present and non-blank. */
@@ -42,19 +45,10 @@ export type GatewayCredentialResolution =
       credential: "api-key";
       /** Where the winning key lives; a shell export is not eve's to remove. */
       source: GatewayCredentialSource;
-      /** Present when an OIDC token exists that the key shadows. */
-      shadowedOidc?: { file?: string };
     }
   | { credential: "oidc"; file?: string };
 
-/**
- * THE one encoding of gateway credential precedence: `AI_GATEWAY_API_KEY`
- * (env file first for attribution, then the shell) outranks the OIDC token,
- * exactly as the AI SDK gateway provider resolves them. Every surface that
- * reports or ranks gateway credentials — the endpoint status, the /model
- * provider row, the link outcome, boot detection — must route through this
- * function so they can never disagree.
- */
+/** Ranks Gateway credentials using runtime precedence. */
 export function resolveGatewayCredential(
   evidence: GatewayCredentialEvidence,
 ): GatewayCredentialResolution | undefined {
@@ -67,11 +61,7 @@ export function resolveGatewayCredential(
   const hasOidc = evidence.oidcFile !== undefined || evidence.oidcAvailable === true;
 
   if (source !== undefined) {
-    const resolution: GatewayCredentialResolution = { credential: "api-key", source };
-    if (hasOidc) {
-      resolution.shadowedOidc = evidence.oidcFile === undefined ? {} : { file: evidence.oidcFile };
-    }
-    return resolution;
+    return { credential: "api-key", source };
   }
   if (hasOidc) {
     return evidence.oidcFile === undefined
@@ -91,10 +81,24 @@ export function resolveGatewayCredential(
 export function resolveModelEndpointStatus(
   routing: ModelRouting,
   credentials: GatewayCredentialPresence,
+  chatgpt?: {
+    readonly state: ChatGptEndpointState;
+    readonly accountLabel?: string;
+  },
 ): ModelEndpointStatus {
   if (routing.kind === "external") {
+    if (isChatGptModelRouting(routing) && chatgpt !== undefined) {
+      return { kind: "chatgpt", ...chatgpt };
+    }
     return { kind: "external", provider: routing.provider };
   }
+  if (credentials.account)
+    return {
+      kind: "gateway",
+      connected: true,
+      credential: "oauth",
+      team: credentials.team,
+    };
   const resolution = resolveGatewayCredential({
     apiKeyInEnv: credentials.apiKey,
     oidcAvailable: credentials.oidc,

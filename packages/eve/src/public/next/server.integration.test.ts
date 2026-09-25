@@ -51,6 +51,21 @@ describe("resolveEveDestinationPrefix", () => {
     );
   });
 
+  it("reports a missing local production build instead of proxying to an unstarted port", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const appRoot = await createTempAppRoot();
+
+    await expect(
+      resolveEveDestinationPrefix({
+        appRoot,
+        phase: "phase-production-server",
+        productionDestinationPrefix: "http://127.0.0.1:4274",
+        productionServerOrigin: "http://127.0.0.1:4274",
+      }),
+    ).rejects.toThrow(`Run eve build from ${appRoot} before starting Next.js.`);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it("ignores non-server URLs in dev server output while waiting for the listening URL", async () => {
     vi.stubEnv("NODE_ENV", "development");
     const appRoot = await createTempAppRoot();
@@ -92,6 +107,30 @@ describe("resolveEveDestinationPrefix", () => {
     expect(stderrWrites).toContain(
       "[eve:dev:support] server listening at http://127.0.0.1:33449\n",
     );
+  });
+
+  it("selects a workspace agent when starting its dev server", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const appRoot = await createTempAppRoot();
+    const child = createMockChildProcess();
+    spawnMock.mockReturnValue(child);
+
+    const destination = resolveEveDestinationPrefix({
+      appRoot,
+      logLabel: "support",
+      phase: "phase-development-server",
+      productionDestinationPrefix: "/internal/eve",
+      workspaceAgentName: "support",
+    });
+
+    await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1));
+    expect(spawnMock).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(["dev", "--no-ui", "--port", "0", "--agent", "support"]),
+      expect.objectContaining({ cwd: appRoot }),
+    );
+    child.stdout.emit("data", Buffer.from("[dev] server listening at http://127.0.0.1:33451\n"));
+    await expect(destination).resolves.toBe("http://127.0.0.1:33451");
   });
 
   it("suppresses low-signal eve dev startup output", async () => {

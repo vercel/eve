@@ -6,24 +6,24 @@ url: /human-in-the-loop
 
 Human-in-the-loop (HITL) is any point where the agent durably pauses and waits for a person. Two things trigger it, and both ride the same pause-and-resume protocol:
 
-- **Approvals** — a tool requires a person to sign off before (or instead of) running. The agent decides to call the tool; a human decides whether it does.
+- **Approvals** — a tool policy allows, denies, or pauses a call for a person to review. The agent decides to call the tool; the policy decides whether it runs automatically or needs a human decision.
 - **Questions** — the agent itself asks the user a clarifying question or a choice mid-turn, and parks until they answer.
 
 Either way the run parks at `session.waiting`, durably, for as long as it takes — seconds or days — and picks back up exactly where it left off once the answer arrives. Channels render the request for you.
 
 ## Approvals
 
-Approval is a property of a [tool](/docs/tools) that pauses for a person before it runs. Gate a tool with `approval` and the helpers from `eve/tools/approval`:
+Approval is a property of a [tool](/docs/tools) that gates it before it runs. The policy can decide automatically or pause for a person. Set `approval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
+import { auto } from "eve/tools/approval";
 import { z } from "zod";
 
 export default defineTool({
   description: "Refund a charge.",
   inputSchema: z.object({ tenantId: z.string(), chargeId: z.string(), amount: z.number() }),
-  approval: always(), // or once() / never() / a policy
+  approval: auto(), // or always() / once() / never() / a policy
   async execute(input) {
     return refund(input);
   },
@@ -35,10 +35,34 @@ export default defineTool({
 | `never()`  | Never require approval (the default when omitted).                                 |
 | `once()`   | Require approval only the first time the tool runs in a session; auto-allow after. |
 | `always()` | Require approval before every call.                                                |
+| `auto()`   | Ask an evaluation model whether to run the exact call or require user approval.    |
 
 By default, omitted `approval` behaves like `never()`, so tool calls may execute without human approval. Require human approval or other safeguards for sensitive, irreversible, regulated, financial, healthcare, employment, housing, legal, safety-impacting, user-impacting, or external side-effecting actions.
 
-When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools, callId }`, and returns an AI SDK 7 approval status synchronously or as a promise. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
+`auto()` uses an [AI SDK evaluation model](/docs/guides/evaluate) to classify each call as `clear` or `caution`. It defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev evaluation model](https://vercel.com/i/what-is-jev). Like `evaluate`, a model string uses Vercel AI Gateway unless the application configures a global AI SDK default provider:
+
+```ts
+approval: auto({ model: "typesafe-ai/jev" });
+```
+
+The evaluation model reviews the tool name and input for dangerous effects. A caution, failed review, or incomplete input requires user approval. The tool input is sent to the evaluation model's provider.
+
+Override the classifier text for application-specific policy:
+
+```ts
+approval: auto({
+  model: "typesafe-ai/jev",
+  instructions: "Review whether this refund needs finance approval.",
+  criteria: {
+    clear: "The refund can proceed automatically.",
+    caution: "A person must review the refund.",
+  },
+});
+```
+
+A reusable approval grant applies only after every matching request that is already pending has been resolved. If several calls to a `once()`-gated tool have each produced an approval prompt, approving one does not authorize the others; each visible prompt remains an independent decision. After those pending requests are resolved, later calls in the session are allowed automatically.
+
+When the decision depends on the input, pass your own policy instead of a helper. It receives the same session context as tool execution, plus `{ toolName, toolInput, approvedTools, callId, abortSignal }`, and returns an AI SDK 7 approval status synchronously or as a promise. Use `abortSignal` for asynchronous policy work so cancellation stops it with the turn. Use `ctx.session.auth.current` to guard by the caller of the current turn and `ctx.session.auth.initiator` to guard by the caller that created the session. Return `"user-approval"` to pause for a person or `"not-applicable"` to continue without a prompt. `toolInput` can be undefined, so guard the access. This policy denies cross-tenant calls, then requires approval only when an amount crosses a threshold:
 
 ```ts
 approval: ({ session, toolInput }) => {
@@ -52,9 +76,52 @@ approval: ({ session, toolInput }) => {
 
 For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
 
-Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from both `eve/tools` and `eve/tools/approval`.
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
+
+### Authorizing approval responses
+
+You may also define an approval response policy that decides whether the authenticated person who selects **Approve** may approve that specific call:
+
+```ts title="agent/tools/refund_charge.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string() }),
+  approval: {
+    request: always(),
+    response: ({ responder, request, response, session, auth }) => {
+      // The Slack channel authenticates the responder and includes the workspace and user IDs.
+      // Larger apps can look up approver membership here instead.
+      const approvers = ["slack:T012AB3CD:U045EF6GH", "slack:T012AB3CD:U078JK9LM"];
+      const canApprove = approvers.includes(responder.principalId);
+
+      return canApprove
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "This user cannot approve refunds." };
+    },
+  },
+  async execute(input) {
+    return refund(input);
+  },
+});
+```
+
+The `response` policy receives:
+
+- `responder`: the authenticated principal that submitted the response, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity.
+- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved.
+- `response`: the submitted decision. Response policies run for approval, so its current value is `{ decision: "approve" }`.
+- `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
+- `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
+
+Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it.
+
+When a response is refused without starting a turn, the session returns to `session.waiting`. The client finishes the submission and keeps the approval prompt answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision. You can inspect `approval.candidate` events for the response policy's refusal reason.
 
 ### Skipping approval for schedule-dispatched turns
 
@@ -85,31 +152,44 @@ export default defineTool({
 
 ## Questions
 
-The built-in `ask_question` tool lets the model pause and ask the user, rather than guessing. It has no `execute` — the model calls it with `{ prompt, options?, allowFreeform? }`:
+The `ask_question` tool lets the model pause and ask the user one question, rather than guessing. The model calls it with `{ question, options? }`:
 
-- `prompt`: the question to put to the user.
-- `options`: an optional list of choices to offer. Channels render these as buttons or a select menu.
-- `allowFreeform`: whether the user may answer with free text instead of picking an option.
+- `question`: the question to put to the user, with the context needed to answer it.
+- `options`: two or three mutually exclusive choices, each with a `label` and a one-sentence `description`. Channels render these as buttons or a select menu. Omit `options` for an open-ended question.
 
-`ask_question` is part of the [default harness](/docs/concepts/default-harness), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
+The user can always type their own answer instead of picking an option, so the model never needs an "Other" option. The tool returns `{ status: "answered", answer }` with the chosen option's label or the user's words, `{ status: "dismissed" }` when the user moved on without answering, or `{ status: "unavailable" }` when the session cannot request input.
+
+`ask_question` is an [opt-in framework tool](/docs/concepts/built-in-tools#ask_question). Add it with `eve add tool/ask_question`, which creates this file:
+
+```ts title="agent/tools/ask_question.ts"
+import { askQuestion } from "eve/tools/ask_question";
+
+export default askQuestion();
+```
+
+`ask_question` is an ordinary [workflow tool](/docs/tools/workflows) built on `ctx.ask()`. Write your own workflow tool with `ctx.ask()` when you need a different schema or want to act on the answer in the same call. Without any asking tool, the model asks in its reply text and the user's next message carries the answer.
 
 ## How pause and resume works
 
 Approvals and questions share one protocol:
 
-1. The model requests input (an approval, or an `ask_question`).
+1. A tool call needs approval, or a workflow tool such as `ask_question` calls `ctx.ask()`.
 2. eve emits an `input.requested` stream event carrying the pending requests.
 3. The turn parks at `session.waiting`, durably, for as long as it takes.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
+For `ctx.ask()` questions from blocking tools, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message reaches the model as a normal turn, and each pending question created with `dismissible: true` resolves as `dismissed`. Questions from background tools and subagents need a structured response.
+
 Each request includes a `kind` discriminator: `tool-approval`, `question`, or
-`session-limit`. Clients should use `kind` to choose behavior and presentation;
-`toolName` and `requestId` identify the action and request but do not encode its
-semantics.
+`session-limit`. Clients should use `kind` to choose behavior and presentation.
+`requestId` identifies the request to answer, and `action.callId` identifies the
+tool call that raised it; neither encodes the request's semantics.
 
 The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
 
-For approval requests, unrelated follow-up text does not deny the tool call — and it does not wait behind it either. The message runs as an ordinary turn while the approval stays pending and answerable; a later structured answer still resolves the original tool call. Text that exactly matches an option (like `approve`) still resolves the request directly.
+When a background subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
+
+For approval requests, unrelated follow-up text does not deny the tool call. eve keeps the approval pending and records that pending state in model-visible session history. Follow-up turns run normally and may call other tools while the approval remains unresolved. Once it is answered, eve settles the original tool call exactly once.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
 
@@ -119,10 +199,12 @@ Channels turn requests into native UI: the Slack adapter renders approvals as bu
 
 From your own frontend, scan all messages for pending requests and answer through the same session — see [Building a frontend](/docs/guides/frontend/overview#human-in-the-loop-prompts) for the client-side reducer and `inputResponses` shape.
 
+The default message reducer waits for server confirmation before marking any input request answered. Use the store's `submitted` or `streaming` status to show that a response is being processed; submitting a response alone does not resolve an approval, question, or session-limit prompt. The `client.input.responded` event remains a submission notification for custom reducers, not confirmation that the server accepted the answer.
+
 ## What to read next
 
 - [Tools](/docs/tools): define the typed actions an approval gates
-- [Default harness](/docs/concepts/default-harness): the built-in tools, including `ask_question`
+- [Built-in tools](/docs/concepts/built-in-tools): the default tools and opt-in tools such as `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
 - [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
 - [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools

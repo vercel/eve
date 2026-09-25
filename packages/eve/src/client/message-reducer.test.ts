@@ -3,19 +3,24 @@ import { describe, expect, it } from "vitest";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createActionInputAppendedEvent,
   createActionPartialEvent,
   createActionResultEvent,
   createActionsRequestedEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
+  createInputResolvedEvent,
   createInputRequestedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
+  createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
   createTurnCancelledEvent,
+  createTurnFailedEvent,
+  type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -32,6 +37,238 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("accumulates message and reasoning deltas without a start marker", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createReasoningAppendedEvent({
+        reasoningDelta: "I",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createReasoningAppendedEvent({
+        reasoningDelta: " can",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "Hel",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "lo",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toEqual([
+      { type: "step-start" },
+      { state: "streaming", stepIndex: 0, text: "I can", type: "reasoning" },
+      { state: "streaming", stepIndex: 0, text: "Hello", type: "text" },
+    ]);
+  });
+
+  it("uses the canonical completion after an interrupted attempt", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageAppendedEvent({
+        messageDelta: "abandoned",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "replacement",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: " complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "streaming",
+      stepIndex: 0,
+      text: "abandonedreplacement complete",
+      type: "text",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createMessageCompletedEvent({
+        message: "replacement complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "replacement complete",
+      type: "text",
+    });
+  });
+
+  it("projects streamed tool input and upgrades it to the validated request", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: '{"title":"Hel',
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: undefined,
+      inputText: '{"title":"Hel',
+      state: "input-streaming",
+      stepIndex: 0,
+      toolCallId: "call_render",
+      toolMetadata: { eve: { kind: "unknown", name: "render" } },
+      toolName: "render",
+      type: "dynamic-tool",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: 'lo"}',
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(data.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ inputText: '{"title":"Hello"}' }),
+    );
+
+    data = reduceServerEvents(reducer, data, [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_render",
+            input: { title: "Hello" },
+            kind: "tool-call",
+            toolName: "render",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: { title: "Hello" },
+      state: "input-available",
+      stepIndex: 0,
+      toolCallId: "call_render",
+      toolMetadata: { eve: { inputRequest: undefined, kind: "tool-call", name: "render" } },
+      toolName: "render",
+      type: "dynamic-tool",
+    });
+
+    const settled = data;
+    data = reduceServerEvents(reducer, data, [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "late",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(data).toBe(settled);
+  });
+
+  it("projects workflow tool requests as named tool parts", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_publish",
+            input: { report: "weekly" },
+            kind: "workflow-tool-call",
+            toolName: "publish",
+            workflowId: "publish-workflow",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: { report: "weekly" },
+      state: "input-available",
+      stepIndex: 0,
+      toolCallId: "call_publish",
+      toolMetadata: {
+        eve: { inputRequest: undefined, kind: "tool-call", name: "publish" },
+      },
+      toolName: "publish",
+      type: "dynamic-tool",
+    });
+  });
+
+  it("removes an unfinished streamed tool input when the turn is cancelled", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "{",
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+      createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+    ]);
+
+    expect(data.messages[0]?.parts).toEqual([{ type: "step-start" }]);
+  });
+
+  it("does not create an assistant message when a turn fails before streaming", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createTurnFailedEvent({
+        code: "MODEL_FAILED",
+        message: "model failed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages).toEqual([]);
+  });
+
   it("replaces tool-generator snapshots and ignores a late partial after the terminal result", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [
@@ -566,12 +803,61 @@ describe("defaultMessageReducer", () => {
       type: "client.input.responded",
     });
 
-    expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-responded" });
+    expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
   });
 
-  it("marks input requests as responded when the client submits a response", () => {
+  it.each(["tool-approval", "question", "session-limit"] as const)(
+    "waits for authoritative resolution of a submitted %s response",
+    (kind) => {
+      const reducer = defaultMessageReducer();
+      const requested = reduceServerEvents(reducer, reducer.initial(), [
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "ask_question" },
+              kind,
+              prompt: "Continue Alice's task?",
+              requestId: "request_1",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ]);
+      const response = { requestId: "request_1", optionId: "continue" };
+      const submitted = reducer.reduce(requested, {
+        type: "client.input.responded",
+        data: { createdAt: 1, responses: [response] },
+      });
+      expect(submitted).toBe(requested);
+      expect(findToolPart(submitted, "call_1")).toMatchObject({ state: "approval-requested" });
+      expect(findToolPart(submitted, "call_1")?.toolMetadata?.eve?.inputResponse).toBeUndefined();
+      const resolved = reduceServerEvents(reducer, submitted, [
+        createInputResolvedEvent({
+          resolutions: [
+            {
+              kind,
+              outcome: kind === "tool-approval" ? "approved" : "answered",
+              requestId: "request_1",
+              response,
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ]);
+      expect(findToolPart(resolved, "call_1")).toMatchObject({
+        state: "approval-responded",
+        toolMetadata: { eve: { inputResponse: response } },
+      });
+    },
+  );
+
+  it("projects authoritative input resolutions from replayed server events", () => {
     const reducer = defaultMessageReducer();
-    let data = reduceServerEvents(reducer, reducer.initial(), [
+    const data = reduceServerEvents(reducer, reducer.initial(), [
       createInputRequestedEvent({
         requests: [
           {
@@ -585,7 +871,7 @@ describe("defaultMessageReducer", () => {
             kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes", style: "primary" },
-              { id: "deny", label: "No", style: "danger" },
+              { id: "cancel", label: "No", style: "danger" },
             ],
             prompt: "Approve tool call: bash",
             requestId: "approval_1",
@@ -595,59 +881,154 @@ describe("defaultMessageReducer", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-    ]);
-
-    data = reducer.reduce(data, {
-      data: {
-        createdAt: 1,
-        responses: [{ optionId: "deny", requestId: "approval_1" }],
-      },
-      type: "client.input.responded",
-    });
-
-    expect(data.messages).toEqual([
-      {
-        id: "turn_1:assistant",
-        metadata: {
-          status: "streaming",
-          turnId: "turn_1",
-        },
-        parts: [
-          { type: "step-start" },
+      createInputResolvedEvent({
+        resolutions: [
           {
-            approval: {
-              id: "approval_1",
-            },
-            input: { command: "pwd" },
-            state: "approval-responded",
-            stepIndex: 0,
-            toolCallId: "call_1",
-            toolMetadata: {
-              eve: {
-                inputRequest: {
-                  allowFreeform: undefined,
-                  display: "confirmation",
-                  kind: "tool-approval",
-                  options: [
-                    { id: "approve", label: "Yes", style: "primary" },
-                    { id: "deny", label: "No", style: "danger" },
-                  ],
-                  prompt: "Approve tool call: bash",
-                  requestId: "approval_1",
-                },
-                inputResponse: { optionId: "deny", requestId: "approval_1" },
-                kind: "tool-call",
-                name: "bash",
-              },
-            },
-            toolName: "bash",
-            type: "dynamic-tool",
+            kind: "tool-approval",
+            outcome: "approved",
+            requestId: "approval_1",
+            response: { optionId: "approve", requestId: "approval_1" },
           },
         ],
-        role: "assistant",
-      },
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
     ]);
+
+    expect(findToolPart(data, "call_1")).toMatchObject({
+      state: "approval-responded",
+      toolMetadata: {
+        eve: {
+          inputResponse: { optionId: "approve", requestId: "approval_1" },
+        },
+      },
+    });
   });
+
+  it("closes replayed input requests that resolve without a response", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "question_1",
+              input: { prompt: "Which environment?" },
+              kind: "tool-call",
+              toolName: "ask_question",
+            },
+            allowFreeform: true,
+            display: "text",
+            kind: "question",
+            prompt: "Which environment?",
+            requestId: "question_1",
+          },
+          {
+            action: {
+              callId: "question_2",
+              input: { prompt: "Which region?" },
+              kind: "tool-call",
+              toolName: "ask_question",
+            },
+            allowFreeform: true,
+            display: "text",
+            kind: "question",
+            prompt: "Which region?",
+            requestId: "question_2",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "ignored",
+            requestId: "question_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(findToolPart(data, "question_1")).toMatchObject({
+      output: { status: "ignored" },
+      state: "output-available",
+    });
+    expect(findToolPart(data, "question_2")).toMatchObject({
+      state: "approval-requested",
+    });
+  });
+
+  it.each(["rejected", "failed", "timed-out", "stale"] as const)(
+    "keeps an approval answerable after a %s candidate",
+    (outcome) => {
+      const reducer = defaultMessageReducer();
+      let data = reduceServerEvents(reducer, reducer.initial(), [
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "save_note" },
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [
+                { id: "approve", label: "Approve" },
+                { id: "cancel", label: "Cancel" },
+              ],
+              prompt: "Save the note?",
+              requestId: "approval_1",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ]);
+      data = reducer.reduce(data, {
+        data: { createdAt: 1, responses: [{ optionId: "approve", requestId: "approval_1" }] },
+        type: "client.input.responded",
+      });
+      expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
+      data = reduceServerEvents(reducer, data, [
+        {
+          type: "approval.candidate",
+          data: {
+            candidateId: "candidate_1",
+            requestId: "approval_1",
+            responderPrincipalId: "alice",
+            outcome,
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+      ]);
+      expect(findToolPart(data, "call_1")).toMatchObject({ state: "approval-requested" });
+      expect(findToolPart(data, "call_1")?.toolMetadata?.eve?.inputResponse).toBeUndefined();
+      data = reduceServerEvents(reducer, data, [
+        {
+          type: "approval.settled",
+          data: {
+            requestId: "approval_1",
+            responderPrincipalId: "bob",
+            outcome: "approved",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+        },
+      ]);
+      expect(findToolPart(data, "call_1")).toMatchObject({
+        state: "approval-responded",
+        approval: { approved: true },
+      });
+    },
+  );
 
   it("merges resumed approval results back into the requested tool part", () => {
     const reducer = defaultMessageReducer();
@@ -685,6 +1066,19 @@ describe("defaultMessageReducer", () => {
       type: "client.input.responded",
     });
     data = reduceServerEvents(reducer, data, [
+      createInputResolvedEvent({
+        resolutions: [
+          {
+            kind: "tool-approval",
+            outcome: "approved",
+            requestId: "approval_1",
+            response: { optionId: "approve", requestId: "approval_1" },
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
       createStepStartedEvent({
         modelId: "openai/gpt-5.5",
         sequence: 1,
@@ -794,7 +1188,6 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
-        messageSoFar: "Checking Vienna",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_0",
@@ -821,7 +1214,6 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
-        messageSoFar: "Now Berlin",
         sequence: 3,
         stepIndex: 0,
         turnId: "turn_0",
@@ -847,14 +1239,12 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
-        reasoningSoFar: "Thinking",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Partial",
-        messageSoFar: "Partial",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
@@ -900,7 +1290,6 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
-        messageSoFar: "<eve-empty-delivery/>",
         sequence: 1,
         stepIndex: 1,
         turnId: "turn_1",
@@ -923,6 +1312,72 @@ describe("defaultMessageReducer", () => {
       },
       { type: "step-start" },
     ]);
+  });
+
+  it("preserves separate participant messages received within one turn", () => {
+    const reducer = defaultMessageReducer();
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "test message", sequence: 0, turnId: "turn_1" }),
+      createMessageReceivedEvent({ message: "a", sequence: 1, turnId: "turn_1" }),
+    ]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: [`delivery_${index}`] },
+    }));
+    const reduce = () =>
+      events.reduce((data, event) => reducer.reduce(data, event), reducer.initial());
+
+    const data = reduce();
+    expect(data.messages.map((message) => message.id)).toEqual(
+      events.map((event) => `${event.meta.id}:user`),
+    );
+    expect(data.messages.map((message) => message.parts)).toEqual([
+      [{ state: "done", text: "test message", type: "text" }],
+      [{ state: "done", text: "a", type: "text" }],
+    ]);
+    expect(reduce().messages.map((message) => message.id)).toEqual(
+      data.messages.map((message) => message.id),
+    );
+  });
+
+  it("projects one bubble for one coalesced participant event", () => {
+    const reducer = defaultMessageReducer();
+    const [event] = stampTestEvents([
+      createMessageReceivedEvent({ message: "first\n\nsecond", sequence: 0, turnId: "turn_1" }),
+    ]).map((candidate) => ({
+      ...candidate,
+      meta: { ...candidate.meta, deliveryIds: ["delivery_1", "delivery_2"] },
+    }));
+    const data = reducer.reduce(reducer.initial(), event!);
+
+    expect(data.messages).toHaveLength(1);
+    expect(data.messages[0]?.parts).toEqual([
+      { state: "done", text: "first\n\nsecond", type: "text" },
+    ]);
+  });
+
+  it("uses a stable fallback id for legacy received events", () => {
+    const reducer = defaultMessageReducer();
+    const event = {
+      ...createMessageReceivedEvent({ message: "legacy", sequence: 2, turnId: "turn_1" }),
+      meta: { at: "2026-07-27T18:04:11.912Z" },
+    } as MessageStreamEvent;
+
+    const data = reducer.reduce(reducer.initial(), event);
+    expect(data.messages[0]?.id).toBe("turn_1:2:user");
+  });
+
+  it("does not project framework-authored task input", () => {
+    const reducer = defaultMessageReducer();
+    const [event] = stampTestEvents([
+      createMessageReceivedEvent({
+        kind: "execution.background_task",
+        message: "Task completed",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(reducer.reduce(reducer.initial(), event!).messages).toEqual([]);
   });
 
   it("projects structured file parts from message.received onto the user message", () => {
@@ -981,5 +1436,6 @@ function findToolPart(
 ) {
   return data.messages
     .flatMap((message) => message.parts)
-    .find((part) => part.type === "dynamic-tool" && part.toolCallId === toolCallId);
+    .filter((part) => part.type === "dynamic-tool")
+    .find((part) => part.toolCallId === toolCallId);
 }

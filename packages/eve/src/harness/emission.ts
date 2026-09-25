@@ -17,6 +17,7 @@ import type {
 } from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
+  createActionInputAppendedEvent,
   createActionPartialEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
@@ -42,16 +43,18 @@ import {
   createRuntimeToolResultFromToolError,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import {
   createInvalidToolCallInputError,
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import {
+  collectActionPresentation,
+  createPresentedRuntimeActionRequestFromToolCall,
+  type RuntimeActionRequestProjection,
+} from "#harness/action-presentation.js";
+import { projectResultPresentation, projectDeltaPresentation } from "#harness/tool-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -59,6 +62,8 @@ import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
+import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
+import { frameworkMessageKindForStepInput } from "#harness/messages.js";
 
 export {
   getHarnessEmissionState,
@@ -66,10 +71,6 @@ export {
   setHarnessEmissionState,
 } from "#harness/emission-state.js";
 export type { HarnessEmissionState } from "#harness/emission-state.js";
-
-// ---------------------------------------------------------------------------
-// Turn lifecycle helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Emits `session.started` (once), `turn.started`, and `message.received` at the
@@ -79,20 +80,31 @@ export async function emitTurnPreamble(
   emitFn: HarnessEmitFn,
   input: StepInput,
   state: HarnessEmissionState,
+  messages: readonly ModelMessage[],
   runtimeIdentity?: RuntimeIdentity,
   traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
-  const turnId = `turn_${state.sequence}`;
+  // Steering re-enters an open turn: keep its id and step index and skip the
+  // `turn.started` it already emitted.
+  const steering = state.turnId !== "";
+  const turnId = steering ? state.turnId : `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
+  if (!steering) {
+    await emitFn(
+      createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }),
+      messages,
+    );
+  }
 
   if (input.message !== undefined) {
+    const kind = frameworkMessageKindForStepInput(input);
     await emitFn(
       createMessageReceivedEvent({
+        kind: kind === "execution.background_task" ? kind : undefined,
         message: input.message,
         sequence: state.sequence,
         turnId,
@@ -100,12 +112,15 @@ export async function emitTurnPreamble(
     );
   }
 
-  return {
+  const nextState: HarnessEmissionState = {
     sessionStarted: true,
     sequence: state.sequence,
-    stepIndex: 0,
+    stepIndex: steering ? state.stepIndex : 0,
     turnId,
   };
+  return steering && state.assistantOutputStarted
+    ? { ...nextState, assistantOutputStarted: true }
+    : nextState;
 }
 
 /**
@@ -239,33 +254,6 @@ export async function emitTurnEpilogue(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Maps an AI SDK finish reason string to the eve-owned
- * {@link AssistantStepFinishReason} union. Unknown values become `"other"`.
- */
-export function normalizeAssistantStepFinishReason(
-  value: string | undefined,
-): AssistantStepFinishReason {
-  switch (value) {
-    case "content-filter":
-    case "error":
-    case "length":
-    case "stop":
-    case "tool-calls":
-      return value;
-    default:
-      return "other";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Stream content emission
-// ---------------------------------------------------------------------------
-
 /**
  * Result of consuming one step's `fullStream`.
  *
@@ -340,6 +328,8 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
+  const actionInputs = new Map<string, JsonObject>();
+  const streamingActionInputs = new Map<string, { toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -357,7 +347,24 @@ async function consumeStreamContent(
     currentMessage = "";
   };
 
-  const emitActionRequest = async (action: RuntimeActionRequest): Promise<void> => {
+  const emitActionInput = async (
+    callId: string,
+    toolName: string,
+    inputTextDelta: string,
+  ): Promise<void> =>
+    emitFn(
+      createActionInputAppendedEvent({
+        callId,
+        inputTextDelta,
+        sequence: state.sequence,
+        stepIndex: state.stepIndex,
+        toolName,
+        turnId: state.turnId,
+      }),
+    );
+
+  const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
+    const { action } = projection;
     if (emittedActionCallIds.has(action.callId)) {
       return;
     }
@@ -367,9 +374,11 @@ async function consumeStreamContent(
     }
 
     emittedActionCallIds.add(action.callId);
+    actionInputs.set(action.callId, action.input);
     await emitFn(
       createActionsRequestedEvent({
         actions: [action],
+        presentation: collectActionPresentation([projection]),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
@@ -395,7 +404,7 @@ async function consumeStreamContent(
       await flushCurrentMessage();
     }
 
-    const resolved = resolveProviderToolCallRequest(toolCall);
+    const resolved = resolveProviderToolCallRequest(toolCall, options?.tools ?? new Map());
     if (resolved.toolError !== undefined) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
       await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));
@@ -406,6 +415,7 @@ async function consumeStreamContent(
       return;
     }
 
+    actionInputs.set(resolved.request.action.callId, resolved.request.action.input);
     providerActionBatch.observe(resolved.request);
   };
 
@@ -414,8 +424,18 @@ async function consumeStreamContent(
       return;
     }
     emittedActionResultCallIds.add(result.callId);
+    const resultPresentation =
+      result.isError === true
+        ? undefined
+        : projectResultPresentation(
+            options?.tools.get(result.toolName),
+            result.callId,
+            actionInputs.get(result.callId),
+            result.output,
+          );
     await emitFn(
       createActionResultEvent({
+        presentation: resultPresentation,
         result,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
@@ -425,8 +445,15 @@ async function consumeStreamContent(
   };
 
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
+    const deltaPresentation = projectDeltaPresentation(
+      options?.tools.get(result.toolName),
+      result.callId,
+      actionInputs.get(result.callId),
+      result.output,
+    );
     await emitFn(
       createActionPartialEvent({
+        presentation: deltaPresentation,
         result,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
@@ -446,7 +473,7 @@ async function consumeStreamContent(
 
     try {
       await emitActionRequest(
-        createRuntimeActionRequestFromToolCall({
+        createPresentedRuntimeActionRequestFromToolCall({
           toolCall,
           tools: options.tools,
         }),
@@ -479,7 +506,6 @@ async function consumeStreamContent(
         await emitFn(
           createReasoningAppendedEvent({
             reasoningDelta: part.text,
-            reasoningSoFar: currentReasoning,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
@@ -504,15 +530,43 @@ async function consumeStreamContent(
         await emitFn(
           createMessageAppendedEvent({
             messageDelta: part.text,
-            messageSoFar: currentMessage,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
           }),
         );
         break;
+      case "tool-input-start": {
+        if (
+          options === undefined ||
+          part.providerExecuted === true ||
+          options.excludedActionToolNames.has(part.toolName)
+        ) {
+          streamingActionInputs.delete(part.id);
+          break;
+        }
+        await providerActionBatch.flush();
+        if (currentMessage.trim().length > 0) {
+          await flushCurrentMessage();
+        }
+        streamingActionInputs.set(part.id, { toolName: part.toolName });
+        break;
+      }
+      case "tool-input-delta": {
+        const input = streamingActionInputs.get(part.id);
+        if (input === undefined) {
+          break;
+        }
+        await providerActionBatch.flush();
+        await emitActionInput(part.id, input.toolName, part.delta);
+        break;
+      }
+      case "tool-input-end":
+        streamingActionInputs.delete(part.id);
+        break;
       case "tool-call": {
         const toolCall = part as TypedToolCall<ToolSet>;
+        streamingActionInputs.delete(toolCall.toolCallId);
         toolCallIdsSeenInStream.add(toolCall.toolCallId);
         if (toolCall.providerExecuted === true) {
           await collectProviderToolCall(toolCall);
@@ -622,7 +676,11 @@ async function consumeStreamContent(
 
   // Channel adapters deliver terminal completions, so the reserved marker
   // becomes a null completion without delaying normal streaming deltas.
-  if (finishReason !== "tool-calls" && hasEmptyDeliverySentinel(currentMessage)) {
+  if (
+    finishReason !== "content-filter" &&
+    finishReason !== "tool-calls" &&
+    hasEmptyDeliverySentinel(currentMessage)
+  ) {
     await emitFn(
       createMessageCompletedEvent({
         finishReason,
@@ -632,7 +690,7 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
     );
-  } else if (currentMessage.trim().length > 0) {
+  } else if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
         finishReason,

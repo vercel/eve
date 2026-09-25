@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, resolve } from "node:path";
+import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 
 const AUTHORED_ASSET_CODE_EXTENSIONS = [
   ".ts",
@@ -15,9 +16,14 @@ const AUTHORED_ASSET_CODE_EXTENSIONS = [
 
 /**
  * Creates the Rollup-compatible plugin that gives authored modules a small
- * asset-module surface for non-code relative imports.
+ * asset-module surface for non-code relative imports inside the authored
+ * package. Assets may sit outside the agent directory, but not outside the
+ * package that owns it.
  */
-export function createAuthoredAssetImportPlugin(): Record<string, unknown> {
+export function createAuthoredAssetImportPlugin(input: {
+  readonly packageRoot: string;
+}): Record<string, unknown> {
+  const packageRoot = toCanonicalPath(input.packageRoot);
   return {
     name: "eve-authored-asset-import",
     resolveId(source: string, importer: string | undefined) {
@@ -27,8 +33,14 @@ export function createAuthoredAssetImportPlugin(): Record<string, unknown> {
 
       const { path, suffix } = splitImportSuffix(source);
       const resolvedPath = isAbsolute(path) ? path : resolve(dirname(importer), path);
+      const canonicalPath = toCanonicalPath(resolvedPath);
+      if (!isPathInsideOrEqual(canonicalPath, packageRoot)) {
+        throw new Error(
+          `Authored asset import "${source}" from "${importer}" resolves outside package root "${packageRoot}".`,
+        );
+      }
 
-      return `${resolvedPath}${suffix}`;
+      return `${canonicalPath}${suffix}`;
     },
     async load(id: string) {
       const { path, suffix } = splitImportSuffix(id);
@@ -62,6 +74,20 @@ export function createAuthoredAssetImportPlugin(): Record<string, unknown> {
       };
     },
   };
+}
+
+function isPathInsideOrEqual(path: string, directory: string): boolean {
+  const relativePath = relative(directory, resolve(path));
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+function toCanonicalPath(path: string): string {
+  const absolutePath = resolve(path);
+  try {
+    return realpathSync.native(absolutePath);
+  } catch {
+    return absolutePath;
+  }
 }
 
 async function readAssetText(path: string): Promise<string | undefined> {

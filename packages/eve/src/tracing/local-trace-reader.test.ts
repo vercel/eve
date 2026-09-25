@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseLocalTraceSegment } from "./local-trace-reader.js";
+import {
+  describeLocalTraceSpan,
+  isAgentTurnSpan,
+  parseLocalTraceSegment,
+} from "./local-trace-reader.js";
 
 const TRACE_ID = "1".repeat(32);
 const SPAN_ID = "a".repeat(16);
@@ -30,6 +34,37 @@ function span(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 describe("parseLocalTraceSegment", () => {
+  it("describes semantic agent spans while retaining legacy turn support", () => {
+    const spans = parseLocalTraceSegment(
+      segment([
+        span({
+          attributes: [
+            { key: "agent.turn.id", value: { stringValue: "turn-1" } },
+            { key: "gen_ai.operation.name", value: { stringValue: "invoke_agent" } },
+          ],
+          name: "invoke_agent weather",
+        }),
+        span({
+          attributes: [{ key: "agent.turn.id", value: { stringValue: "turn-legacy" } }],
+          name: "agent.turn",
+          spanId: "b".repeat(16),
+        }),
+        span({
+          attributes: [
+            { key: "gen_ai.operation.name", value: { stringValue: "invoke_agent" } },
+            { key: "gen_ai.usage.input_tokens", value: { intValue: 10 } },
+          ],
+          name: "invoke_agent researcher",
+          spanId: "c".repeat(16),
+        }),
+      ]),
+      TRACE_ID,
+    );
+
+    expect(spans.map(isAgentTurnSpan)).toEqual([true, true, false]);
+    expect(spans.map(describeLocalTraceSpan)).toEqual([["turn-1"], ["turn-legacy"], []]);
+  });
+
   it("parses span events with attributes, sorted by time", () => {
     const spans = parseLocalTraceSegment(
       segment([

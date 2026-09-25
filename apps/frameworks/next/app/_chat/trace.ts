@@ -70,27 +70,27 @@ function readEventTimestamp(event: TranscriptStreamEvent): string | undefined {
 }
 
 function getEventTurnId(event: TranscriptStreamEvent): string | undefined {
-  if (!isRecord(event.data)) {
+  if (!("data" in event) || !isRecord(event.data)) {
     return undefined;
   }
 
-  return readString(event.data.turnId);
+  return readString((event.data as Record<string, unknown>).turnId);
 }
 
 function getEventSequence(event: TranscriptStreamEvent): number | undefined {
-  if (!isRecord(event.data)) {
+  if (!("data" in event) || !isRecord(event.data)) {
     return undefined;
   }
 
-  return readNumber(event.data.sequence);
+  return readNumber((event.data as Record<string, unknown>).sequence);
 }
 
 function getEventStepIndex(event: TranscriptStreamEvent): number | undefined {
-  if (!isRecord(event.data)) {
+  if (!("data" in event) || !isRecord(event.data)) {
     return undefined;
   }
 
-  return readNumber(event.data.stepIndex);
+  return readNumber((event.data as Record<string, unknown>).stepIndex);
 }
 
 function ensureTurn(
@@ -420,8 +420,8 @@ export function buildTraceTurnsFromTranscript(
       continue;
     }
 
-    if (event.type === "reasoning.appended" && step !== undefined && isRecord(event.data)) {
-      step.reasoningText = readString(event.data.reasoningSoFar);
+    if (event.type === "reasoning.appended" && step !== undefined) {
+      step.reasoningText = (step.reasoningText ?? "") + event.data.reasoningDelta;
       continue;
     }
 
@@ -430,8 +430,8 @@ export function buildTraceTurnsFromTranscript(
       continue;
     }
 
-    if (event.type === "message.appended" && step !== undefined && isRecord(event.data)) {
-      step.responseText = readString(event.data.messageSoFar);
+    if (event.type === "message.appended" && step !== undefined) {
+      step.responseText = (step.responseText ?? "") + event.data.messageDelta;
       continue;
     }
 

@@ -34,7 +34,7 @@ function trace(spans: readonly LocalTraceSpan[], traceId = "t".repeat(32)): Loca
   const ends = spans.map((s) => s.endTimeNs);
   return {
     endTimeNs: ends.reduce((a, b) => (b > a ? b : a), 0n),
-    sessionIds: [],
+    conversationIds: [],
     spans,
     startTimeNs: starts.reduce((a, b) => (b < a ? b : a), starts[0] ?? 0n),
     traceId,
@@ -62,7 +62,9 @@ function conversationTrace(options: { readonly longReply?: boolean } = {}): Loca
     spanId: "c".repeat(16),
     parentSpanId: step.spanId,
     attributes: {
-      "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+      "gen_ai.input.messages": JSON.stringify([
+        { parts: [{ content: "hi", type: "text" }], role: "user" },
+      ]),
       "ai.response.text": options.longReply === true ? "a long reply. ".repeat(60) : "reply",
     },
   });
@@ -104,6 +106,31 @@ describe("reduceTraceViewerKey", () => {
     expect(state.selectedRow).toBe(count - 1);
     state = reduceTraceViewerKey(state, key("up"), ENV).state;
     expect(state.selectedRow).toBe(count - 2);
+  });
+
+  it("moves and scrolls with j/k", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    state = reduceTraceViewerKey(state, key("text", "j"), ENV).state;
+    expect(state.selectedRow).toBe(1);
+    state = reduceTraceViewerKey(state, key("text", "k"), ENV).state;
+    expect(state.selectedRow).toBe(0);
+
+    state = reduceTraceViewerKey(state, key("enter"), ENV).state;
+    state = reduceTraceViewerKey(state, key("tab"), ENV).state;
+    state = reduceTraceViewerKey(state, key("text", "j"), ENV).state;
+    expect(state.panelScroll).toBe(1);
+    state = reduceTraceViewerKey(state, key("text", "k"), ENV).state;
+    expect(state.panelScroll).toBe(0);
+  });
+
+  it("ignores pasted j/k navigation", () => {
+    const state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const result = reduceTraceViewerKey(
+      state,
+      { type: "text", value: "j", framing: "bracketed-paste" },
+      ENV,
+    );
+    expect(result.state.selectedRow).toBe(0);
   });
 
   it("jumps home and end", () => {
@@ -518,7 +545,9 @@ describe("applyLoadedTrace", () => {
           spanId: "c".repeat(16),
           parentSpanId: "b".repeat(16),
           attributes: {
-            "ai.prompt.messages": JSON.stringify([{ role: "user", content: "hi" }]),
+            "gen_ai.input.messages": JSON.stringify([
+              { parts: [{ content: "hi", type: "text" }], role: "user" },
+            ]),
             "ai.prompt.system": "system prompt",
             "ai.response.text": "reply",
           },

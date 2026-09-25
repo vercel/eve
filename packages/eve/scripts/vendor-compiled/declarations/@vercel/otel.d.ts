@@ -51,11 +51,22 @@ export type SamplerOrName =
   | "parentbased_traceidratio"
   | "traceidratio";
 
+/**
+ * A `MetricReader`. Structural for the same reason the exporter is: the
+ * instance comes from whichever `@opentelemetry/sdk-metrics` build the app
+ * installed, and eve only ever hands it to `registerOTel`.
+ */
+export interface MetricReader {
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
 export interface Configuration {
   readonly attributes?: Readonly<Record<string, unknown>>;
   readonly autoDetectResources?: boolean;
   readonly idGenerator?: IdGenerator;
   readonly instrumentations?: readonly unknown[];
+  readonly metricReaders?: readonly MetricReader[];
   readonly propagators?: readonly PropagatorOrName[];
   readonly serviceName?: string;
   readonly spanProcessors?: readonly SpanProcessorOrName[];

@@ -73,7 +73,7 @@ export interface ThemeGlyphs {
   cornerOpen: string;
   /** `⌝` — marks a provider endpoint authored in the agent's own code. */
   external: string;
-  /** `⏺` — the in-progress todo item (pulses while the turn runs). */
+  /** `⏺` — an active in-progress state, such as a cancelling turn. */
   dotActive: string;
   /** `✓` — a completed tool or success state. */
   success: string;
@@ -99,8 +99,6 @@ export interface ThemeGlyphs {
   option: string;
   /** `❯` — the input prompt mark. */
   prompt: string;
-  /** `›` — the prompt mark's quiet form while the buffer is empty. */
-  promptIdle: string;
   /** `⎿` — hangs a command's result under its invocation. */
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
@@ -119,14 +117,6 @@ export interface ThemeGlyphs {
   arrowDown: string;
   /** `↯` — Fast mode (Gateway priority tier) marker beside a model id. */
   fast: string;
-  /** `●` — a track notch below the current position (already covered). */
-  trackFilled: string;
-  /** `◉` — the track notch at the current position. */
-  trackCurrent: string;
-  /** `○` — a track notch above the current position. */
-  trackEmpty: string;
-  /** `─` — the connector segment between track notches. */
-  trackLine: string;
   /** `↵` — the Enter affordance inside a selection badge. */
   enter: string;
   /** `▪` — the marker beside an in-flight validation badge. */
@@ -150,11 +140,10 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   question: "?",
   connection: "●",
   arrow: "→",
-  pointer: "▷",
-  selectedPointer: "▶",
-  option: "◦",
+  pointer: "›",
+  selectedPointer: "›",
+  option: " ",
   prompt: "❯",
-  promptIdle: "›",
   elbow: "⎿",
   hrule: "▔",
   dash: "─",
@@ -164,10 +153,6 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   arrowUp: "↑",
   arrowDown: "↓",
   fast: "↯",
-  trackFilled: "●",
-  trackCurrent: "◉",
-  trackEmpty: "○",
-  trackLine: "─",
   enter: "↵",
   validating: "▪",
 };
@@ -193,7 +178,6 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   selectedPointer: ">",
   option: ".",
   prompt: ">",
-  promptIdle: ">",
   elbow: "`-",
   hrule: "=",
   dash: "-",
@@ -203,10 +187,6 @@ const ASCII_GLYPHS: ThemeGlyphs = {
   arrowUp: "^",
   arrowDown: "v",
   fast: ">>",
-  trackFilled: "*",
-  trackCurrent: "O",
-  trackEmpty: ".",
-  trackLine: "-",
   enter: "<-'",
   validating: "o",
 };

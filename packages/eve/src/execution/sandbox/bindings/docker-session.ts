@@ -3,7 +3,7 @@ import { dirname as posixDirname } from "node:path/posix";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
-import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-backend-utils.js";
+import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
@@ -50,10 +50,9 @@ const DOCKER_KILL_TREE_SCRIPT = [
 
 export function createDockerInternalSession(input: {
   readonly cli: DockerCli;
-  readonly containerName: string;
-  readonly id: string;
+  readonly containerIdentity: string;
 }): InternalSandboxSession {
-  const { cli, containerName } = input;
+  const { cli, containerIdentity } = input;
 
   async function killSpawnTree(pidFilePath: string): Promise<void> {
     // Best-effort: the container may already be stopped or the process
@@ -61,7 +60,7 @@ export function createDockerInternalSession(input: {
     await cli
       .run([
         "exec",
-        containerName,
+        containerIdentity,
         "bash",
         "-c",
         DOCKER_KILL_TREE_SCRIPT,
@@ -72,7 +71,6 @@ export function createDockerInternalSession(input: {
   }
 
   return {
-    id: input.id,
     resolvePath: resolveWorkspacePath,
     async spawn(options: SandboxSpawnOptions) {
       const args = ["exec", "-w", resolveWorkspacePath(options.workingDirectory ?? WORKSPACE_ROOT)];
@@ -91,7 +89,7 @@ export function createDockerInternalSession(input: {
         `echo "$$" > ${shellQuote(pidFilePath)}; ` +
         `bash -lc ${shellQuote(options.command)}; ` +
         `status=$?; rm -f ${shellQuote(pidFilePath)}; exit $status`;
-      args.push(containerName, "bash", "-c", wrapped);
+      args.push(containerIdentity, "bash", "-c", wrapped);
 
       const child = cli.stream(args, { signal: options.abortSignal });
       options.abortSignal?.addEventListener("abort", () => void killSpawnTree(pidFilePath), {
@@ -115,7 +113,7 @@ export function createDockerInternalSession(input: {
       const result = await cli.run(
         [
           "exec",
-          containerName,
+          containerIdentity,
           "bash",
           "-lc",
           // A sentinel exit code distinguishes "missing" from real read
@@ -134,7 +132,7 @@ export function createDockerInternalSession(input: {
       const flags = `${options.recursive === true ? "r" : ""}${options.force === true ? "f" : ""}`;
       const args = [
         "exec",
-        containerName,
+        containerIdentity,
         "rm",
         ...(flags.length > 0 ? [`-${flags}`] : []),
         "--",
@@ -149,7 +147,7 @@ export function createDockerInternalSession(input: {
         [
           "exec",
           "-i",
-          containerName,
+          containerIdentity,
           "bash",
           "-lc",
           `mkdir -p ${shellQuote(posixDirname(options.path))} && cat > ${shellQuote(options.path)}`,

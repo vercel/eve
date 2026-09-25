@@ -24,6 +24,20 @@ export default defineMcpClientConnection({
 
 The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: it is the main signal `connection_search` uses when deciding which connection to query.
 
+## Configure protocol discovery
+
+eve discovers the server's MCP protocol by default. If a server requires the older `initialize` handshake, disable discovery for that connection:
+
+```ts
+export default defineMcpClientConnection({
+  url: "https://mcp.example.com/mcp",
+  description: "Search support cases",
+  protocolVersionDiscovery: false,
+});
+```
+
+With `protocolVersionDiscovery: false`, the client skips `server/discover` and starts with `initialize`, proposing `2025-11-25` and negotiating a supported handshake-based version. This is a per-connection setting; omitting it or setting it to `true` keeps discovery enabled. Remove the override when the server supports discovery. The setting also applies to connections returned by dynamic resolvers.
+
 ## Use Vercel Connect for OAuth
 
 For OAuth-backed MCP servers, use the shared [Vercel Connect flow](../connections#interactive-oauth-via-vercel-connect), then pass the returned connector UID to `connect()`. Keep the MCP runtime URL and Connect service identifier distinct. For example, Linear uses `https://mcp.linear.app/mcp` as the MCP endpoint and `mcp.linear.app` when creating the connector.
@@ -58,7 +72,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-Values may be JSON values, promises, or callbacks. Callbacks receive the active session context plus the bare remote `toolName`.
+Values may be JSON values, promises, or callbacks. Callbacks receive the active session context, the bare remote `toolName`, and a replay-stable `callId` that is unique to the tool call. Use `callId` when the remote server needs an idempotency key.
 
 eve treats configured keys as application-owned: it removes them from every remote tool's model-facing input schema and adds their resolved values immediately before execution. They apply to every tool call on the connection and replace any conflicting model value. Approval policies continue to receive only the model-authored input.
 
@@ -86,11 +100,11 @@ Prefer `allow` for the smallest safe surface, especially when the server exposes
 
 ## Approval gates
 
-Use the shared `approval` option to gate every tool served by an MCP connection. The [connections overview](../connections#per-connection-approval) defines the `never()`, `once()`, and `always()` helpers; [Human-in-the-loop](../human-in-the-loop#approvals) defines the pause-and-resume contract.
+Use the shared `approval` option to gate every tool served by an MCP connection. The [connections overview](../connections#per-connection-approval) defines the `never()`, `once()`, `always()`, and `auto()` helpers; [Human-in-the-loop](../human-in-the-loop#approvals) defines the pause-and-resume contract.
 
 ### Gate specific tools by name or input
 
-A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools }` and returns an approval status, synchronously or as a promise.
+A remote MCP server usually mixes read tools with destructive or publishing ones, so a blanket `always()` would prompt on every harmless call. Pass a custom policy instead — the same [`Approval`](/docs/human-in-the-loop#approvals) shape authored tools use — to gate only the calls that matter. The policy receives `{ session, toolName, toolInput, approvedTools, callId, abortSignal }` and returns an approval status, synchronously or as a promise.
 
 This connection always gates deletes, gates a publish only when the call actually schedules a post, and lets everything else through:
 
@@ -111,7 +125,10 @@ const publishesNow = (input: unknown): boolean => {
 export default defineMcpClientConnection({
   url: "https://mcp.example.com/mcp",
   description: "Social publishing: draft, schedule, and manage posts.",
-  auth: { getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }) },
+  auth: {
+    credentialOwner: "app",
+    getToken: async () => ({ token: process.env.SOCIAL_API_KEY! }),
+  },
   approval: ({ toolName, toolInput }) => {
     if (DELETE_TOOLS.some((t) => toolName.includes(t))) return "user-approval";
     if (PUBLISH_TOOLS.some((t) => toolName.includes(t))) {

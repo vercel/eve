@@ -1,5 +1,8 @@
+import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { appendUserAgentProduct } from "#internal/user-agent.js";
 import type { CommandLifecycle } from "#cli/shutdown.js";
 import {
   resolveLocalDevelopmentClientOptions,
@@ -13,13 +16,17 @@ import {
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { createDevDiagnostics } from "../diagnostics.js";
+import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
+import { LOGIN_CONNECTION_COMMAND_OPTIONS } from "#setup/flows/model-login-options.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
+import { TerminalRenderer } from "./terminal-renderer.js";
+import type { PromptArgumentSuggestion } from "./argument-typeahead.js";
+import type { ArgumentTypeaheadCommand } from "./prompt-commands.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
@@ -30,16 +37,106 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   readonly target: DevelopmentTuiTarget;
   /** Additional request headers sent by this TUI client. */
   readonly headers?: Readonly<Record<string, string>>;
-  /**
-   * Text to seed the prompt input with after the UI launches. A bare local
-   * `/model` starts fresh-agent onboarding. Applies to the first prompt only.
-   */
+  /** Text to seed the prompt input with after the UI launches. Applies to the first prompt only. */
   readonly initialInput?: string;
+  /** Explicit fresh-agent onboarding handoff from `eve init`. */
+  readonly onboard?: boolean;
+  /** Reports timestamped steps and terminal result for fresh-agent onboarding. */
+  readonly onOnboardingStep?: (input: EveCliSetupStepEvent) => void;
+  readonly onOnboardingTerminal?: (input: EveCliSetupTerminalEvent) => void;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
   readonly onBootProgress?: DevBootProgressReporter;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly lifecycle?: CommandLifecycle;
+  /** Prepared editing-only startup UI reused by the initialized local runner. */
+  startup?: DevelopmentTuiStartup;
+}
+
+function inlineArgumentSuggestions(appRoot: string) {
+  return async (
+    command: ArgumentTypeaheadCommand,
+  ): Promise<readonly PromptArgumentSuggestion[]> => {
+    if (command === "loglevel") {
+      return [
+        { value: "all", label: "all", hint: "Show all captured logs" },
+        { value: "stderr", label: "stderr", hint: "Show stderr logs only" },
+        { value: "sandbox", label: "sandbox", hint: "Show sandbox logs only" },
+        { value: "none", label: "none", hint: "Hide captured logs" },
+      ];
+    }
+    if (command === "login") {
+      return LOGIN_CONNECTION_COMMAND_OPTIONS.map((option) => ({
+        value: option.command,
+        label: option.label,
+      }));
+    }
+    if (command === "model") {
+      const { gatewayModelCapabilities } = await import("#setup/boxes/model-capabilities.js");
+      const { fetchGatewayCatalog, modelOptionsFromCatalog } =
+        await import("#setup/boxes/select-model.js");
+      const catalog = await fetchGatewayCatalog().catch(() => undefined);
+      return modelOptionsFromCatalog(catalog).map((option) => {
+        const reasoning = gatewayModelCapabilities(catalog, option.value)?.reasoningLevels;
+        return {
+          value: option.value,
+          label: option.value,
+          hint: option.hint,
+          ...(reasoning === undefined || reasoning.length === 0
+            ? {}
+            : {
+                next: [
+                  { value: "default", label: "default" },
+                  ...reasoning.map((value) => ({ value, label: value })),
+                ],
+              }),
+        };
+      });
+    }
+    const { browseRegistryCatalog } = await import("#cli/commands/registry.js");
+    const catalog = await browseRegistryCatalog(appRoot);
+    return catalog.items.map((item) => ({
+      value: item.address,
+      label: item.name,
+      hint: item.description ?? item.address,
+    }));
+  };
+}
+
+export interface DevelopmentTuiStartup {
+  readonly diagnostics: DevDiagnostics | undefined;
+  readonly renderer: TerminalRenderer;
+  finish(): { draft: string; queuedPrompt: string | undefined };
+  shutdown(): Promise<void>;
+}
+
+export async function startDevelopmentTuiStartup(
+  input: TuiDisplayOptions & {
+    readonly appRoot: string;
+    readonly initialInput?: string;
+    readonly onExitRequest: () => void;
+  },
+): Promise<DevelopmentTuiStartup> {
+  const diagnostics = await createDevDiagnostics(input.appRoot).catch(() => undefined);
+  const renderer = new TerminalRenderer({
+    ...input,
+    diagnostics,
+    argumentSuggestions: inlineArgumentSuggestions(input.appRoot),
+    onExitRequest: input.onExitRequest,
+  });
+  renderer.beginStartupDraft({
+    initialDraft: input.initialInput,
+    title: input.name ?? "eve",
+  });
+  return {
+    diagnostics,
+    renderer,
+    finish: () => renderer.finishStartupDraft(),
+    async shutdown() {
+      renderer.shutdown();
+      await diagnostics?.close();
+    },
+  };
 }
 
 function prepareRemoteTarget(target: RemoteDevelopmentTarget) {
@@ -74,6 +171,14 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
     : { kind: "remote", target, remote: prepareRemoteTarget(target) };
 }
 
+function withTuiUserAgent(
+  headers: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> {
+  const resolved = new Headers(headers);
+  appendUserAgentProduct(resolved, `eve-tui/${resolveInstalledPackageInfo().version}`);
+  return Object.fromEntries(resolved.entries());
+}
+
 /**
  * Runs the `eve dev` terminal UI against the given server URL until the
  * user exits.
@@ -88,19 +193,24 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     target,
     headers,
     initialInput,
+    onboard,
+    onOnboardingStep,
+    onOnboardingTerminal,
     onBootProgress,
     lifecycle,
+    startup,
     withExclusiveTerminal,
     ...display
   } = input;
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
-  const headerOptions = headers === undefined ? {} : { headers };
+  const headerOptions = { headers: withTuiUserAgent(headers) };
 
   const client = new Client(
     prepared.kind === "local"
       ? resolveLocalDevelopmentClientOptions({
           ...headerOptions,
+          interactiveClient: true,
           serverUrl,
           token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
         })
@@ -117,6 +227,9 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     serverUrl,
     promptCommandHandler: createPromptCommandHandler({ target }),
     availablePromptCommands: promptCommandsFor(target.kind),
+    ...(target.kind === "local"
+      ? { argumentSuggestions: inlineArgumentSuggestions(target.workspaceRoot) }
+      : {}),
     formatTransportError: (error) =>
       isVercelAuthChallenge(error)
         ? formatRemoteAuthChallengeMessage(serverUrl)
@@ -129,14 +242,22 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.remote = prepared.remote;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
+  if (startup !== undefined) {
+    options.renderer = startup.renderer;
+    options.startup = startup;
+  }
+  if (onboard !== undefined) options.onboard = onboard;
+  if (onOnboardingStep !== undefined) options.onOnboardingStep = onOnboardingStep;
+  if (onOnboardingTerminal !== undefined) options.onOnboardingTerminal = onOnboardingTerminal;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;
 
   const diagnostics =
-    prepared.kind === "local"
+    startup?.diagnostics ??
+    (prepared.kind === "local"
       ? await createDevDiagnostics(prepared.target.workspaceRoot).catch(() => undefined)
-      : undefined;
+      : undefined);
   if (diagnostics !== undefined) options.diagnostics = diagnostics;
   try {
     await new EveTUIRunner(options).run();

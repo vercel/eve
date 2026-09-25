@@ -161,9 +161,11 @@ export function messageFromLinearAgentSessionEvent(event: LinearAgentSessionEven
 export function formatLinearContextBlock(event: LinearAgentSessionEvent): string {
   const session = event.agentSession;
   const issue = session.issue;
+  const appUserId = event.appUserId ?? session.appUserId;
   const lines = [
     "<linear_context>",
     `action: ${event.action}`,
+    ...(appUserId ? [`app_user_id: ${appUserId}`] : []),
     `agent_session_id: ${session.id}`,
     `agent_session_url: ${session.url ?? ""}`,
     `organization_id: ${event.organizationId ?? session.organizationId ?? ""}`,

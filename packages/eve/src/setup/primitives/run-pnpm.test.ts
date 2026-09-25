@@ -9,6 +9,8 @@ import {
   runPnpmInstall,
   spawnPnpm,
 } from "./run-pnpm.js";
+import { packageManagerInstallSucceeded } from "./pm/run.js";
+import { resultSucceeded } from "./pm/process-result.js";
 import { pnpmPackageManager } from "./pm/pnpm.js";
 
 vi.mock("node:child_process", async (importOriginal) => ({
@@ -64,7 +66,7 @@ afterEach(() => {
 
 describe("runPnpmInstall", () => {
   test("updates an existing lockfile after scaffolded dependencies change", async () => {
-    await expect(runPnpmInstall("/tmp/eve-agent")).resolves.toBe(true);
+    expect(packageManagerInstallSucceeded(await runPnpmInstall("/tmp/eve-agent"))).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
     expect(mockedSpawn).toHaveBeenCalledWith(
@@ -74,11 +76,101 @@ describe("runPnpmInstall", () => {
     );
   });
 
+  test("supports prompt-free installs with a scoped release-age override", async () => {
+    expect(
+      packageManagerInstallSucceeded(
+        await runPnpmInstall("/tmp/eve-agent", {
+          autoApprove: true,
+          bypassMinimumReleaseAge: true,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "pnpm",
+      [
+        "--dir",
+        "/tmp/eve-agent",
+        "install",
+        "--no-frozen-lockfile",
+        "--yes",
+        "--config.minimum-release-age=0",
+      ],
+      expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: ["inherit", "pipe", "pipe"] }),
+    );
+  });
+
+  test("retries without auto-approval when pnpm rejects the option", async () => {
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        child.stderr.emit("data", Buffer.from("ERROR Unknown option: 'yes'\n"));
+        child.stderr.emit("data", Buffer.from("For help, run: pnpm help install\n"));
+        child.emit("close", 1);
+      });
+      return child;
+    });
+    const onOutput = vi.fn();
+
+    expect(
+      packageManagerInstallSucceeded(
+        await runPnpmInstall("/tmp/eve-agent", {
+          autoApprove: true,
+          bypassMinimumReleaseAge: true,
+          onOutput,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn.mock.calls.map(([, args]) => args)).toEqual([
+      [
+        "--dir",
+        "/tmp/eve-agent",
+        "install",
+        "--no-frozen-lockfile",
+        "--yes",
+        "--config.minimum-release-age=0",
+      ],
+      [
+        "--dir",
+        "/tmp/eve-agent",
+        "install",
+        "--no-frozen-lockfile",
+        "--config.minimum-release-age=0",
+      ],
+    ]);
+    expect(onOutput).not.toHaveBeenCalled();
+  });
+
+  test("does not retry other pnpm install failures", async () => {
+    mockedSpawn.mockImplementationOnce(() => {
+      const child = createMockChildProcess();
+      queueMicrotask(() => {
+        child.stderr.emit("data", Buffer.from("ERR_PNPM_FETCH_500 Registry unavailable\n"));
+        child.emit("close", 1);
+      });
+      return child;
+    });
+    const onOutput = vi.fn();
+
+    expect(
+      packageManagerInstallSucceeded(
+        await runPnpmInstall("/tmp/eve-agent", { autoApprove: true, onOutput }),
+      ),
+    ).toBe(false);
+
+    expect(mockedSpawn).toHaveBeenCalledTimes(1);
+    expect(onOutput).toHaveBeenCalledWith({
+      stream: "stderr",
+      text: "ERR_PNPM_FETCH_500 Registry unavailable",
+    });
+  });
+
   test("installs a claimed workspace member with native workspace semantics", async () => {
     mockedExistsSync.mockImplementation((path) => path === "/tmp/pnpm-workspace.yaml");
     mockMembershipProbe(["/tmp", "/tmp/eve-agent"]);
 
-    await expect(runPnpmInstall("/tmp/eve-agent")).resolves.toBe(true);
+    expect(packageManagerInstallSucceeded(await runPnpmInstall("/tmp/eve-agent"))).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledTimes(2);
     expect(mockedSpawn).toHaveBeenLastCalledWith(
@@ -92,7 +184,7 @@ describe("runPnpmInstall", () => {
     mockedExistsSync.mockImplementation((path) => path === "/tmp/pnpm-workspace.yaml");
     mockMembershipProbe(["/tmp"]);
 
-    await expect(runPnpmInstall("/tmp/eve-agent")).resolves.toBe(true);
+    expect(packageManagerInstallSucceeded(await runPnpmInstall("/tmp/eve-agent"))).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledTimes(2);
     expect(mockedSpawn).toHaveBeenLastCalledWith(
@@ -112,7 +204,7 @@ describe("runPnpmInstall", () => {
     child.stderr.emit("data", Buffer.from("WARN deprecated package\n"));
     child.emit("close", 0);
 
-    await expect(result).resolves.toBe(true);
+    expect(packageManagerInstallSucceeded(await result)).toBe(true);
     expect(mockedSpawn).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "/tmp/eve-agent", "install", "--no-frozen-lockfile"],
@@ -134,40 +226,56 @@ describe("runPnpmInstall", () => {
     child.stdout.emit("data", Buffer.from("workspace parse failed\n"));
     child.emit("close", 1);
 
-    await expect(result).resolves.toBe(false);
+    const install = await result;
+    expect(install.kind).toBe("workspace-probe-failed");
+    expect(install.result.stdout).toBe("workspace parse failed\n");
     expect(onOutput.mock.calls.map(([line]) => line)).toEqual([
       { stream: "stdout", text: "workspace parse failed" },
-      { stream: "stderr", text: "pnpm list --depth -1 --json exited with code 1." },
     ]);
   });
 });
 
 describe("runPackageManagerInstall", () => {
-  test.each([
-    [
-      "pnpm",
-      ["--dir", "/tmp/app", "install", "--no-frozen-lockfile", "--config.minimum-release-age=0"],
-    ],
-    ["npm", ["install", "--min-release-age=0"]],
-    // yarn has no release-age gate, so the bypass adds nothing.
-    ["yarn", ["install"]],
-    ["bun", ["install"]],
-  ] as const)("maps the release-age bypass onto %s", async (kind, expectedArgs) => {
-    await expect(
-      runPackageManagerInstall(kind, "/tmp/app", { bypassMinimumReleaseAge: true }),
-    ).resolves.toBe(true);
+  test("automatically approves npm prompts and bypasses inherited release-age policies", async () => {
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("npm", "/tmp/app", {
+          autoApprove: true,
+          bypassMinimumReleaseAge: true,
+        }),
+      ),
+    ).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledWith(
-      kind,
-      expectedArgs,
+      "npm",
+      ["install", "--yes", "--min-release-age=0"],
+      expect.objectContaining({ cwd: "/tmp/app" }),
+    );
+  });
+
+  test("bypasses inherited Bun release-age policies without passing an unsupported yes flag", async () => {
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("bun", "/tmp/app", {
+          autoApprove: true,
+          bypassMinimumReleaseAge: true,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "bun",
+      ["install", "--minimum-release-age=0"],
       expect.objectContaining({ cwd: "/tmp/app" }),
     );
   });
 
   test("requests npm output before registry operations complete", async () => {
-    await expect(
-      runPackageManagerInstall("npm", "/tmp/app", { progressDetails: true }),
-    ).resolves.toBe(true);
+    expect(
+      packageManagerInstallSucceeded(
+        await runPackageManagerInstall("npm", "/tmp/app", { progressDetails: true }),
+      ),
+    ).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "npm",
@@ -214,15 +322,25 @@ describe("pnpmPackageManager", () => {
 });
 
 describe("spawnPnpm", () => {
-  test("runs the given pnpm argv in the project directory", async () => {
-    await expect(spawnPnpm("/tmp/eve-agent", ["exec", "eve", "dev", "--no-ui"])).resolves.toBe(
-      true,
-    );
+  test("inherits output when no parent renderer is supplied", async () => {
+    expect(
+      resultSucceeded(await spawnPnpm("/tmp/eve-agent", ["exec", "eve", "dev", "--no-ui"])),
+    ).toBe(true);
 
     expect(mockedSpawn).toHaveBeenCalledWith(
       "pnpm",
       ["--dir", "/tmp/eve-agent", "exec", "eve", "dev", "--no-ui"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
+    );
+  });
+
+  test("pipes output when stdin is non-interactive without a parent renderer", async () => {
+    await spawnPnpm("/tmp/eve-agent", ["install"], { nonInteractive: true });
+
+    expect(mockedSpawn).toHaveBeenCalledWith(
+      "pnpm",
+      ["--dir", "/tmp/eve-agent", "install"],
+      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
     );
   });
 
@@ -245,14 +363,7 @@ describe("spawnPnpm", () => {
     error.name = "AbortError";
     error.code = "ABORT_ERR";
     child.emit("error", error);
-    let settled = false;
-    void result.then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
+    await expect(result).resolves.toMatchObject({ termination: { kind: "aborted" } });
     child.emit("close", null);
-
-    await expect(result).resolves.toBe(false);
   });
 });

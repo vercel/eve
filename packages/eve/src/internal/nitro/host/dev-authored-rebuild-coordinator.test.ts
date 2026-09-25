@@ -51,13 +51,7 @@ vi.mock("#internal/nitro/development-generation.js", () => ({
   discardDevelopmentGeneration: mocks.discardDevelopmentGeneration,
 }));
 vi.mock("#internal/nitro/host/artifacts-config.js", () => ({
-  createDevelopmentNitroArtifactsConfig: () => ({}),
-}));
-vi.mock("#internal/nitro/routes/runtime-artifacts.js", () => ({
-  resolveNitroCompiledArtifactsSource: () => ({}),
-}));
-vi.mock("#execution/sandbox/development-prewarm.js", () => ({
-  startDevelopmentSandboxPrewarmInBackground: vi.fn(),
+  createDevelopmentGenerationArtifactsSource: () => ({ kind: "disk" }),
 }));
 
 function createHost(
@@ -157,6 +151,7 @@ describe("transactional authored rebuild coordinator", () => {
         outDir: "/tmp/eve-test/packages/crm/dist",
         packageName: "@acme/crm",
         runtimeDependencies: ["eve"],
+        externalDependencies: [],
         shortName: "crm",
       },
     } as const;

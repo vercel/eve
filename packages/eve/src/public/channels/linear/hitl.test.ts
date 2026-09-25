@@ -4,7 +4,7 @@ import {
   linearInputRequestSignal,
   renderLinearInputRequests,
 } from "#public/channels/linear/hitl.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 function makeRequest(overrides: Partial<InputRequest> = {}): InputRequest {
   return {

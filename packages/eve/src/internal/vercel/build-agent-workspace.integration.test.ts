@@ -1,0 +1,137 @@
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("#shared/resolve-eve-binary.js", () => ({
+  resolveEveBinaryPath: (root: string) => join(root, "node_modules", "eve", "bin", "eve.js"),
+}));
+
+import { resolveEveProjectContext } from "#internal/project-context.js";
+import { buildAgentWorkspace } from "#internal/vercel/build-agent-workspace.js";
+
+async function createWorkspace(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "eve-workspace-build-"));
+  await writeFile(
+    join(root, "package.json"),
+    JSON.stringify({
+      dependencies: { eve: "*" },
+      packageManager: "pnpm@10.0.0",
+      private: true,
+    }),
+  );
+  await Promise.all([
+    mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
+    mkdir(join(root, "agents", "research", "agent"), { recursive: true }),
+  ]);
+  return root;
+}
+
+async function resolveWorkspace(root: string) {
+  const context = await resolveEveProjectContext(root);
+  if (context.kind !== "workspace") throw new Error("Expected a workspace context.");
+  return context.workspace;
+}
+
+describe("buildAgentWorkspace", () => {
+  it("emits peer services and canonical public routes", async () => {
+    const root = await createWorkspace();
+    const workspace = await resolveWorkspace(root);
+    expect(workspace).toBeDefined();
+
+    const output = await buildAgentWorkspace(workspace);
+    const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
+    const multiAgentSummary = JSON.parse(
+      await readFile(join(root, ".eve", "agent-summary.json"), "utf8"),
+    );
+
+    expect(multiAgentSummary).toMatchObject({
+      agents: [
+        {
+          name: "research",
+          routePrefix: "/eve/research",
+          summaryPath: "agents/research/.eve/agent-summary.json",
+        },
+        {
+          name: "support",
+          routePrefix: "/eve/support",
+          summaryPath: "agents/support/.eve/agent-summary.json",
+        },
+      ],
+      kind: "vercel-eve-multi-agent-summary",
+      schemaVersion: 1,
+    });
+
+    expect(config.routes).toEqual([
+      {
+        destination: { service: "eve-research", type: "service" },
+        src: "^/eve/research/v1/(.*)$",
+      },
+      {
+        destination: { service: "eve-research", type: "service" },
+        src: "^/eve/research/?$",
+      },
+      {
+        destination: { service: "eve-support", type: "service" },
+        src: "^/eve/support/v1/(.*)$",
+      },
+      {
+        destination: { service: "eve-support", type: "service" },
+        src: "^/eve/support/?$",
+      },
+      { handle: "filesystem" },
+    ]);
+    await expect(readFile(join(output, "static", "index.html"), "utf8")).resolves.toContain(
+      "2 agents are up and accepting messages.",
+    );
+    await expect(
+      access(join(root, ".eve", "vercel-services", "eve-support")),
+    ).resolves.toBeUndefined();
+
+    expect(config.services["eve-support"]).toEqual({
+      buildCommand:
+        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' build",
+      devCommand:
+        "cd '../../../agents/support' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/support' && export EVE_INTERNAL_AGENT_WORKSPACE_MEMBER=1 && node 'node_modules/eve/bin/eve.js' dev --no-ui",
+      framework: "eve",
+      outputDirectory: ".vercel/output",
+      root: ".eve/vercel-services/eve-support",
+      routePrefix: "/eve/support",
+      routes: [
+        {
+          src: "^/eve/support/?$",
+          transforms: [{ args: "/", op: "set", type: "request.path" }],
+        },
+        {
+          src: "^/eve/support/v1/(.*)$",
+          transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
+        },
+      ],
+    });
+  });
+
+  it("keeps digit-bearing public names while encoding the generated service name", async () => {
+    const root = await createWorkspace();
+    await mkdir(join(root, "agents", "support2", "agent"), { recursive: true });
+    const workspace = await resolveWorkspace(root);
+    const output = await buildAgentWorkspace(workspace);
+    const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
+    const supportServiceName = Object.keys(config.services).find((name) =>
+      name.startsWith("eve-support-"),
+    );
+
+    expect(supportServiceName).toMatch(/^eve-support-[a-z]+$/);
+    expect(config.routes).toContainEqual({
+      destination: { service: supportServiceName, type: "service" },
+      src: "^/eve/support2/v1/(.*)$",
+    });
+  });
+
+  it("refuses to assemble an authored graph", async () => {
+    const root = await createWorkspace();
+    await writeFile(join(root, "vercel.json"), JSON.stringify({ services: {} }));
+    const workspace = await resolveWorkspace(root);
+    await expect(buildAgentWorkspace(workspace)).rejects.toThrow(/vercel\.ts.*eve\/vercel/);
+  });
+});

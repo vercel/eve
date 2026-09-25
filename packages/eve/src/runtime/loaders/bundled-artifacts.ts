@@ -1,9 +1,11 @@
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { SandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 import {
   createRuntimeSession,
   getActiveRuntimeSession,
+  setRuntimeSessionCompiledArtifacts,
   withRuntimeSession,
 } from "#runtime/sessions/runtime-session.js";
 
@@ -15,6 +17,7 @@ export interface BundledCompiledArtifacts {
   manifest: CompiledAgentManifest;
   metadata?: CompileMetadata;
   moduleMap: CompiledModuleMap;
+  sandboxPreparedArtifacts?: SandboxPreparedArtifactsManifest;
 }
 
 /**
@@ -32,11 +35,12 @@ export interface WithBundledCompiledArtifactsInput extends BundledCompiledArtifa
  * scoped session so tests cannot leak installations across each other.
  */
 export function installBundledCompiledArtifacts(input: BundledCompiledArtifacts): void {
-  getActiveRuntimeSession().compiledArtifacts = {
+  setRuntimeSessionCompiledArtifacts(getActiveRuntimeSession(), {
     manifest: input.manifest,
     metadata: input.metadata,
     moduleMap: input.moduleMap,
-  };
+    sandboxPreparedArtifacts: input.sandboxPreparedArtifacts,
+  });
 }
 
 /**
@@ -59,6 +63,16 @@ export async function withBundledCompiledArtifacts<T>(
  * Reads the bundled compiled-artifact snapshot for the active runtime
  * session, or `null` if none has been installed.
  */
+export function updateBundledSandboxPreparedArtifacts(
+  sandboxPreparedArtifacts: SandboxPreparedArtifactsManifest,
+): boolean {
+  const session = getActiveRuntimeSession();
+  const installed = session.compiledArtifacts;
+  if (installed === null) return false;
+  setRuntimeSessionCompiledArtifacts(session, { ...installed, sandboxPreparedArtifacts });
+  return true;
+}
+
 export function readBundledCompiledArtifacts(): BundledCompiledArtifacts | null {
   return getActiveRuntimeSession().compiledArtifacts;
 }

@@ -121,7 +121,7 @@ export async function applyGitHubSetup(
     log: context.presenter.log,
     events: plan.events,
     project: plan.project,
-    projectRoot: context.appRoot,
+    projectRoot: context.projectRoot,
     slug: plan.slug,
     signal: context.signal,
   });

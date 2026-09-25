@@ -16,6 +16,7 @@ const DISPATCH_MODULE_PATH = "/framework/schedule-task.ts";
 
 const ARTIFACTS_CONFIG = {
   kind: "production",
+  sandboxScope: "test-sandbox-scope",
 } as const;
 
 describe("schedule task routes", () => {

@@ -4,13 +4,13 @@ description: "Expose external MCP and OpenAPI servers to the model, with connect
 url: /connections
 ---
 
-A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth.
+A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth. To instead let eve communicate with users through an external service, use a [channel](/docs/channels/overview).
 
-Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
+Connections live under `agent/connections/`. A static connection's runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. A dynamic connection file can instead resolve a caller-specific connection set at session or turn boundaries. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
 
 ## MCP connections
 
-Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model.
+Use an MCP connection when the external service already exposes an MCP server. The server publishes its tools and schemas, and eve makes the matched tools callable by the model. Each tool's JSON Schema reaches the model as published, minus any arguments you supply with `toolCall.providedArguments`, and eve checks the model's arguments against it before it calls the server.
 
 Read [MCP connections](/docs/connections/mcp) for `defineMcpClientConnection`, transport requirements, and MCP tool filters.
 
@@ -19,6 +19,66 @@ Read [MCP connections](/docs/connections/mcp) for `defineMcpClientConnection`, t
 Use an OpenAPI connection when the service exposes an OpenAPI 3.x document. eve turns operations in the document into connection tools, one per operation.
 
 Read [OpenAPI connections](/docs/connections/openapi) for `defineOpenAPIConnection`, `baseUrl`, and operation filters.
+
+## Dynamic connections
+
+Use `defineDynamic` when the connection set depends on the authenticated user,
+tenant, or another runtime lookup. Import it with the connection factories from
+`eve/connections`, then return one connection definition, a map of definitions,
+or `null` from `session.started` or `turn.started`.
+
+```ts title="agent/connections/accounts.ts"
+import { defineDynamic, defineMcpClientConnection } from "eve/connections";
+import { listAccounts } from "../lib/accounts";
+
+export default defineDynamic({
+  events: {
+    "session.started": async (_event, ctx) => {
+      const accounts = await listAccounts(ctx.session.auth.current);
+      return Object.fromEntries(
+        accounts.map((account) => [
+          account.slug,
+          defineMcpClientConnection({
+            url: account.mcpUrl,
+            description: account.description,
+            instanceKey: account.id,
+            auth: account.auth,
+          }),
+        ]),
+      );
+    },
+  },
+});
+```
+
+For a single returned definition, the filename supplies the connection name.
+For a map, each bare map key becomes a connection name. Every entry must use
+`defineMcpClientConnection` or `defineOpenAPIConnection`. Authenticated entries
+must also set `instanceKey` to a stable, non-secret account or tenant identifier.
+See [Dynamic capabilities](/docs/guides/dynamic-capabilities#dynamic-connections)
+for event scope, naming, conflicts, and durable recovery behavior.
+
+Tools from a `turn.started` connection can require approval, including an
+`approval.response` policy. When an approval resumes between turns, eve rebuilds
+the connection callbacks before checking the response policy, even in a fresh
+process. This restoration uses the pending request's turn coordinates and the
+current authenticated session context; it does not emit another public
+`turn.started` event. The response policy still receives the authenticated
+responder separately. When one delivery answers requests from different turns,
+eve restores each candidate's originating connection scope before its policy
+check, then prepares the complete batch selected for tool replay. Keep connection
+resolvers idempotent because restoration can run them again.
+
+Restoration uses current resolver results, not a historical connection snapshot.
+If the tool is absent from the persisted tool metadata, or its required response
+policy is unavailable, eve refuses the response and leaves the request pending.
+eve does not reconstruct missing tool metadata from earlier turns. Before replay, eve checks that the
+approved tool is still available and that its connection identity has not
+changed since the call requested approval. A missing or changed connection
+fails the replay rather than sending the call to a replacement destination.
+Request a new tool call and approval after correcting the connection. Identity
+includes the endpoint and `instanceKey`; use a distinct `instanceKey` for each
+account or tenant even when they share an endpoint.
 
 ## Static-token auth
 
@@ -31,6 +91,7 @@ export default defineMcpClientConnection({
   url: "https://mcp.linear.app/mcp",
   description: "Linear workspace.",
   auth: {
+    credentialOwner: "app",
     getToken: async () => ({ token: process.env.LINEAR_API_TOKEN! }),
   },
 });
@@ -38,7 +99,7 @@ export default defineMcpClientConnection({
 
 If the token has a known TTL, set `expiresAt` (milliseconds since epoch) and eve refreshes ahead of time rather than waiting for a `401`.
 
-When `getToken` is the only auth, `principalType` defaults to `"app"`: one shared credential keyed across all sessions. Switch to `principalType: "user"` when each end-user carries their own token.
+When `getToken` is the only auth, `credentialOwner` defaults to `"app"`: one shared credential keyed across all sessions. Set `credentialOwner: "user"` when each end-user carries their own token.
 
 eve resolves and caches connection tokens per step; they never land in conversation history or reach the model.
 
@@ -48,11 +109,13 @@ A connection credential can belong to the agent or to the person using it. This 
 
 | Credential owner | Use when                                                                       | Auth shape                                                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| App              | The agent should use one shared service, bot, installation, or app credential. | `auth: { getToken }` defaults to `principalType: "app"`, or use `connect({ connector: "linear/myagent", principalType: "app" })` with Vercel Connect.        |
-| User             | Each end-user should authorize and use their own third-party account.          | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { principalType: "user", getToken }`.              |
+| App              | The agent should use one shared service, bot, installation, or app credential. | `auth: { getToken }` defaults to `credentialOwner: "app"`, or use `connect({ connector: "linear/myagent", principalType: "app" })` with Vercel Connect.      |
+| User             | Each end-user should authorize and use their own third-party account.          | `connect("linear/myagent")`, `connect({ connector: "linear/myagent", principalType: "user" })`, or `auth: { credentialOwner: "user", getToken }`.            |
 | User from a job  | Background work should use the same user's OAuth grant that started the work.  | Start or resume the session through a channel whose route auth resolved that user, or pass an explicit user auth context when dispatching through a channel. |
 
-`principalType: "user"` does not mean "ask any human later." It means "key this credential to the authenticated user already attached to the eve session." If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
+`credentialOwner: "user"` does not mean "ask any human later." It means "key this credential to the authenticated user already attached to the eve session." If the run was started by a schedule, a same-project runtime token, `localDev()`, or another internal runtime path without an end-user principal, a user-scoped connection fails with `reason: "principal_required"` instead of starting OAuth. In that case, either authenticate the inbound channel as a user or configure the connection as app-scoped.
+
+`credentialOwner` is eve's field for raw getToken-only connection auth. Existing non-interactive raw `principalType` definitions still work, but are deprecated. Interactive auth and `connect()` from `@vercel/connect/eve` continue to use `principalType: "user"`; that field also remains correct for route-auth session identities.
 
 ## No auth
 
@@ -94,7 +157,7 @@ export default defineOpenAPIConnection({
   spec: "https://warehouse.example.com/openapi.json",
   description: "The caller's tenant-scoped warehouse.",
   auth: (ctx) => ({
-    principalType: "user",
+    credentialOwner: "user",
     getToken: async () => ({
       token: await tenantToken(ctx.session.auth.current),
     }),
@@ -113,7 +176,7 @@ headers: {
 }
 ```
 
-Use `principalType: "user"` for per-user tokens so eve rejects unauthenticated callers and keys its step-local token cache by user. The resolver supplements route auth; it does not authenticate the inbound request. Static auth objects and header maps remain available when every caller shares the same configuration.
+Use `credentialOwner: "user"` for per-user tokens so eve rejects unauthenticated callers and keys its step-local token cache by user. The resolver supplements route auth; it does not authenticate the inbound request. Static auth objects and header maps remain available when every caller shares the same configuration.
 
 ## Per-connection approval
 
@@ -131,7 +194,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-`never()` lets every call through, `once()` asks for approval the first time in a session, and `always()` asks every time. The pause and resume is the same human-in-the-loop flow covered in [Tools](/docs/tools).
+`never()` lets every call through, `once()` asks for approval the first time in a session, `always()` asks every time, and `auto()` uses an evaluation model to allow routine calls and ask about dangerous or unclear effects. The pause and resume is the same human-in-the-loop flow covered in [Tools](/docs/tools).
 
 For connection tools that can create, modify, delete, transmit, purchase, message, or access sensitive data, use approval, allow-lists, or other safeguards appropriate to the action.
 
@@ -162,7 +225,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-`"linear/myagent"` is the UID you chose when registering the Connect client. `connect("linear/myagent")` is shorthand for a user-scoped interactive OAuth connection: eve resolves a token for the active user before each tool call, emits `authorization.required` when that user has not authorized yet, and resumes the parked turn after the callback completes.
+Use the connector UID returned by `vercel connect create`; the display name passed to `--name` is not the UID. `connect("linear/myagent")` is shorthand for a user-scoped interactive OAuth connection: eve resolves a token for the active user before each tool call, emits `authorization.required` when that user has not authorized yet, and resumes the parked turn after the callback completes.
 
 When a local subagent needs interactive authorization, eve surfaces the authorization lifecycle on the root session's channel, including through nested subagent chains. The challenge still points to the child session's callback, so completing it resumes the child directly while the parent continues waiting for its result.
 
@@ -185,16 +248,16 @@ App-scoped Connect auth is non-interactive. eve asks Vercel Connect for an app t
 
 ### Troubleshooting Vercel Connect auth
 
-| Symptom                                      | What it means                                                                                                                     | Fix                                                                                                                                       |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `reason: "principal_required"`               | A user-scoped connection ran without an authenticated user on the active session.                                                 | Return `principalType: "user"` from the channel's route auth, or change the connection to `principalType: "app"` if it should be shared.  |
-| `authorization.required` appears but no UI   | eve parked the turn for OAuth, but the channel or frontend is not rendering the challenge.                                        | Render the challenge from the stream event and continue the same session after the callback.                                              |
-| OAuth works locally but fails after deploy   | The project may not be linked to the Connect client, or the deployed runtime may not have the expected Vercel OIDC/project scope. | Run Connect setup from the consuming project directory, link the project, deploy again, and verify the connector UID in `connect("...")`. |
-| A scheduled or internal run needs user OAuth | Schedules and runtime callers do not automatically carry an end-user principal.                                                   | Dispatch through a user-authenticated channel when work is user-owned, or use app-scoped auth for agent-owned background work.            |
+| Symptom                                      | What it means                                                                                                                     | Fix                                                                                                                                                             |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reason: "principal_required"`               | A user-scoped connection ran without an authenticated user on the active session.                                                 | Return `principalType: "user"` from the channel's route auth, or use `connect({ connector, principalType: "app" })` if the Connect credential should be shared. |
+| `authorization.required` appears but no UI   | eve parked the turn for OAuth, but the channel or frontend is not rendering the challenge.                                        | Render the challenge from the stream event and continue the same session after the callback.                                                                    |
+| OAuth works locally but fails after deploy   | The project may not be linked to the Connect client, or the deployed runtime may not have the expected Vercel OIDC/project scope. | Run Connect setup from the consuming project directory, link the project, deploy again, and verify the connector UID in `connect("...")`.                       |
+| A scheduled or internal run needs user OAuth | Schedules and runtime callers do not automatically carry an end-user principal.                                                   | Dispatch through a user-authenticated channel when work is user-owned, or use app-scoped auth for agent-owned background work.                                  |
 
 ## Self-hosted interactive OAuth
 
-To run your own OAuth, use `defineInteractiveAuthorization` from `eve/connections`, which takes a three-method form and needs no Vercel Connect. eve mints a callback URL, parks (durably suspends) the turn on a framework-owned webhook, and resumes once the token comes back. Interactive auth is always `principalType: "user"`, and the factory pins that for you.
+To run your own OAuth, use `defineInteractiveAuthorization` from `eve/connections`, which takes a three-method form and needs no Vercel Connect. eve mints a callback URL, parks (durably suspends) the turn on a framework-owned webhook, and resumes once the token comes back. Interactive auth is always `principalType: "user"`; `credentialOwner` applies only to getToken-only auth, and the factory pins the interactive value for you.
 
 ```ts title="agent/connections/linear.ts"
 import {
@@ -245,7 +308,13 @@ export default defineMcpClientConnection({
 
 Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
 
-`displayName` is presentation-only. The connection's path-derived name still keys the authorization flow, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
+`displayName` is presentation-only. The connection's resolved name still keys
+the callback URL, while eve scopes token caching and authorization completion
+to the opaque resolved instance identity. You can also set `displayName` on the
+`auth` definition itself (e.g.
+`auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that
+definition-level value wins over one the strategy stamps on the challenge, and
+channels fall back to title-casing the connection name when neither is set.
 
 ### Signaling authorization state
 

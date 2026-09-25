@@ -3,6 +3,8 @@ import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ScheduleIdKey } from "#context/keys.js";
 import { expectFunction } from "#internal/authored-module.js";
 import type {
   ScheduleDefinition,
@@ -72,6 +74,12 @@ export class ScheduleDispatcher {
   }
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, input.scheduleId);
+    return await contextStorage.run(scope, () => this.triggerInScope(input));
+  }
+
+  private async triggerInScope(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const sessions: Session[] = [];
     const waitUntilTasks: Promise<unknown>[] = [];
     const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));

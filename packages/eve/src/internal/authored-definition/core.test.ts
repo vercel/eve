@@ -5,11 +5,20 @@ import {
   normalizeInstructionsDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
-import { defineDynamic } from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
 describe("normalizeAgentDefinition", () => {
+  it("normalizes agent tool visibility", () => {
+    expect(
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: false }, FAILURE_MESSAGE).tool,
+    ).toBe(false);
+    expect(() =>
+      normalizeAgentDefinition({ model: "openai/gpt-5.5", tool: "no" }, FAILURE_MESSAGE),
+    ).toThrow(FAILURE_MESSAGE);
+  });
+
   it("accepts provider-agnostic reasoning effort", () => {
     const definition = normalizeAgentDefinition(
       {
@@ -109,6 +118,7 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
+          maxTokenCostUsdPerSession: 1.5,
           sessionTimeoutMs: 86_400_000,
         },
       },
@@ -118,6 +128,7 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
       sessionTimeoutMs: 86_400_000,
     });
   });
@@ -129,6 +140,7 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: false,
           maxOutputTokensPerSession: false,
+          maxTokenCostUsdPerSession: false,
           sessionTimeoutMs: false,
         },
       },
@@ -138,6 +150,7 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
+      maxTokenCostUsdPerSession: false,
       sessionTimeoutMs: false,
     });
   });
@@ -175,6 +188,10 @@ describe("normalizeAgentDefinition", () => {
     ["maxOutputTokensPerSession", 1.5],
     ["maxOutputTokensPerSession", -1],
     ["maxOutputTokensPerSession", "20000"],
+    ["maxTokenCostUsdPerSession", 0],
+    ["maxTokenCostUsdPerSession", -0.01],
+    ["maxTokenCostUsdPerSession", Number.POSITIVE_INFINITY],
+    ["maxTokenCostUsdPerSession", "1.50"],
     ["sessionTimeoutMs", 0],
     ["sessionTimeoutMs", 1.5],
     ["sessionTimeoutMs", -1],
@@ -219,6 +236,41 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.experimental?.workflow).toEqual({ world: "@workflow/world-postgres" });
   });
 
+  it("accepts a positive model-call batch size", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          workflow: {
+            modelCallsPerStep: 4,
+          },
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.workflow?.modelCallsPerStep).toBe(4);
+  });
+
+  it.each([0, 1.5, -1, Number.POSITIVE_INFINITY, "4"])(
+    "rejects invalid model-call batch size %j",
+    (value) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            model: "openai/gpt-5.5",
+            experimental: {
+              workflow: {
+                modelCallsPerStep: value,
+              },
+            },
+          },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow(FAILURE_MESSAGE);
+    },
+  );
+
   it("rejects non-string workflow world values", () => {
     expect(() =>
       normalizeAgentDefinition(
@@ -253,32 +305,64 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
   });
 
-  it("accepts a boolean subagentPersistentSessions flag", () => {
+  it.each([0, "default"] as const)("accepts workflow retention %j", (value) => {
     const definition = normalizeAgentDefinition(
       {
         model: "openai/gpt-5.5",
         experimental: {
-          subagentPersistentSessions: true,
+          workflow: {
+            retention: value,
+          },
         },
       },
       FAILURE_MESSAGE,
     );
 
-    expect(definition.experimental?.subagentPersistentSessions).toBe(true);
+    expect(definition.experimental?.workflow?.retention).toBe(value);
   });
 
-  it("rejects non-boolean subagentPersistentSessions values", () => {
+  it.each(["none", "0", 1, true, null])("rejects invalid workflow retention %j", (value) => {
     expect(() =>
       normalizeAgentDefinition(
         {
           model: "openai/gpt-5.5",
           experimental: {
-            subagentPersistentSessions: "yes",
+            workflow: {
+              retention: value,
+            },
           },
         },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('"experimental.subagentPersistentSessions" must be a boolean.');
+    ).toThrow('"experimental.workflow.retention" must be 0 or "default"');
+  });
+
+  it.each([true, false])("rejects the removed subagentPersistentSessions flag", (value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            subagentPersistentSessions: value,
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "subagentPersistentSessions"');
+  });
+
+  it.each([true, false, "yes"])("rejects the removed tasks flag", (tasks) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            tasks,
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "tasks"');
   });
 });
 

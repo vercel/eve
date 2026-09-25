@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
 import type { LogRecord } from "#internal/logging.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
@@ -11,8 +12,7 @@ import {
 } from "#internal/nitro/host/dev-watcher-log.js";
 
 import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
-import { promptCommandsFor } from "./prompt-commands.js";
-import { PROMPT_PLACEHOLDER_MESSAGES } from "./prompt-placeholder.js";
+import { PROMPT_COMMANDS, promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
@@ -24,6 +24,29 @@ function streamOf(events: AgentTUIStreamEvent[]): AgentTUIStreamResult {
         controller.close();
       },
     }),
+  };
+}
+
+function agentInfoWithDynamicModel(): AgentInfoResult {
+  const info = createTestAgentInfoResult({ name: "Weather Agent" });
+  return {
+    ...info,
+    agent: {
+      ...info.agent,
+      model: {
+        routing: {
+          kind: "dynamic",
+          resolver: {
+            eventNames: ["step.started"],
+            slug: "model",
+            logicalPath: "agent.ts",
+            owner: { kind: "application" },
+            sourceId: "agent-model",
+            sourceKind: "module",
+          },
+        },
+      },
+    },
   };
 }
 
@@ -85,65 +108,17 @@ function agentInfoWithModel(
   endpoint?: StaticAgentInfoModel["endpoint"],
   extras?: Partial<StaticAgentInfoModel>,
 ): AgentInfoResult {
+  const info = createTestAgentInfoResult({ modelId, name: "Weather Agent" });
   return {
+    ...info,
     agent: {
-      agentRoot: "/tmp/weather-agent/agent",
-      appRoot: "/tmp/weather-agent",
+      ...info.agent,
       model: {
         id: modelId,
         endpoint,
         routing: { kind: "gateway" as const, target: modelId.split("/")[0] ?? "openai" },
         ...extras,
       },
-      name: "Weather Agent",
-    },
-    capabilities: {
-      devRoutes: true,
-    },
-    channels: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      framework: [],
-    },
-    connections: [],
-    diagnostics: {
-      discoveryErrors: 0,
-      discoveryWarnings: 0,
-    },
-    hooks: [],
-    instructions: {
-      dynamic: [],
-      static: [],
-    },
-    kind: "eve-agent-info",
-    mode: "development",
-    sandbox: null,
-    schedules: [],
-    skills: {
-      dynamic: [],
-      static: [],
-    },
-    subagents: {
-      local: [],
-      total: 0,
-    },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: {
-      enabled: false,
-      toolName: "Workflow",
-    },
-    workspace: {
-      resourceRoot: null,
-      rootEntries: [],
     },
   };
 }
@@ -218,27 +193,25 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(process.listeners("exit")).toEqual(before);
   });
 
-  it("renders the brand line with the agent name and a tip", () => {
+  it("commits the startup card before the prompt", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("gpt-5"),
-      tip: "Use eve add to install integrations from the registry.",
+      info: agentInfoWithModel("gpt-5", {
+        kind: "gateway",
+        connected: true,
+        credential: "api-key",
+      }),
     });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("eve Weather Agent");
-    expect(snapshot).toContain("Use eve add to install integrations from the registry.");
-    // The model lives on the status line, not the header; the old config
-    // rows and key hints are gone.
-    expect(snapshot).not.toContain("gpt-5");
+    expect(snapshot).toMatch(/☰eve v\d+\.\d+\.\d+ · Weather Agent · Run \/help for commands/u);
     expect(snapshot).not.toContain("http://localhost:3000");
-    expect(snapshot).not.toContain("Type to chat");
   });
 
-  it("refreshes the committed agent header with the latest model", async () => {
+  it("updates the status model without repeating an unchanged agent card", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       info: agentInfoWithModel("old-model"),
@@ -263,6 +236,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("new-model");
     expect(snapshot).not.toContain("old-model");
+    expect(snapshot.match(/☰eve v\d/gu)).toHaveLength(1);
     expect(snapshot).toContain("hello");
     expect(snapshot).toContain("still here");
     renderer.shutdown();
@@ -293,6 +267,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("weather in SF?");
     expect(snapshot).toContain("get_weather");
     expect(snapshot).toContain("It's 73°F in SF.");
+  });
+
+  it("replaces discarded retry text with the authoritative completed message", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "t1", delta: "Discard this partial response." },
+        { type: "assistant-delta", id: "t1", delta: "Recovered answer." },
+        { type: "assistant-complete", id: "t1", text: "Recovered answer." },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Discard this partial response.");
+    expect(snapshot.match(/Recovered answer\./gu)).toHaveLength(1);
   });
 
   it("renders rejected tools as denied", async () => {
@@ -621,7 +612,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await Promise.resolve();
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     expect(screen.snapshot()).not.toContain("Ctrl+C to interrupt");
 
     streamController?.close();
@@ -646,7 +637,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await Promise.resolve();
     // The bar renders; connection state lives in its own section.
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
 
     streamController?.close();
     await rendering;
@@ -676,22 +667,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
       await Promise.resolve();
       let lines = screen.snapshot().split("\n");
-      // The label types itself out: one character at t=0.
-      let barRow = lines.findIndex((line) => line === "▪ W 1s");
+      let barRow = lines.findIndex((line) => line === "• Thinking (0s)");
       expect(barRow).toBeGreaterThan(-1);
-      // The pending prompt row wears the same quiet `›` as the idle one
+      // The pending prompt row wears the same default-color `❯` as the idle one
       // beneath the bar; the status line follows it.
       expect(lines[barRow + 1]).toBe("");
-      expect(lines[barRow + 2]).toContain("›");
+      expect(lines[barRow + 2]).toContain("❯");
       expect(lines[barRow + 4]).toContain("gpt-5");
 
-      // The duration ticks live while the pulse blinks on the shared beat.
-      await vi.advanceTimersByTimeAsync(2_000);
+      // Advance past the second boundary so the shared paint ticker catches it.
+      await vi.advanceTimersByTimeAsync(2_100);
       lines = screen.snapshot().split("\n");
-      // Fully revealed once the reveal window has passed.
-      barRow = lines.findIndex((line) => line.includes("Working for 2s"));
+      barRow = lines.findIndex((line) => line.includes("Thinking (2s)"));
       expect(barRow).toBeGreaterThan(-1);
-      expect(lines[barRow + 2]).toContain("›");
+      expect(lines[barRow + 2]).toContain("❯");
       expect(lines[barRow + 4]).toContain("gpt-5");
 
       streamController?.close();
@@ -717,7 +706,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.enter();
 
     expect(await prompt).toBe("hello");
-    expect(screen.snapshot()).toContain("* W 1s");
+    expect(screen.snapshot()).toContain("* Thinking (0s)");
     expect(screen.snapshot()).not.toContain("⊙");
     renderer.shutdown();
   });
@@ -818,6 +807,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await expect(second).rejects.toThrow();
     expect(renderer.exitRequested()).toBe(true);
 
+    renderer.shutdown();
+  });
+
+  it("does not yank-pop after a controller-owned repaint key", async () => {
+    const { input, renderer } = makeRenderer();
+
+    const prompt = renderer.readPrompt();
+    input.type("one");
+    input.send("\u0015"); // Ctrl+U
+    input.type("two");
+    input.send("\u0015"); // Ctrl+U
+    input.send("\u0019"); // Ctrl+Y inserts "two"
+    input.send("\u0012"); // Ctrl+R interrupts yank-pop
+    input.send("\x1by"); // Alt+Y must not replace it with "one"
+    input.enter();
+
+    expect(await prompt).toBe("two");
     renderer.shutdown();
   });
 
@@ -987,6 +993,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("settles an authorization block when its callback arrives in a later stream pass", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "background", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "background" });
     renderer.upsertConnectionAuth({
       name: "linear",
       description: "Authorization required for linear",
@@ -1015,6 +1023,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "linear · authorization")).toBe(1);
     expect(snapshot).toContain("linear · authorization · authorized");
     expect(snapshot).toContain("Authorization complete");
     expect(snapshot).not.toContain("linear · authorization · required");
@@ -1149,6 +1158,54 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps late background child output inside its section across parent turns", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-1", delta: "Research task started." },
+        { type: "assistant-complete", id: "parent-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "parent-2", delta: "It is still running." },
+        { type: "assistant-complete", id: "parent-2" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "cool" },
+    );
+
+    // The child emits after both parent turns. It still inserts beside its
+    // call's header, not at the current transcript edge beneath parent-2.
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "executing",
+    });
+
+    const snapshot = screen.snapshot();
+    const header = snapshot.indexOf("※ subagent(researcher)");
+    const child = snapshot.indexOf("dig");
+    const firstParent = snapshot.indexOf("Research task started.");
+    const user = snapshot.indexOf("cool");
+    const secondParent = snapshot.indexOf("It is still running.");
+    expect(firstParent).toBeGreaterThan(-1);
+    expect(user).toBeGreaterThan(firstParent);
+    expect(secondParent).toBeGreaterThan(user);
+    expect(header).toBeGreaterThan(secondParent);
+    expect(child).toBeGreaterThan(header);
+    renderer.shutdown();
+  });
+
   it("swaps a dispatch's preparing placeholder for the section header", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1249,7 +1306,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Fetched https://one.example");
     expect(screen.snapshot()).not.toContain("Done");
 
-    renderer.completeSubagent({ callId: "s1" });
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
     const snapshot = screen.snapshot();
     // Completed: the corner reports Done with the counted footnote and the
     // children fold away — the parent's reply carries the conclusion.
@@ -1258,6 +1315,271 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
     renderer.shutdown();
   });
+
+  it("commits an authoritative background completion out of the live prompt region", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.backgroundSubagent({ callId: "s1" });
+    renderer.upsertSubagentTool({
+      callId: "s1",
+      subagentName: "researcher",
+      childCallId: "dig-1",
+      toolName: "dig",
+      input: { phase: "sources" },
+      status: "done",
+      output: { ok: true },
+    });
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next message");
+
+    // Prompt repaint must not redraw the completed subagent cohort: it has
+    // moved to immutable scrollback and no longer occupies the live region.
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    expect(await prompt).toBe("next message");
+    renderer.shutdown();
+  });
+
+  it("keeps the activity ticker running while a background subagent remains live", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-hold",
+        toolName: "hold",
+        input: { durationMs: 45_000 },
+        status: "executing",
+      });
+
+      await renderer.renderStream(streamOf([{ type: "finish" }]), {
+        continueSession: true,
+        submittedPrompt: "start background work",
+      });
+      const outputBeforeTick = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(90);
+      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
+
+      renderer.completeSubagent({ authoritative: true, callId: "background" });
+      const outputAfterCompletion = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the ticker running when one of two background subagents completes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const startBackground = (callId: string) => {
+        renderer.beginSubagent({ callId, name: "hang-worker" });
+        renderer.backgroundSubagent({ callId });
+        renderer.upsertSubagentTool({
+          callId,
+          subagentName: "hang-worker",
+          childCallId: `${callId}-hold`,
+          toolName: "hold",
+          input: { durationMs: 45_000 },
+          status: "executing",
+        });
+      };
+
+      startBackground("first");
+      await renderer.renderStream(streamOf([{ type: "finish" }]), {
+        continueSession: true,
+        submittedPrompt: "start first background worker",
+      });
+      await renderer.renderStream(
+        streamOf([
+          { type: "assistant-complete", id: "a", text: "Mock reply: a" },
+          { type: "finish" },
+        ]),
+        { continueSession: true, submittedPrompt: "a" },
+      );
+      startBackground("second");
+      await renderer.renderStream(streamOf([{ type: "finish" }]), {
+        continueSession: true,
+        submittedPrompt: "start second background worker",
+      });
+
+      renderer.completeSubagent({ authoritative: true, callId: "first" });
+      const outputBeforeTick = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(90);
+      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
+
+      renderer.completeSubagent({ authoritative: true, callId: "second" });
+      const outputAfterCompletion = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops background activity ticking when a session boundary abandons its child", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-hold",
+        toolName: "hold",
+        input: { durationMs: 45_000 },
+        status: "executing",
+      });
+
+      renderer.renderSessionBoundary();
+      const outputAfterBoundary = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputAfterBoundary);
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("commits completed foreground turns ahead of a live background subagent", async () => {
+    const { screen, renderer } = makeRenderer(48, 8);
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "background", name: "researcher" });
+    // These settled blocks arrive before the parent reports that the child
+    // is background work. Reclassifying the child must release them from its
+    // formerly leading live cohort.
+    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_ONE");
+    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_TWO");
+    renderer.backgroundSubagent({ callId: "background" });
+    renderer.upsertSubagentStep({
+      callId: "background",
+      subagentName: "researcher",
+      sectionKey: 0,
+      reasoning: "",
+      message: "still researching background details",
+      finalized: false,
+    });
+
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-complete", id: "answer-1", text: "FIRST_COMPLETED_ANSWER" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "FIRST_COMPLETED_PROMPT" },
+    );
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-complete", id: "answer-2", text: "SECOND_COMPLETED_ANSWER" },
+        { type: "finish" },
+      ]),
+      { continueSession: true, submittedPrompt: "SECOND_COMPLETED_PROMPT" },
+    );
+
+    const transcript = screen.snapshot();
+    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_ONE");
+    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_TWO");
+    expect(transcript).toContain("FIRST_COMPLETED_PROMPT");
+    expect(transcript).toContain("FIRST_COMPLETED_ANSWER");
+    expect(transcript).toContain("SECOND_COMPLETED_PROMPT");
+    expect(transcript).toContain("SECOND_COMPLETED_ANSWER");
+    expect(transcript).toContain("still researching background details");
+
+    renderer.completeSubagent({ authoritative: true, callId: "background" });
+    expect(screen.snapshot()).not.toContain("hidden while streaming");
+    renderer.shutdown();
+  });
+
+  it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "researcher",
+      sectionKey: 0,
+      reasoning: "",
+      message: "parent-visible output",
+      finalized: true,
+    });
+    renderer.completeSubagent({ authoritative: false, callId: "s1" });
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+
+    renderer.beginSubagent({ callId: "s1", name: "researcher" });
+    renderer.upsertSubagentStep({
+      callId: "s1",
+      subagentName: "researcher",
+      sectionKey: 1,
+      reasoning: "",
+      message: "delayed child output",
+      finalized: true,
+    });
+
+    expect(screen.snapshot()).toContain("delayed child output");
+    expect(screen.snapshot()).not.toContain("└ Done");
+
+    renderer.completeSubagent({ authoritative: true, callId: "s1" });
+    const outputAfterCommit = screen.rawOutput().length;
+    const prompt = renderer.readPrompt();
+    input.type("next");
+    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
+    input.enter();
+    await prompt;
+    renderer.shutdown();
+  });
+
+  it.each(["active", "idle"] as const)(
+    "settles only the %s cancelled turn's top-level tools",
+    async (mode) => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      renderer.upsertSubagentTool({
+        callId: "background",
+        subagentName: "researcher",
+        childCallId: "child-bash",
+        toolName: "bash",
+        input: { command: "background-child" },
+        status: "executing",
+      });
+      const result = streamOf([
+        {
+          type: "tool-call",
+          toolCallId: "current-bash",
+          toolName: "bash",
+          input: { command: "idle-current" },
+        },
+        { type: "turn-cancelled" },
+        { type: "finish" },
+      ]);
+
+      if (mode === "active") {
+        await renderer.renderStream(result, { continueSession: true });
+      } else {
+        await renderer.renderIdleStream(result, { continueSession: true });
+      }
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("background-child");
+      expect(snapshot).toContain("idle-current");
+      expect(countOccurrences(snapshot, "interrupted")).toBe(1);
+      renderer.shutdown();
+    },
+  );
 
   it("renders parallel calls to the same subagent as ordinal-numbered sections", async () => {
     const { screen, renderer } = makeRenderer();
@@ -1328,7 +1650,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("┌── Session restarted, clear context.");
   });
 
-  it("closes the dying turn's coda and dismisses the todo panel at the boundary", async () => {
+  it("closes the dying turn's coda at the boundary", async () => {
     const { screen, input, renderer } = makeRenderer();
     const prompt = renderer.readPrompt();
     input.type("hey agent");
@@ -1338,17 +1660,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await renderer.renderStream(
       streamOf([
         { type: "step-start" },
-        {
-          type: "tool-call",
-          toolCallId: "t1",
-          toolName: "todo",
-          input: {
-            todos: [
-              { content: "first task", status: "in_progress" },
-              { content: "second task", status: "pending" },
-            ],
-          },
-        },
         { type: "assistant-delta", id: "m1", delta: "working" },
         { type: "assistant-complete", id: "m1" },
         { type: "step-finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
@@ -1356,20 +1667,18 @@ describe("TerminalRenderer (inline scrollback)", () => {
       ]),
       { continueSession: true },
     );
-    expect(screen.snapshot()).toContain("first task");
 
     renderer.renderSessionBoundary();
     const snapshot = screen.snapshot();
-    // The dead turn's stats close before the boundary, not after it…
+    // The dead turn's stats close before the boundary, not after it.
     expect(snapshot.indexOf("└ Done in")).toBeGreaterThan(-1);
     expect(snapshot.indexOf("└ Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
-    // …and the discarded session's plan dismisses instead of lingering.
-    expect(snapshot).not.toContain("first task");
 
     // Control returning to the prompt must not add a second coda.
     const second = renderer.readPrompt();
     expect(countOccurrences(screen.snapshot(), "└ Done in")).toBe(1);
     input.ctrlC();
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1390,10 +1699,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
     await Promise.resolve();
 
-    // Empty: the quiet idle mark.
-    expect(screen.snapshot()).toContain("›");
+    // Empty: the default-color prompt mark.
+    expect(screen.snapshot()).toContain("❯");
 
-    // A typed draft flips to the active mark, but dim — Enter is inert, so
+    // A typed draft dims the mark — Enter is inert, so
     // the cyan ready state would overclaim.
     input.type("next question");
     await screen.waitForText("❯ next question");
@@ -1402,6 +1711,39 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     streamController?.close();
     await rendering;
+    renderer.shutdown();
+  });
+
+  it("renders an idle wake turn without corrupting the active prompt draft", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("draft in progress");
+
+    await renderer.renderIdleStream(
+      streamOf([
+        {
+          type: "tool-call",
+          input: { taskIds: ["task_123"] },
+          toolCallId: "cancel-1",
+          toolName: "task_cancel",
+        },
+        {
+          type: "tool-result",
+          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
+          toolCallId: "cancel-1",
+        },
+        { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
+        { type: "assistant-complete", id: "wake-1" },
+        { type: "finish" },
+      ]),
+      { continueSession: true },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Research finished.");
+    expect(snapshot).toContain("draft in progress");
+    input.enter();
+    expect(await prompt).toBe("draft in progress");
     renderer.shutdown();
   });
 
@@ -1451,7 +1793,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("clears the setup attention line once its issue is resolved", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderSetupWarning("1 setup issue: not logged in · /vc:login");
+    renderer.renderSetupWarning("1 setup issue: not logged in · /deploy");
     expect(screen.snapshot()).toContain("not logged in");
 
     renderer.clearSetupWarning();
@@ -1461,49 +1803,142 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("hangs a command outcome under its invocation with the elbow connector", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("/model dismissed.");
+    renderer.finishCommand({ kind: "result", message: "/model dismissed." });
     renderer.shutdown();
 
     expect(screen.snapshot()).toContain("\u23bf  /model dismissed.");
   });
 
+  it("strips complete ANSI styles from command outcomes", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.finishCommand({
+      kind: "result",
+      message: "Model changed to \u001b[1mchatgpt/gpt-5.6-sol\u001b[22m. Live on your next prompt.",
+    });
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toContain(
+      "\u23bf  Model changed to chatgpt/gpt-5.6-sol. Live on your next prompt.",
+    );
+    expect(screen.snapshot()).not.toContain("[1m");
+    expect(screen.snapshot()).not.toContain("[22m");
+  });
+
   it("hangs a successful command outcome from an elbow into a full-intensity rail", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult(
-      "Registry items added: channel/photon-imessage.\n" +
+    renderer.finishCommand({
+      kind: "result",
+      message:
+        "Registry items added: channel/photon-imessage.\n" +
         "Text your agent: +15550000000\n" +
         "Photon project: https://app.photon.codes/dashboard/project-id",
-      "success",
-    );
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("⎿  ✓ Registry items added: channel/photon-imessage.");
-    expect(snapshot).toContain("│ Text your agent: +15550000000");
-    expect(snapshot).toContain("└ Photon project: https://app.photon.codes/dashboard/project-id");
-    expect(screen.rawOutput()).toContain("\u001b[32m✓\u001b[39m");
-    expect(screen.rawOutput()).not.toContain("\u001b[2mText your agent");
+    expect(snapshot).toContain("⎿  Registry items added: channel/photon-imessage.");
+    expect(snapshot).toContain("      Text your agent: +15550000000");
+    expect(snapshot).toContain(
+      "      Photon project: https://app.photon.codes/dashboard/project-id",
+    );
   });
 
   it("keeps a single-line successful command result under the elbow", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandResult("Registry items added: connection/linear.", "success");
+    renderer.finishCommand({ kind: "result", message: "Registry items added: connection/linear." });
     renderer.shutdown();
 
-    expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
+    expect(screen.snapshot()).toContain("⎿  Registry items added: connection/linear.");
+  });
+
+  it("pulses a running command's gutter", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/notion");
+
+    expect(screen.snapshot()).toMatch(/^[▪ ] \/add connection\/notion$/m);
+    expect(screen.snapshot()).not.toContain("│ /add connection/notion");
+    renderer.shutdown();
+  });
+
+  it("holds a running command's gutter still while its setup panel pulses", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/deploy");
+    renderer.setupFlow.begin("");
+
+    expect(screen.snapshot()).toMatch(/^▪ \/deploy$/m);
+    expect(screen.rawOutput()).toContain("\u001b[90m▪\u001b[39m /deploy");
+    renderer.setupFlow.end();
+    renderer.shutdown();
+  });
+
+  it("keeps a running command pending when an idle session stream closes", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.6 default");
+    await renderer.renderIdleStream(streamOf([]));
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.6 default",
+    });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^\* Model set to anthropic\/claude-opus-4.6 default$/m);
+    expect(snapshot).not.toContain("/model anthropic");
+  });
+
+  it("replaces a settled command with its dimmed summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add connection/notion");
+    renderer.finishCommand({ kind: "result", message: "", summary: "Added connection/notion" });
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toMatch(/^\* Added connection\/notion$/m);
+    expect(snapshot).not.toContain("/add connection/notion");
+    expect(snapshot).not.toContain("⎿");
+    expect(screen.rawOutput()).toContain("\u001b[2mAdded connection/notion");
+  });
+
+  it("hangs a settled command's details under its summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/add channel/slack");
+    renderer.finishCommand({
+      kind: "result",
+      message: "Finish with `eve add channel/slack --skip-install`",
+      summary: "Added channel/slack · setup not finished",
+    });
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toMatch(
+      /^\* Added channel\/slack · setup not finished\n {3}⎿ {2}Finish with `eve add channel\/slack --skip-install`$/m,
+    );
+  });
+
+  it("keeps the invocation when a settled command has no summary", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderCommandInvocation("/deploy");
+    renderer.finishCommand({ kind: "result", message: "Deployed: https://example.vercel.app" });
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toMatch(
+      /^\* \/deploy\n {3}⎿ {2}Deployed: https:\/\/example.vercel.app$/m,
+    );
   });
 
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/vc:login", "failed");
-    renderer.renderCommandResult(
-      "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
+    renderer.renderCommandInvocation("/deploy");
+    renderer.finishCommand({
+      kind: "result",
+      message:
+        "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
-    );
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("│ ⨯ /vc:login");
+    expect(snapshot).toMatch(/^\* \/deploy$/m);
     expect(snapshot).toContain("⎿  Authentication was refreshed");
     expect(snapshot).toContain("TRUSTED_SOURCES_ENVIRONMENT_MISMATCH");
     expect(snapshot).not.toContain("· Authentication was refreshed");
@@ -1515,17 +1950,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const prompt = renderer.readPrompt();
     // A bare prompt before any info/turn has no status row (no ↑ 0 ↓ 0 counter).
     expect(screen.snapshot()).not.toContain("↑ 0");
-    // Empty buffer: the quiet `›` gutter with the rotation's first message.
-    expect(screen.snapshot()).toContain(`› ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
-    expect(screen.snapshot()).not.toContain("❯");
+    // Empty buffer: the default-color `❯` gutter with the message invitation.
+    expect(screen.snapshot()).toContain("❯ Send a message…");
     expect(screen.rawOutput()).not.toContain("\x1b[48;5;");
 
     input.type("hello");
-    // Typing swaps in the active prompt mark and clears the invitation.
+    // Typing colors the prompt mark and clears the invitation.
     expect(screen.snapshot()).toContain("❯ hello");
-    expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
+    expect(screen.snapshot()).not.toContain("Send a message…");
     input.enter();
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     expect(await prompt).toBe("hello");
     renderer.shutdown();
   });
@@ -1540,11 +1974,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input.enter();
 
       expect(await prompt).toBe("hello");
-      expect(screen.snapshot()).toContain("▪ W 1s");
-
-      // The typewriter label advances while the submit wait ticks.
-      vi.advanceTimersByTime(450);
-      expect(screen.snapshot()).toContain("Workin");
+      expect(screen.snapshot()).toContain("• Thinking (0s)");
 
       let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
       const rendering = renderer.renderStream(
@@ -1560,7 +1990,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       await Promise.resolve();
       // The stream keeps the same bar — one working indicator end to end.
       expect(screen.snapshot()).not.toContain("⊙");
-      expect(screen.snapshot()).toContain(" 1s");
+      expect(screen.snapshot()).toContain("Thinking (0s)");
 
       streamController?.close();
       await rendering;
@@ -1601,6 +2031,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // crossing the 20K input threshold is what earns the row.
     expect(screen.snapshot()).toContain("└ Done in 1s ── ↑ 20.5K ↓ 43");
     input.ctrlC();
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1629,6 +2060,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const second = renderer.readPrompt();
     expect(screen.snapshot()).not.toContain("\n└ ");
     input.ctrlC();
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1638,21 +2070,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer();
 
     const first = renderer.readPrompt();
-    expect(screen.snapshot()).toContain(`› ${PROMPT_PLACEHOLDER_MESSAGES[0]}`);
+    expect(screen.snapshot()).toContain("❯ Send a message…");
     input.type("hello");
     input.enter();
     expect(await first).toBe("hello");
 
-    // Once the user has spoken, the empty prompt keeps the quiet `›` but
-    // drops the invitation text; typing still swaps in the active `❯`.
+    // Once the user has spoken, the empty prompt keeps the default-color `❯` but
+    // drops the invitation text; typing still colors the active `❯`.
     const second = renderer.readPrompt();
-    expect(screen.snapshot()).toContain("›");
-    expect(screen.snapshot()).not.toContain("❯");
-    expect(screen.snapshot()).not.toContain(PROMPT_PLACEHOLDER_MESSAGES[0]);
+    expect(screen.snapshot()).toContain("❯");
+    expect(screen.snapshot()).not.toContain("Send a message…");
     input.type("again");
     expect(screen.snapshot()).toContain("❯ again");
     input.ctrlC();
-    expect(screen.snapshot()).not.toContain("❯");
+    expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
@@ -1678,7 +2109,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain(" 1s");
+      expect(screen.snapshot()).toContain("Thinking (0s)");
     });
     streamController?.enqueue({
       type: "reasoning-delta",
@@ -1688,11 +2119,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await Promise.resolve();
     // The trace never reaches the screen; the bar carries the turn.
     const lines = screen.snapshot().split("\n");
-    const barRow = lines.findIndex((line) => line.includes(" 1s"));
+    const barRow = lines.findIndex((line) => line.includes("Thinking (0s)"));
     expect(barRow).toBeGreaterThan(-1);
     expect(screen.snapshot()).not.toContain("the plan is to check the forecast");
     // The pending prompt row holds its place below, then the status line.
-    expect(lines[barRow + 2]).toContain("›");
+    expect(lines[barRow + 2]).toContain("❯");
     expect(lines[barRow + 4]).toContain("gpt-5");
 
     streamController?.enqueue({ type: "reasoning-complete", id: "r1" });
@@ -1758,9 +2189,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      // Empty draft: the pending prompt wears the same quiet `›` as idle
+      // Empty draft: the pending prompt wears the same default-color `❯` as idle
       // (readiness is signalled by the turn bar's absence, not the glyph).
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("follow-up question");
     // Enter mid-turn queues the draft into the panel and clears the buffer.
@@ -1796,15 +2227,15 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("/cancel");
     input.enter();
 
     await vi.waitFor(() => {
       expect(cancel).toHaveBeenCalledOnce();
-      expect(screen.snapshot()).toContain("/cancel");
-      expect(screen.snapshot()).toContain("Turn cancellation requested.");
+      expect(screen.snapshot()).toContain("* Cancellation requested");
+      expect(screen.snapshot()).not.toContain("/cancel");
       expect(screen.snapshot()).toContain("Cancelling turn…");
     });
 
@@ -1817,17 +2248,54 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("pops the oldest queued message on Esc, cancels the turn, and stages the steer prompt", async () => {
+  it("interrupts a pending /cancel on Ctrl+C and arms the next press to exit", async () => {
     const { screen, input, renderer } = makeRenderer();
-    const escape = async () => {
-      input.send("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    };
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const abort = vi.fn();
     const cancel = vi.fn();
     const rendering = renderer.renderStream(
       {
+        abort,
         cancel,
+        events: new ReadableStream<AgentTUIStreamEvent>(),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.snapshot()).toContain("❯");
+    });
+    input.type("/cancel");
+    input.enter();
+    await vi.waitFor(() => {
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(screen.snapshot()).toContain("Cancelling turn…");
+    });
+
+    input.ctrlC();
+    await expect(rendering).resolves.toBeUndefined();
+
+    expect(abort).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(screen.snapshot()).toContain("Interrupted");
+
+    const prompt = renderer.readPrompt();
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow();
+    expect(renderer.exitRequested()).toBe(true);
+    renderer.shutdown();
+  });
+
+  it("steers each Enter message without cancelling the turn", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const cancel = vi.fn();
+    const accepted = Promise.withResolvers<void>();
+    const steer = vi.fn(() => accepted.promise);
+    const rendering = renderer.renderStream(
+      {
+        cancel,
+        steer,
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -1838,30 +2306,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("go north");
     input.enter();
     input.type("go south");
     input.enter();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Queue 2/5");
-    });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(steer).toHaveBeenNthCalledWith(1, "go north");
+    expect(steer).toHaveBeenNthCalledWith(2, "go south");
+    expect(screen.snapshot()).not.toContain("Queue");
 
-    await escape();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(screen.snapshot()).toContain("Steering — cancelling the running turn…");
-    expect(screen.snapshot()).toContain("1/5 still queued");
-
-    // The server settles the cancelled turn and the stream reaches its boundary.
-    streamController?.enqueue({ type: "turn-cancelled" });
+    accepted.resolve();
+    streamController?.enqueue({ type: "finish" });
     streamController?.close();
     await rendering;
-    expect(screen.snapshot()).toContain("Cancelled");
 
-    // The popped message steers; the remaining one stays queued behind it.
-    expect(renderer.takeQueuedPrompt()).toBe("go north");
-    expect(renderer.takeQueuedPrompt()).toBe("go south");
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
     renderer.shutdown();
   });
 
@@ -1885,7 +2346,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
 
     await escape();
@@ -1964,12 +2425,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("marks drained prompts with the provenance arrow — above for steer, below for queue", async () => {
+  it("renders steered and queued prompts without provenance arrow rows", async () => {
     const { screen, input, renderer } = makeRenderer();
-    const escape = async () => {
-      input.send("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    };
     const closedStream = () =>
       new ReadableStream<AgentTUIStreamEvent>({
         start(controller) {
@@ -1977,11 +2434,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
         },
       });
 
-    // Steer: queue a message mid-turn and pop it with Esc.
+    // Enter steers immediately without a cancellation key.
+    const steer = vi.fn(async () => {});
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
     const first = renderer.renderStream(
       {
-        cancel: vi.fn(),
+        steer,
         events: new ReadableStream<AgentTUIStreamEvent>({
           start(controller) {
             streamController = controller;
@@ -1991,24 +2449,20 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("go north");
     input.enter();
-    await escape();
-    streamController?.enqueue({ type: "turn-cancelled" });
+    expect(steer).toHaveBeenCalledWith("go north");
+    expect(screen.snapshot()).not.toContain("Queue 1/5");
+    streamController?.enqueue({ type: "finish" });
     streamController?.close();
     await first;
 
-    const steered = renderer.takeQueuedPrompt();
-    expect(steered).toBe("go north");
-    await renderer.renderStream(
-      { events: closedStream() },
-      { submittedPrompt: steered, continueSession: true },
-    );
+    expect(renderer.takeQueuedPrompt()).toBeUndefined();
     let lines = screen.snapshot().split("\n");
     const steerIndex = lines.findIndex((line) => line.includes("│ go north"));
-    expect(lines[steerIndex - 1]?.trim()).toBe("↑");
+    expect(lines[steerIndex - 1]?.trim()).not.toBe("↑");
 
     // Queue: a message that waited for the natural boundary.
     let secondController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
@@ -2023,7 +2477,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "another task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Working for");
+      expect(screen.snapshot()).toContain("Thinking (");
     });
     input.type("go south");
     input.enter();
@@ -2041,12 +2495,67 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
     lines = screen.snapshot().split("\n");
     const queueIndex = lines.findIndex((line) => line.includes("│ go south"));
-    expect(lines[queueIndex + 1]?.trim()).toBe("↑");
+    expect(lines[queueIndex + 1]?.trim()).not.toBe("↑");
 
     // The ordinary typed prompts carry no arrow.
     const typedIndex = lines.findIndex((line) => line.includes("│ long task"));
     expect(lines[typedIndex - 1]?.trim()).not.toBe("↑");
     expect(lines[typedIndex + 1]?.trim()).not.toBe("↑");
+    renderer.shutdown();
+  });
+
+  it("preserves a rejected Enter steering message for recovery", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const steer = vi.fn(async () => {
+      throw new Error("Session unavailable");
+    });
+    let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        steer,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(value) {
+            controller = value;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await screen.waitForText("❯");
+    input.type("change direction");
+    input.enter();
+    await screen.waitForText("Steering failed");
+    expect(steer).toHaveBeenCalledWith("change direction");
+    controller?.enqueue({ type: "finish" });
+    controller?.close();
+    await rendering;
+    expect(renderer.takeQueuedPrompt()).toBe("change direction");
+    renderer.shutdown();
+  });
+
+  it("keeps slash commands out of the steering message", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const steer = vi.fn(async () => {});
+    let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+    const rendering = renderer.renderStream(
+      {
+        steer,
+        events: new ReadableStream<AgentTUIStreamEvent>({
+          start(value) {
+            controller = value;
+          },
+        }),
+      },
+      { submittedPrompt: "long task", continueSession: true },
+    );
+    await screen.waitForText("❯");
+    input.type("/model");
+    input.enter();
+    expect(steer).not.toHaveBeenCalled();
+    controller?.enqueue({ type: "finish" });
+    controller?.close();
+    await rendering;
+    expect(renderer.takeQueuedPrompt()).toBe("/model");
     renderer.shutdown();
   });
 
@@ -2064,7 +2573,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
 
     for (let index = 1; index <= 5; index += 1) {
@@ -2105,7 +2614,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       { submittedPrompt: "long task", continueSession: true },
     );
     await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     input.type("first");
     input.enter();
@@ -2147,9 +2656,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     );
 
     await vi.waitFor(() => {
-      // The pending prompt already shows `›` — but the live bar keeps the
+      // The pending prompt already shows `❯` — but the live bar keeps the
       // idle predicate false.
-      expect(screen.snapshot()).toContain("›");
+      expect(screen.snapshot()).toContain("❯");
     });
     await expect(screen.waitForIdlePrompt(200)).rejects.toThrow(/idle prompt/u);
 
@@ -2160,6 +2669,170 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.ctrlC();
     input.ctrlC();
     await expect(prompt).rejects.toThrow();
+    renderer.shutdown();
+  });
+
+  it("queues startup messages until the agent is ready", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const requestStop = vi.fn();
+    const startupRenderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      onExitRequest: requestStop,
+    });
+
+    startupRenderer.beginStartupDraft({
+      initialDraft: "weather",
+      title: "weather-agent",
+    });
+    expect(screen.snapshot()).toContain("weather-agent");
+    expect(screen.snapshot()).toContain("Run /help for commands");
+    expect(screen.snapshot()).not.toContain("model");
+    expect(screen.snapshot()).not.toContain("loading");
+    expect(screen.snapshot()).toContain("Starting agent");
+    expect(screen.snapshot()).toContain("weather");
+
+    input.type(" tomorrow");
+    input.enter();
+    expect(screen.snapshot()).toContain("Queue 1/5");
+    expect(screen.snapshot()).toContain("└ weather tomorrow");
+    expect(screen.snapshot()).not.toContain("❯ weather tomorrow");
+
+    input.type("and next week");
+    input.enter();
+    expect(screen.snapshot()).toContain("Queue 2/5");
+    expect(screen.snapshot()).toContain("│ weather tomorrow");
+    expect(screen.snapshot()).toContain("└ and next week");
+
+    const startup = startupRenderer.finishStartupDraft();
+    expect(startup).toEqual({
+      draft: "",
+      queuedPrompt: "weather tomorrow\n\nand next week",
+    });
+
+    const prompt = startupRenderer.readPrompt();
+    expect(screen.snapshot()).not.toContain("Queue 1/5");
+    input.ctrlC();
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow();
+    expect(requestStop).toHaveBeenCalledOnce();
+    startupRenderer.shutdown();
+  });
+
+  it.each([32, 80])(
+    "defers startup warnings until connection readiness at %i columns",
+    (columns) => {
+      const { renderer, screen } = makeRenderer(columns);
+      renderer.beginStartupDraft({ initialDraft: "Hello Alice", title: "Agent" });
+      renderer.renderSetupWarning("Model disconnected · /login");
+      expect(screen.snapshot()).not.toContain("Model disconnected");
+      renderer.setStartupPhase("connecting");
+      expect(screen.snapshot()).toContain("Reading saved connection");
+      expect(screen.snapshot()).not.toContain("Model disconnected");
+      expect(renderer.finishStartupDraft()).toEqual({
+        draft: "Hello Alice",
+        queuedPrompt: undefined,
+      });
+      renderer.setStartupPhase(undefined);
+      expect(screen.snapshot()).toContain("Model disconnected");
+      renderer.shutdown();
+    },
+  );
+
+  it.each([32, 80])(
+    "keeps startup editable across connection work and questions at %i columns",
+    async (columns) => {
+      const { renderer, screen, input } = makeRenderer(columns);
+      renderer.beginStartupDraft({ initialDraft: "Hello", title: "Agent" });
+      const composerRow = screen
+        .snapshot()
+        .split("\n")
+        .findIndex((line) => line.includes("Hello"));
+      renderer.setStartupPhase("connecting");
+      renderer.setupFlow.begin("Connect a model");
+      const interrupt = renderer.setupFlow.waitForInterrupt();
+      renderer.setupFlow.setStatus("Connecting with Vercel…");
+      expect(screen.snapshot()).toContain("Connecting with Vercel");
+      expect(screen.snapshot()).not.toContain("Connect a model");
+      expect(screen.snapshot()).not.toContain("Working");
+      expect(
+        screen
+          .snapshot()
+          .split("\n")
+          .findIndex((line) => line.includes("Hello")),
+      ).toBe(composerRow);
+      input.type(" 世界");
+      expect(screen.snapshot()).toContain("Hello 世界");
+      const answer = renderer.setupFlow.readSelect({
+        kind: "search",
+        message: "Connect a model",
+        options: [
+          { value: "vercel", label: "Vercel Account" },
+          { value: "openai", label: "OpenAI API Key" },
+        ],
+      });
+      expect(screen.snapshot()).toContain("Connect a model");
+      expect(screen.snapshot()).not.toContain("Hello 世界");
+      input.type("OpenAI");
+      input.enter();
+      await expect(answer).resolves.toEqual(["openai"]);
+      renderer.setupFlow.setStatus("Checking connection…");
+      input.type("!");
+      expect(screen.snapshot()).toContain("Hello 世界!");
+      input.enter();
+      renderer.setStartupPhase("updating");
+      renderer.setupFlow.setStatus("Loading selected model…");
+      input.type("Next message");
+      expect(screen.snapshot()).toContain("Loading selected model");
+      expect(screen.snapshot()).not.toContain("Working");
+      interrupt.dispose();
+      renderer.setupFlow.end({ preserveDiagnostics: false });
+      input.type(" too");
+      expect(renderer.finishStartupDraft()).toEqual({
+        draft: "Next message too",
+        queuedPrompt: "Hello 世界!",
+      });
+      renderer.setStartupPhase(undefined);
+      renderer.shutdown();
+    },
+  );
+
+  it("restores the startup draft after a masked key question is cancelled", async () => {
+    const { renderer, input, screen } = makeRenderer();
+    renderer.beginStartupDraft({ initialDraft: "My message", title: "Agent" });
+    renderer.setupFlow.begin("Connect a model");
+    const answer = renderer.setupFlow.readText({ message: "API key", mask: true });
+    input.type("private-test-key");
+    expect(screen.snapshot()).not.toContain("private-test-key");
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    expect(screen.snapshot()).toContain("My message");
+    expect(renderer.finishStartupDraft().draft).toBe("My message");
+    renderer.setStartupPhase(undefined);
+    renderer.shutdown();
+  });
+
+  it("lets Ctrl-C stop an editing-only startup draft", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const requestStop = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      onExitRequest: requestStop,
+    });
+
+    renderer.beginStartupDraft({
+      title: "weather-agent",
+    });
+    input.ctrlC();
+
+    expect(requestStop).toHaveBeenCalledOnce();
     renderer.shutdown();
   });
 
@@ -2202,7 +2875,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     renderer.shutdown();
   });
 
@@ -2254,7 +2927,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders the question overlay with numbered rows and an inverse-blue cursor", async () => {
+  it("renders the question overlay with numbered rows and a bold cursor", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.readInputQuestion({
@@ -2270,10 +2943,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     const lines = snapshot.split("\n");
     const selected = lines.find((line) => line.includes("AI Gateway"));
-    expect(selected).toContain(" ▶ 1. AI Gateway ");
+    expect(selected).toContain(" › 1. AI Gateway ");
     expect(selected).toContain("↵");
-    expect(screen.rawOutput()).toContain("\x1b[7m");
-    expect(screen.rawOutput()).toContain("\x1b[34m");
+    expect(screen.rawOutput()).not.toContain("\x1b[7m");
+    expect(screen.rawOutput()).toContain("\x1b[1m");
     // Every option's description rides its own row, cursor or not.
     expect(lines).toContain("        Managed access");
     expect(lines).toContain("        Direct access");
@@ -2282,14 +2955,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("Enter to select");
     expect(countOccurrences(snapshot, "Esc to")).toBe(1);
 
-    input.down();
+    input.send("j");
     const unselected = screen
       .snapshot()
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
     expect(unselected).toContain("1. AI Gateway");
-    expect(unselected).not.toContain("▶");
-    input.up();
+    expect(unselected).not.toContain("›");
+    input.send("k");
 
     input.enter();
     await expect(answer).resolves.toEqual({ optionId: "gateway" });
@@ -2319,13 +2992,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Esc to dismiss");
 
     await escape();
-    // No answer travels; the runner returns to the prompt and the server
-    // records the parked request as ignored on the next message.
+    // No answer travels; the runner returns to the prompt and the question
+    // stays open for the next message.
     await expect(answer).resolves.toBeUndefined();
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("? Choose access");
-    expect(snapshot).toContain("⎿  Dismissed.");
+    expect(snapshot).toContain("⎿  Skipped. The question stays open.");
     // The option list does not survive the dismissal.
     expect(snapshot).not.toContain("Managed access");
     expect(snapshot).not.toContain("Enter to select");
@@ -2356,7 +3029,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -2473,7 +3146,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await escape();
     await expect(answer).resolves.toBeUndefined();
-    expect(screen.snapshot()).toContain("⎿  Dismissed.");
+    expect(screen.snapshot()).toContain("⎿  Skipped. The question stays open.");
     renderer.shutdown();
   });
 
@@ -2519,13 +3192,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("paints a fully typed known command blue in the input line", async () => {
+  it("leaves a fully typed known command as plain text in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/add");
-    // The ANSI blue open (34) wraps the typed command in the painted row.
-    expect(screen.rawOutput()).toContain("[34m/add");
+    expect(screen.rawOutput()).not.toContain("[1m/add");
+    expect(screen.rawOutput()).not.toContain("[34m/add");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -2538,7 +3211,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Never passes through a known command, even if painted per keystroke
     // ("/li…" is not a known command).
     input.type("/lin is not a command");
-    expect(screen.rawOutput()).not.toContain("[34m");
+    expect(screen.rawOutput()).not.toContain("[1m/lin is not a command");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -2853,22 +3526,71 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("records sandbox log lines in the diagnostic log", () => {
+  it("records captured sandbox log lines in the diagnostic log", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const stub = stubDiagnostics();
-    const append = stub.append;
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       unicode: true,
       diagnostics: stub.diagnostics,
     });
-
-    renderer.renderSandboxLog('eve: sandbox template "root" (microsandbox): apt-get update');
-    expect(append).toHaveBeenCalledWith({ source: "sandbox", detail: expect.any(String) });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    process.stdout.write('eve: sandbox template "root" (microsandbox): apt-get update\n');
     renderer.shutdown();
+    expect(stub.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "stdout",
+        detail: expect.stringContaining("apt-get update"),
+      }),
+    );
+  });
+
+  it("shows delayed build progress and immediate completion when logs are hidden", () => {
+    vi.useFakeTimers();
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
+    try {
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+      process.stdout.write(
+        `${formatChangeDetectedLogLine("/app", [
+          { event: "change", path: "/app/agent/instructions.md" },
+        ])}\n`,
+      );
+      expect(renderer.logDisplayMode()).toBe("none");
+      expect(screen.snapshot()).not.toContain("agent/instructions.md changed");
+      expect(screen.snapshot()).not.toContain("○ stdout");
+
+      vi.advanceTimersByTime(250);
+      expect(screen.snapshot()).toContain("▪ agent/instructions.md updating…");
+
+      process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
+      expect(screen.snapshot()).toContain("✓ agent/instructions.md updated");
+
+      vi.advanceTimersByTime(4_000);
+      expect(screen.snapshot()).not.toContain("✓ agent/instructions.md updated");
+
+      process.stdout.write(
+        `${formatChangeDetectedLogLine("/app", [
+          { event: "change", path: "/app/agent/agent.ts" },
+        ])}\n`,
+      );
+      process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
+      expect(screen.snapshot()).toContain("✓ agent/agent.ts updated");
+      expect(screen.snapshot()).not.toContain("agent/agent.ts updating");
+    } finally {
+      renderer.shutdown();
+      vi.useRealTimers();
+    }
   });
 
   it("hides logs by default, then reveals buffered lines at their original positions", () => {
@@ -3006,22 +3728,22 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("ordinary stdout log");
   });
 
-  it("renders subscribed sandbox logs under the sandbox log level", () => {
+  it("renders captured lazy preparation logs under the sandbox log level", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
-      captureForeignOutput: false,
+      captureForeignOutput: true,
       logs: "sandbox",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    renderer.renderSandboxLog?.('eve: sandbox template "root" (docker): checking Docker daemon');
-    renderer.renderSandboxLog?.("eve: initializing 3 sandbox templates...");
-    renderer.renderSandboxLog?.('eve: built sandbox template "root" on backend "docker".');
-    renderer.renderSandboxLog?.("ordinary stdout log");
+    process.stdout.write('eve: sandbox template "root" (docker): checking Docker daemon\n');
+    process.stdout.write("eve: initializing 3 sandbox templates...\n");
+    process.stdout.write('eve: built sandbox template "root" on backend "docker".\n');
+    process.stdout.write("ordinary stdout log\n");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -3332,7 +4054,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     input.type("n");
     expect(await approval).toEqual({ approved: false, reason: "Denied by user." });
-    expect(screen.snapshot()).toContain("W 1s");
+    expect(screen.snapshot()).toContain("Thinking (0s)");
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -3429,25 +4151,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Session ended — started a new session.");
   });
 
-  it("refreshing the agent header preserves committed transcript and scrollback", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.renderNotice("previous transcript");
-
-    // Dev HMR refresh: a fresh header is committed beneath the transcript —
-    // nothing is cleared or replayed.
-    renderer.renderAgentHeader({ name: "Weather Agent v2", serverUrl: "http://localhost:3000" });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("previous transcript");
-    expect(snapshot).toContain("Weather Agent v2");
-    // The refreshed header lands after the prior transcript, not on a wiped screen.
-    expect(snapshot.indexOf("Weather Agent v2")).toBeGreaterThan(
-      snapshot.indexOf("previous transcript"),
-    );
-  });
-
   it("does not repeat the banner when a source reload re-sends an unchanged header", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -3458,7 +4161,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.shutdown();
 
-    expect(countOccurrences(screen.snapshot(), "Weather Agent")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "☰eve v")).toBe(1);
   });
 
   it("reset clears committed transcript rows", () => {
@@ -3522,9 +4225,110 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("toggles a multi-select with space and confirms from the Submit row", async () => {
-    const { input, renderer } = makeRenderer();
+  it("returns from a planner review with Left Arrow instead of selecting an action", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      navigation: {
+        kind: "planner",
+        activeStep: 2,
+        steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+      },
+      message: "Review your agent",
+      options: [
+        { value: "install", label: "Install and set up" },
+        { value: "back", label: "Back" },
+      ],
+    });
 
+    expect(screen.snapshot()).toContain("enter to select · ← back · esc to cancel");
+    input.left();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "back",
+      values: [],
+    });
+    renderer.shutdown();
+  });
+
+  it("ignores arrow navigation before the first navigable planner step", async () => {
+    const { input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      navigation: {
+        kind: "planner",
+        activeStep: 0,
+        firstNavigableStep: 1,
+        steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+      },
+      message: "Choose a model",
+      options: [{ value: "model", label: "Use recommended model" }],
+    });
+
+    input.left();
+    input.right();
+    input.enter();
+    await expect(answer).resolves.toEqual(["model"]);
+    renderer.shutdown();
+  });
+
+  it("ignores Left Arrow on the first navigable planner step", async () => {
+    const { input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      navigation: {
+        kind: "planner",
+        activeStep: 1,
+        firstNavigableStep: 1,
+        steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+      },
+      message: "Where should people reach your agent?",
+      options: [{ value: "web", label: "Web Chat" }],
+      required: false,
+    });
+
+    input.left();
+    input.enter();
+    input.right();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "forward",
+      values: ["web"],
+    });
+    renderer.shutdown();
+  });
+
+  it("proceeds from a planner checklist with Right Arrow and preserves its selections", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      navigation: {
+        kind: "planner",
+        activeStep: 0,
+        steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+      },
+      message: "Where should people reach your agent?",
+      options: [
+        { value: "web", label: "Web Chat" },
+        { value: "slack", label: "Slack" },
+      ],
+      required: false,
+    });
+
+    expect(screen.snapshot()).not.toContain("Channels (1)");
+    input.enter();
+    expect(screen.snapshot()).toContain("Channels (1)");
+    input.right();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "forward",
+      values: ["web"],
+    });
+    renderer.shutdown();
+  });
+
+  it("confirms selected entries from a multi-select's Submit row", async () => {
+    const { input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({
       kind: "multi",
       message: "Select channels",
@@ -3620,6 +4424,29 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
+  it("selects ChatGPT as a provider sibling", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    const answer = renderer.setupFlow.readProviderPicker({
+      message: "Provider",
+      options: [
+        { value: "ai-gateway-project", label: "AI Gateway via Project" },
+        { value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" },
+        { value: "chatgpt", label: "ChatGPT subscription" },
+        { value: "external", label: "Other providers" },
+      ],
+      initialValue: "ai-gateway-project",
+      validateInlineKey: async () => ({ kind: "valid" }),
+    });
+
+    expect(screen.snapshot()).toContain("ChatGPT subscription");
+    input.down();
+    input.down();
+    input.enter();
+    await expect(answer).resolves.toEqual({ kind: "chatgpt" });
+    renderer.shutdown();
+  });
+
   it("validates a masked key without replacing the provider frame", async () => {
     const { screen, input, renderer } = makeRenderer();
     let resolveValidation:
@@ -3634,8 +4461,8 @@ describe("TerminalRenderer setup panel", () => {
 
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
-      options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
-      initialValue: "own-key",
+      options: [{ value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+      initialValue: "ai-gateway-key",
       validateInlineKey: validate,
     });
 
@@ -3657,7 +4484,7 @@ describe("TerminalRenderer setup panel", () => {
     input.enter();
     resolveValidation?.({ kind: "valid" });
     await expect(answer).resolves.toEqual({
-      kind: "inline-key",
+      kind: "ai-gateway-key",
       key: "bad-keyx",
       validation: { kind: "valid" },
     });
@@ -3674,8 +4501,8 @@ describe("TerminalRenderer setup panel", () => {
       const { screen, input, renderer } = makeRenderer();
       const answer = renderer.setupFlow.readProviderPicker({
         message: "Provider",
-        options: [{ value: "own-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
-        initialValue: "own-key",
+        options: [{ value: "ai-gateway-key", label: "AI Gateway via AI_GATEWAY_API_KEY" }],
+        initialValue: "ai-gateway-key",
         validateInlineKey: async () => ({ kind: "valid" }),
       });
       let settled = false;
@@ -3705,8 +4532,8 @@ describe("TerminalRenderer setup panel", () => {
     const validations: Array<{ key: string; signal: AbortSignal; finish(): void }> = [];
     const answer = renderer.setupFlow.readProviderPicker({
       message: "Provider",
-      options: [{ value: "own-key", label: "AI Gateway key" }],
-      initialValue: "own-key",
+      options: [{ value: "ai-gateway-key", label: "AI Gateway key" }],
+      initialValue: "ai-gateway-key",
       validateInlineKey: (key, signal) => {
         return new Promise<{ kind: "valid" }>((resolve) => {
           validations.push({ key, signal, finish: () => resolve({ kind: "valid" }) });
@@ -3728,114 +4555,10 @@ describe("TerminalRenderer setup panel", () => {
     await Promise.resolve();
     validations[1]?.finish();
     await expect(answer).resolves.toEqual({
-      kind: "inline-key",
+      kind: "ai-gateway-key",
       key: "sk-second",
       validation: { kind: "valid" },
     });
-    renderer.shutdown();
-  });
-
-  it("walks the model editor from pick to slider to toggle to Done", async () => {
-    const { screen, input, renderer } = makeRenderer(100, 40);
-    renderer.setupFlow.begin("Configure the agent model");
-    const answer = renderer.setupFlow.readModelEditor({
-      model: {
-        kind: "pick",
-        options: [
-          {
-            value: "anthropic/claude-sonnet-5",
-            label: "anthropic/claude-sonnet-5",
-            featured: true,
-          },
-          { value: "xai/grok-4.5", label: "xai/grok-4.5" },
-        ],
-        current: "anthropic/claude-sonnet-5",
-      },
-      reasoning: null,
-      serviceTier: { kind: "standard" },
-      settingsEditable: true,
-      externalRouting: false,
-      capabilitiesFor: () => ({
-        reasoning: true,
-        reasoningLevels: ["low", "high"],
-        fastMode: true,
-      }),
-    });
-
-    // The value menu opens on the Model row.
-    expect(screen.snapshot()).toContain("▶ Model");
-    input.enter();
-    expect(screen.snapshot()).toContain("Select the model");
-    input.type("grok");
-    expect(screen.snapshot()).toContain("xai/grok-4.5");
-    input.enter();
-    // Back on the menu, the model hint carries the pick.
-    expect(screen.snapshot()).toContain("xai/grok-4.5");
-
-    // Reasoning adjusts inline on its row: right enters the scale at the
-    // lowest level, another right (via Tab, which mimics it) walks up.
-    input.down();
-    expect(screen.snapshot()).toContain("▶ Reasoning effort");
-    input.right();
-    expect(screen.snapshot()).toContain("◉─○ low");
-    input.send("\t");
-    expect(screen.snapshot()).toContain("●─◉ high");
-
-    input.down();
-    expect(screen.snapshot()).toContain("▶ Service tier");
-    expect(screen.snapshot()).toContain("normal");
-    input.right();
-    expect(screen.snapshot()).toContain("fast ↯");
-
-    input.down();
-    input.enter();
-
-    await expect(answer).resolves.toEqual({
-      model: "xai/grok-4.5",
-      reasoning: "high",
-      serviceTier: "priority",
-    });
-    renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.shutdown();
-  });
-
-  it("unwinds Esc through filter, sub-screen, and menu before cancelling", async () => {
-    const { screen, input, renderer } = makeRenderer(100, 40);
-    renderer.setupFlow.begin("Configure the agent model");
-    const answer = renderer.setupFlow.readModelEditor({
-      model: {
-        kind: "pick",
-        options: [{ value: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5" }],
-        current: "anthropic/claude-sonnet-5",
-      },
-      reasoning: null,
-      serviceTier: { kind: "standard" },
-      settingsEditable: true,
-      externalRouting: false,
-      capabilitiesFor: () => undefined,
-    });
-    let settled = false;
-    void answer.finally(() => {
-      settled = true;
-    });
-
-    input.enter();
-    input.type("sonnet");
-    input.send("\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(settled).toBe(false);
-    // The first Esc only cleared the filter; the list is still open.
-    expect(screen.snapshot()).toContain("▏ type to search");
-
-    input.send("\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(settled).toBe(false);
-    // Back on the menu.
-    expect(screen.snapshot()).toContain("▶ Model");
-
-    input.send("\x1b");
-    await expect(answer).resolves.toBeUndefined();
-    renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
 
@@ -3851,7 +4574,7 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("commits toned flow lines to the transcript", () => {
+  it("commits flow lines to the transcript with a shared marker", () => {
     const { screen, renderer } = makeRenderer();
 
     renderer.setupFlow.renderLine("Connected the agent to the Vercel AI Gateway.", "success");
@@ -3859,33 +4582,85 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("✓ Connected the agent to the Vercel AI Gateway.");
-    expect(snapshot).toContain("· visit https://vercel.com/connect");
+    expect(snapshot).toContain("* Connected the agent to the Vercel AI Gateway.");
+    expect(snapshot).toContain("* visit https://vercel.com/connect");
   });
 });
 
 describe("TerminalRenderer setup flow session", () => {
-  it("restores the terminal while a child process inherits stdio", async () => {
+  it("repaints multiline setup titles without leaking copies into the transcript", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const message =
+      "You need to link to a project to use linear through Vercel Connect.\n\nSelect your team";
+
+    renderer.setupFlow.begin("Add to your agent");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      message,
+      options: [
+        { value: "vercel", label: "Vercel" },
+        { value: "labs", label: "Vercel Labs" },
+      ],
+    });
+    input.down();
+    input.up();
+
+    expect(screen.snapshot().split(message.split("\n")[0]!)).toHaveLength(2);
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
+  it("does not repaint while inherited stdio owns the terminal", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      renderer.setupFlow.begin("Add integration");
+      renderer.beginSubagent({ callId: "background", name: "researcher" });
+      renderer.backgroundSubagent({ callId: "background" });
+      let release!: () => void;
+      const inherited = renderer.setupFlow.withInheritedStdio(
+        () => new Promise<void>((resolve) => (release = resolve)),
+      );
+      const outputDuringHandoff = screen.rawOutput().length;
+      await vi.advanceTimersByTimeAsync(180);
+      expect(screen.rawOutput()).toHaveLength(outputDuringHandoff);
+
+      release();
+      await inherited;
+      renderer.setupFlow.end();
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards inherited subprocess output when restoring the transcript", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.renderNotice("anchor");
-    renderer.setupFlow.begin("Add integration", "pulse");
+    renderer.setupFlow.begin("Add integration");
     let inherited = false;
     await renderer.setupFlow.withInheritedStdio(async () => {
       inherited = true;
       input.pause();
+      screen.write("temporary OAuth instructions\n");
+      expect(screen.snapshot()).toContain("temporary OAuth instructions");
     });
 
     expect(inherited).toBe(true);
     expect(input.resumeCalls).toBe(2);
-    expect(screen.snapshot()).toContain("Add integration");
+    expect(screen.snapshot()).toContain("anchor");
+    expect(screen.snapshot()).not.toContain("┃ Add integration");
+    expect(screen.snapshot()).not.toContain("temporary OAuth instructions");
     renderer.setupFlow.end();
     renderer.shutdown();
   });
 
   it("discards input without interrupting a non-interruptible flow", async () => {
     const { input, renderer } = makeRenderer();
-    renderer.setupFlow.begin("Add to your agent", "pulse");
+    renderer.setupFlow.begin("Add to your agent");
     const interrupt = renderer.setupFlow.waitForInterrupt({ interruptible: false });
     let interrupted = false;
     void interrupt.promise.then(() => {
@@ -3906,7 +4681,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
 
-      renderer.setupFlow.begin("Configure the agent model", "pulse");
+      renderer.setupFlow.begin("Configure the agent model");
       renderer.setupFlow.setStatus("Checking the project…");
       expect(screen.snapshot()).toContain("▪ Checking the project…");
 
@@ -3924,7 +4699,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
 
-      renderer.setupFlow.begin("Add to your agent", "pulse");
+      renderer.setupFlow.begin("Add to your agent");
       renderer.setupFlow.setStatus("Installing Slack and dependencies…");
       expect(screen.snapshot()).not.toContain("5s");
 
@@ -3936,18 +4711,15 @@ describe("TerminalRenderer setup flow session", () => {
     }
   });
 
-  it("uses the attention color for an external-action pulse", () => {
+  it("keeps a browser wait on the green pulse without highlighting its text", () => {
     const { screen, renderer } = makeRenderer();
 
-    renderer.setupFlow.begin("Agent connections", "pulse");
-    renderer.setupFlow.setStatus({
-      kind: "external-action",
-      text: "Waiting for you to complete setup in the browser…",
-      emphasis: "browser",
-    });
+    renderer.setupFlow.begin("Agent connections");
+    renderer.setupFlow.setStatus("Finish signing in to Vercel in your browser");
 
-    expect(screen.rawOutput()).toContain("\x1b[33m▪\x1b[39m");
-    expect(screen.rawOutput()).toContain("\x1b[33mbrowser\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[32m▪\x1b[39m");
+    expect(screen.rawOutput()).toContain("\x1b[2mFinish signing in to Vercel in your browser");
+    expect(screen.rawOutput()).not.toContain("\x1b[33m");
     renderer.shutdown();
   });
 
@@ -3961,7 +4733,7 @@ describe("TerminalRenderer setup flow session", () => {
       unicode: false,
     });
 
-    renderer.setupFlow.begin("Configure the agent model", "pulse");
+    renderer.setupFlow.begin("Configure the agent model");
     renderer.setupFlow.setStatus("Checking the project...");
 
     expect(screen.snapshot()).toContain("* Checking the project...");
@@ -3979,7 +4751,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.setStatus("Loading teams…");
 
     let snapshot = screen.snapshot();
-    expect(snapshot).toContain("/deploy");
+    expect(snapshot).not.toContain("┃ /deploy");
     expect(snapshot).toContain("Creating Vercel project…");
     expect(snapshot).toContain("Loading teams…");
 
@@ -4004,7 +4776,10 @@ describe("TerminalRenderer setup flow session", () => {
       "warning",
     );
     renderer.setupFlow.end({ preserveDiagnostics: false });
-    renderer.renderCommandResult("Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.");
+    renderer.finishCommand({
+      kind: "result",
+      message: "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.",
+    });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
@@ -4013,7 +4788,7 @@ describe("TerminalRenderer setup flow session", () => {
     expect(snapshot).toContain("Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.");
   });
 
-  it("renders questions inside the open flow panel under its title", async () => {
+  it("gives the active question the flow heading", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.setupFlow.begin("/deploy");
@@ -4025,7 +4800,9 @@ describe("TerminalRenderer setup flow session", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("/deploy");
+    expect(snapshot).not.toContain("┃ /deploy");
+    expect(snapshot).toContain("Vercel project");
+    expect(snapshot).toMatch(/─{20,}/);
     expect(snapshot).toContain("This directory is not linked yet.");
     expect(snapshot).toContain("Vercel project");
 
@@ -4094,9 +4871,9 @@ describe("TerminalRenderer setup flow session", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Slack channel was not added");
     expect(snapshot).not.toContain("Scaffolding Web Chat channel files");
-    // Focused completed row reads inert: a dim pointer, not a check.
-    expect(snapshot).toContain("▷ Terminal UI · Already installed");
-    expect(snapshot).not.toContain("✓ Terminal UI");
+    // A focused completed row retains a dim inert cursor; resting completed
+    // rows retain their semantic check without borrowing selection weight.
+    expect(snapshot).toContain("› Terminal UI · Already installed");
     expect(snapshot).toContain("✓ Web Chat");
     expect(snapshot).toContain("Slack       · Creates slackbot and deploys to Vercel");
     expect(snapshot).toContain("Dependency installation failed.");
@@ -4138,6 +4915,32 @@ describe("TerminalRenderer setup flow session", () => {
 
     input.enter();
     await expect(answer).resolves.toEqual(["add-more"]);
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
+  it("clears the completed item and install status before the batch follow-up", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("Set up your agent");
+    renderer.setupFlow.replaceContent?.({ headline: "Adding GitHub · 2 of 3", facts: [] });
+    renderer.setupFlow.setStatus("Installing files and dependencies…");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      message: "What would you like to do next?",
+      options: [
+        { value: "deploy", label: "Deploy" },
+        { value: "finish", label: "Start chatting" },
+      ],
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Adding GitHub · 2 of 3");
+    expect(snapshot).not.toContain("Installing files and dependencies");
+    expect(snapshot).toContain("What would you like to do next?");
+
+    input.enter();
+    await expect(answer).resolves.toEqual(["deploy"]);
     renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });
@@ -4210,7 +5013,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.setStatus("Creating a Slackbot through Vercel Connect...");
 
     input.ctrlC();
-    await expect(interrupt.promise).resolves.toBeUndefined();
+    await expect(interrupt.promise).resolves.toBe("ctrl-c");
 
     renderer.setupFlow.end();
     renderer.shutdown();
@@ -4468,7 +5271,7 @@ describe("TerminalRenderer command echo spacing", () => {
     input.type("/connect");
     input.enter();
     await prompt;
-    renderer.renderCommandResult("Project linked.");
+    renderer.finishCommand({ kind: "result", message: "Project linked." });
     renderer.shutdown();
 
     const lines = screen.snapshot().split("\n");
@@ -4489,14 +5292,14 @@ describe("TerminalRenderer command typeahead", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("/help");
     expect(snapshot).toContain("Show available commands");
-    expect(snapshot).toContain("Configure the agent's model and provider");
-    const promptLine = snapshot.split("\n").find((line) => line.includes("❯ /"));
-    expect(promptLine?.startsWith("❯ /")).toBe(true);
+    expect(snapshot).toContain("Choose a model, speed, and reasoning");
+    const promptLine = snapshot.split("\n").find((line) => line.includes("│ /"));
+    expect(promptLine?.startsWith("│ /")).toBe(true);
 
     input.enter();
-    // The highlighted default — /help leads the registry — is what a bare
+    // The highlighted default — /model leads the registry — is what a bare
     // slash submits.
-    expect(await prompt).toBe("/help");
+    expect(await prompt).toBe("/model");
     renderer.shutdown();
   });
 
@@ -4511,10 +5314,155 @@ describe("TerminalRenderer command typeahead", () => {
     expect(snapshot).toContain("/model");
     expect(snapshot).toContain("[provider/model]");
     // ...and the dropdown (with its description column) is gone.
-    expect(snapshot).not.toContain("Configure the agent's model and provider");
+    expect(snapshot).not.toContain("Choose a model, speed, and reasoning");
 
     input.enter();
     expect(await prompt).toBe("/model");
+    renderer.shutdown();
+  });
+
+  it("delays loading until model argument suggestions remain pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const input = new MockUserInput();
+      const suggestions = Promise.withResolvers<
+        readonly {
+          value: string;
+          label: string;
+          hint?: string;
+        }[]
+      >();
+      const renderer = new TerminalRenderer({
+        input,
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        argumentSuggestions: async () => suggestions.promise,
+      });
+
+      const prompt = renderer.readPrompt();
+      input.type("/model ");
+      expect(screen.snapshot()).not.toContain("Loading models…");
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(screen.snapshot()).toContain("Loading models…");
+
+      suggestions.resolve([{ value: "openai/gpt-5", label: "GPT-5" }]);
+      await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
+      input.enter();
+      await prompt;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not paint loading when argument suggestions resolve within the delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const input = new MockUserInput();
+      const renderer = new TerminalRenderer({
+        input,
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        argumentSuggestions: async () => [{ value: "openai/gpt-5", label: "GPT-5" }],
+      });
+
+      const prompt = renderer.readPrompt();
+      input.type("/model ");
+      await vi.advanceTimersByTimeAsync(499);
+      expect(screen.snapshot()).toContain("openai/gpt-5");
+      expect(screen.snapshot()).not.toContain("Loading models…");
+      input.enter();
+      await prompt;
+      renderer.shutdown();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("advances to reasoning after selecting a model with reasoning choices", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => [
+        {
+          value: "openai/gpt-6-sol",
+          label: "openai/gpt-6-sol",
+          next: [{ value: "high", label: "high" }],
+        },
+      ],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model sol");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-6-sol"));
+    input.enter();
+    expect(screen.snapshot()).toContain("│ /model openai/gpt-6-sol ");
+    expect(screen.snapshot()).toContain("high");
+    input.enter();
+
+    expect(await prompt).toBe("/model openai/gpt-6-sol high");
+    renderer.shutdown();
+  });
+
+  it("completes a model argument from its inline catalog", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async (command) =>
+        command === "model"
+          ? [
+              {
+                value: "anthropic/claude-sonnet-5",
+                label: "Claude Sonnet 5",
+                hint: "Anthropic",
+              },
+            ]
+          : [],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/model claude");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("anthropic/claude-sonnet-5"));
+    input.enter();
+
+    expect(await prompt).toBe("/model anthropic/claude-sonnet-5");
+    renderer.shutdown();
+  });
+
+  it("completes an add argument from its inline registry catalog", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async (command) =>
+        command === "add"
+          ? [{ value: "channel/slack", label: "Slack", hint: "Slack channel" }]
+          : [],
+    });
+
+    const prompt = renderer.readPrompt();
+    input.type("/add slack");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("channel/slack"));
+    input.send("\t");
+    input.enter();
+
+    expect(await prompt).toBe("/add channel/slack");
     renderer.shutdown();
   });
 
@@ -4556,6 +5504,152 @@ describe("TerminalRenderer command typeahead", () => {
     expect(screen.snapshot()).toContain("│ /quit");
   });
 
+  it("keeps a submitted /help invocation above its transient drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("/help");
+    input.enter();
+    expect(await prompt).toBe("/help");
+
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    const open = screen.snapshot().split("\n");
+    expect(open.filter((line) => line.startsWith("│ /help"))).toEqual(["│ /help"]);
+    expect(open.indexOf("│ /help")).toBeLessThan(open.findIndex((line) => /^─{20,}$/.test(line)));
+    input.send("\x1b");
+    expect(await choice).toBeUndefined();
+    expect(screen.snapshot()).not.toContain("Show available commands");
+    expect(screen.snapshot()).not.toContain("│ /help");
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.8",
+    });
+    renderer.shutdown();
+    expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
+    expect(screen.snapshot()).not.toContain("/help");
+  });
+
+  it("lets /help choose a command without retaining the drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+
+    const open = screen.snapshot();
+    expect(open).not.toContain("┃ Commands");
+    expect(open).toContain("/model");
+    expect(open).toContain("↑/↓ move · Enter select · Esc close");
+    expect(open.match(/─{20,}/g)).toHaveLength(2);
+    expect(open).not.toMatch(/\b1\. \/model/);
+    input.down();
+    input.enter();
+    expect(await choice).toBe("/reset");
+    expect(screen.snapshot()).not.toContain("Choose a model, speed, and reasoning");
+    renderer.shutdown();
+  });
+
+  it("restores a help selection as a command-gutter composer with argument suggestions", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      argumentSuggestions: async () => [{ value: "openai/gpt-5", label: "GPT-5" }],
+    });
+    const help = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    input.enter();
+    const selection = await help;
+    expect(selection).toBe("/model ");
+    const prompt = renderer.readPrompt({ initialDraft: selection });
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
+    expect(screen.snapshot()).toContain("│ /model");
+    expect(screen.snapshot()).not.toContain("❯ /model");
+    input.enter();
+    expect(await prompt).toBe("/model openai/gpt-5");
+    renderer.shutdown();
+  });
+
+  it("keeps the selected help command visible on short terminals", async () => {
+    const { input, renderer, screen } = makeRenderer(80, 10);
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    for (let i = 0; i < 8; i += 1) input.down();
+    expect(screen.snapshot()).toContain("/traces");
+    expect(screen.snapshot()).not.toContain("┃ Commands");
+    input.enter();
+    expect(await choice).toBe("/traces ");
+    renderer.shutdown();
+  });
+
+  it("keeps a submitted /info invocation above its transient drawer", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.type("/info");
+    input.enter();
+    expect(await prompt).toBe("/info");
+
+    const panel = renderer.showInfoPanel("Application");
+    const open = screen.snapshot().split("\n");
+    expect(open.filter((line) => line.includes("/info"))).toEqual(["│ /info"]);
+    expect(open.indexOf("│ /info")).toBeLessThan(open.findIndex((line) => /^─{20,}$/.test(line)));
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Application");
+    expect(screen.snapshot()).not.toContain("│ /info");
+    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.8");
+    renderer.finishCommand({
+      kind: "result",
+      message: "",
+      summary: "Model set to anthropic/claude-opus-4.8",
+    });
+    renderer.shutdown();
+    expect(screen.snapshot()).toContain("Model set to anthropic/claude-opus-4.8");
+    expect(screen.snapshot()).not.toContain("/info");
+  });
+
+  it("closes the transient info panel without retaining its contents", async () => {
+    const { input, renderer, screen } = makeRenderer();
+    const panel = renderer.showInfoPanel(
+      "\x1b[36mApplication\x1b[39m\n\x1b[1mAgent\x1b[22m: Weather",
+    );
+
+    const open = screen.snapshot();
+    expect(open).not.toContain("┃ Application info");
+    expect(open).toContain("Application");
+    expect(open).toContain("Agent: Weather");
+    expect(open).toContain("Esc to close");
+    expect(open.match(/─{20,}/g)).toHaveLength(2);
+    expect(open).not.toContain("[36m");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Application");
+    expect(screen.snapshot()).not.toContain("Agent: Weather");
+    renderer.shutdown();
+  });
+
+  it("scrolls long info drawers within the terminal before closing", async () => {
+    const { input, renderer, screen } = makeRenderer(60, 10);
+    const panel = renderer.showInfoPanel(
+      Array.from({ length: 12 }, (_, i) => `Entry ${i}`).join("\n"),
+    );
+    expect(screen.snapshot()).toContain("Entry 0");
+    expect(screen.snapshot()).toContain("↑/↓ scroll · Esc close");
+    for (let i = 0; i < 10; i += 1) input.down();
+    expect(screen.snapshot()).toContain("Entry 11");
+    expect(screen.snapshot()).not.toContain("Entry 0");
+    input.send("\x1b");
+    await panel;
+    expect(screen.snapshot()).not.toContain("Entry 11");
+    renderer.shutdown();
+  });
+
+  it("resolves an open transient drawer on shutdown", async () => {
+    const { renderer } = makeRenderer();
+    const choice = renderer.choosePromptCommand(PROMPT_COMMANDS);
+    renderer.shutdown();
+    expect(await choice).toBeUndefined();
+  });
+
   it("moves the suggestion highlight with arrows instead of recalling history", async () => {
     const { input, renderer } = makeRenderer();
 
@@ -4568,9 +5662,35 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /reset; history recall would have submitted the
+    // Down moved /model → /reset; history recall would have submitted the
     // earlier prompt instead.
     expect(await second).toBe("/reset");
+    renderer.shutdown();
+  });
+
+  it("leaves transient commands and setup drawers out of prompt history", async () => {
+    const { input, renderer } = makeRenderer();
+
+    for (const text of [
+      "an earlier prompt",
+      "/model anthropic/claude-opus-4.6 default",
+      "/help",
+      "/info",
+      "/add connection/linear",
+      "/login chatgpt",
+      "/loglevel all",
+      "/traces",
+    ]) {
+      const prompt = renderer.readPrompt();
+      input.type(text);
+      input.enter();
+      await prompt;
+    }
+
+    const recalled = renderer.readPrompt();
+    input.up();
+    input.enter();
+    expect(await recalled).toBe("an earlier prompt");
     renderer.shutdown();
   });
 
@@ -4588,7 +5708,7 @@ describe("TerminalRenderer command typeahead", () => {
     });
 
     input.type("m");
-    expect(screen.snapshot()).toContain("Configure the agent's model and provider");
+    expect(screen.snapshot()).toContain("Choose a model, speed, and reasoning");
     input.enter();
     expect(await prompt).toBe("/model");
     renderer.shutdown();
@@ -4623,8 +5743,8 @@ describe("TerminalRenderer command typeahead", () => {
     const prompt = renderer.readPrompt();
     input.type("/");
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Authenticate with Vercel");
-    expect(snapshot).not.toContain("Configure the agent's model and provider");
+    expect(snapshot).not.toContain("Authenticate with Vercel");
+    expect(snapshot).not.toContain("Choose a model, speed, and reasoning");
     input.enter();
     await prompt;
     renderer.shutdown();
@@ -4657,7 +5777,7 @@ describe("TerminalRenderer status line", () => {
     identity: { projectName: "my-agent", teamName: "acme" },
   };
 
-  it("renders the local server, model, and Vercel link under the prompt row", async () => {
+  it("renders the model and Vercel link without the local port under the prompt row", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
@@ -4684,14 +5804,13 @@ describe("TerminalRenderer status line", () => {
     });
 
     const lines = screen.snapshot().split("\n");
-    const promptRow = lines.findIndex((line) => line.includes("›"));
+    const promptRow = lines.findIndex((line) => line.includes("❯"));
     expect(promptRow).toBeGreaterThan(-1);
     const statusRow = lines.slice(promptRow + 1).join("\n");
-    expect(statusRow).toContain(":3000");
+    expect(statusRow).not.toContain(":3000");
     expect(statusRow).toContain("anthropic/claude-sonnet-5");
-    expect(statusRow.indexOf(":3000")).toBeLessThan(statusRow.indexOf("anthropic/claude-sonnet-5"));
     // The linked project folds into the connected gateway label.
-    expect(statusRow).toContain("via ai-gateway(oidc:my-agent)");
+    expect(statusRow).toContain("· ai-gateway(oidc:my-agent)");
     expect(statusRow).not.toContain("⚠ ai-gateway");
     // No token segment before any turn reports usage (↑ 0 ↓ 0 is noise).
     expect(statusRow).not.toContain("↑ 0");
@@ -4703,6 +5822,111 @@ describe("TerminalRenderer status line", () => {
     await prompt;
     renderer.shutdown();
   });
+
+  it("shows dynamic model below the prompt after replacing a static model", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const info = agentInfoWithModel("openai/gpt-5.6-sol");
+    const header = { name: "Weather Agent", serverUrl: "http://localhost:3000", info };
+    renderer.renderAgentHeader(header);
+    const prompt = renderer.readPrompt();
+    renderer.renderAgentHeader({ ...header, info: agentInfoWithDynamicModel() });
+    const lines = screen.snapshot().split("\n");
+    const promptRow = lines.findIndex((line) => line.includes("❯"));
+    expect(promptRow).toBeGreaterThan(-1);
+    const footer = lines.slice(promptRow + 1).join("\n");
+    expect(footer).toContain("dynamic model");
+    expect(footer).not.toContain("openai/gpt-5.6-sol");
+    expect(footer).not.toContain("⚠ ai-gateway");
+    input.type("done");
+    input.enter();
+    await prompt;
+    await renderer.renderStream(
+      {
+        events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
+          yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
+          expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
+          yield { type: "step-start", modelId: "openai/gpt-5.6-sol" };
+          expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+          expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
+          yield { type: "finish" };
+        })(),
+      },
+      { submittedPrompt: "hi", continueSession: true },
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+    await renderer.renderStream(
+      {
+        events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
+          yield { type: "turn-start", turnId: "next-turn" };
+          expect(screen.snapshot()).toContain("dynamic model");
+          expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
+          yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
+          yield { type: "finish" };
+        })(),
+      },
+      { submittedPrompt: "hello again", continueSession: true },
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
+    renderer.renderSessionBoundary();
+    expect(screen.snapshot()).toContain("dynamic model");
+    expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
+    renderer.shutdown();
+  });
+
+  it("clears an idle turn's model before resolution and preserves same-turn continuations", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithDynamicModel(),
+    });
+    await renderer.renderIdleStream(
+      streamOf([
+        { type: "turn-start", turnId: "first" },
+        { type: "step-start", modelId: "openai/gpt-5.6-sol" },
+      ]),
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+    await renderer.renderIdleStream(streamOf([{ type: "turn-start", turnId: "first" }]));
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
+    await renderer.renderIdleStream(
+      streamOf([
+        { type: "turn-start", turnId: "wake" },
+        { type: "error", errorText: "Model selection failed" },
+      ]),
+    );
+    expect(screen.snapshot()).toContain("dynamic model");
+    expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
+    expect(screen.snapshot()).toContain("Model selection failed");
+    renderer.shutdown();
+  });
+
+  it.each([null, 42, {}, "x".repeat(10_000)])(
+    "bounds model display data without interrupting the stream (%#)",
+    async (modelId) => {
+      const { screen, renderer } = makeRenderer(320);
+      renderer.renderAgentHeader({
+        name: "Weather Agent",
+        serverUrl: "http://localhost:3000",
+        info: agentInfoWithDynamicModel(),
+      });
+      await renderer.renderIdleStream(
+        streamOf([
+          { type: "step-start", modelId } as AgentTUIStreamEvent,
+          { type: "assistant-complete", id: "answer", text: "Hello Alice." },
+        ]),
+      );
+      expect(screen.snapshot()).toContain("Hello Alice.");
+      expect(screen.snapshot()).toContain("dynamic model");
+      if (typeof modelId === "string") {
+        expect(screen.snapshot()).toContain("x".repeat(256));
+        expect(screen.snapshot()).not.toContain("x".repeat(257));
+      } else {
+        expect(screen.snapshot()).not.toContain("dynamic model ·");
+      }
+      renderer.shutdown();
+    },
+  );
 
   it("suppresses the status line while a setup flow panel is open", () => {
     const { screen, renderer } = makeRenderer();
@@ -4717,13 +5941,13 @@ describe("TerminalRenderer status line", () => {
       }),
     });
     renderer.setVercelStatus(vercelStatus);
-    expect(screen.snapshot()).toContain("via ai-gateway(oidc:my-agent)");
+    expect(screen.snapshot()).toContain("· ai-gateway(oidc:my-agent)");
 
     renderer.setupFlow.begin("Connect to Vercel");
-    expect(screen.snapshot()).not.toContain("via ai-gateway(oidc:my-agent)");
+    expect(screen.snapshot()).not.toContain("· ai-gateway(oidc:my-agent)");
 
     renderer.setupFlow.end({ preserveDiagnostics: false });
-    expect(screen.snapshot()).toContain("via ai-gateway(oidc:my-agent)");
+    expect(screen.snapshot()).toContain("· ai-gateway(oidc:my-agent)");
     renderer.shutdown();
   });
 
@@ -4754,12 +5978,9 @@ describe("TerminalRenderer status line", () => {
     });
 
     const lines = screen.snapshot().split("\n");
-    const title = lines.indexOf("   Authenticate via Vercel OIDC");
-    expect(lines.slice(title, title + 3)).toEqual([
-      "   Authenticate via Vercel OIDC",
-      "",
-      "   Select your team",
-    ]);
+    const title = lines.indexOf("   Select your team");
+    expect(title).toBeGreaterThanOrEqual(0);
+    expect(lines).not.toContain("   Authenticate via Vercel OIDC");
     const status = lines.indexOf("   ↗ vpoke.playground-vercel.tools  Authenticating via OIDC…");
     expect(status).toBeGreaterThan(title);
     expect(lines[status - 1]).toBe("");
@@ -4866,11 +6087,49 @@ describe("TerminalRenderer status line", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("anthropic/claude-sonnet-5");
-    expect(snapshot).toContain("via ai-gateway(oidc:my-agent)");
+    expect(snapshot).toContain("· ai-gateway(oidc:my-agent)");
     // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).
     expect(snapshot).not.toContain("↑ 0");
     expect(snapshot).not.toContain("↑ 500");
     expect(snapshot).not.toContain("hello");
     renderer.shutdown();
   });
+});
+
+describe("setup interaction transitions", () => {
+  it.each([32, 80])(
+    "anchors the heading from loading through filtering at %i columns",
+    async (columns) => {
+      const { screen, input, renderer } = makeRenderer(columns);
+      renderer.setupFlow.begin("Add to your agent");
+      const titleRow = () =>
+        screen
+          .snapshot()
+          .split("\n")
+          .findIndex((row) => row.includes("Add to your agent"));
+      const initialRow = titleRow();
+      renderer.setupFlow.setStatus("Loading catalog…");
+      expect(titleRow()).toBe(initialRow);
+      const answer = renderer.setupFlow.readSelect({
+        kind: "search",
+        message: "Add to your agent",
+        options: [
+          { value: "slack", label: "Slack" },
+          { value: "linear", label: "Linear" },
+        ],
+      });
+      const questionRow = titleRow();
+      expect(questionRow).toBeGreaterThan(initialRow);
+      expect(screen.snapshot().split("Add to your agent")).toHaveLength(2);
+      input.type("sl");
+      expect(titleRow()).toBe(questionRow);
+      input.send("\x1b");
+      input.send("\x1b");
+      await expect(answer).resolves.toBeUndefined();
+      expect(screen.snapshot()).not.toContain("Working…");
+      renderer.setupFlow.end({ preserveDiagnostics: false });
+      renderer.shutdown();
+      expect(screen.snapshot()).not.toContain("Add to your agent");
+    },
+  );
 });

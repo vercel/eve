@@ -42,41 +42,82 @@ const PORTABILITY_CASES: readonly PortabilityCase[] = [
   {
     descriptor: {
       files: {
-        "agent/sandbox.ts": `import { defaultBackend, defineSandbox } from "eve/sandbox";
-import { docker } from "eve/sandbox/docker";
-import { justbash } from "eve/sandbox/just-bash";
-import { microsandbox } from "eve/sandbox/microsandbox";
-import { vercel } from "eve/sandbox/vercel";
+        "agent/vercel.ts": `import { withEve, type EveVercelConfig } from "eve/vercel";
 
-const fallback = defaultBackend({
-  docker: { image: "ghcr.io/vercel/eve:latest" },
-  justBash: {},
-  microsandbox: {},
-  vercel: { resources: { vcpus: 2 } },
+const config = {
+  routes: [{ destination: { service: "web", type: "service" }, src: "^(.*)$" }],
+  services: { web: { framework: "nextjs", root: "apps/web" } },
+} satisfies EveVercelConfig;
+
+export default withEve(config);
+`,
+      },
+      name: "vercel-composer-public-api-portability",
+    },
+    include: ["src/public/vercel/index.ts"],
+    name: "lets tsc typecheck withEve from the public Vercel subpath",
+    packageExports: {
+      "./vercel": {
+        types: "./dist/src/public/vercel/index.d.ts",
+      },
+    },
+  },
+  {
+    descriptor: {
+      files: {
+        "agent/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+import { defineSandboxProvider } from "eve/sandbox/provider";
+import { DockerSandbox } from "eve/sandbox/docker";
+import { JustBashSandbox } from "eve/sandbox/just-bash";
+import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";
+import { Drive, VercelSandbox } from "eve/sandbox/vercel";
+
+const custom = defineSandboxProvider({
+  name: "custom",
+  environment() {
+    return {
+      async prepare() { return null; },
+      async resume() { throw new Error("unused"); },
+      async start() { throw new Error("unused"); },
+    };
+  },
 });
+void custom.environment();
 
-void docker;
-void justbash;
-void microsandbox;
+export const environment = process.env.VERCEL === "1"
+  ? VercelSandbox.environment({ resources: { vcpus: 2 } })
+  : DefaultSandbox.environment({ docker: { image: "ghcr.io/vercel/eve:latest" } });
+void Drive;
+async function verifyMutableNetworkCapability() {
+  const sandbox = await DockerSandbox.dockerfile().open({ networkPolicy: "deny-all" });
+  await sandbox.setNetworkPolicy("allow-all");
+}
+void verifyMutableNetworkCapability;
+void DockerSandbox.image("ghcr.io/acme/agent:latest");
+void JustBashSandbox.environment();
+void MicrosandboxSandbox.dockerfile();
+void MicrosandboxSandbox.image("ghcr.io/acme/agent:latest");
 
-export default defineSandbox({
-  backend: process.env.VERCEL === "1" ? vercel() : fallback,
-});
+export default defineSandbox(() => environment.open());
 `,
       },
       name: "sandbox-public-api-portability",
     },
     include: [
       "src/public/sandbox/index.ts",
+      "src/public/sandbox/provider.ts",
       "src/public/sandbox/docker.ts",
       "src/public/sandbox/just-bash.ts",
       "src/public/sandbox/microsandbox.ts",
       "src/public/sandbox/vercel.ts",
     ],
-    name: "lets tsc typecheck sandbox backend factories from nested subpath imports",
+    name: "lets tsc typecheck sandbox environments from nested subpath imports",
     packageExports: {
       "./sandbox": {
         types: "./dist/src/public/sandbox/index.d.ts",
+      },
+      "./sandbox/provider": {
+        types: "./dist/src/public/sandbox/provider.d.ts",
       },
       "./sandbox/docker": {
         types: "./dist/src/public/sandbox/docker.d.ts",
@@ -89,6 +130,48 @@ export default defineSandbox({
       },
       "./sandbox/vercel": {
         types: "./dist/src/public/sandbox/vercel.d.ts",
+      },
+    },
+  },
+  {
+    descriptor: {
+      files: {
+        "agent/memory/user.ts": `import { defineMemory } from "eve/memory";
+import {
+  fileMemory,
+  inMemory,
+  type MemoryDocumentBackend,
+} from "eve/memory/file";
+import { vercelBlob, type VercelBlobBackendOptions } from "eve/memory/file/vercel";
+
+const blobOptions: VercelBlobBackendOptions = { prefix: "portable/memory" };
+const backend: MemoryDocumentBackend = process.env.VERCEL
+  ? vercelBlob(blobOptions)
+  : inMemory();
+
+export default defineMemory({
+  provider: fileMemory({ backend, maxCharacters: 8_000 }),
+  scope: "shared",
+});
+`,
+      },
+      name: "file-memory-public-api-portability",
+    },
+    include: [
+      "src/public/memory/index.ts",
+      "src/public/memory/file/index.ts",
+      "src/public/memory/file/vercel.ts",
+    ],
+    name: "lets tsc typecheck file-memory providers and backends from public subpaths",
+    packageExports: {
+      "./memory": {
+        types: "./dist/src/public/memory/index.d.ts",
+      },
+      "./memory/file": {
+        types: "./dist/src/public/memory/file/index.d.ts",
+      },
+      "./memory/file/vercel": {
+        types: "./dist/src/public/memory/file/vercel.d.ts",
       },
     },
   },
@@ -280,9 +363,17 @@ async function expectPortableFixtureToTypecheck(testCase: PortabilityCase): Prom
     )}\n`,
   );
 
-  await runFile(process.execPath, [TSC_BIN_PATH, "-p", consumerTsconfigPath], {
-    cwd: appRoot,
-  });
+  try {
+    await runFile(process.execPath, [TSC_BIN_PATH, "-p", consumerTsconfigPath], {
+      cwd: appRoot,
+    });
+  } catch (error) {
+    const stderr =
+      typeof error === "object" && error !== null && "stderr" in error
+        ? String(error.stderr)
+        : String(error);
+    throw new Error(`Portable consumer typecheck failed:\n${stderr}`, { cause: error });
+  }
 }
 
 async function writeDescriptorAppFiles(input: {

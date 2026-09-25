@@ -9,8 +9,8 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { expectObjectRecord, expectOnlyKnownKeys } from "#internal/authored-module.js";
 import { parseJsonValue } from "#shared/json.js";
 
@@ -19,6 +19,8 @@ const KNOWN_TOP_LEVEL_KEYS = [
   "auth",
   "description",
   "headers",
+  "instanceKey",
+  "protocolVersionDiscovery",
   "toolCall",
   "tools",
   "url",
@@ -29,12 +31,14 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
   "baseUrl",
   "description",
   "headers",
+  "instanceKey",
   "operations",
   "spec",
   "toolCall",
 ] as const;
 const KNOWN_AUTHORIZATION_KEYS = [
   "completeAuthorization",
+  "credentialOwner",
   "evict",
   "getToken",
   "principalType",
@@ -68,6 +72,7 @@ export function normalizeMcpClientConnectionDefinition(
 
   validateUrl(record, message);
   validateDescription(record, message);
+  validateInstanceKey(record, message);
 
   const authorization = normalizeAuthorization(record, message);
   const headers = normalizeHeaders(record, message);
@@ -83,10 +88,23 @@ export function normalizeMcpClientConnectionDefinition(
     }
   }
 
-  const result: McpClientConnectionDefinition = {
+  const result: {
+    -readonly [K in keyof McpClientConnectionDefinition]: McpClientConnectionDefinition[K];
+  } = {
     description: record.description as string,
     url: record.url as string,
   };
+
+  if (record.protocolVersionDiscovery !== undefined) {
+    if (typeof record.protocolVersionDiscovery !== "boolean") {
+      throw new Error(`${message} "protocolVersionDiscovery" must be a boolean.`);
+    }
+    result.protocolVersionDiscovery = record.protocolVersionDiscovery;
+  }
+
+  if (record.instanceKey !== undefined) {
+    result.instanceKey = record.instanceKey as string;
+  }
 
   if (authorization !== undefined) {
     result.auth = authorization;
@@ -171,6 +189,7 @@ export function normalizeOpenApiConnectionDefinition(
   validateSpec(record, message);
   validateBaseUrl(record, message);
   validateDescription(record, message);
+  validateInstanceKey(record, message);
 
   const authorization = normalizeAuthorization(record, message);
   const headers = normalizeHeaders(record, message);
@@ -195,6 +214,10 @@ export function normalizeOpenApiConnectionDefinition(
 
   if (record.baseUrl !== undefined) {
     result.baseUrl = record.baseUrl as string;
+  }
+
+  if (record.instanceKey !== undefined) {
+    result.instanceKey = record.instanceKey as string;
   }
 
   if (authorization !== undefined) {
@@ -270,6 +293,13 @@ function validateUrl(record: Record<string, unknown>, message: string): void {
 function validateDescription(record: Record<string, unknown>, message: string): void {
   if (typeof record.description !== "string" || record.description.length === 0) {
     throw new Error(`${message} The "description" field must be a non-empty string.`);
+  }
+}
+
+function validateInstanceKey(record: Record<string, unknown>, message: string): void {
+  if (record.instanceKey === undefined) return;
+  if (typeof record.instanceKey !== "string" || record.instanceKey.length === 0) {
+    throw new Error(`${message} The "instanceKey" field must be a non-empty string.`);
   }
 }
 

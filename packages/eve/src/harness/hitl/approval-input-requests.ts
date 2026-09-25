@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import {
   buildResolvedInputBatch,
   resolveApprovalOutcome,
@@ -10,6 +10,7 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import {
+  getPendingInputBatches,
   queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
@@ -25,12 +26,6 @@ import type {
   ResolvePendingInputResult,
   ToolResponsePart,
 } from "#harness/hitl/pending-input-resolution.js";
-import {
-  buildQuestionToolResponsePart,
-  findAnsweredQuestionBatches,
-  resolveQuestionBatches,
-} from "#harness/hitl/question-input-requests.js";
-import type { QuestionInputRequest } from "#harness/hitl/question-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
@@ -39,12 +34,12 @@ type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" 
 
 export type RejectedActionBatch = ResolvedInputActionBatch;
 
-export function hasAnsweredApprovalBatch(
+export function findAnsweredApprovalBatches(
   batches: readonly PendingInputBatch[],
   responses: readonly InputResponse[],
-): boolean {
+): PendingInputBatch[] {
   const responseIds = new Set(responses.map((response) => response.requestId));
-  return batches.some((batch) =>
+  return batches.filter((batch) =>
     batch.requests.every(
       (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
     ),
@@ -53,38 +48,18 @@ export function hasAnsweredApprovalBatch(
 
 export function resolveApprovalInputBatches(
   input: InputDomainResolverInput & {
-    readonly approvalBatches: readonly PendingInputBatch[];
-    readonly questionBatches: readonly PendingInputBatch[];
     readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   },
 ): ResolvePendingInputResult {
-  const responseIds = new Set(input.responses.map((response) => response.requestId));
-  const answeredApprovalBatches = new Set(
-    input.approvalBatches.filter((batch) =>
-      batch.requests.every(
-        (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
-      ),
-    ),
-  );
-  const answeredQuestionBatches = new Set(
-    findAnsweredQuestionBatches(input.questionBatches, input.responses),
-  );
-  let resolvedBatches = input.batches.filter(
-    (batch) => answeredApprovalBatches.has(batch) || answeredQuestionBatches.has(batch),
-  );
-  const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-  if (firstApprovalIndex >= 0) {
-    // Anything after this batch would hide its approval response from AI
-    // SDK's tail-tool-message scan. Its responses replay on the next step.
-    resolvedBatches = resolvedBatches.slice(0, firstApprovalIndex + 1);
-  }
-
-  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const answered = new Set(findAnsweredApprovalBatches(input.batches, input.responses));
+  // Only the first answered batch resolves: anything after it would hide its
+  // approval response from AI SDK's tail-tool-message scan. Later answers
+  // replay on the next step.
+  const approvalBatch = input.batches.find((batch) => answered.has(batch));
+  const openBatches = input.batches.filter((batch) => batch !== approvalBatch);
   const leftoverResponses = responsesForBatches(input.responses, openBatches);
 
-  if (resolvedBatches.length === 0) {
+  if (approvalBatch === undefined) {
     if (input.resolvedStepInput?.message === undefined) {
       return {
         outcome: "unresolved",
@@ -105,42 +80,42 @@ export function resolveApprovalInputBatches(
     };
   }
 
-  const approvalBatch = resolvedBatches.find((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-  const questionBatches = resolvedBatches.filter((batch) => batch !== approvalBatch);
-  const questions = resolveQuestionBatches({
-    batches: questionBatches,
+  const approval = resolveApprovalBatch({
+    batch: approvalBatch,
     messages: [...input.baseHistory],
+    resolveApprovalKey: input.resolveApprovalKey,
     responses: input.responses,
+    session: input.session,
   });
-  const approval =
-    approvalBatch === undefined
-      ? { messages: questions, session: input.session }
-      : resolveApprovalBatch({
-          batch: approvalBatch,
-          messages: questions,
-          resolveApprovalKey: input.resolveApprovalKey,
-          responses: input.responses,
-          session: input.session,
-        });
+  const resolved = buildResolvedInputBatch(approvalBatch, input.responses);
 
   return finishResolvedInput({
-    deferTurnInput: approvalBatch !== undefined || input.deferTurnInput,
+    deferTurnInput: true,
     leftoverResponses,
     messages: approval.messages,
     rejectedActions: approval.rejectedActions,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
-    }),
+    resolvedInputs: resolved === undefined ? [] : [resolved],
     resolvedStepInput: input.resolvedStepInput,
-    session: removePendingInputBatches(approval.session, resolvedBatches),
+    session: removePendingInputBatches(approval.session, [approvalBatch]),
   });
 }
 
-/** Returns tool approval keys recorded during this session. */
-export function getApprovedTools(session: HarnessSession): ReadonlySet<string> {
+/** Returns recorded approval keys that have no matching request still pending. */
+export function getApprovedTools(
+  session: HarnessSession,
+  resolveApprovalKey?: (request: InputRequest) => string | undefined,
+): ReadonlySet<string> {
+  const approvedTools = readRecordedApprovedTools(session);
+  for (const batch of getPendingInputBatches(session.state)) {
+    for (const request of batch.requests) {
+      if (!isApprovalRequest(request)) continue;
+      approvedTools.delete(resolveApprovalKey?.(request) ?? request.action.toolName);
+    }
+  }
+  return approvedTools;
+}
+
+function readRecordedApprovedTools(session: HarnessSession): Set<string> {
   const value = session.state?.[APPROVED_TOOLS_KEY];
   return Array.isArray(value) ? new Set(value as string[]) : new Set();
 }
@@ -191,7 +166,9 @@ function recordApprovedTools(input: {
   if (newKeys.length === 0) return input.session;
 
   const state = { ...input.session.state };
-  state[APPROVED_TOOLS_KEY] = [...new Set([...getApprovedTools(input.session), ...newKeys])];
+  state[APPROVED_TOOLS_KEY] = [
+    ...new Set([...readRecordedApprovedTools(input.session), ...newKeys]),
+  ];
   return { ...input.session, state };
 }
 
@@ -241,11 +218,9 @@ function buildApprovalBatchToolResponseParts(
         );
         break;
       case "question":
-        parts.push(buildQuestionToolResponsePart(request as QuestionInputRequest, response));
-        break;
       case "session-limit":
         throw new TypeError(
-          "Session-limit pending input batches must contain only session-limit requests.",
+          `Approval pending input batches cannot contain a "${request.kind}" request.`,
         );
       default: {
         const unhandled: never = request.kind;

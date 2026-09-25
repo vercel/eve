@@ -39,6 +39,12 @@ vi.mock("./server.js", async (importOriginal) => {
 
 const { resolveEveDestinationPrefix } = await import("./server.js");
 
+vi.mock("#internal/nitro/host/workspace-extensions.js", () => ({
+  buildWorkspaceExtensions: vi.fn(async () => undefined),
+}));
+
+const { buildWorkspaceExtensions } = await import("#internal/nitro/host/workspace-extensions.js");
+
 import {
   EVE_NEXT_SERVICE_PREFIX,
   withEve,
@@ -60,7 +66,32 @@ describe("withEve", () => {
   afterEach(() => {
     vi.mocked(resolveEveDestinationPrefix).mockClear();
     vi.mocked(ensureEveVercelOutputConfig).mockClear();
+    vi.mocked(buildWorkspaceExtensions).mockClear();
     vi.unstubAllEnvs();
+  });
+
+  it("builds each agent's workspace extensions while Next.js is building", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await withEve<TestConfig>(
+      {},
+      { agents: { billing: "./agents/billing", support: "./agents/support" } },
+    )("phase-production-build", { defaultConfig: {} });
+
+    expect(vi.mocked(buildWorkspaceExtensions).mock.calls).toEqual([
+      [expect.stringMatching(/\/agents\/billing$/)],
+      [expect.stringMatching(/\/agents\/support$/)],
+    ]);
+  });
+
+  it("does not build workspace extensions outside the Next.js build phase", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await resolveConfig(withEve<TestConfig>({}));
+
+    expect(buildWorkspaceExtensions).not.toHaveBeenCalled();
   });
 
   it("does not add Next.js rewrites on Vercel", async () => {
@@ -336,11 +367,11 @@ describe("withEve", () => {
       expect.arrayContaining([
         {
           destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/support/eve/v1/:path+`,
-          source: "/eve/agents/support/eve/v1/:path+",
+          source: "/eve/support/v1/:path+",
         },
         {
           destination: "https://agent.example.com/_eve_internal/billing/eve/v1/:path+",
-          source: "/eve/agents/billing/eve/v1/:path+",
+          source: "/eve/billing/v1/:path+",
         },
       ]),
     );
@@ -350,14 +381,14 @@ describe("withEve", () => {
           appRoot: expect.stringContaining("/agents/billing"),
           buildCommand: "pnpm build:billing-agent",
           name: "billing",
-          publicRoutePrefix: "/eve/agents/billing",
+          publicRoutePrefix: "/eve/billing",
           servicePrefix: "/_eve_internal/billing",
         },
         {
           appRoot: expect.stringContaining("/agents/support"),
-          buildCommand: "node '../../node_modules/eve/bin/eve.js' build",
+          buildCommand: "node 'node_modules/eve/bin/eve.js' build",
           name: "support",
-          publicRoutePrefix: "/eve/agents/support",
+          publicRoutePrefix: "/eve/support",
           servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,
         },
       ],
@@ -385,13 +416,29 @@ describe("withEve", () => {
       expect.arrayContaining([
         {
           destination: "http://127.0.0.1:4274/eve/v1/:path+",
-          source: "/eve/agents/billing/eve/v1/:path+",
+          source: "/eve/billing/v1/:path+",
         },
         {
           destination: "http://127.0.0.1:4275/eve/v1/:path+",
-          source: "/eve/agents/support/eve/v1/:path+",
+          source: "/eve/support/v1/:path+",
         },
       ]),
+    );
+  });
+
+  it("accepts digit-bearing public agent names", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const config = await withEve<TestConfig>({}, { agents: { support2: "./agents/support" } })(
+      "phase-production-build",
+      { defaultConfig: {} },
+    );
+
+    await expect(config.rewrites?.()).resolves.toEqual(
+      expect.objectContaining({
+        beforeFiles: expect.arrayContaining([
+          expect.objectContaining({ source: "/eve/support2/v1/:path+" }),
+        ]),
+      }),
     );
   });
 
@@ -400,9 +447,7 @@ describe("withEve", () => {
       withEve<TestConfig>(
         {},
         {
-          agents: {
-            support: "./agents/support",
-          },
+          agents: { support: "./agents/support" },
           eveRoot: "./agent",
         },
       ),

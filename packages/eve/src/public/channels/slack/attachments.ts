@@ -1,6 +1,7 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
-import type { FetchFileResult } from "#channel/adapter.js";
+import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveSlackBotToken,
@@ -8,6 +9,11 @@ import {
   type SlackThread,
 } from "#public/channels/slack/api.js";
 import type { SlackAttachment, SlackMessage } from "#public/channels/slack/inbound.js";
+import {
+  isConfiguredSlackFileUrl,
+  resolveSlackTransportOptions,
+  type SlackTransportOptions,
+} from "#public/channels/slack/transport.js";
 import {
   evaluateFilePart,
   formatUploadPolicyViolation,
@@ -162,30 +168,42 @@ export function buildSlackTurnMessage(
  * Creates a `fetchFile` function for the Slack channel.
  *
  * Returns `null` for URLs that don't belong to Slack so they pass
- * through to the model provider unchanged. Fetches Slack file URLs
- * with the bot token.
+ * through to the model provider unchanged. Fetches Slack file URLs, and
+ * URLs under a configured `api.fileBaseUrl`, with the bot token, on
+ * `api.fetch` when one is configured.
  */
 export function createSlackFetchFile(input: {
+  readonly api?: SlackTransportOptions;
   readonly botToken?: SlackBotToken;
-}): (url: string) => Promise<FetchFileResult | null> {
-  return async (url) => {
-    if (!isSlackFileUrl(url)) {
+}): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
+  const api = resolveSlackTransportOptions(input.api);
+  return async (url, context) => {
+    if (!isConfiguredSlackFileUrl(api, url) && !isSlackFileUrl(url)) {
       return null;
     }
-    const token = await resolveSlackBotToken(input.botToken);
-    const response = await fetch(url, {
+    const installationTeamId = context?.state.installationTeamId;
+    const token = await resolveSlackBotToken(input.botToken, {
+      teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
+    });
+    const response = await (api?.fetch ?? fetch)(url, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
+      throw new EveAttachmentError({
+        adapterKind: "slack",
+        kind: "resolver-threw",
+        message: `Slack file fetch returned HTTP ${response.status}.`,
+      });
     }
     const mediaType = response.headers.get("content-type") ?? undefined;
     const normalizedMediaType = mediaType?.split(";", 1)[0]?.trim().toLowerCase();
     if (normalizedMediaType === "text/html") {
-      throw new Error(
-        `Slack file fetch returned an HTML sign-in page instead of file bytes for ${url}. ` +
-          "The bot token may be missing the files:read scope. Add the scope, reinstall the Slack app, and retry.",
-      );
+      throw new EveAttachmentError({
+        adapterKind: "slack",
+        kind: "resolver-threw",
+        message:
+          "Slack returned an HTML sign-in page instead of file bytes. The bot token may be missing the files:read scope. Add the scope, reinstall the Slack app, and retry.",
+      });
     }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),

@@ -1,7 +1,80 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
-import { defineAgent } from "eve";
+import { defineAgent, defineDynamic } from "eve";
+import { mockModel } from "eve/evals";
+
+const DISABLED_AGENT_TOOL_REQUEST = "E2E_DISABLED_ROOT_AGENT_TOOL";
+const CHILD_REQUEST = 'Call final_output exactly once with {"answer":"client-recursion-ok"}.';
+const disabledAgentToolModel = mockModel({
+  modelId: "disabled-root-agent-tool",
+  respond: ({ tools }) => {
+    if (tools.some((tool) => tool.name === "agent")) {
+      throw new Error("The disabled built-in agent tool was exposed to the model.");
+    }
+    return "DISABLED-ROOT-AGENT-TOOL-HIDDEN";
+  },
+});
+const childModel = mockModel({
+  modelId: "recursive-client-result-child",
+  respond: () => ({
+    toolCalls: [{ name: "final_output", input: { answer: "client-recursion-ok" } }],
+  }),
+});
+
+const config = e2eAgentConfig({
+  mock: ({ lastUserMessage, toolResults, userMessages }) => {
+    if (lastUserMessage?.includes("favorite word") && lastUserMessage.includes("?")) {
+      const remembered = userMessages
+        .map((message) => /My favorite word is (\w+)/u.exec(message)?.[1])
+        .find((word) => word !== undefined);
+      return remembered ?? "No favorite word was provided.";
+    }
+    if (lastUserMessage?.startsWith("Call call_child ")) {
+      const result = toolResults.find((entry) => entry.name === "call_child");
+      return result === undefined
+        ? { toolCalls: [{ name: "call_child", input: {} }] }
+        : JSON.stringify(result.output);
+    }
+    if (lastUserMessage === CHILD_REQUEST) {
+      return {
+        toolCalls: [{ name: "final_output", input: { answer: "client-recursion-ok" } }],
+      };
+    }
+    return `Mock reply: ${lastUserMessage ?? ""}`;
+  },
+});
+const { model, modelContextWindowTokens, ...agentConfig } = config;
 
 export default defineAgent({
-  ...e2eAgentConfig(),
+  ...agentConfig,
+  model: defineDynamic({
+    events: {
+      "step.started": (_event, ctx) => {
+        // This child exercises traced HTTP cleanup; schema-following has separate model evals.
+        const isResultChild = ctx.messages.some((message) => {
+          if (message.role !== "user") return false;
+          const text =
+            typeof message.content === "string"
+              ? message.content
+              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+          return text === CHILD_REQUEST;
+        });
+        const isDisabledAgentToolProbe = ctx.messages.some((message) => {
+          if (message.role !== "user") return false;
+          const text =
+            typeof message.content === "string"
+              ? message.content
+              : message.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+          return text === DISABLED_AGENT_TOOL_REQUEST;
+        });
+        if (isDisabledAgentToolProbe) {
+          return { model: disabledAgentToolModel, modelContextWindowTokens: 1_000_000 };
+        }
+        return isResultChild
+          ? { model: childModel, modelContextWindowTokens: 1_000_000 }
+          : { model, modelContextWindowTokens };
+      },
+    },
+  }),
+  experimental: config.experimental,
   reasoning: "high",
 });

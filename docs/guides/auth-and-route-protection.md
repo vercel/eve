@@ -21,7 +21,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
-`GET /eve/v1/health` is always public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials.
+The health route created by `eveChannel()` is public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials. Replacing `agent/channels/eve.ts` with a custom `defineChannel(...)` or disabling that slot also replaces or removes the health route.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -215,7 +215,7 @@ export default eveChannel({
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve selects the default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 
@@ -223,7 +223,7 @@ Keep secret values (`ROUTE_AUTH_BASIC_PASSWORD`, signing keys) in environment va
 
 ## Accepting forwarded identity from another deployment
 
-A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on the create-session request as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
+A `defineRemoteAgent({ forwardPrincipal: true })` caller (see [Remote agents](./remote-agents#forwarding-the-caller-identity)) asserts its end user's principal on create and continuation requests as a `forwardedPrincipal` body field. By default every such assertion is rejected with `403` — accepting someone else's word for who the user is requires naming exactly which forwarders you trust. Do that with `trustedForwarders` on `eveChannel`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -231,15 +231,59 @@ import { vercelOidc, vercelSubject } from "eve/channels/auth";
 
 export default eveChannel({
   auth: [vercelOidc()],
-  // Only the router deployment may assert a forwarded principal.
+  // Only the router deployment may forward eve delegation context.
   trustedForwarders: (forwarder) =>
     forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
 });
 ```
 
-The predicate authorizes the _forwarder_ (the verified route-auth principal — who is asserting), not the forwarded principal (what is asserted). Match it precisely: a permissive predicate like `() => true` lets any caller that passes route auth assert any principal, including preview deployments of your own project when `vercelOidc()` is in the walk. `trustedForwarders` exists only on your authored channel — the framework default channel never accepts a forwarded principal, so a receiving deployment must author `agent/channels/eve.ts`.
+`trustedForwarders` authorizes the verified forwarder to supply eve delegation context: principal identity, parent session lineage, and, with principal forwarding, trace-content constraints. Match it precisely: `() => true` grants this authority to every caller that passes route auth, including preview deployments accepted by `vercelOidc()`. The framework default channel rejects forwarded principals and ignores the other context.
 
-When the predicate accepts, the forwarded principal replaces the session principal: `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly, so user-scoped connections, local subagents, and further `forwardPrincipal` hops all see that user. The forwarder is recorded on the accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+### Limiting what a forwarder may assert
+
+A forwarder accepted on its identity alone can assert any principal, including identities your tools trust directly, such as a Slack user or an app principal. When a forwarder should speak only for its own users, check what it asserts with the predicate's second argument:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import type { SessionAuthContext } from "eve/context";
+
+const router = vercelSubject({ teamSlug: "acme", projectName: "router" });
+
+/** The router forwards only users signed in through its own identity provider. */
+function isRouterUser(context: SessionAuthContext): boolean {
+  return (
+    context.authenticator === "router-sso" &&
+    context.issuer === "router" &&
+    context.principalType === "user"
+  );
+}
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  trustedForwarders: (forwarder, assertion) =>
+    forwarder.subject === router &&
+    assertion.principal !== undefined &&
+    isRouterUser(assertion.principal.current) &&
+    isRouterUser(assertion.principal.initiator),
+});
+```
+
+`assertion.principal` holds the `current` and `initiator` contexts the forwarder asserts, already stamped with `eve:forwarded-by`. `initiator` equals `current` when the sender omits it. `initiator` takes effect only on session creation; on continuation the predicate still sees the asserted `initiator`, but the session keeps its original initiator, so checking it does not constrain that pinned value. Attributes are asserted too, so check any attribute your tools trust. `assertion.principal` is absent when the predicate decides parent session lineage for a request that forwards no principal; a predicate that requires it accepts that forwarder's lineage only alongside a principal it accepts. The `ForwardedAssertion` and `TrustedForwarders` types are exported from `eve/channels/eve` for named predicates.
+
+When the predicate accepts a create request, `ctx.session.auth.current` and `.initiator` carry the forwarded user exactly as if they had called your deployment directly. On continuation, only `auth.current` is replaced; `auth.initiator` remains the session creator. User-scoped connections, local subagents, and further `forwardPrincipal` hops therefore see the active turn's caller.
+
+The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Forwarded identity rejections fail loud: a forwarded body without `trustedForwarders` configured, or with a forwarder or assertion the predicate refuses, is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
+
+Trusted parent session lineage populates `ctx.session.parent` and preserves the root session across the delegation chain. Untrusted lineage is ignored, and accepted lineage does not remove the normal root-session token cap.
+
+For requests marked as remote delegations by a callback body and valid sampled `traceparent`, the same accepted `trustedForwarders` result may admit an origin audience and directional content ceiling from one W3C Baggage member. The assertion is not an authorization grant: the receiver's trace policy independently decides against the immutable origin audience, and the two decisions are intersected. Every later hop forwards only that narrowed result. Malformed, partial, unsampled, or mixed-version assertions become metadata-only. The callback and headers are caller-supplied; the verified transport principal and `trustedForwarders` are the trust boundary. See [Preserving trace content](./remote-agents#preserving-trace-content).
+
+W3C `traceparent`, `tracestate`, and the forwarded conversation ID are correlation metadata. They do not require `trustedForwarders`, establish session lineage, or grant session access.
+
+> ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents#forwarding-the-caller-identity) for the upgrade behavior.
+
+Subagent sessions are persistent by default, but they do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
 
 ## What reaches `ctx.session.auth`
 
@@ -392,4 +436,5 @@ Inline providers derive a stable tool-qualified auth key from Vercel Connect met
 
 - [Security model](../concepts/security-model): trust boundaries and the pre-production checklist
 - [Connections](../connections): connection auth shapes (`connect()` vs static token)
+- [Multi-tenant outbound auth](../patterns/multi-tenant-auth): select tenant-scoped outbound credentials from the verified inbound identity
 - [Deployment](./deployment/overview): where route-auth secrets live in production

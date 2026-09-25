@@ -13,9 +13,24 @@ eve ships a base HTTP channel plus first-class platform channels, and you can au
 
 After a channel normalizes input, eve runs the same agent runtime regardless of where the message came from. Tools and instructions do not need channel-specific logic.
 
+## Audience
+
+When a channel creates a session, it assigns an observability audience:
+`public`, `private`, or `unknown`. The audience controls trace content capture,
+not who may call the channel. Each channel uses the visibility information it
+has; `unknown` is the safe default when it cannot classify a conversation.
+
+Route auth controls access and supplies the session principal. See [Auth &
+route protection](../guides/auth-and-route-protection) for principal types and
+authorization. See the [default eve HTTP channel](./eve#audience) for its
+mapping, or [custom channels](./custom#conversation-audience) to classify your
+own.
+
 ## Overlapping messages
 
-Channels default to `turnPolicy: "steer"`. When an accepted message arrives while a turn is active, eve first durably buffers the message, then cooperatively cancels the active turn and starts a replacement turn. The cancelled turn emits `turn.cancelled` followed by `session.waiting`; the replacement starts with a new turn ID. Output already streamed and completed side effects are not rolled back.
+Channels default to `turnPolicy: "steer"`. Before assistant answer output or local tool execution begins, a message can interrupt pending model generation and continue the same turn with the correction. Executing tools finish and checkpoint their results before steering reaches the next model call. After answer output starts, steering waits for the next committed workflow boundary. The turn ID stays the same.
+
+Reasoning and search progress do not count as answer output. Interrupted provider-managed search may run again; completed local tools are preserved.
 
 Set `turnPolicy: "queue"` on any built-in or custom channel when each turn must finish before the next message starts:
 
@@ -28,15 +43,17 @@ export default defineChannel({
 });
 ```
 
+Adjacent queued messages can combine into one turn only when their full auth contexts match, including identity, issuer, authenticator, and authorization attributes. Their attachments and context stay in payload order. A different auth context ends the batch; eve does not regroup messages across intervening senders. Anonymous deliveries stay separate. Turns still share the session's conversation history.
+
 `from(address).send(...)`, fixed `Session.send(...)`, cross-channel sends, and Chat SDK bridge sends also accept a per-send `turnPolicy` override. Pure `inputResponses` deliveries answer their pending request without steering. Explicit `cancel()` remains the stop-without-replacement operation.
 
-Channel admission still runs first. Ignored mentions, rejected signatures, duplicates, and any other dropped platform events never affect the active turn.
+Events rejected before `send(...)`, such as invalid signatures or filtered mentions, never reach the active turn. A delivery already sent to the session can interrupt pending generation before the channel's `deliver` hook processes it. If that hook ignores the correction, eve resumes the original request with its original auth, delivery provenance, and channel state.
 
 Each channel has its own provider terms, data flow, auth model, and user-consent expectations. Before sending non-public, sensitive, regulated, or production data through a channel, confirm that the channel provider and your configured scopes, signature checks, route auth, and delivery behavior are appropriate for your use case.
 
 ## Where channels live
 
-Channel files live under `agent/channels/` in the root agent. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. Export the channel as the module's default export. Local subagents do not declare channels.
+Channel files live under `agent/channels/` in the root agent or come from an [extension](../extensions) mounted there. The file stem is the channel id: `agent/channels/intake.ts` is addressed as `intake`. An extension mount prefixes its contributed channel IDs but does not change their route paths. Local subagents do not declare channels.
 
 ```text
 agent/
@@ -47,15 +64,65 @@ agent/
     intake.ts
 ```
 
-Install a channel from the registry with `eve add channel/photon-imessage`, `eve add channel/slack`, or `eve add channel/web`. You can also author the file by hand.
+Install a channel from the registry with `eve add channel/<name>`, such as `eve add channel/slack` or `eve add channel/web`. You can also author the file by hand.
 
 ## The eve HTTP channel (default)
 
-The eve channel is the framework's default HTTP session API, the routes the terminal UI, [`useEveAgent`](../guides/frontend/overview), and `curl` all talk to. It is enabled by default, even with no `agent/channels/eve.ts` file. Add that file only to override the defaults, most often the route auth policy. See [HTTP channel](./eve) for routes, auth, and customization.
+The eve channel is the framework's default HTTP session API, the routes the terminal UI, [`useEveAgent`](../guides/frontend/overview), and `curl` all talk to. Its selected `channels/eve.ts` source owns health, inspection, callbacks, task input, and the session protocol as one replaceable surface. eve supplies the source when no `agent/channels/eve.ts` file exists; author that file to replace it, most often to change route auth. See [HTTP channel](./eve) for routes, auth, replacement, and disablement.
 
 ## Custom channels
 
-When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `send(address, input)` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel hand-off, channel metadata, address tokens, and file uploads.
+When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel declares route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`), an `events` map, and uses `send(address, input)` to start or resume a session. See [Custom channels](./custom) for the full walkthrough, including WebSocket routes, cross-channel agent hand-off, channel metadata, address tokens, and file uploads.
+
+A cross-channel `send(...)` supplies input to the agent and invokes the model on the destination channel. eve does not currently provide a direct cross-channel provider-message queue. To post without starting a turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when delivery also needs application-managed retries and deduplication.
+
+## Background task results
+
+Pass `taskDeliveryPolicy` to `send(...)` to choose how the session reports background results:
+
+- `"auto"` (default for new channel sessions): ready results can invoke the parent while other tasks continue. The parent reports results that are useful independently and stays silent when a useful answer needs unfinished work.
+- `"cohort"`: wait for overlapping tasks to settle, then deliver their terminal outcomes together.
+
+```ts title="agent/channels/reports.ts"
+import { defineChannel, POST } from "eve/channels";
+import { localDev, routeAuth } from "eve/channels/auth";
+
+export default defineChannel({
+  routes: [
+    POST("/reports", async (request, { from }) => {
+      const auth = await routeAuth(request, localDev());
+      if (auth instanceof Response) return auth;
+      const session = await from("daily-report").send("Prepare the daily reports.", {
+        auth,
+        taskDeliveryPolicy: "cohort",
+      });
+      return Response.json({ sessionId: session.id });
+    }),
+  ],
+});
+```
+
+The option is available on channel-local `from(...).send(...)`, cross-channel
+`to(...).send(...)`, fixed-session `send(...)`, Chat SDK `bridge.send(...)`, and client
+sends. An explicit value
+updates the session's policy, including pending background tasks; later sends that
+omit it preserve that policy. A cross-channel send carries its setting through the
+receiver's `from(...).send(...)` unless that call supplies an explicit value.
+
+[Schedules](../schedules#background-task-results) default new sessions to `"cohort"`.
+A schedule handler can pass `taskDeliveryPolicy: "auto"` to `send(...)` to override
+that default. Child sessions use their own policy.
+
+With `"auto"`, a model call may finish without a user-visible message. Results
+already queued from the same cohort may share a turn. Each reporting turn receives
+the whole cohort, including pending tasks and available outputs, so previously
+withheld results remain available for a later combined report.
+
+Input requests and explicit task messages remain eligible for delivery under
+either policy. Failure and cancellation update task state immediately; their
+automatic reports follow the selected policy. User messages follow `turnPolicy`.
+See [Completion batching](../subagents#completion-batching) for cohort membership
+and result ordering.
 
 ## Relationship to the Chat SDK
 
@@ -69,7 +136,9 @@ eve's first-class channels use eve-owned runtimes for webhook handling, verifica
 | ------------------------------------------- | ---------------------------------------------------------- |
 | A web app / browser chat UI                 | eve channel + [`useEveAgent`](../guides/frontend/overview) |
 | Local tooling, SDK clients, `curl`          | [eve HTTP channel](./eve) (default)                        |
+| MCP clients delegating durable work         | [MCP](./mcp)                                               |
 | Slack mentions, DMs, buttons                | [Slack](./slack)                                           |
+| iMessage and SMS                            | [Linq](./linq)                                             |
 | iMessage                                    | [Photon](./photon)                                         |
 | Discord slash commands, components          | [Discord](./discord)                                       |
 | Microsoft Teams messages + Adaptive Cards   | [Teams](./teams)                                           |
@@ -84,11 +153,16 @@ eve's first-class channels use eve-owned runtimes for webhook handling, verifica
 
 As the deployer, it is your responsibility to ensure your agent complies with applicable laws.
 
-Where an eve agent communicates with people, you may be required to disclose that they are interacting with an automated AI system where law requires it. eve does not add this disclosure automatically; configure it in your instructions and/or channel responses.
+Where an eve agent communicates with people, you may be required to disclose that they are interacting with an automated AI system where law requires it. eve does not add this disclosure automatically; configure it in your instructions and/or channel responses. See [Responsible use](../responsible-use) for the full deployer responsibilities.
 
 ## What to read next
 
+- [eve HTTP channel](./eve): the default session API behind the TUI, SDK clients, and browser UIs
 - [Slack](./slack): the most common platform channel, end to end
+- [MCP](./mcp): expose the agent as a durable invocation service
+- [Linq](./linq), [Photon](./photon), [Discord](./discord), [Teams](./teams), [Telegram](./telegram), [Twilio](./twilio), [GitHub](./github), and [Linear](./linear): the other first-class platform channels
+- [Chat SDK adapters](./chat-sdk): reach services eve has no first-class channel for
 - [Custom channels](./custom): build a channel for any surface with `defineChannel`
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): post to another platform without starting an agent turn
 - [Frontend](../guides/frontend/overview): browser chat on the eve channel with `useEveAgent`
 - [Integrations](/integrations): browse every built-in channel in one gallery using the Channels filter

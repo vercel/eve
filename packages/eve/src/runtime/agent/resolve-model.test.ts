@@ -6,7 +6,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { ContextContainer } from "#context/container.js";
 import { RuntimeModelMetadataCacheKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { defineDynamic } from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   loadDynamicRuntimeModelDefinition,
@@ -22,6 +22,31 @@ const DYNAMIC_MODEL_SOURCE = {
 };
 
 describe("dynamic runtime model resolution", () => {
+  it.each(["gateway", "provider"])("retains reasoning for a %s selection", async (kind) => {
+    const model =
+      kind === "gateway" ? "openai/gpt-5.5" : createLanguageModel("openai.responses", "gpt-5.5");
+    const result = await resolveRuntimeModelSelection({
+      selection: { model, reasoning: "low", modelContextWindowTokens: 128_000 },
+      durability: kind === "gateway" ? "durable" : "live",
+      state: new ContextContainer(),
+    });
+    expect(result.reference.reasoning).toBe("low");
+    if (kind === "provider") expect(result.model).toBe(model);
+  });
+
+  it("rejects invalid reasoning before resolving model metadata", async () => {
+    const catalog = createCatalog();
+    await expect(
+      resolveRuntimeModelSelection({
+        catalog,
+        selection: { model: "openai/gpt-5.5", reasoning: "maximum" } as never,
+        durability: "live",
+        state: new ContextContainer(),
+      }),
+    ).rejects.toThrow("invalid reasoning");
+    expect(catalog.getByGatewayId).not.toHaveBeenCalled();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
@@ -71,6 +96,7 @@ describe("dynamic runtime model resolution", () => {
     const result = await definition.events["session.started"]?.(
       { type: "session.started" },
       {
+        model: { id: "openai/gpt-5.5" },
         channel: { kind: "slack" },
         messages: [{ content: "Hi", role: "user" }],
         session: { auth: { current: null, initiator: null }, id: "session-1" },

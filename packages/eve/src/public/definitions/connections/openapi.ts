@@ -2,11 +2,11 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 
 /**
@@ -65,7 +65,7 @@ export interface OpenAPIConnectionDefinition {
    * `Authorization: Bearer <token>`.
    *
    * - `getToken`-only: covers static API keys, pre-provisioned tokens,
-   *   and out-of-band OAuth. Defaults to `principalType: "app"` when
+   *   and out-of-band OAuth. Defaults to `credentialOwner: "app"` when
    *   omitted.
    * - Three-method form: provide `startAuthorization` and
    *   `completeAuthorization` together to opt into interactive OAuth.
@@ -76,12 +76,21 @@ export interface OpenAPIConnectionDefinition {
    */
   auth?: ConnectionAuthDefinition;
   /**
+   * Stable, non-secret identity for the resolved connection instance.
+   *
+   * Authenticated dynamic connections must set this to an account or tenant
+   * identifier that changes whenever the endpoint or auth provider changes.
+   * eve hashes the value before storing it in durable authorization state.
+   */
+  readonly instanceKey?: string;
+  /**
    * Optional per-connection approval gate for connection tool calls.
    *
    * Use the helpers from `eve/tools/approval`:
    * - `never()`: allow all tool calls without approval
    * - `once()`: require approval only the first time per session
    * - `always()`: require approval for every tool call
+   * - `auto()`: use an evaluation model to ask about dangerous or unclear effects
    */
   approval?: Approval;
   /**

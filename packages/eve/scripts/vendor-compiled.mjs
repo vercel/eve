@@ -9,13 +9,17 @@
  * `scripts/vendor-compiled/declarations/`, and importing the config from
  * `scripts/vendor-compiled/index.mjs`.
  */
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveNitroRolldownVersion } from "./nitro-rolldown.mjs";
 import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mjs";
 import { MODULES } from "./vendor-compiled/index.mjs";
+import { syncCodeExtension } from "./sync-code-extension.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const packageRoot = dirname(here);
 const compiledRoot = join(packageRoot, ".generated", "compiled");
 const vendorCompiledDir = join(here, "vendor-compiled");
@@ -25,12 +29,21 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 // is invalidated and vendoring re-runs.
 const scriptFiles = [
   fileURLToPath(import.meta.url),
+  join(packageRoot, "package.json"),
+  join(here, "nitro-rolldown.mjs"),
+  join(here, "vendor-warning-log.mjs"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
+
+await syncCodeExtension();
 
 await runVendor({
   packageRoot,
   compiledRoot,
   modules: MODULES,
   scriptFiles,
+  toolVersions: {
+    rolldown: resolveNitroRolldownVersion(),
+    typescript: require("typescript/package.json").version,
+  },
 });

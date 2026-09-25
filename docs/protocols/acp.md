@@ -1,5 +1,5 @@
 ---
-title: "Agent Client Protocol (ACP)"
+title: "Editor Integration (ACP)"
 description: "Use local or deployed eve agents from Agent Client Protocol clients."
 ---
 
@@ -15,7 +15,7 @@ Without a URL, the client starts one process from the eve application root. It s
 eve acp https://agent.example.com
 ```
 
-For a recognized Vercel deployment, eve verifies the exact origin and resolves a short-lived project-scoped OIDC token from the local Vercel session. If login or a Trusted Sources change is required, run `eve dev <url>` and complete `/vc:login` before launching ACP. `VERCEL_AUTOMATION_BYPASS_SECRET` remains available for deployments configured with a Protection Bypass for Automation token.
+For a recognized Vercel deployment, eve verifies the exact origin and resolves a short-lived project-scoped OIDC token from the local Vercel session. Remote access requires an existing authorized Vercel session; account login runs during local deployment. Configure required Trusted Sources access in the target project before launching ACP. `VERCEL_AUTOMATION_BYPASS_SECRET` remains available for deployments configured with a Protection Bypass for Automation token.
 
 ## Configure Zed
 

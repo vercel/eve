@@ -48,7 +48,6 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   duration?: number;
 };
 
-const AUTO_CLOSE_DELAY = 1000;
 const MS_IN_S = 1000;
 
 export const Reasoning = memo(
@@ -103,12 +102,8 @@ export const Reasoning = memo(
     // Auto-close when streaming ends (once only, and only if it ever streamed)
     useEffect(() => {
       if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
-        const timer = setTimeout(() => {
-          setIsOpen(false);
-          setHasAutoClosed(true);
-        }, AUTO_CLOSE_DELAY);
-
-        return () => clearTimeout(timer);
+        setIsOpen(false);
+        setHasAutoClosed(true);
       }
     }, [isStreaming, isOpen, setIsOpen, hasAutoClosed]);
 

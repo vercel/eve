@@ -7,14 +7,6 @@ export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:
 /** Synthetic resumption prompt used when no real user message can be replayed. */
 export const COMPACTION_RESUMPTION_MESSAGE = "Continue.";
 
-/**
- * Label line of the framework-injected todo preservation message. Owned here
- * so compaction can recognize the message as synthetic when picking a user
- * message to replay after compaction.
- */
-export const TODO_COMPACTION_PRESERVATION_LABEL =
-  "[Your task list was preserved across context compaction]";
-
 const COMPACTION_SYSTEM_PROMPT = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.
 
 Include:
@@ -313,11 +305,27 @@ function renderConversationText(value: string, limit?: number): string {
   return limit === undefined ? value.trim() : capText(value, limit);
 }
 
+// Providers reject lone surrogates created by cutting an astral character in half.
+export function sliceUtf16Safe(value: string, limit: number): string {
+  if (limit <= 0) {
+    return "";
+  }
+  if (value.length <= limit) {
+    return value;
+  }
+  let end = limit;
+  const last = value.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 function capText(value: string, limit: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= limit) {
     return normalized;
   }
 
-  return `${normalized.slice(0, limit).trimEnd()}…`;
+  return `${sliceUtf16Safe(normalized, limit).trimEnd()}…`;
 }

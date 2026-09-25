@@ -97,6 +97,9 @@ export async function discoverSandboxSource(input: {
     (folderEntry) =>
       folderEntry.name === SANDBOX_WORKSPACE_DIRECTORY_NAME && folderEntry.isDirectory(),
   );
+  const hasDockerfile = folderEntries.some(
+    (folderEntry) => folderEntry.name === "Dockerfile" && folderEntry.isFile(),
+  );
 
   if (sandboxModuleCandidates.length > 1) {
     diagnostics.push(
@@ -119,13 +122,13 @@ export async function discoverSandboxSource(input: {
   const hasModule = moduleFileName !== undefined;
   const hasWorkspace = workspaceFolderEntry !== undefined;
 
-  if (!hasModule && !hasWorkspace) {
+  if (!hasModule && !hasWorkspace && !hasDockerfile) {
     diagnostics.push(
       createDiscoverErrorDiagnostic({
         code: DISCOVER_SANDBOX_FOLDER_EMPTY,
         message:
-          `Sandbox folder "sandbox/" contains neither a "sandbox.<ext>" definition ` +
-          `nor a "workspace/" subdirectory. Add one or the other, or remove the folder.`,
+          `Sandbox folder "sandbox/" contains no "Dockerfile", "sandbox.<ext>" definition, ` +
+          `or "workspace/" subdirectory. Add one or remove the folder.`,
         sourcePath: directoryPath,
       }),
     );
@@ -250,7 +253,7 @@ async function collectWorkspaceRootEntries(
   source: ProjectSource,
   workspacePath: string,
 ): Promise<readonly string[]> {
-  const entries = await readSortedDirectoryEntries(source, workspacePath);
+  const entries = await readSortedDirectoryEntries(source, workspacePath, { includeTests: true });
   const rendered: string[] = [];
 
   for (const entry of entries) {

@@ -1,5 +1,6 @@
 import { createHeadlessPrompter } from "#setup/headless.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 
@@ -9,6 +10,7 @@ import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-
 
 export interface DeclaredSetupOptions {
   yes?: boolean;
+  force?: boolean;
   nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   silent?: boolean;
@@ -24,7 +26,6 @@ export async function runDeclaredSetups(input: {
   setups: readonly RegistrySetupCommand[] | undefined;
   options: DeclaredSetupOptions;
   dependencies: RegistrySetupDependencies;
-  cancelledReminder: string;
   resumeCommand: string;
 }): Promise<RegistrySetupCompletion | false> {
   let completion: RegistrySetupCompletion = { facts: [] };
@@ -42,6 +43,13 @@ export async function runDeclaredSetups(input: {
           args: [
             ...setup.args,
             ...(input.options.yes ? ["--yes"] : []),
+            ...(input.options.force &&
+            setup.package === "eve" &&
+            setup.bin === "eve" &&
+            setup.args[0] === "integration" &&
+            setup.args[1] === "setup"
+              ? ["--force"]
+              : []),
             ...(input.options.nonInteractive ? ["--non-interactive"] : []),
             ...Object.entries(input.options.answers ?? {}).flatMap(([key, value]) => [
               "--answer",
@@ -52,10 +60,7 @@ export async function runDeclaredSetups(input: {
         input.item,
         { prompter, signal: input.options.signal },
       );
-      if (result.kind === "cancelled") {
-        input.logger.log(input.cancelledReminder);
-        return false;
-      }
+      if (result.kind === "cancelled") return false;
       if (result.kind === "blocked") {
         if (!input.options.nonInteractive) throw new Error("Setup requires more input.");
         input.logger.error(
@@ -66,7 +71,13 @@ export async function runDeclaredSetups(input: {
             installed: true,
             completedItems: [],
             ...result.blocker,
-            next: headlessSetupContinuation({ item: input.item, installed: true }),
+            next: headlessSetupContinuation({
+              item: input.item,
+              installed: true,
+              answers: input.options.answers,
+              question:
+                result.blocker.status === "input_required" ? result.blocker.question : undefined,
+            }),
           }),
         );
         process.exitCode = 2;
@@ -78,6 +89,7 @@ export async function runDeclaredSetups(input: {
     }
     return completion;
   } catch (error) {
+    if (error instanceof WizardCancelledError) return false;
     const message = error instanceof Error ? error.message : String(error);
     if (input.options.nonInteractive) {
       input.logger.error(
@@ -87,7 +99,11 @@ export async function runDeclaredSetups(input: {
           item: input.item,
           completedItems: [],
           message,
-          next: headlessSetupContinuation({ item: input.item, installed: true }),
+          next: headlessSetupContinuation({
+            item: input.item,
+            installed: true,
+            answers: input.options.answers,
+          }),
         }),
       );
       process.exitCode = 1;

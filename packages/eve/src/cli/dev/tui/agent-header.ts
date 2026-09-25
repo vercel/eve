@@ -1,58 +1,34 @@
-/**
- * Builds the startup header the dev TUI commits to scrollback before the
- * first prompt: one `eve <agent name>` brand line, a discovery-diagnostics
- * line when the compiler reported problems, and a rotating tip for local
- * sessions. The resolved model is not repeated here — it lives on the
- * persistent status line at the bottom.
- */
+/** Builds the startup card the dev TUI commits before the first prompt. */
 
 import type { AgentInfoResult } from "#client/index.js";
-import { isPromptControlCommand } from "./prompt-commands.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { clipVisible } from "#cli/ui/terminal-text.js";
 import type { Theme } from "./theme.js";
-import { truncate } from "./tool-format.js";
 
 export interface AgentHeaderInput {
-  /** Resolved display name (e.g. "weather-agent"). */
-  name: string;
+  /** Resolved display name used when agent inspection is unavailable. */
+  name?: string;
   /** Agent inspection payload, or `undefined` when it could not be fetched. */
   info?: AgentInfoResult;
   theme: Theme;
   /** Available terminal width. */
   width: number;
-  /** Message-of-the-day line rendered under the brand line, when present. */
-  tip?: string;
 }
 
-/**
- * The header's message-of-the-day pool. All entries reference local-only
- * slash commands, so callers only attach a tip to local `eve dev` sessions.
- */
-export const AGENT_HEADER_TIPS: readonly string[] = [
-  "Use /add to install integrations from the registry.",
-  "Use /deploy to see your agent go live.",
-  "Type /help to see every command.",
-];
-
-/** Picks one tip; `random` is a test seam over Math.random. */
-export function pickAgentHeaderTip(random: () => number = Math.random): string {
-  const index = Math.min(
-    AGENT_HEADER_TIPS.length - 1,
-    Math.floor(random() * AGENT_HEADER_TIPS.length),
-  );
-  return AGENT_HEADER_TIPS[index]!;
-}
-
-/**
- * Returns the styled rows of the startup header (no trailing blank line is
- * added by callers other than the one separating it from the transcript).
- */
+/** Returns the styled rows of the startup card. */
 export function buildAgentHeader(input: AgentHeaderInput): string[] {
-  const { theme, info, name, width } = input;
+  const { theme, info, width } = input;
   const c = theme.colors;
-
-  const lines: string[] = [];
-  const brand = c.bold("eve");
-  lines.push(` ${brand} ${c.dim(truncate(name, Math.max(8, width - 8)))}`);
+  const version = resolveInstalledPackageInfo().version;
+  const available = Math.max(0, width - 1);
+  const agentName = info?.agent.name ?? input.name;
+  const metadata = [
+    ...(agentName === undefined ? [] : [c.dim(agentName)]),
+    c.dim("Run /help for commands"),
+  ].join(c.dim(` ${theme.glyph.dot} `));
+  const wordmark = theme.unicode ? "☰eve" : "eve";
+  const title = c.bold(wordmark) + c.dim(` v${version} ${theme.glyph.dot} `) + metadata;
+  const lines = [clipVisible(title, available)];
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {
     const parts: string[] = [];
@@ -72,23 +48,10 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
         ),
       );
     }
-    lines.push(` ${c.dim(theme.glyph.warning)} ${parts.join(c.dim(" · "))}`);
-  }
-
-  if (input.tip !== undefined) {
-    lines.push(` ${renderTip(input.tip, Math.max(8, width - 2), theme)}`);
+    lines.push("", `  ${c.dim(theme.glyph.warning)} ${parts.join(c.dim(" · "))}`);
   }
 
   return lines;
-}
-
-function renderTip(tip: string, width: number, theme: Theme): string {
-  return truncate(tip, width)
-    .split(/(\/[a-z:-]+)/u)
-    .map((part) =>
-      isPromptControlCommand(part) ? theme.colors.blue(part) : theme.colors.dim(part),
-    )
-    .join("");
 }
 
 function plural(count: number): string {

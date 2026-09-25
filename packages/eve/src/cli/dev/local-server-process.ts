@@ -83,15 +83,16 @@ export function createDevelopmentServer(
     active.unref();
   };
 
-  const start = (): Promise<DevelopmentServerHandle> => {
+  const start = async (): Promise<DevelopmentServerHandle> => {
     if (child !== undefined) throw new Error("DevelopmentServer.start() was already called.");
     const shellEnvironment = { ...process.env };
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     process.env[EVE_DEV_ENV_FLAG] ??= "1";
     const spawned = fork(
       childPath,
       [
         JSON.stringify({
+          developmentExtensions: options.developmentExtensions,
           existing: options.existing,
           host: options.host,
           port: options.port,
@@ -100,7 +101,10 @@ export function createDevelopmentServer(
       {
         cwd: appRoot,
         detached: true,
-        env: { ...shellEnvironment, [EVE_DEV_ENV_FLAG]: "1" },
+        env: {
+          ...shellEnvironment,
+          [EVE_DEV_ENV_FLAG]: "1",
+        },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       },
     );

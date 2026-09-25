@@ -21,6 +21,7 @@ function signalWithVerifier(): AuthorizationSignal {
   return requestAuthorization([
     {
       attemptId: "attempt-linear",
+      instanceId: "connection:linear-account",
       name: "linear",
       challenge: { url: "https://idp.example/auth" },
       hookUrl: "https://app.example/cb",
@@ -64,7 +65,7 @@ describe("authorizationPendingAsJsonObject", () => {
 });
 
 describe("redactSignalResume", () => {
-  it("strips resume but keeps the signal shape + other challenge fields", () => {
+  it("strips runtime-only state but keeps the model-safe challenge fields", () => {
     const redacted = redactSignalResume(signalWithVerifier());
     expect(isAuthorizationSignal(redacted)).toBe(true);
     expect(redacted.challenges[0]).toEqual({
@@ -73,6 +74,7 @@ describe("redactSignalResume", () => {
       challenge: { url: "https://idp.example/auth" },
       hookUrl: "https://app.example/cb",
     });
+    expect(redacted.challenges[0]).not.toHaveProperty("instanceId");
     expect(redacted.challenges[0]).not.toHaveProperty("resume");
     expect(redacted.challenges[0]).not.toHaveProperty("principal");
   });

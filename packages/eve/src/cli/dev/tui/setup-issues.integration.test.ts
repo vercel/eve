@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client, type AgentInfoResult } from "#client/index.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { EveTUIRunner, type AgentTUIRenderer } from "./runner.js";
 import { detectSetupIssues } from "./setup-issues.js";
@@ -14,40 +15,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const BASE_GATEWAY_INFO = createTestAgentInfoResult({
+  agentRoot: "/app/agent",
+  appRoot: "/app",
+  modelId: "openai/gpt-5.5",
+  name: "Agent",
+});
 const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
+  ...BASE_GATEWAY_INFO,
   agent: {
-    agentRoot: "/app/agent",
-    appRoot: "/app",
+    ...BASE_GATEWAY_INFO.agent,
     model: {
       endpoint: { kind: "gateway", connected: false },
       id: "openai/gpt-5.5",
       routing: { kind: "gateway", target: "openai" },
     },
-    name: "Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
 };
 
 async function linkedAppRoot(): Promise<string> {
@@ -68,12 +51,9 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     expect(issues).toEqual([]);
   });
 
-  it("diagnoses missing credentials (not the link) when the directory is linked", async () => {
+  it("defers model diagnosis when runtime info is unavailable", async () => {
     const appRoot = await linkedAppRoot();
-    const issues = await detectSetupIssues({ appRoot, env: {} });
-    expect(issues).toEqual([
-      { kind: "attention", label: "AI Gateway credentials missing", command: "/model" },
-    ]);
+    expect(await detectSetupIssues({ appRoot, env: {} })).toEqual([]);
   });
 
   it("diagnoses a linked project with disconnected model access", async () => {
@@ -88,12 +68,12 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       {
         kind: "attention",
         label: "AI Gateway credentials missing",
-        command: "/model",
+        command: "/login",
       },
     ]);
   });
 
-  it("opens model setup from the prefilled onboarding prompt when inspection is unavailable", async () => {
+  it("opens only login during onboarding when inspection is unavailable", async () => {
     const appRoot = await linkedAppRoot();
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "info").mockRejectedValue(new Error("inspection unavailable"));
@@ -124,22 +104,16 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       renderer,
       serverUrl: "http://localhost:3000",
       session: client.sessions.attach("session_test"),
-      initialInput: "/model",
+      onboard: true,
     });
 
     await runner.run();
 
-    expect(handle).toHaveBeenNthCalledWith(
-      1,
-      { type: "extension", name: "model", argument: "" },
-      { renderer, title: "eve", initialModelStep: "provider" },
-    );
-    expect(handle).toHaveBeenNthCalledWith(
-      2,
-      { type: "extension", name: "add", argument: "" },
-      { renderer, title: "eve" },
+    expect(handle).toHaveBeenCalledExactlyOnceWith(
+      { type: "extension", name: "login", argument: "" },
+      expect.objectContaining({ renderer, title: "eve", initialModelStep: "provider" }),
     );
     expect(readPrompt).toHaveBeenCalledOnce();
-    expect(order).toEqual(["model", "add", "prompt"]);
+    expect(order).toEqual(["login", "prompt"]);
   });
 });

@@ -14,6 +14,7 @@
 /** The color primitives the row painter needs; satisfied by both the TUI theme and the CLI palette. */
 export interface RowColors {
   blue(text: string): string;
+  bold(text: string): string;
   dim(text: string): string;
   green(text: string): string;
   inverse(text: string): string;
@@ -38,10 +39,10 @@ export interface RowGlyphs {
 
 /** Canonical unicode glyphs; the CLI prompts render with these. */
 export const UNICODE_ROW_GLYPHS: RowGlyphs = {
-  pointer: "▷",
-  selectedPointer: "▶",
+  pointer: "›",
+  selectedPointer: "›",
   success: "✓",
-  placeholder: "◦",
+  placeholder: " ",
   dot: "·",
   warning: "⚠",
 };
@@ -64,6 +65,8 @@ interface OptionRowInput {
   state: OptionRowState;
   /** Whether an un-hovered, selectable row draws the placeholder glyph. */
   placeholder: boolean;
+  /** TUI lists use type weight rather than a caret to show focus. */
+  presentation?: "cursor" | "minimal";
   /** Spaces inserted before the hint's dot so hints tab-align to a shared column. */
   hintPadding?: number;
   /**
@@ -181,12 +184,12 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
 export function renderCursorRow(
   text: string,
   selected: boolean,
-  colors: Pick<RowColors, "blue" | "inverse" | "yellow">,
+  colors: Pick<RowColors, "blue" | "inverse" | "yellow" | "bold">,
   accent?: "warning",
 ): string {
   if (!selected) return ` ${text}`;
-  const color = accent === "warning" ? colors.yellow : colors.blue;
-  return colors.inverse(color(` ${text} `));
+  const color = accent === "warning" ? colors.yellow : colors.bold;
+  return color(` ${text}`);
 }
 
 /** Prefixes a continuation line so its text starts in the option label column. */
@@ -210,8 +213,21 @@ export function renderOptionRow(input: OptionRowInput): string {
   if (input.isCursor && input.focusHint !== undefined) hintText = input.focusHint;
   let hint = "";
   if (hintText !== undefined) {
-    const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1 - Number(selected));
+    const separatorWidth = Math.max(0, (input.hintPadding ?? 0) + 1);
     hint = c.dim(`${" ".repeat(separatorWidth)}${glyphs.dot} ${hintText}`);
+  }
+  if (input.presentation === "minimal") {
+    const styledLabel =
+      input.state.kind === "available" ? (selected ? c.bold(label) : c.dim(label)) : label;
+    // Minimal rows reserve the cursor/check cell even when it is blank. This
+    // keeps labels and their tab-aligned hints fixed when a checklist toggles,
+    // while completed or disabled rows retain a dim cursor when focused.
+    const marker =
+      (input.state.kind === "available" && !input.state.checked) ||
+      (input.state.kind === "disabled" && !input.isCursor)
+        ? " "
+        : glyph;
+    return ` ${marker} ${styledLabel}${hint}`;
   }
   const content = `${glyph} ${label}`;
   const row = renderCursorRow(content, selected, c, input.accent);

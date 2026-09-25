@@ -1,17 +1,15 @@
 import { defineEval } from "eve/evals";
 
-import { SECOND_CHECKPOINT_MARKER } from "../constants";
+import { HANDOFF_REFERENCE, REVIEW_REFERENCE } from "../release-reports";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "The model does not repeat an identical successful call after compaction.",
+  description: "A repository review and release handoff survive compaction without repeated work.",
   async test(t) {
     const turn = await t.send(
-      [
-        "[case: redundant-tool-calls]",
-        "Call inspect-repository exactly once with scope repository.",
-        "After it succeeds, report REPOSITORY_INSPECTION_COMPLETE and call no more tools.",
-      ].join("\n"),
+      "Review the storefront repository and prepare a release handoff for the next maintainer. " +
+        "Cover the catalog, cart, checkout, and order history, and call out the checks the maintainer should run before release. " +
+        "Include the completed review and handoff record references in your final note.",
     );
 
     turn.expectOk();
@@ -19,14 +17,20 @@ export default defineEval({
     t.calledTool("inspect-repository", {
       count: 1,
       input: { scope: "repository" },
-      output: { completed: true, completionMarker: "REPOSITORY_INSPECTION_COMPLETE" },
+      output: { completed: true, reportId: REVIEW_REFERENCE, status: "completed" },
     });
-    t.calledTool("advance-checkpoint", {
+    t.calledTool("prepare-handoff", {
       count: 1,
-      output: { checkpointMarker: SECOND_CHECKPOINT_MARKER, completed: true },
+      input: { reviewId: REVIEW_REFERENCE },
+      output: { completed: true, reportId: HANDOFF_REFERENCE, status: "completed" },
     });
-    t.event("compaction.completed", { count: 2 });
-    t.messageIncludes("REPOSITORY_INSPECTION_COMPLETE");
-    t.messageIncludes(SECOND_CHECKPOINT_MARKER);
+    t.event("compaction.completed", { count: (count) => count >= 2 });
+    t.messageIncludes(REVIEW_REFERENCE);
+    t.messageIncludes(HANDOFF_REFERENCE);
+    t.noFailedActions();
+
+    t.calledTool("inspect-repository", { count: 1 }).soft().label("no repeated inspection");
+    t.calledTool("prepare-handoff", { count: 1 }).soft().label("no repeated handoff");
+    t.event("compaction.completed", { count: 2 }).soft().label("compaction efficiency");
   },
 });

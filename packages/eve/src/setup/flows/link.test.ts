@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 describe("runLinkFlow", () => {
-  it("reports the gateway key as the active credential when it shadows the pulled OIDC token", async () => {
+  it("reports the env-file key as active when both credentials exist", async () => {
     const { prompter } = createFakePrompter({
       single: (opts) => {
         if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
@@ -113,19 +113,16 @@ describe("runLinkFlow", () => {
       projectSelection: "create-or-link",
     });
 
-    // Runtime resolution ranks the key first; reporting OIDC here would
-    // claim a credential that never authenticates a call.
     expect(result).toEqual({
       kind: "done",
       resolution: {
         credential: "api-key",
         source: { kind: "env-file", path: ".env.local" },
-        shadowedOidc: { file: ".env.local" },
       },
     });
   });
 
-  it("reports a shell-exported gateway key shadowing the pulled OIDC token", async () => {
+  it("reports the shell key as active when both credentials exist", async () => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "vck_shell");
     const { prompter } = createFakePrompter({
       single: (opts) => {
@@ -147,7 +144,6 @@ describe("runLinkFlow", () => {
       resolution: {
         credential: "api-key",
         source: { kind: "shell" },
-        shadowedOidc: { file: ".env.local" },
       },
     });
   });

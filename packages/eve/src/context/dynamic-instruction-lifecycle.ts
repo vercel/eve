@@ -1,9 +1,7 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import {
-  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
-  isBrandedInstructionsEntry,
-} from "#shared/dynamic-tool-definition.js";
+import { ALLOWED_DYNAMIC_INSTRUCTION_EVENTS } from "#dynamic/definition.js";
+import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -19,6 +17,7 @@ import {
   TurnDynamicInstructionsKey,
 } from "#context/keys.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
+import { createFrameworkUserMessage, type UserModelMessage } from "#harness/messages.js";
 
 const log = createLogger("dynamic-instructions");
 
@@ -26,7 +25,7 @@ type SlugMessageMap = Record<string, readonly SystemModelMessage[]>;
 
 type LoweredInstruction =
   | { readonly role: "system"; readonly message: SystemModelMessage }
-  | { readonly role: "user"; readonly message: ModelMessage }
+  | { readonly role: "user"; readonly message: UserModelMessage }
   | undefined;
 
 function lowerInstruction(definition: InstructionsDefinition): LoweredInstruction {
@@ -38,7 +37,7 @@ function lowerInstruction(definition: InstructionsDefinition): LoweredInstructio
   if (content.length === 0) return undefined;
   return normalized.role === "system"
     ? { role: "system", message: { role: "system", content } }
-    : { role: "user", message: { role: "user", content } };
+    : { role: "user", message: createFrameworkUserMessage("context.instruction", content) };
 }
 
 function durableKeyForEvent(eventType: string): ContextKey<SlugMessageMap> | undefined {
@@ -74,7 +73,7 @@ export function prepareDynamicInstructionPreamble(
 }
 
 /** Drains user-role results and clears the instructions-only virtual context. */
-export function drainDynamicInstructionUserMessages(ctx: AlsContext): ModelMessage[] {
+export function drainDynamicInstructionUserMessages(ctx: AlsContext): UserModelMessage[] {
   const messages = [...(ctx.get(PendingDynamicInstructionUserMessagesKey) ?? [])];
   ctx.delete(DynamicInstructionResolveMessagesKey);
   ctx.delete(PendingDynamicInstructionUserMessagesKey);

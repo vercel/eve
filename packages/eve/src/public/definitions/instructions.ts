@@ -1,12 +1,14 @@
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import {
   DYNAMIC_SENTINEL_KIND,
-  INSTRUCTIONS_BRAND,
   type DynamicResolveContext,
   type DynamicSentinel,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
-import type { PublicInstructionsDefinition } from "#shared/instructions-definition.js";
+import {
+  INSTRUCTIONS_BRAND,
+  type PublicInstructionsDefinition,
+} from "#shared/instructions-definition.js";
 
 export type InstructionsDefinition = Readonly<PublicInstructionsDefinition>;
 

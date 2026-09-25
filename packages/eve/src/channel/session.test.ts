@@ -1,9 +1,42 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildSessionHandle, createAttachSessionFn, createSession } from "#channel/session.js";
+import {
+  buildSessionHandle,
+  createAttachSessionFn,
+  createSession,
+  type Session,
+} from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationHookTokensKey,
+  ContinuationTokenKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+} from "#context/keys.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
+
+function fixedSessionRespondTypeChecks(session: Session): void {
+  const responsesWithMetadata = [
+    { kind: "tool-approval", optionId: "approve", requestId: "approval-1" },
+  ] as const;
+
+  // @ts-expect-error fixed sessions enforce the same exact input-response contract.
+  void session.respond(responsesWithMetadata, { auth: null });
+
+  const widenedResponses: readonly InputResponse[] = responsesWithMetadata;
+  // @ts-expect-error widened responses must be schema-validated before delivery.
+  void session.respond(widenedResponses, { auth: null });
+
+  const validatedResponses = parseInputResponses([
+    { optionId: "approve", requestId: "approval-1" },
+  ]);
+  void session.respond(validatedResponses, { auth: null });
+}
+
+void fixedSessionRespondTypeChecks;
 
 function createRuntime(): Runtime {
   return {
@@ -22,25 +55,39 @@ function createRuntime(): Runtime {
 }
 
 describe("createSession#cancel", () => {
+  it("passes an explicit task policy through a fixed-session send", async () => {
+    const runtime = createRuntime();
+    await createSession("sess_1", runtime).send("Report when ready", {
+      auth: null,
+      taskDeliveryPolicy: "auto",
+    });
+    expect(runtime.dispatchSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess_1",
+        command: expect.objectContaining({ taskDeliveryPolicy: "auto" }),
+      }),
+    );
+  });
+
   it("cancels this session's turn by session id", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", turnId: undefined },
+      command: { kind: "cancel" },
       sessionId: "sess_1",
     });
   });
 
-  it("forwards the turn guard", async () => {
+  it("forwards the turn guard and owned-task scope", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
 
-    await session.cancel({ turnId: "turn_2" });
+    await session.cancel({ tasks: true, turnId: "turn_2" });
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", turnId: "turn_2" },
+      command: { kind: "cancel", tasks: true, turnId: "turn_2" },
       sessionId: "sess_1",
     });
   });
@@ -51,13 +98,63 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", turnId: undefined },
+      command: { kind: "cancel" },
       sessionId: "sess_2",
     });
   });
 });
 
 describe("fixed session operations", () => {
+  it("dispatches ephemeral context separately from durable channel context", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime);
+
+    await session.send(
+      "hello",
+      attachClientContext({ auth: null, context: ["durable"] }, ["ephemeral"]),
+    );
+
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        kind: "send",
+        payload: expect.objectContaining({
+          context: ["durable"],
+          message: "hello",
+        }),
+        requestId: undefined,
+        turnPolicy: "steer",
+      },
+      sessionId: "sess_1",
+    });
+    const call = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0];
+    expect(
+      readClientContext(call?.command.kind === "send" ? call.command.payload : undefined),
+    ).toEqual(["ephemeral"]);
+  });
+
+  it("keeps the session turn policy out of channel delivery metadata", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime, {
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "req_1",
+      turnPolicy: "queue",
+    });
+
+    await session.send("hello", { auth: null });
+
+    const command = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0].command;
+    expect(command?.kind === "send" ? command.delivery : undefined).toMatchObject({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "req_1",
+    });
+    expect(command?.kind === "send" ? command.delivery : undefined).not.toHaveProperty(
+      "turnPolicy",
+    );
+  });
+
   it("dispatches every operation through the stable session id", async () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");
@@ -123,8 +220,9 @@ describe("fixed session operations", () => {
         auth: null,
         caller: {
           callId: "call_1",
-          replyTo: { kind: "callback", url: callback.url },
+          replyTo: { kind: "callback", token: callback.token, url: callback.url },
           subagentName: "research",
+          taskId: undefined,
         },
         kind: "send",
         payload: { message: "continue" },
@@ -171,28 +269,28 @@ describe("buildSessionHandle", () => {
     expect(session.continuation?.token).toBe("C1:T1");
   });
 
-  it("namespaces the channel-local token on continuation.rekey", () => {
+  it("namespaces the channel-local token on continuation.alias", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:");
     const session = buildSessionHandle(ctx);
 
-    session.continuation?.rekey("C1:T1");
+    session.continuation?.alias("C1:T1");
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
 
-  it("round-trips the exposed channel-local token through continuation.rekey", () => {
+  it("round-trips the exposed channel-local token through continuation.alias", () => {
     const ctx = new ContextContainer();
     ctx.set(ContinuationTokenKey, "slack:C1:T1");
     const session = buildSessionHandle(ctx);
 
-    session.continuation?.rekey(session.continuation.token);
+    session.continuation?.alias(session.continuation.token);
 
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
   });
 
-  it("is idempotent: a redundant continuation.rekey does not write", () => {
-    // Authors call continuation.rekey from hot-path event handlers
+  it("records every distinct continuation address without duplicating redundant aliases", () => {
+    // Authors call continuation.alias from hot-path event handlers
     // (e.g. Slack's `message.completed`). The handler can't always
     // know whether the token has actually changed, so the SessionHandle
     // itself short-circuits redundant writes — the workflow body
@@ -216,13 +314,21 @@ describe("buildSessionHandle", () => {
 
     const session = buildSessionHandle(observed);
 
-    session.continuation?.rekey("C1:T1");
+    session.continuation?.alias("C1:T1");
     expect(writeCount).toBe(0);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T1");
 
-    session.continuation?.rekey("C1:T2");
-    expect(writeCount).toBe(1);
+    session.continuation?.alias("C1:T2");
+    session.continuation?.alias("C1:T3");
+    session.continuation?.alias("C1:T2");
+
+    expect(writeCount).toBe(6);
     expect(ctx.get(ContinuationTokenKey)).toBe("slack:C1:T2");
+    expect(ctx.get(ContinuationHookTokensKey)).toEqual([
+      "slack:C1:T1",
+      "slack:C1:T2",
+      "slack:C1:T3",
+    ]);
   });
 
   it("throws clearly when no namespaced placeholder token exists", () => {

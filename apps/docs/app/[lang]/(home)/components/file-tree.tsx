@@ -1,6 +1,7 @@
 import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
+import { cacheLife } from "next/cache";
 import type { ComponentProps, JSX } from "react";
 import {
   IconAgents,
@@ -58,7 +59,7 @@ city in the world.`,
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "xai/grok-4.5",
+  model: "spacexai/grok-4.7",
 });`,
   },
   {
@@ -110,16 +111,21 @@ export default defineTool({
     NavIcon: IconSandbox,
     description:
       "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
-    code: `import { defineSandbox } from
-  "eve/sandbox";
+    code: `import { DefaultSandbox,
+  defineSandbox } from "eve/sandbox";
 
-export default defineSandbox({
-  async bootstrap({ sandbox }) {
-    await sandbox.run(
-      "git clone repo /workspace"
-    );
-  },
-});`,
+export const environment =
+  DefaultSandbox.environment({
+    prepare: async (sandbox) => {
+      await sandbox.run({
+        command: "git clone repo /workspace"
+      });
+    }
+  });
+
+export default defineSandbox(() =>
+  environment.open()
+);`,
   },
   {
     label: "Channels",
@@ -163,7 +169,7 @@ export default defineMcpClientConnection({
 
 export default defineAgent({
   description: "Investigate questions",
-  model: "xai/grok-4.5",
+  model: "spacexai/grok-4.7",
 });`,
   },
   {
@@ -194,15 +200,18 @@ import { includes } from "eve/evals/expect";
 
 export default defineEval({
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
-    t.check(t.reply, includes("Sunny"));
+    t.check(turn.message, includes("Sunny"));
   },
 });`,
   },
 ];
 
 export async function FileTree() {
+  "use cache";
+  cacheLife("max");
+
   const rendered = await Promise.all(
     snippets.map((snippet) =>
       highlight(snippet.code, {

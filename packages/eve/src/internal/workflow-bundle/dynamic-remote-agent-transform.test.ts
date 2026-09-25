@@ -139,4 +139,32 @@ export default defineDynamic({
       ),
     ).resolves.toBeNull();
   });
+
+  it("shares one hoisted declaration across byte-identical credential factories", async () => {
+    const factoryCall = `defineRemoteAgent({
+          auth: async () => ({ headers: { authorization: "Bearer fresh" } }),
+          description: "Remote research.",
+          url: "https://research.example.com",
+        })`;
+    const source = `
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      researcher: ${factoryCall},
+      writer: ${factoryCall},
+    }),
+  },
+});
+`;
+    const code = await transformSource(source);
+
+    const declarations = [...code.matchAll(/function (__eve_dynamic_remote_credentials_\w+)\(/g)];
+    expect(declarations).toHaveLength(1);
+
+    // Both call sites must reference the shared hoisted implementation.
+    const name = declarations[0]![1]!;
+    expect(code.split(name).length - 1).toBeGreaterThanOrEqual(3);
+  });
 });

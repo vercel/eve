@@ -1,5 +1,5 @@
 /**
- * Alternate-screen mode for full-screen modal views (the `/traces` viewer).
+ * Alternate-screen mode for temporary full-screen terminal ownership.
  *
  * The dev TUI's transcript deliberately streams into native scrollback (see
  * `live-region.ts`), but a modal viewer wants the whole terminal without
@@ -29,9 +29,17 @@ export interface AltScreenOutput {
   write(chunk: string): boolean;
 }
 
+export interface AltScreenEnterOptions {
+  /** Interactive subprocesses need the terminal cursor; rendered views do not. */
+  cursor?: "hidden" | "visible";
+  /** Rendered views use mouse events; inherited subprocesses retain native selection. */
+  mouse?: boolean;
+}
+
 export class AltScreen {
   readonly #write: (chunk: string) => boolean;
   #active = false;
+  #mouse = false;
 
   constructor(output: AltScreenOutput) {
     this.#write = output.write.bind(output);
@@ -41,10 +49,15 @@ export class AltScreen {
     return this.#active;
   }
 
-  /** Switches to the alternate buffer, hides the cursor, enables SGR mouse. */
-  enter(): void {
+  /** Switches to the alternate buffer with view-friendly defaults. */
+  enter(options: AltScreenEnterOptions = {}): void {
     if (this.#active) return;
-    this.#write(`${ALT_SCREEN_ON}${HIDE_CURSOR}${MOUSE_ON}`);
+    const mouse = options.mouse ?? true;
+    const cursor = options.cursor ?? "hidden";
+    this.#write(
+      `${ALT_SCREEN_ON}${cursor === "hidden" ? HIDE_CURSOR : SHOW_CURSOR}${mouse ? MOUSE_ON : ""}`,
+    );
+    this.#mouse = mouse;
     this.#active = true;
   }
 
@@ -79,7 +92,8 @@ export class AltScreen {
   /** Restores the main screen, cursor, and mouse reporting. */
   exit(): void {
     if (!this.#active) return;
-    this.#write(`${MOUSE_OFF}${SHOW_CURSOR}${ALT_SCREEN_OFF}`);
+    this.#write(`${this.#mouse ? MOUSE_OFF : ""}${SHOW_CURSOR}${ALT_SCREEN_OFF}`);
+    this.#mouse = false;
     this.#active = false;
   }
 }

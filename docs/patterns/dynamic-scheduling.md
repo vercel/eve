@@ -244,7 +244,7 @@ Implement that adapter with whichever durable store already belongs to your appl
 - `complete` disables one-time rows or computes the next recurring run;
 - expired leases are recoverable.
 
-Delivery is at least once. A crash after `receive` succeeds but before `complete` can dispatch again, so side-effecting tasks need application-level idempotency.
+Delivery is at least once. A crash after `receive` succeeds but before `complete` can dispatch again, so side-effecting tasks need application-level idempotency. When the destination should receive a provider message without another agent turn, use the outbox pattern in [Durable cross-channel notifications](./durable-cross-channel-notifications) instead of `to(...).send(...)`.
 
 ## Scheduling instructions
 

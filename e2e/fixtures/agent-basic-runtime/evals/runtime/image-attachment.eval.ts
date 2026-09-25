@@ -17,10 +17,11 @@ export default defineEval({
   description: "Session runtime smoke: attachments.",
 
   async test(t) {
+    const session = await t.session();
     // Eval modules execute from a build cache, so assets resolve against
     // the app root (`eve eval` runs with the app as cwd), not import.meta.
     const filePath = join(process.cwd(), "evals/assets/cat-image.png");
-    const turn = await t.sendFile(
+    const turn = await session.sendFile(
       "The attached fixture image depicts a cat. Reply with exactly: cat",
       filePath,
       "image/png",

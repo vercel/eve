@@ -1,8 +1,7 @@
-import type { ContentPart, ModelMessage, ToolSet, TypedToolCall } from "ai";
-import { z } from "zod";
+import type { ContentPart, ModelMessage, ToolSet } from "ai";
+import { z } from "#compiled/zod/index.js";
 
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
 // Persisted history parts lose AI SDK typing on the storage round trip. The
@@ -30,69 +29,6 @@ const ToolApprovalRequestSchema = z.object({
   toolCallId: z.string().optional().catch(undefined),
   type: z.literal("tool-approval-request"),
 });
-
-/**
- * Extracts question input requests from tool calls that target the
- * `ask_question` framework tool.
- */
-export function extractQuestionInputRequests(input: {
-  readonly excludedCallIds: ReadonlySet<string>;
-  readonly toolCalls: readonly TypedToolCall<ToolSet>[];
-}): InputRequest[] {
-  return extractQuestionRequests(input);
-}
-
-function extractQuestionRequests(input: {
-  readonly excludedCallIds: ReadonlySet<string>;
-  readonly toolCalls: readonly ToolCallDescriptor[];
-}): InputRequest[] {
-  const requests: InputRequest[] = [];
-
-  for (const toolCall of input.toolCalls) {
-    if (toolCall.toolName !== ASK_QUESTION_TOOL_NAME) {
-      continue;
-    }
-
-    if (input.excludedCallIds.has(toolCall.toolCallId)) {
-      continue;
-    }
-
-    const action = createRuntimeToolCallActionFromToolCall({ toolCall });
-    const toolInput = action.input as {
-      allowFreeform?: boolean;
-      options?: InputRequest["options"];
-      prompt: string;
-    };
-    const request: {
-      action: InputRequest["action"];
-      allowFreeform?: InputRequest["allowFreeform"];
-      display?: InputRequest["display"];
-      kind: InputRequest["kind"];
-      options?: InputRequest["options"];
-      prompt: InputRequest["prompt"];
-      requestId: InputRequest["requestId"];
-    } = {
-      action,
-      display: "text",
-      kind: "question",
-      prompt: String(toolInput.prompt),
-      requestId: action.callId,
-    };
-
-    if (toolInput.allowFreeform !== undefined) {
-      request.allowFreeform = toolInput.allowFreeform;
-    }
-
-    if (toolInput.options !== undefined) {
-      request.options = toolInput.options;
-      request.display = "select";
-    }
-
-    requests.push(request);
-  }
-
-  return requests;
-}
 
 /**
  * Extracts tool approval input requests from AI SDK content parts that
@@ -172,9 +108,9 @@ function extractApprovalRequests(input: {
 }
 
 /**
- * Recovers request metadata for submitted input response IDs from model
- * history. The newest occurrence wins so compacted or repeated history does
- * not replace the request that is closest to the current turn.
+ * Recovers approval request metadata for submitted input response IDs from
+ * model history. The newest occurrence wins so compacted or repeated history
+ * does not replace the request that is closest to the current turn.
  */
 export function extractHistoricalInputRequests(input: {
   readonly history: readonly ModelMessage[];
@@ -188,19 +124,10 @@ export function extractHistoricalInputRequests(input: {
       continue;
     }
 
-    const toolCalls = message.content.flatMap((part: unknown) => {
-      const toolCall = PersistedToolCallSchema.safeParse(part);
-      return toolCall.success && input.requestIds.has(toolCall.data.toolCallId)
-        ? [toolCall.data]
-        : [];
+    const candidates = extractApprovalRequests({
+      content: message.content,
+      includedRequestIds: input.requestIds,
     });
-    const candidates = [
-      ...extractQuestionRequests({ excludedCallIds: new Set(), toolCalls }),
-      ...extractApprovalRequests({
-        content: message.content,
-        includedRequestIds: input.requestIds,
-      }),
-    ];
 
     for (const request of candidates) {
       if (!input.requestIds.has(request.requestId) || requests.has(request.requestId)) {

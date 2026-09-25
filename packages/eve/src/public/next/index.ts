@@ -1,10 +1,14 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import type { NextConfig } from "next";
 
+import { assertValidPublicAgentName } from "#internal/agent-name.js";
+import { findEveProjectContext } from "#internal/project-context.js";
+import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
-import { resolveEveDestinationPrefix } from "./server.js";
+import { NEXT_PHASE_PRODUCTION_BUILD, resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
 /**
@@ -16,8 +20,7 @@ export const EVE_NEXT_SERVICE_PREFIX = "/_eve_internal/eve";
 const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
 const DEFAULT_EVE_NEXT_PRODUCTION_PORT = 4274;
-const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve/agents";
-const AGENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve";
 
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
@@ -108,16 +111,19 @@ export interface WithEveOptions {
    */
   readonly devServerTimeoutMs?: number;
   /**
-   * Path to the eve application root, relative to `process.cwd()` unless
-   * absolute. Defaults to the Next.js app root.
+   * Path to an eve project root, relative to the Next.js app root unless
+   * absolute. The root may contain one `agent/` or an `agents/` workspace.
+   * Defaults to the Next.js app root.
    */
   readonly eveRoot?: string;
   /**
-   * Named eve agents to mount under `/eve/agents/<name>/eve/v1/*`.
+   * Named eve agents to mount under `/eve/<name>/v1/*`.
    *
-   * Use this when one Next.js app needs to talk to multiple eve agents. When
-   * set, do not also set {@link eveRoot}; the single-agent form remains the
-   * shorthand for one unnamed agent mounted at `/eve/v1/*`.
+   * Use this when one Next.js app needs to talk to multiple eve agents outside
+   * a project-level `agents/` workspace. When unset, withEve discovers a
+   * workspace at the Next.js app root automatically. Do not combine with
+   * {@link eveRoot}; the single-agent form remains the shorthand for one
+   * unnamed agent mounted at `/eve/v1/*`.
    */
   readonly agents?: WithEveAgentsConfig;
   /**
@@ -145,6 +151,7 @@ interface ResolvedEveNextAgent {
   readonly name?: string;
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
+  readonly workspaceMember?: boolean;
 }
 
 function resolveApplicationRoot(appPath: string | undefined): string {
@@ -152,7 +159,7 @@ function resolveApplicationRoot(appPath: string | undefined): string {
     return process.cwd();
   }
 
-  return isAbsolute(appPath) ? appPath : resolve(process.cwd(), appPath);
+  return resolve(process.cwd(), appPath);
 }
 
 function resolveDevServerTimeout(timeoutMs: number | undefined): number | undefined {
@@ -191,7 +198,7 @@ function createNamedAgentServicePrefix(basePrefix: string, name: string): string
 }
 
 function createAgentRewriteSource(publicRoutePrefix: string): string {
-  return joinRoutePrefix(publicRoutePrefix, `${EVE_ROUTE_PREFIX}/:path+`);
+  return joinEveRoutePath(publicRoutePrefix, `${EVE_ROUTE_PREFIX}/:path+`);
 }
 
 function normalizeOrigin(origin: string): string {
@@ -309,43 +316,56 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
 }
 
 function assertValidAgentName(name: string): void {
-  if (!AGENT_NAME_PATTERN.test(name)) {
-    throw new Error(
-      `eve Next.js agent name ${JSON.stringify(
-        name,
-      )} is invalid. Use lowercase letters, numbers, underscores, or hyphens, starting with a letter or number.`,
-    );
+  assertValidPublicAgentName(name, "eve Next.js agent name");
+}
+
+function assertValidWithEveOptions(options: WithEveOptions): void {
+  if (options.eveRoot !== undefined && options.agents !== undefined) {
+    throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
   }
+  if (options.agents === undefined) return;
+  const agentNames = Object.keys(options.agents);
+  if (agentNames.length === 0) {
+    throw new Error("withEve agents must contain at least one named eve agent.");
+  }
+  for (const name of agentNames) assertValidAgentName(name);
 }
 
-function quoteShellArg(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function toPosixPath(path: string): string {
-  return path.replaceAll("\\", "/");
-}
-
-function createDefaultBuildCommand(input: {
-  readonly agentRoot: string;
-  readonly nextRoot: string;
-}): string {
-  const eveBinaryPath = toPosixPath(
-    relative(input.agentRoot, resolveEveBinaryPath(input.nextRoot)),
+function createDefaultBuildCommand(input: { readonly agentRoot: string }): string {
+  const eveBinaryPath = toVercelRelativePath(
+    input.agentRoot,
+    resolveEveBinaryPath(input.agentRoot),
   );
-  return `node ${quoteShellArg(eveBinaryPath)} build`;
+  return `node ${quoteVercelShellArgument(eveBinaryPath)} build`;
 }
 
-function normalizeAgentsConfig(
+async function normalizeAgentsConfig(
   options: WithEveOptions,
-  nextRoot: string,
-): readonly ResolvedEveNextAgent[] {
+): Promise<readonly ResolvedEveNextAgent[]> {
   const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
   const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
-    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot, nextRoot });
+    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot });
 
   if (options.agents === undefined) {
-    const appRoot = resolveApplicationRoot(options.eveRoot);
+    const eveRoot = resolveApplicationRoot(options.eveRoot);
+    const context = await findEveProjectContext(eveRoot);
+    if (
+      context?.kind === "workspace" &&
+      context.workspace.root === eveRoot &&
+      context.workspace.members.length > 0
+    ) {
+      return context.workspace.members.map((member, index) => ({
+        appRoot: member.appRoot,
+        buildCommand: resolveBuildCommand(member.appRoot, undefined),
+        localProductionPortOffset: index,
+        name: member.name,
+        publicRoutePrefix: createNamedAgentRoutePrefix(member.name),
+        servicePrefix: createNamedAgentServicePrefix(servicePrefixBase, member.name),
+        workspaceMember: true,
+      }));
+    }
+
+    const appRoot = eveRoot;
     return [
       {
         appRoot,
@@ -355,10 +375,6 @@ function normalizeAgentsConfig(
         servicePrefix: servicePrefixBase,
       },
     ];
-  }
-
-  if (options.eveRoot !== undefined) {
-    throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
   }
 
   const entries = Object.entries(options.agents);
@@ -385,12 +401,34 @@ function normalizeAgentsConfig(
   });
 }
 
+async function buildAgentWorkspaceExtensions(
+  agents: readonly ResolvedEveNextAgent[],
+): Promise<void> {
+  // Loaded lazily so development config loads skip the extension builder.
+  const [{ buildWorkspaceExtensions }, { DiscoveryProjectResolutionError }] = await Promise.all([
+    import("#internal/nitro/host/workspace-extensions.js"),
+    import("#discover/project.js"),
+  ]);
+  // Agents can mount the same extension, so build them one at a time.
+  for (const agent of agents) {
+    try {
+      await buildWorkspaceExtensions(agent.appRoot);
+    } catch (error) {
+      // The Next.js app can proxy to an agent built and deployed elsewhere.
+      if (error instanceof DiscoveryProjectResolutionError) continue;
+      throw error;
+    }
+  }
+}
+
 /**
  * Wraps a Next.js config so same-origin eve endpoints proxy to a separate eve
  * service.
  *
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
- * rewrites eve protocol endpoints to that local URL. In Vercel production,
+ * rewrites eve protocol endpoints to that local URL. During `next build`,
+ * builds each agent's mounted source-backed workspace extensions so the
+ * Next.js type check can resolve them. In Vercel production,
  * writes Build Output service routes so Vercel sends eve protocol endpoints to
  * the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
@@ -403,19 +441,37 @@ export function withEve<TConfig extends EveNextConfig>(
 ): EveNextConfigFunction<TConfig> {
   const nextRoot = process.cwd();
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
-  const agents = normalizeAgentsConfig(options, nextRoot);
-
+  assertValidWithEveOptions(options);
   return async function eveNextConfig(phase, context) {
-    const nextConfig = await resolveNextConfig(configOrFunction, phase, context);
+    const [agents, nextConfig] = await Promise.all([
+      normalizeAgentsConfig(options),
+      resolveNextConfig(configOrFunction, phase, context),
+    ]);
+    if (phase === NEXT_PHASE_PRODUCTION_BUILD) {
+      await buildAgentWorkspaceExtensions(agents);
+    }
     const existingRewrites = nextConfig.rewrites;
     const configuredVercel = await ensureEveVercelOutputConfig({
-      agents: agents.map((agent) => ({
-        appRoot: agent.appRoot,
-        buildCommand: agent.buildCommand,
-        name: agent.name,
-        publicRoutePrefix: agent.publicRoutePrefix,
-        servicePrefix: agent.servicePrefix,
-      })),
+      agents: agents.map((agent) => {
+        const outputAgent: {
+          appRoot: string;
+          buildCommand: string;
+          name?: string;
+          publicRoutePrefix: string;
+          servicePrefix: string;
+          workspaceMember?: boolean;
+        } = {
+          appRoot: agent.appRoot,
+          buildCommand: agent.buildCommand,
+          name: agent.name,
+          publicRoutePrefix: agent.publicRoutePrefix,
+          servicePrefix: agent.servicePrefix,
+        };
+        if (agent.workspaceMember === true) {
+          outputAgent.workspaceMember = true;
+        }
+        return outputAgent;
+      }),
       nextRoot,
     });
 
@@ -453,6 +509,7 @@ export function withEve<TConfig extends EveNextConfig>(
                 phase,
                 productionDestinationPrefix: agent.productionDestination.destinationPrefix,
                 productionServerOrigin: agent.productionDestination.localServerOrigin,
+                workspaceAgentName: agent.workspaceMember === true ? agent.name : undefined,
               });
 
               return createEveRewriteRule({

@@ -2,7 +2,7 @@ import { createPromptCommandOutput, withPhase, type ChannelSetupLog } from "#set
 import { replaceConnectTrigger } from "#setup/connect-provisioning.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 export const GITHUB_TRIGGER_PATH = "/eve/v1/github";
 

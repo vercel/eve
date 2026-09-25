@@ -1,5 +1,5 @@
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   EveDynamicToolPart,
   EveMessageInputRequest,
@@ -102,6 +102,7 @@ export function normalizeActionRequest(action: RuntimeActionRequest): ActionDesc
         toolName: "eve:load-skill",
       };
     case "tool-call":
+    case "workflow-tool-call":
       return {
         kind: "tool-call",
         name: action.toolName,

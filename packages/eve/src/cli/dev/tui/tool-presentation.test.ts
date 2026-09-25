@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { getAllFrameworkToolNames } from "#runtime/framework-tools/index.js";
-
 import { presentPreparingTool, presentTool } from "./tool-presentation.js";
 
 describe("presentPreparingTool", () => {
@@ -141,23 +139,8 @@ describe("presentTool", () => {
     ).toBe("Search pricing");
   });
 
-  it("renders todo maintenance without dumping the list", () => {
-    const update = presentTool("todo", {
-      todos: [
-        { content: "a", status: "completed", priority: "high" },
-        { content: "b", status: "in_progress", priority: "low" },
-      ],
-    });
-    expect(update.title).toBe("Update todo list");
-    expect(update.subtitle).toBe("2 tasks");
-    expect(update.summarizeResult({ counts: { total: 2 } })).toBeUndefined();
-
-    expect(presentTool("todo", {}).title).toBe("Read todo list");
-    expect(presentTool("todo", undefined).title).toBe("Read todo list");
-  });
-
   it("renders the remaining structured builtins semantically", () => {
-    expect(presentTool("ask_question", { prompt: "Which environment?" }).title).toBe(
+    expect(presentTool("ask_question", { question: "Which environment?" }).title).toBe(
       "Ask Which environment?",
     );
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
@@ -169,27 +152,22 @@ describe("presentTool", () => {
     expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
   });
 
-  it("covers every framework builtin with semantic copy", () => {
+  it("covers the builtin presentation table with semantic copy", () => {
     const representativeInputs: Record<string, unknown> = {
       agent: { message: "audit the auth flow" },
-      ask_question: { prompt: "Which environment?" },
+      ask_question: { question: "Which environment?" },
       bash: { command: "ls" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
-      todo: { todos: [] },
+      task_cancel: { taskIds: ["task_abc"] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
       write_file: { filePath: "/workspace/a.ts", content: "x" },
     };
 
-    for (const name of getAllFrameworkToolNames()) {
-      const input = representativeInputs[name];
-      expect(
-        input,
-        `framework tool "${name}" has no representative input — add semantic copy for it in tool-presentation.ts and cover it here`,
-      ).toBeDefined();
+    for (const [name, input] of Object.entries(representativeInputs)) {
       expect(presentTool(name, input).title, name).not.toBe(name);
     }
   });
@@ -199,6 +177,22 @@ describe("presentTool", () => {
 
     expect(presentation.title).toBe("web_fetch");
     expect(presentation.subtitle).toContain('format="markdown"');
+  });
+
+  it("does not retain semantic copy for the removed task_sleep tool", () => {
+    expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("task_sleep");
+  });
+
+  it("does not retain semantic copy for the removed task_update tool", () => {
+    const presentation = presentTool("task_update", { message: "Checking the next region." });
+    expect(presentation.title).toBe("task_update");
+    expect(presentation.subtitle).toContain('message="Checking the next region."');
+    expect(presentation.group).toBeUndefined();
+    expect(presentation.doneTitle).toBeUndefined();
+    expect(presentPreparingTool("task_update")).toMatchObject({
+      title: "task_update",
+      subtitle: "preparing…",
+    });
   });
 
   it("presents a named subagent dispatch as a delegation", () => {

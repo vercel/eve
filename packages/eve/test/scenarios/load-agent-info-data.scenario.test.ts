@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { resolveCompilerArtifactPaths } from "../../src/compiler/artifacts.js";
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import {
-  loadAgentInfoData,
+  loadAgentInfoManifestData,
   resolveAgentInfoCompiledArtifactsSource,
 } from "../../src/internal/nitro/routes/agent-info/load-agent-info-data.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
@@ -34,7 +34,12 @@ describe("loadAgentInfoData", () => {
     });
     await writeFile(
       join(agentRoot, "sandbox", "sandbox.ts"),
-      ["export default {};", ""].join("\n"),
+      [
+        'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+        "export const environment = DefaultSandbox.environment();",
+        "export default defineSandbox(() => environment.open());",
+        "",
+      ].join("\n"),
     );
 
     await compileAgent({
@@ -65,16 +70,15 @@ describe("loadAgentInfoData", () => {
 
       const agentInfoCompiledArtifactsSource = resolveAgentInfoCompiledArtifactsSource({
         kind: "production",
+        sandboxScope: "test-sandbox-scope",
       });
       expect(agentInfoCompiledArtifactsSource.kind).toBe("bundled");
-      const data = await loadAgentInfoData({
+      const data = await loadAgentInfoManifestData({
         compiledArtifactsSource: agentInfoCompiledArtifactsSource,
       });
 
-      expect(data.agent.config?.name).toBe(data.manifest.config.name);
       expect(data.manifest.config.name).toBe(manifest.config.name);
-      expect(data.agent.sandbox).not.toBeNull();
-      expect(data.agent.sandbox?.sourceKind).toBe("module");
+      expect(data.manifest.sandbox.sourceKind).toBe("module");
       expect(data.schedules).toEqual([]);
     });
   });

@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 
@@ -6,8 +6,7 @@ export const EVE_WORDMARK = "eve";
 
 /**
  * The boot banner shared by every CLI command that announces itself: the eve
- * badge plus the installed version. Printed only by the CLI program's
- * pre-action hook so commands never compose their own variant.
+ * badge plus the installed version. Init prints it before its progress row.
  */
 export function eveCliBanner(): string {
   const { version } = resolveInstalledPackageInfo();

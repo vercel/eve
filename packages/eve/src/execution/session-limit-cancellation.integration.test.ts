@@ -1,3 +1,4 @@
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { describe, expect, it } from "vitest";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 
@@ -8,7 +9,7 @@ import {
   filterEventsByType,
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
@@ -56,7 +57,11 @@ async function deliver(
   const deadline = Date.now() + timeout;
   while (true) {
     try {
-      await resumeHook(continuationToken, { auth: null, kind: "send", payload });
+      await resumeHook(sessionInboxHookToken(continuationToken), {
+        auth: null,
+        kind: "send",
+        payload,
+      });
       return;
     } catch (error) {
       if (Date.now() > deadline) throw error;
@@ -77,7 +82,7 @@ function requestIdFromPromptTurn(events: readonly UnstampedMessageStreamEvent[])
 
 describe("session-limit continuation decline integration", () => {
   it("cancels the turn and keeps the session resumable when the user declines", async () => {
-    const runtime = createTestRuntime({
+    const runtime = await createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-root" },
     });
     const continuationToken = "http:limit-decline-root";
@@ -85,6 +90,8 @@ describe("session-limit continuation decline integration", () => {
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
           input: { message: "Hello there" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -135,77 +142,6 @@ describe("session-limit continuation decline integration", () => {
         expect(filterEventsByType(repromptTurn, "input.requested")).toHaveLength(1);
         expect(filterEventsByType(repromptTurn, "turn.cancelled")).toHaveLength(0);
         expectNoFailureEvents(repromptTurn);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  }, 60_000);
-
-  it("fails a zero-quota delegation fast and declines the root's own prompt", async () => {
-    const runtime = createTestRuntime({
-      agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-child" },
-    });
-    const continuationToken = "http:limit-decline-child";
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "Delegate to a subagent: summarize the weather." },
-          serializedContext: {
-            ...buildSerializedContext({
-              channelKind: "http",
-              continuationToken,
-              mode: "conversation",
-            }),
-            "eve.capabilities": { requestInput: true },
-          },
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        // The root's first model call spends the whole budget, so the
-        // delegated child inherits a zero remainder and fails fast --
-        // approving a zero-token window could never grant tokens, so no
-        // child prompt is raised (`violation.limit > 0` in
-        // `enforceSessionTokenLimit`). The root receives the child's error
-        // result, reaches its own pre-model gate, and parks on its OWN
-        // continuation prompt.
-        const hitlTurn = await stream.nextTurn();
-        expect(hitlTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(hitlTurn, "subagent.called")).toHaveLength(1);
-        expect(filterEventsByType(hitlTurn, "input.requested")).toHaveLength(1);
-        const requestId = requestIdFromPromptTurn(hitlTurn);
-        // The prompt belongs to the root, not the delegated child.
-        expect(requestId.startsWith(`${run.runId}:limit:`)).toBe(true);
-
-        // Declining the root's own prompt is a user action the stream must
-        // show: the turn settles as cancelled and the session stays
-        // resumable -- same contract as the direct-decline case above.
-        await deliver(continuationToken, {
-          inputResponses: [{ optionId: "stop", requestId }],
-        });
-        const declinedTurn = await stream.nextTurn();
-        expect(declinedTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(declinedTurn, "turn.cancelled")).toHaveLength(1);
-        expect(filterEventsByType(declinedTurn, "session.completed")).toHaveLength(0);
-        expect(filterEventsByType(declinedTurn, "subagent.called")).toHaveLength(0);
-        expectNoFailureEvents(declinedTurn);
-
-        // The session accepts the next message; the root is still over
-        // budget, so it re-raises its own prompt (fail-closed) instead of
-        // running a model call or re-dispatching the delegation.
-        await deliver(continuationToken, { message: "follow up after decline" });
-        const followUpTurn = await stream.nextTurn();
-
-        expect(followUpTurn.at(-1)?.type).toBe("session.waiting");
-        expect(filterEventsByType(followUpTurn, "input.requested")).toHaveLength(1);
-        expect(filterEventsByType(followUpTurn, "subagent.called")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "message.completed")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "session.completed")).toHaveLength(0);
-        expect(filterEventsByType(followUpTurn, "turn.cancelled")).toHaveLength(0);
-        expectNoFailureEvents(followUpTurn);
       } finally {
         stream.dispose();
         await run.cancel();

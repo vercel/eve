@@ -120,7 +120,7 @@ describe("eve dev server workflow generations", () => {
           createGenerationMarkerToolSource("generation-two", false),
         );
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -132,9 +132,8 @@ describe("eve dev server workflow generations", () => {
           `Timed out waiting for the selected-generation retry.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
         );
         expect(readCompletedMessages(firstResult.events)).toContain("generation-one");
-        // Deliberate contract change from the worker-pinned architecture: the
-        // retried turn keeps its generation's authored modules but resumes in
-        // the replaced worker, so it observes the current instrumentation.
+        // Providers are installed once by the active host, while durable tool
+        // code can retry from the generation that originally selected it.
         expect(readCompletedMessages(firstResult.events)).toContain("instrumentation-two");
 
         const secondResult = await sendDevelopmentMessage({
@@ -187,7 +186,9 @@ describe("eve dev server workflow generations", () => {
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
 
-  it(
+  // Re-enable after https://github.com/vercel/workflow/pull/3824 ships and eve
+  // vendors the release with abortable local queue deliveries.
+  it.skip(
     "recovers a nonterminal child Workflow on its selected generation after restart",
     async () => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
@@ -218,7 +219,7 @@ describe("eve dev server workflow generations", () => {
           createGenerationMarkerToolSource("generation-two", false),
         );
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -234,9 +235,9 @@ describe("eve dev server workflow generations", () => {
         await expect(
           readFile(recoveredPath, "utf8").then((source) => JSON.parse(source) as unknown),
         ).resolves.toEqual({
-          // The recovered delivery executes in the restarted worker (current
-          // instrumentation) with its recorded generation's modules.
-          instrumentation: "two",
+          // The recorded generation owns both its tool and instrumentation
+          // sources, even when recovery happens in a freshly started worker.
+          instrumentation: "one",
           marker: "generation-one-runtime",
         });
       } finally {

@@ -32,7 +32,7 @@ function connectorResult(uid: string, id: string, subject: "app" | "user") {
 }
 
 describe("connector response parsing", () => {
-  it("rejects created connectors without user support", () => {
+  it("selects created connectors by principal support", () => {
     const response = { uid: "linear/acme", id: "scl_1", supportedSubjectTypes: ["user"] };
     expect(parseCreatedConnector(JSON.stringify(response))).toEqual({
       uid: "linear/acme",
@@ -41,6 +41,9 @@ describe("connector response parsing", () => {
     expect(
       parseCreatedConnector(JSON.stringify({ ...response, supportedSubjectTypes: ["app"] })),
     ).toBeUndefined();
+    expect(
+      parseCreatedConnector(JSON.stringify({ ...response, supportedSubjectTypes: ["app"] }), "app"),
+    ).toEqual({ uid: "linear/acme", id: "scl_1" });
   });
 });
 
@@ -143,6 +146,44 @@ describe("setupConnectionConnector", () => {
     );
   });
 
+  it("attaches an app-only canonical connector when requested", async () => {
+    capture
+      .mockResolvedValueOnce(
+        jsonResult({ connectors: [{ uid: CANONICAL_UID, id: "scl_canonical" }] }),
+      )
+      .mockResolvedValueOnce(connectorResult(CANONICAL_UID, "scl_canonical", "app"));
+    run.mockResolvedValue(true);
+
+    await expect(setupConnectionConnector({ ...options(), principalType: "app" })).resolves.toEqual(
+      {
+        kind: "existing",
+        connectorUid: CANONICAL_UID,
+      },
+    );
+    expect(run).toHaveBeenCalledWith(
+      ["connect", "attach", CANONICAL_UID, "--yes", "--scope", "org_1"],
+      expect.any(Object),
+    );
+  });
+
+  it("creates an app-only connector when requested", async () => {
+    capture.mockResolvedValue(jsonResult({ connectors: [] }));
+    create.mockResolvedValue(connectorResult("linear/linear", "scl_created", "app"));
+    run.mockResolvedValue(true);
+    const fake = createFakePrompter({ single: () => "create", text: () => "linear" });
+
+    await expect(
+      setupConnectionConnector({
+        ...options(fake.prompter),
+        principalType: "app",
+      }),
+    ).resolves.toEqual({
+      kind: "created",
+      connectorId: "scl_created",
+      connectorUid: "linear/linear",
+    });
+  });
+
   it("paginates and offers only existing connectors that support user authorization", async () => {
     run.mockResolvedValue(true);
     capture
@@ -229,6 +270,48 @@ describe("setupConnectionConnector", () => {
 
     await expect(setupConnectionConnector(options(fake.prompter))).rejects.toThrow(
       `Could not create the ${SERVICE} connector. Vercel returned: Error: Connect is not enabled for this team.`,
+    );
+  });
+
+  it("uses separate discovery and creation services when requested", async () => {
+    run.mockResolvedValue(true);
+    capture.mockResolvedValue(jsonResult({ connectors: [] }));
+    create.mockResolvedValue(connectorResult("mcp.agentcard.sh/agentcard", "scl_created", "user"));
+    const fake = createFakePrompter({ single: () => "create", text: () => "agentcard" });
+
+    await expect(
+      setupConnectionConnector({
+        ...options(fake.prompter),
+        slug: "agentcard",
+        service: "mcp.agentcard.sh/mcp",
+        creationType: "agentcard",
+        canonicalConnectorName: "agentcard",
+        connectionMethod: "mcp",
+      }),
+    ).resolves.toEqual({
+      kind: "created",
+      connectorId: "scl_created",
+      connectorUid: "mcp.agentcard.sh/agentcard",
+    });
+    expect(capture).toHaveBeenCalledWith(
+      expect.arrayContaining(["--service", "mcp.agentcard.sh/mcp"]),
+      expect.any(Object),
+    );
+    expect(create).toHaveBeenCalledWith(
+      [
+        "connect",
+        "create",
+        "agentcard",
+        "--name",
+        "agentcard",
+        "--connection-method",
+        "mcp",
+        "-F",
+        "json",
+        "--scope",
+        "org_1",
+      ],
+      expect.any(Object),
     );
   });
 

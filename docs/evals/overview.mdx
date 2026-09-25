@@ -32,10 +32,10 @@ import { includes } from "eve/evals/expect";
 export default defineEval({
   description: "Basic message and tool-usage coverage for the weather agent.",
   async test(t) {
-    await t.send("What is the weather in Brooklyn?");
+    const turn = await t.send("What is the weather in Brooklyn?");
     t.succeeded();
     t.calledTool("get_weather");
-    t.check(t.reply, includes("Sunny"));
+    t.check(turn.message, includes("Sunny"));
   },
 });
 ```
@@ -51,12 +51,55 @@ import { defineEvalConfig } from "eve/evals";
 import { Braintrust } from "eve/evals/reporters";
 
 export default defineEvalConfig({
-  judge: { model: "openai/gpt-5.4-mini" },
+  judge: { model: "typesafe-ai/jev" },
   reporters: [Braintrust({ projectName: "my-agent" })],
 });
 ```
 
-Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge.*`); a tree of fully deterministic evals can omit it. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
+Everything is optional. `judge` sets the default model for [LLM-as-judge](./judge) assertions (`t.judge(...)`); omit it to use the default evaluator, `typesafe-ai/jev`. Deterministic evals make no judge requests. `reporters`, `maxConcurrency`, and `timeoutMs` round out the defaults. Config `reporters` observe every eval in the run, so set one `Braintrust()` here instead of adding it to each eval. CLI flags (`--max-concurrency`, `--timeout`) and per-eval values take precedence over the config defaults.
+
+### Run setup and teardown
+
+Use `setup` to start shared resources or run migrations before eve starts the local agent server. Return shared context directly from `setup`, then release resources in `teardown`:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { startTestDatabase } from "./database.js";
+
+export default defineEvalConfig({
+  async setup() {
+    const database = await startTestDatabase();
+    return { database };
+  },
+  async teardown(context) {
+    await context?.database.close();
+  },
+});
+```
+
+`context` is inferred from the setup return value. To use that type in an eval file, pass the config's type to `defineEval`:
+
+```ts title="evals/database.eval.ts"
+import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
+import type config from "./evals.config.js";
+
+export default defineEval<typeof config>({
+  async test(t) {
+    const result = await t.context.database.query("SELECT 1 AS value");
+    await t.require(result.rows[0]?.value, equals(1));
+  },
+});
+```
+
+Setup, eval bodies, and teardown share the same context object in the runner process. Class instances and functions keep their identity; context is neither serialized nor sent to the agent server. Concurrent evals share these resources, so isolate any database records they modify.
+
+`setup` can also return nothing.
+
+- Setup runs once per `eve eval` invocation, after discovery and config loading, before target startup.
+- Teardown runs after the local server and its sandbox handles shut down, including after setup, startup, or eval failures. Cleanup failures fail the command.
+
+`teardown` receives `undefined` when setup returns no context or throws before returning. In that case, setup must clean up resources that only it can access. Teardown can also be used without setup. The per-eval `timeoutMs` does not apply to setup or teardown.
 
 ## Deterministic fixture models
 
@@ -100,7 +143,7 @@ model: mockModel({
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
-- **Drive** the agent: `t.send(...)`, `t.start(...)`, `t.cancel()`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.requireInputRequest(...)`, `t.newSession()`. Live turns returned by `start()` can wait for typed mid-turn events before cancellation or settlement. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
+- **Drive** the agent: `t.session()` creates an empty session; `t.send(...)` creates a session with its first message and returns a turn. Continue through `turn.session.send(...)`. Session handles also expose `start`, `cancel`, `respond`, `respondAll`, `sendFile`, and `requireInputRequest`. Read output from `turn.message`, and conversation state from `turn.session`. See [Cases](./cases).
 - **Assert** with three surfaces, covered next.
 
 ## Three assertion surfaces
@@ -108,23 +151,25 @@ model: mockModel({
 Each surface matches a genuinely different kind of judgment:
 
 - **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
-- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(t.reply, includes("sunny"))`. Grade `t.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
-- **`t.judge.autoevals.*`** is the LLM-as-judge surface, like `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default and uses the configured judge model, never the agent under test. See [Judge](./judge).
+- **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(turn.message, includes("sunny"))`. Grade `turn.message`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
+- **`t.judge(...)`** is the LLM-as-judge surface, like `t.judge("cites a source")`. It grades the most recently settled turn’s assistant message by default; pass `{ on: turn.session.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
 
 ## Gate vs soft
 
 Every assertion returns a chainable handle, so severity rides on the assertion itself. There is no separate thresholds map.
 
 - **Gates** are hard. A failed gate marks the eval `failed` and `eve eval` exits non-zero. Run-level methods, `includes`, `equals`, and `matches` are gates by default.
-- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` (visible but not fatal, unless you pass `--strict`). `similarity` and every `t.judge.*` assertion are soft by default. A soft assertion with no threshold is tracked-only and never fails.
+- **Soft** assertions are tracked data. They land in reports and artifacts, and a below-threshold soft assertion marks the eval `scored` (visible but not fatal, unless you pass `--strict`). `similarity` and every `t.judge(...)` assertion are soft by default. A soft assertion with no threshold is tracked-only and never fails.
 
 Override per assertion: `.gate(threshold?)` promotes to a hard gate, `.soft(threshold?)` demotes to tracked, and `.atLeast(threshold)` is a soft assertion with a bar.
 
 ```ts
 t.succeeded(); // gate
 t.calledTool("get_weather").soft(); // record as a metric, don't gate
-t.judge.autoevals.closedQA("cites a source"); // soft, tracked (no threshold)
-t.judge.autoevals.factuality(reference).atLeast(0.7); // soft, gated under --strict at 0.7
+t.judge("cites a source"); // soft, tracked (no threshold)
+t.judge("The response is consistent with output.reference.", {
+  on: { response: turn.message ?? "", reference },
+}).atLeast(0.7); // soft, gated under --strict at 0.7
 ```
 
 Use `await t.require(value, assertion)` for a gate that must pass before the script can safely continue. Use `t.skip(reason)` as the first operation for an intentionally unsupported target capability.

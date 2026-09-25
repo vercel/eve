@@ -30,16 +30,20 @@ const health = await client.health();
 console.log(health.status, health.workflowId);
 ```
 
-Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`.
+The client requires the successful response to match `{ ok: true, status: "ready", workflowId: string }`. Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`; invalid JSON or a malformed successful payload throws `HealthResponseError`.
 
 ## Inspect an agent
 
-Use `info()` to inspect a development agent. The client parses and validates the complete response before returning it:
+Use `info()` to inspect an agent. The client requires the complete agent-info version 6 response before returning it:
 
 ```ts
 const info = await client.info();
 console.log(info.agent.name, info.agent.model.id);
 ```
+
+Pass `info({ signal })` to cancel the HTTP request. The signal is checked only after custom header and credential callbacks resolve; it does not limit how long those callbacks or the complete `info()` call can take.
+
+Version 4 separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. A non-success response throws `ClientError`; invalid JSON, an earlier schema version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`.
 
 ## Authentication
 
@@ -111,7 +115,21 @@ Per-request headers override client-level values with the same name. For example
 
 ## Sessions
 
-For an ID-addressed session, create it explicitly with the first message:
+Create and park an ID-addressed conversation before its first turn when you can start session work
+while the user is still composing:
+
+```ts
+const { session } = await client.sessions.create();
+
+const response = await session.send("Summarize account A.");
+await response.result();
+```
+
+The create promise resolves when the server accepts the durable workflow. It does not open the
+event stream or wait for initialization; an early `session.send()` uses the
+same bounded startup retries as other follow-ups.
+
+To create the session and start its first turn in one request, include the message:
 
 ```ts
 const { session, response } = await client.sessions.create({ message: "Summarize account A." });

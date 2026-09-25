@@ -61,6 +61,16 @@ describe("setEveAttributes", () => {
     );
   });
 
+  it('stringifies boolean attribute values as "true"/"false"', async () => {
+    await setEveAttributes({ "$eve.is_trace_content_visible": true, "$eve.flag": false });
+
+    expect(setAttributesMock).toHaveBeenCalledTimes(1);
+    expect(setAttributesMock).toHaveBeenCalledWith(
+      { "$eve.is_trace_content_visible": "true", "$eve.flag": "false" },
+      { allowReservedAttributes: true },
+    );
+  });
+
   it("drops undefined values so callers can build sparse attribute maps", async () => {
     await setEveAttributes({
       "$eve.parent": "wrun_parent",

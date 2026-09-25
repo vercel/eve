@@ -13,7 +13,7 @@ import {
  */
 describe("durableSessionStore integration", () => {
   it("each step's readDurableSession returns the immediately-preceding write", async () => {
-    const runtime = createTestRuntime({ agent: { name: "durable-session-store-fixture" } });
+    const runtime = await createTestRuntime({ agent: { name: "durable-session-store-fixture" } });
 
     await runtime.run(async () => {
       const run = await start(durableSessionStoreFixtureWorkflow, [
@@ -33,39 +33,20 @@ describe("durableSessionStore integration", () => {
         { historyDepth: 3, marker: "beta", sessionId: result.sessionId },
         { historyDepth: 5, marker: "gamma", sessionId: result.sessionId },
       ]);
-    });
-  });
-
-  it("a standalone read step after several writes returns the latest returned state", async () => {
-    const runtime = createTestRuntime({ agent: { name: "durable-session-store-fixture-tail" } });
-
-    await runtime.run(async () => {
-      const run = await start(durableSessionStoreFixtureWorkflow, [
-        {
-          markers: [
-            { marker: "first", historyDepth: 0 },
-            { marker: "second", historyDepth: 2 },
-            { marker: "third", historyDepth: 4 },
-            { marker: "fourth", historyDepth: 6 },
-          ],
-        },
-      ]);
-
-      const result = await run.returnValue;
-
-      // The read step runs after the loop with no intervening write of
-      // its own, so this asserts the returned state still carries the
-      // latest snapshot across a later step boundary.
+      // The tail read runs after the loop with no write of its own, so the
+      // returned state must still carry the latest snapshot across a step boundary.
       expect(result.tailReadAfterAllWrites).toEqual({
-        historyDepth: 6,
-        marker: "fourth",
+        historyDepth: 5,
+        marker: "gamma",
         sessionId: result.sessionId,
       });
     });
   });
 
   it("a write-step retry's returned state is what the subsequent read returns", async () => {
-    const runtime = createTestRuntime({ agent: { name: "durable-session-store-fixture-retry" } });
+    const runtime = await createTestRuntime({
+      agent: { name: "durable-session-store-fixture-retry" },
+    });
 
     await runtime.run(async () => {
       const run = await start(durableSessionRetryFixtureWorkflow, []);

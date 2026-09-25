@@ -21,9 +21,10 @@ export default defineEval({
         type: "object",
       },
     });
+    const session = structured.session;
     structured.expectOk();
 
-    const plain = await t.send("Reply normally without structured output.");
+    const plain = await session.send("Reply normally without structured output.");
     plain.expectOk();
     plain.notEvent("result.completed");
 

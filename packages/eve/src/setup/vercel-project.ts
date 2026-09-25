@@ -1,8 +1,8 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import pc from "picocolors";
-import { z } from "zod";
+import pc from "#compiled/picocolors/index.js";
+import { z } from "#compiled/zod/index.js";
 
 import {
   assertNoLegacyProjectLinkDirectory,
@@ -32,6 +32,7 @@ import {
   ensureCreatedProjectFramework,
   type CreatedProjectFrameworkOptions,
 } from "./vercel-project-framework.js";
+import { configureTraceSampling } from "./vercel-trace-sampling.js";
 
 const VercelProjectReferenceSchema = z.object({
   id: z.string().min(1),
@@ -54,7 +55,10 @@ export interface PickTeamOptions extends VercelProjectOperationOptions {
   selectMessage?: (currentTeam: string) => string;
 }
 
-export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {}
+export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOptions {
+  /** Configure 100% trace sampling when creating a Vercel project. */
+  traceSampling?: boolean;
+}
 
 /** Effects used to ensure an interactive Vercel project link. */
 export interface EnsureLinkedVercelProjectDeps {
@@ -187,18 +191,20 @@ async function probeWhoami(projectRoot: string, options: VercelProjectOperationO
 }
 
 /**
- * Whether a failed `whoami` is the explicit not-authenticated diagnostic ("No
- * existing credentials found" / "not authenticated") rather than a transient
- * fault (DNS, network, API error, timeout). Only the former is a genuine
- * logged-out state; classifying any non-zero exit as logged-out would route a
- * network blip to `/vc:login`.
+ * Whether a failed `whoami` explicitly calls for authentication recovery
+ * rather than reporting a transient fault (DNS, network, API error, timeout).
+ * Vercel reports an invalid stored token directly, but a linked team can mask
+ * that diagnostic with `scope-not-accessible`; both require a fresh login.
  */
 function isLoggedOutFailure(failure: VercelCaptureFailure): boolean {
   const text = `${failure.stdout} ${failure.stderr}`.toLowerCase();
   return (
     text.includes("credentials") ||
     text.includes("not authenticated") ||
-    text.includes("not logged in")
+    text.includes("not logged in") ||
+    text.includes("specified token is not valid") ||
+    text.includes("scope-not-accessible") ||
+    text.includes("do not have access to the specified account")
   );
 }
 
@@ -241,9 +247,9 @@ export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | 
     case "authenticated":
       return undefined;
     case "cli-missing":
-      return "Vercel CLI not found, see /vc:install";
+      return "Vercel CLI not found, see /deploy";
     case "logged-out":
-      return "Log in to Vercel first, see /vc:login";
+      return "Log in to Vercel first, see /deploy";
     case "unavailable":
       return "Couldn't reach Vercel, check your connection";
     default: {
@@ -657,6 +663,8 @@ export async function linkProject(
     if (!linked) return undefined;
     const link = await readProjectLink(projectRoot);
     if (link === undefined) return undefined;
+    if (options.traceSampling === true)
+      await configureTraceSampling(link, prompter, options.signal);
     await ensureCreatedProjectFramework(
       prompter,
       projectRoot,

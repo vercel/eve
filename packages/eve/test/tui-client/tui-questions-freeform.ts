@@ -9,7 +9,7 @@ import { theme } from "./lib/theme.ts";
 
 /**
  * Covers the freeform-via-arrow-nav UX. The model raises an
- * `ask_question` with `allowFreeform: true` and a small set of
+ * `ask_question`, which always accepts free text, with a small set of
  * predefined options. The TUI surfaces a navigable "Type your own
  * answer" row below the last option. Pressing Enter on that row
  * switches to text mode, and the typed reply is sent as `text` (not
@@ -41,18 +41,14 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
 
   const promptLines = [
     "Use the ask_question tool exactly once to ask me to choose an environment.",
-    "Set prompt to: 'Which environment?'",
-    "Set allowFreeform to true.",
-    "Provide exactly three options:",
-    `- id "prod", label "Production"`,
-    `- id "staging", label "Staging"`,
-    `- id "preview", label "Preview"`,
+    "Set question to: 'Which environment?'",
+    'Provide exactly three options: label "Production", label "Staging", and label "Preview".',
     "Wait for my response. Then repeat back exactly what I said.",
   ];
   input.type(promptLines.join(" · "));
   input.enter();
 
-  await screen.waitForText("▶ 1. Production", 60_000);
+  await screen.waitForText("› 1. Production", 60_000);
   console.log(theme.muted("[tui-freeform] select UI live, highlight on Production"));
 
   await sleep(500);
@@ -61,7 +57,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.emit("data", Buffer.from("\x1B[B")); // → Staging
   input.emit("data", Buffer.from("\x1B[B")); // → Preview
   input.emit("data", Buffer.from("\x1B[B")); // → Type your own answer
-  await screen.waitForText("▶ 4. Type your own answer", 2_000);
+  await screen.waitForText("› 4. Type your own answer", 2_000);
   console.log(theme.muted("[tui-freeform] highlight moved to freeform row"));
 
   // The freeform row focuses its inline elbow editor the moment the cursor

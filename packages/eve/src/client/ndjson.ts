@@ -1,4 +1,9 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { EVE_STREAM_LEASE_ENDED_CONTROL, type MessageStreamEvent } from "#protocol/message.js";
+import {
+  normalizeMessageStreamEvent,
+  type MessageStreamEventForVersion,
+  type MessageStreamVersion,
+} from "#protocol/message-version.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -35,15 +40,28 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
+  options: {
+    readonly controlVersion?: "1";
+    readonly idleTimeoutMs?: number;
+    readonly onLeaseEnded?: () => void;
+    readonly signal?: AbortSignal;
+    readonly streamVersion: MessageStreamVersion;
+  },
 ): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let reachedEof = false;
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
 
   try {
     while (true) {
-      const result = await reader.read();
+      options.signal?.throwIfAborted();
+      const result = await readWithIdleTimeout(reader, options?.idleTimeoutMs);
+      options.signal?.throwIfAborted();
 
       if (result.done) {
         reachedEof = true;
@@ -63,7 +81,12 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield JSON.parse(line) as MessageStreamEvent;
+          const value = JSON.parse(line) as unknown;
+          if (options.controlVersion === "1" && isLeaseEndedControl(value)) {
+            options.onLeaseEnded?.();
+          } else {
+            yield parseMessageStreamEvent(value, options.streamVersion);
+          }
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -73,14 +96,63 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield JSON.parse(trailing) as MessageStreamEvent;
+      const value = JSON.parse(trailing) as unknown;
+      if (options.controlVersion === "1" && isLeaseEndedControl(value)) {
+        options.onLeaseEnded?.();
+      } else {
+        yield parseMessageStreamEvent(value, options.streamVersion);
+      }
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     if (!reachedEof) {
-      // Breaking an async iteration must close the response body; releasing
-      // its lock alone leaves the server-side stream open.
-      await reader.cancel().catch(() => {});
+      // A cloned response waits for both branches to cancel. Let the caller
+      // abort the fetch instead of blocking cleanup on a tracing reader.
+      void reader.cancel().catch(() => {});
     }
     reader.releaseLock();
+  }
+}
+
+function isLeaseEndedControl(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    record.$eve === EVE_STREAM_LEASE_ENDED_CONTROL.$eve &&
+    record.version === EVE_STREAM_LEASE_ENDED_CONTROL.version
+  );
+}
+
+function parseMessageStreamEvent<Version extends MessageStreamVersion>(
+  value: unknown,
+  version: Version,
+): MessageStreamEvent {
+  return normalizeMessageStreamEvent(version, value as MessageStreamEventForVersion<Version>);
+}
+
+async function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleTimeoutMs: number | undefined,
+): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (idleTimeoutMs === undefined) return await reader.read();
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new DOMException("Session stream was idle.", "AbortError")),
+          idleTimeoutMs,
+        );
+      }),
+    ]);
+  } catch (error) {
+    // Browsers use vendor-specific TypeError messages for response-body transport failures.
+    if (error instanceof TypeError) {
+      throw new Error("Session stream disconnected.", { cause: error });
+    }
+    throw error;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }

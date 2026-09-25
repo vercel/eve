@@ -1,5 +1,5 @@
 const PROJECT_NAME_REGEX = /^(?!.*---)[a-z0-9-_.]+$/;
-const PROJECT_NAME_ERROR =
+export const PROJECT_NAME_ERROR =
   "Project name can only contain up to 100 lowercase letters, digits, and the characters '.', '_', '-'.";
 
 /** Returns an error message when a project name is not a safe single path segment. */

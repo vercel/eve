@@ -5,16 +5,15 @@ import {
   disableInstrumentation,
   isInstrumentationDisabled,
   isInstrumentationProvider,
-  type InstrumentationSetupContext,
+  type InstrumentationMemoryOperation,
+  type InstrumentationMemoryOperationCompletedEvent,
+  type InstrumentationMemoryOperationFailedEvent,
+  type InstrumentationMemoryOperationStartedEvent,
+  type InstrumentationMemoryOperationTerminalEvent,
+  type InstrumentationMemoryRecord,
 } from "#public/instrumentation/index.js";
 
 describe("defineInstrumentation", () => {
-  it("keeps the legacy setup context constructible with only the agent name", () => {
-    const context: InstrumentationSetupContext = { agentName: "weather" };
-
-    expect(context).toEqual({ agentName: "weather" });
-  });
-
   it("brands a provider-shaped declaration", () => {
     const provider = defineInstrumentation({
       events: {
@@ -27,12 +26,15 @@ describe("defineInstrumentation", () => {
     expect(isInstrumentationProvider(provider)).toBe(true);
   });
 
-  it("brands a legacy config-shaped declaration", () => {
-    const config = defineInstrumentation({ functionId: "support", recordInputs: false });
+  it("preserves a provider trace policy", () => {
+    const tracePolicy = ({ audience }: { audience: string }) => ({
+      emit: true as const,
+      recordInputs: audience === "public",
+      recordOutputs: false,
+    });
+    const provider = defineInstrumentation({ tracePolicy });
 
-    expect(isInstrumentationProvider(config)).toBe(true);
-    expect(config.functionId).toBe("support");
-    expect(config).toMatchObject({ functionId: "support", recordInputs: false });
+    expect(provider.tracePolicy).toBe(tracePolicy);
   });
 
   it("infers terminal handler events from union-typed discriminants", () => {
@@ -70,6 +72,41 @@ describe("defineInstrumentation", () => {
     });
 
     expect(isInstrumentationProvider(provider)).toBe(true);
+  });
+
+  it("exports memory operation event contracts", () => {
+    const operation: InstrumentationMemoryOperation = {
+      idempotencyKey: "memory:search",
+      operationName: "search_memory",
+      phase: "turn.started",
+      slot: "profile",
+      storeId: "scope",
+      turnId: "turn-1",
+    };
+    const record: InstrumentationMemoryRecord = { content: "Prefers dark mode.", id: "theme" };
+    const started: InstrumentationMemoryOperationStartedEvent = {
+      ...operation,
+      rootSessionId: "root-session",
+      sessionId: "session-1",
+      type: "memory.operation.started",
+    };
+    const completed: InstrumentationMemoryOperationCompletedEvent = {
+      ...started,
+      outputRecords: [record],
+      recordCount: 1,
+      type: "memory.operation.completed",
+    };
+    const failed: InstrumentationMemoryOperationFailedEvent = {
+      ...started,
+      error: new Error("failed"),
+      type: "memory.operation.failed",
+    };
+    const terminals: InstrumentationMemoryOperationTerminalEvent[] = [completed, failed];
+
+    expect(terminals.map((event) => event.type)).toEqual([
+      "memory.operation.completed",
+      "memory.operation.failed",
+    ]);
   });
 
   it("preserves the authored fields", () => {

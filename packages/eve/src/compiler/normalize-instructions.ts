@@ -7,14 +7,15 @@ import type {
 } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
+  requireModuleBackedDefinitionLoadOptions,
+  type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
 import {
   assertResolverOnlyDynamicSentinel,
   ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`
@@ -44,9 +45,9 @@ export type CompiledInstructionsEntry =
  * runtime.
  */
 export async function compileInstructionsEntry(
-  agentRoot: string,
+  _agentRoot: string,
   source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: SourceDefinitionCompileOptions,
 ): Promise<CompiledInstructionsEntry> {
   if (source.sourceKind === "markdown") {
     const definition = normalizeInstructionsDefinition(
@@ -58,6 +59,7 @@ export async function compileInstructionsEntry(
       definition: {
         name: stripLogicalPathExtension(source.logicalPath),
         logicalPath: source.logicalPath,
+        owner: options.owner,
         content: definition.content,
         role: definition.role,
         sourceId: source.sourceId,
@@ -66,10 +68,11 @@ export async function compileInstructionsEntry(
     };
   }
 
+  const loadOptions = requireModuleBackedDefinitionLoadOptions(options, source.logicalPath);
   const exportValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: loadOptions.binding,
     kind: "instructions",
+    loadNamespace: loadOptions.loadNamespace,
     source,
   });
 
@@ -126,7 +129,7 @@ export async function compileInstructionsEntry(
 export async function compileInstructions(
   agentRoot: string,
   source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: SourceDefinitionCompileOptions,
 ): Promise<CompiledInstructionsDefinition> {
   const entry = await compileInstructionsEntry(agentRoot, source, options);
   if (entry.kind === "dynamic-instructions") {

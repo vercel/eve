@@ -4,6 +4,9 @@
  */
 export const EVE_ROUTE_PREFIX = "/eve/v1";
 
+/** Reservation pattern for the production cron bridge's unguessable token. */
+export const EVE_PRODUCTION_CRON_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/cron/:token`;
+
 /**
  * Stable framework-owned health route.
  */
@@ -38,6 +41,11 @@ export const EVE_SESSION_RESET_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessi
 export const EVE_SESSION_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:sessionId/stream`;
 
 /**
+ * Parent-origin proxy route for one remotely executed child session stream.
+ */
+export const EVE_SUBAGENT_STREAM_ROUTE_PATTERN = `${EVE_SESSION_ROUTE_PATH}/:parentSessionId/subagents/:callId/:childSessionId/stream`;
+
+/**
  * Framework-owned route pattern for dispatching one authored schedule
  * exactly once from the dev server.
  *
@@ -68,10 +76,10 @@ export const EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH = `${EVE_ROUTE_PREFIX}/dev/run
  */
 export const EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/rebuild`;
 
-/** Dev-only route that pauses authored-source rebuilding while a setup subprocess owns the terminal. */
+/** Dev-only route that acquires an idempotent authored-source suspension lease. */
 export const EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/suspend`;
 
-/** Dev-only route that resumes authored-source rebuilding after setup subprocess completion. */
+/** Dev-only route that idempotently releases one authored-source suspension lease. */
 export const EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH = `${EVE_DEV_RUNTIME_ARTIFACTS_ROUTE_PATH}/resume`;
 
 /**
@@ -99,9 +107,6 @@ export function createEveDevDispatchSchedulePath(scheduleId: string): string {
  */
 export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:attemptId/:token`;
 
-/** Callback shape minted by deployments before authorization attempt IDs. */
-export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`;
-
 /**
  * Stable framework-owned route pattern for terminal session callbacks.
  *
@@ -109,6 +114,12 @@ export const EVE_LEGACY_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}
  * is unauthenticated by design and resumes the matching parked runtime action.
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
+
+/** Capability route used by a parent task to answer a remote child HITL batch. */
+export const EVE_TASK_INPUT_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/task-input/:token`;
+
+/** Capability route for best-effort activity batches. */
+export const EVE_ACTIVITY_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/activity/:token`;
 
 /** Builds the ID-addressed message route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
@@ -118,6 +129,15 @@ export function createEveSessionRoutePath(sessionId: string): string {
 /** Builds the ID-addressed cancel route for one session. */
 export function createEveSessionCancelRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}/cancel`;
+}
+
+/** Builds the parent-origin stream path for one remote child session. */
+export function createEveSubagentStreamRoutePath(input: {
+  readonly callId: string;
+  readonly childSessionId: string;
+  readonly parentSessionId: string;
+}): string {
+  return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(input.parentSessionId)}/subagents/${encodeURIComponent(input.callId)}/${encodeURIComponent(input.childSessionId)}/stream`;
 }
 
 /** Builds the ID-addressed compact route for one session. */
@@ -163,4 +183,14 @@ export function createEveConnectionCallbackRoutePath(
  */
 export function createEveCallbackRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/callback/${encodeURIComponent(token)}`;
+}
+
+/** Builds the capability path used to answer one remote child turn. */
+export function createEveTaskInputRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
+}
+
+/** Builds the capability path for one root activity collector. */
+export function createEveActivityRoutePath(token: string): string {
+  return `${EVE_ROUTE_PREFIX}/activity/${encodeURIComponent(token)}`;
 }

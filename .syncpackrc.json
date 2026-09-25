@@ -11,10 +11,35 @@
   ],
   "versionGroups": [
     {
-      "label": "Extension fixtures declare a broad eve peer range like published extensions",
+      "label": "Chat SDK declarations and consumers must use matching versions",
+      "dependencies": ["chat", "@chat-adapter/*"],
+      "dependencyTypes": ["dev", "prod"]
+    },
+    {
+      "label": "Extensions declare a broad eve peer range",
       "dependencies": ["eve"],
-      "packages": ["gadget-extension", "gizmo-extension", "js-only-extension", "toolkit-extension"],
+      "packages": [
+        "eve-code",
+        "gadget-extension",
+        "gizmo-extension",
+        "js-only-extension",
+        "toolkit-extension"
+      ],
       "dependencyTypes": ["peer"],
+      "isIgnored": true
+    },
+    {
+      "label": "Separately published eve packages accept compatible eve patch releases",
+      "dependencies": ["eve"],
+      "packages": ["@eve/buzz-acp-adapter"],
+      "dependencyTypes": ["prod"],
+      "pinVersion": "workspace:^"
+    },
+    {
+      "label": "Blooio is an externally published integration",
+      "dependencies": ["eve-channel-blooio"],
+      "packages": ["eve-docs"],
+      "dependencyTypes": ["dev"],
       "isIgnored": true
     },
     {
@@ -48,7 +73,7 @@
       "dependencies": ["zod"],
       "packages": ["gadget-extension", "gizmo-extension"],
       "dependencyTypes": ["prod"],
-      "pinVersion": "4.4.3"
+      "pinVersion": "4.5.4"
     },
     {
       "label": "Shared third-party deps must use the catalog: protocol",

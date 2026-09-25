@@ -4,12 +4,13 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 const DEFAULT_SERVER_READY_TIMEOUT_MS = 180_000;
 const DEV_SERVER_REGISTRY_TIMEOUT_MS = 180_000;
 const DEV_SERVER_REGISTRY_POLL_MS = 100;
+const DEV_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const DEV_SERVER_STALE_LOCK_MS = 30_000;
 const EVE_CACHE_DIRECTORY_NAME = ".eve";
 const EVE_NEXT_DEV_SERVER_FILE_NAME = "next-dev-server.json";
@@ -17,7 +18,7 @@ const EVE_NEXT_DEV_SERVER_LOCK_FILE_NAME = "next-dev-server.lock";
 const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
 const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
-const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
+export const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
 
 interface EveProcessHandle {
   readonly origin: string;
@@ -47,10 +48,6 @@ function getGlobalState(): EveNextGlobalState {
   };
 
   return globalWithState[globalStateSymbol];
-}
-
-function joinRoutePrefix(prefix: string, path: string): string {
-  return `${prefix.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
 function normalizeOrigin(origin: string): string {
@@ -120,25 +117,6 @@ function normalizeDevServerRegistry(value: unknown): EveDevServerRegistry | unde
   }
 }
 
-async function isEveServerHealthy(origin: string): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 1_000);
-
-  try {
-    const response = await fetch(joinRoutePrefix(origin, `${EVE_ROUTE_PREFIX}/health`), {
-      signal: controller.signal,
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function readUsableEveDevServerRegistry(appRoot: string): Promise<string | undefined> {
   try {
     const registry = normalizeDevServerRegistry(
@@ -149,7 +127,12 @@ async function readUsableEveDevServerRegistry(appRoot: string): Promise<string |
       return undefined;
     }
 
-    if (!(await isEveServerHealthy(registry.origin))) {
+    if (
+      (await readDevelopmentRuntimeArtifactsRevision({
+        serverUrl: registry.origin,
+        timeoutMs: DEV_SERVER_READINESS_TIMEOUT_MS,
+      })) === undefined
+    ) {
       return undefined;
     }
 
@@ -453,9 +436,17 @@ function startEveDevServer(
   appRoot: string,
   timeoutMs: number,
   logLabel: string | undefined,
+  workspaceAgentName: string | undefined,
 ): Promise<EveProcessHandle> {
   return startServerProcess({
-    args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
+    args: [
+      createEveBinaryPath(),
+      "dev",
+      "--no-ui",
+      "--port",
+      "0",
+      ...(workspaceAgentName === undefined ? [] : ["--agent", workspaceAgentName]),
+    ],
     command: process.execPath,
     cwd: appRoot,
     logLabel,
@@ -468,13 +459,15 @@ function startEveDevServer(
 function startEveProductionServer(input: {
   readonly appRoot: string;
   readonly origin: string;
-}): Promise<EveProcessHandle> | undefined {
+}): Promise<EveProcessHandle> {
   const parsedOrigin = new URL(input.origin);
   const port = parsedOrigin.port;
   const serverEntry = join(input.appRoot, ".output", "server", "index.mjs");
 
   if (!existsSync(serverEntry)) {
-    return undefined;
+    throw new Error(
+      `eve production output is missing at ${serverEntry}. Run eve build from ${input.appRoot} before starting Next.js.`,
+    );
   }
 
   return startServerProcess({
@@ -494,6 +487,7 @@ async function resolveSharedEveDevServer(
   appRoot: string,
   timeoutMs: number,
   logLabel: string | undefined,
+  workspaceAgentName: string | undefined,
 ): Promise<EveProcessHandle> {
   const registeredOrigin = await readUsableEveDevServerRegistry(appRoot);
   if (registeredOrigin !== undefined) {
@@ -512,7 +506,7 @@ async function resolveSharedEveDevServer(
       };
     }
 
-    const handle = await startEveDevServer(appRoot, timeoutMs, logLabel);
+    const handle = await startEveDevServer(appRoot, timeoutMs, logLabel, workspaceAgentName);
     await writeEveDevServerRegistry(appRoot, handle);
     return handle;
   } finally {
@@ -527,6 +521,8 @@ export async function resolveEveDestinationPrefix(input: {
   readonly phase: string;
   readonly productionDestinationPrefix: string;
   readonly productionServerOrigin?: string;
+  /** Workspace member selected when spawning the local eve dev server. */
+  readonly workspaceAgentName?: string;
 }): Promise<string> {
   const state = getGlobalState();
 
@@ -578,6 +574,7 @@ export async function resolveEveDestinationPrefix(input: {
       input.appRoot,
       input.devServerTimeoutMs ?? DEV_SERVER_REGISTRY_TIMEOUT_MS,
       input.logLabel,
+      input.workspaceAgentName,
     ).catch((error) => {
       state.servers.delete(key);
       throw error;

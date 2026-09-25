@@ -6,9 +6,11 @@
   },
   "include": [
     "channels/**/*.ts",
+    "schedules/**/*.ts",
     "connections/**/*.ts",
     "extensions/**/*.ts",
-    "instrumentation/**/*.ts"
+    "instrumentation/**/*.ts",
+    "memory/**/*.ts"
   ],
   "exclude": ["node_modules"]
 }

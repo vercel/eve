@@ -9,15 +9,12 @@ import {
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
 } from "#context/keys.js";
-import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
+import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/background.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
-import {
-  createPreparedRuntimeSubagentTool,
-  getSubagentToolInputJsonSchema,
-} from "#runtime/subagents/registry.js";
+import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import { normalizeDynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { normalizeDynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -31,10 +28,8 @@ async function resolveSelections(input: {
   readonly ctx: ContextContainer;
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
-  readonly persistentSessions: boolean;
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<DynamicSubagentSelections> {
-  const inputSchema = getSubagentToolInputJsonSchema(input.persistentSessions);
   const outcomes = await Promise.allSettled(
     input.resolvers.map(async (resolver) => {
       const handler = resolver.events[input.event.type];
@@ -51,23 +46,26 @@ async function resolveSelections(input: {
           name: resolver.name,
           value: result,
         });
-        const prepared = createPreparedRuntimeSubagentTool(
-          {
-            description: remoteAgent.description,
-            kind: "remote",
-            logicalPath: resolver.logicalPath,
-            name: resolver.name,
-            nodeId: resolver.nodeId,
-            outputSchema: remoteAgent.outputSchema,
-            path: remoteAgent.path,
-            sourceId: resolver.sourceId,
-            sourceKind: resolver.sourceKind,
-            url: remoteAgent.url,
-          },
-          inputSchema,
-        );
+        const effectiveRemoteAgent =
+          resolver.tool === false ? { ...remoteAgent, tool: false as const } : remoteAgent;
+        const prepared = createPreparedRuntimeSubagentTool({
+          description: effectiveRemoteAgent.description,
+          kind: "remote",
+          logicalPath: resolver.logicalPath,
+          name: resolver.name,
+          nodeId: resolver.nodeId,
+          outputSchema: effectiveRemoteAgent.outputSchema,
+          path: effectiveRemoteAgent.path,
+          sourceId: resolver.sourceId,
+          sourceKind: resolver.sourceKind,
+          tool: effectiveRemoteAgent.tool,
+          url: effectiveRemoteAgent.url,
+        });
 
-        return [resolver.nodeId, { kind: "remote", prepared, remoteAgent }] as const;
+        return [
+          resolver.nodeId,
+          { kind: "remote", prepared, remoteAgent: effectiveRemoteAgent },
+        ] as const;
       }
 
       const agentConfig = normalizeDynamicSubagentAgentConfig({
@@ -76,22 +74,24 @@ async function resolveSelections(input: {
         value: result,
       });
       const resolvedAgentConfig = await agentConfig;
-      const prepared = createPreparedRuntimeSubagentTool(
-        {
-          description: resolvedAgentConfig.description,
-          kind: "subagent",
-          logicalPath: resolver.logicalPath,
-          name: resolver.name,
-          nodeId: resolver.nodeId,
-          sourceId: resolver.sourceId,
-          sourceKind: resolver.sourceKind,
-        },
-        inputSchema,
-      );
+      const effectiveAgentConfig =
+        resolver.tool === false
+          ? { ...resolvedAgentConfig, tool: false as const }
+          : resolvedAgentConfig;
+      const prepared = createPreparedRuntimeSubagentTool({
+        description: effectiveAgentConfig.description,
+        kind: "subagent",
+        logicalPath: resolver.logicalPath,
+        name: resolver.name,
+        nodeId: resolver.nodeId,
+        sourceId: resolver.sourceId,
+        sourceKind: resolver.sourceKind,
+        tool: effectiveAgentConfig.tool,
+      });
 
       return [
         resolver.nodeId,
-        { agentConfig: resolvedAgentConfig, kind: "subagent", prepared },
+        { agentConfig: effectiveAgentConfig, kind: "subagent", prepared },
       ] as const;
     }),
   );
@@ -126,7 +126,6 @@ export async function dispatchDynamicSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
-  readonly persistentSessions: boolean;
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
 }): Promise<void> {
   if (!ALLOWED_DYNAMIC_SUBAGENT_EVENTS.has(input.event.type)) {
@@ -149,7 +148,6 @@ export async function refreshDynamicSessionSubagentsForRuntimeRevision(input: {
   readonly ctx: ContextContainer;
   readonly event: SessionStartedStreamEvent;
   readonly messages: readonly ModelMessage[];
-  readonly persistentSessions: boolean;
   readonly resolvers: readonly ResolvedDynamicSubagentResolver[];
   readonly runtimeRevision: string;
 }): Promise<void> {
@@ -182,7 +180,11 @@ export function buildDynamicSubagentTools(input: ContextReader): readonly Harnes
       );
     }
     names.add(selection.prepared.name);
-    tools.push(createHarnessDelegationToolDefinition(selection.prepared));
+    const modelVisible =
+      selection.kind === "subagent"
+        ? selection.agentConfig.tool !== false
+        : selection.remoteAgent.tool !== false;
+    if (modelVisible) tools.push(createPreparedWorkflowToolHarnessDefinition(selection.prepared));
   }
 
   return tools;

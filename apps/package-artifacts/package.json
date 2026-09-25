@@ -12,6 +12,7 @@
     "@vercel/blob": "2.4.0"
   },
   "devDependencies": {
+    "eve": "workspace:*",
     "vitest": "catalog:"
   }
 }

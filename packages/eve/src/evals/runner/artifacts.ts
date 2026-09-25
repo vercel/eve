@@ -70,6 +70,7 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
         severity: a.severity,
         threshold: a.threshold,
         passed: a.passed,
+        errored: a.errored,
         message: a.message,
         metadata: a.metadata,
       })),

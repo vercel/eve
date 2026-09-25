@@ -1,7 +1,6 @@
 import { join } from "node:path";
 
 import type { DiscoverDiagnostic } from "#discover/diagnostics.js";
-import { hasDiscoverErrors, summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import type { ResolvedDiscoveryProject } from "#discover/project.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
@@ -14,12 +13,16 @@ import {
   writeCompilerArtifacts,
 } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { summarizeCompilerDiagnostics, type CompilerDiagnostic } from "#compiler/diagnostics.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 
 /**
  * Input for compiling the current authored agent into framework-owned
  * discovery artifacts.
  */
 export interface CompileAgentInput {
+  /** Development-only source extensions applied before source composition. */
+  developmentExtensions?: DevelopmentExtensionSelection;
   /**
    * Optional {@link ProjectSource} used for discovery reads. Defaults to a
    * disk-backed source so production callers keep their current behaviour.
@@ -33,7 +36,7 @@ export interface CompileAgentInput {
  * artifacts.
  */
 export interface CompileAgentResult {
-  diagnostics: DiscoverDiagnostic[];
+  diagnostics: CompilerDiagnostic[];
   manifest: CompiledAgentManifest;
   metadata: CompileMetadata;
   paths: CompilerArtifactPaths;
@@ -91,15 +94,20 @@ export async function compileAgent(input: CompileAgentInput = {}): Promise<Compi
  */
 export async function compileAgentInWorkspace(input: {
   readonly artifactLocations: CompilerArtifactLocations;
+  readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly startPath: string;
 }): Promise<CompileAgentResult> {
-  const discovered = await discoverAgentForCompilation({ startPath: input.startPath });
+  const discovered = await discoverAgentForCompilation({
+    developmentExtensions: input.developmentExtensions,
+    startPath: input.startPath,
+  });
   const result = await writeAgentCompilation(discovered, input.artifactLocations);
 
   return finishAgentCompilation(result, CompileAgentError.fromTransientArtifacts);
 }
 
 interface DiscoveredAgentCompilation {
+  readonly developmentExtensions: DevelopmentExtensionSelection | undefined;
   readonly diagnostics: DiscoverDiagnostic[];
   readonly manifest: AgentSourceManifest;
   readonly project: ResolvedDiscoveryProject;
@@ -113,6 +121,7 @@ async function discoverAgentForCompilation(
   const discoveryResult = await discoverAgent({ ...project, source });
 
   return {
+    developmentExtensions: input.developmentExtensions,
     diagnostics: discoveryResult.diagnostics,
     manifest: discoveryResult.manifest,
     project,
@@ -127,11 +136,12 @@ async function writeAgentCompilation(
     appRoot: discovered.project.appRoot,
     artifactLocations,
     diagnostics: discovered.diagnostics,
+    developmentExtensions: discovered.developmentExtensions,
     manifest: discovered.manifest,
   });
 
   return {
-    diagnostics: discovered.diagnostics,
+    diagnostics: writtenArtifacts.diagnosticsArtifact.diagnostics,
     manifest: writtenArtifacts.compiledManifest,
     metadata: writtenArtifacts.metadata,
     paths: writtenArtifacts.paths,
@@ -143,7 +153,7 @@ function finishAgentCompilation(
   result: CompileAgentResult,
   createError: (result: CompileAgentResult) => CompileAgentError,
 ): CompileAgentResult {
-  if (hasDiscoverErrors(result.diagnostics)) {
+  if (result.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
     throw createError(result);
   }
 
@@ -152,7 +162,7 @@ function finishAgentCompilation(
   return result;
 }
 
-function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): void {
+function reportDiscoverWarnings(diagnostics: readonly CompilerDiagnostic[]): void {
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
 
   if (warnings.length === 0) {
@@ -160,12 +170,14 @@ function reportDiscoverWarnings(diagnostics: readonly DiscoverDiagnostic[]): voi
   }
 
   for (const warning of warnings) {
-    console.warn(`Warning [${warning.code}]: ${warning.message}\n  source: ${warning.sourcePath}`);
+    console.warn(
+      `Warning [${warning.code}]: ${warning.message}\n  source: ${formatDiagnosticSources(warning)}`,
+    );
   }
 }
 
-function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]): string[] {
-  const summary = summarizeDiscoverDiagnostics(diagnostics);
+function formatCompileAgentErrorLines(diagnostics: readonly CompilerDiagnostic[]): string[] {
+  const summary = summarizeCompilerDiagnostics(diagnostics);
   const lines: string[] = [
     `Discovery failed with ${summary.errors} error(s) and ${summary.warnings} warning(s).`,
   ];
@@ -178,10 +190,16 @@ function formatCompileAgentErrorLines(diagnostics: readonly DiscoverDiagnostic[]
 
   for (const diagnostic of diagnostics) {
     lines.push(`- ${formatDiagnosticSeverity(diagnostic.severity)}: ${diagnostic.message}`);
-    lines.push(`  source: ${diagnostic.sourcePath}`);
+    lines.push(`  source: ${formatDiagnosticSources(diagnostic)}`);
   }
 
   return lines;
+}
+
+function formatDiagnosticSources(diagnostic: CompilerDiagnostic): string {
+  return diagnostic.sources
+    .map((source) => source.sourcePath ?? source.logicalPath ?? source.sourceId ?? source.nodeId)
+    .join(", ");
 }
 
 function formatDiagnosticSeverity(severity: DiscoverDiagnostic["severity"]): string {

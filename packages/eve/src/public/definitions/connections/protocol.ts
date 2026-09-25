@@ -1,4 +1,4 @@
-import type { ConnectionProtocol } from "#runtime/connections/types.js";
+import type { ConnectionProtocol } from "#shared/connection-types.js";
 
 /**
  * Cross-instance symbol marking which protocol a connection definition
@@ -24,11 +24,17 @@ export function stampConnectionProtocol(definition: object, protocol: Connection
  * marker existed continue to compile as MCP connections.
  */
 export function readConnectionProtocol(definition: unknown): ConnectionProtocol {
-  if (typeof definition === "object" && definition !== null && PROTOCOL_KEY in definition) {
-    const stamped = (definition as Record<symbol, ConnectionProtocol | undefined>)[PROTOCOL_KEY];
-    if (stamped !== undefined) {
-      return stamped;
-    }
+  return readStampedConnectionProtocol(definition) ?? "mcp";
+}
+
+/**
+ * Reads the protocol marker without applying the legacy MCP fallback.
+ * Dynamic connection resolvers use this to distinguish one branded
+ * connection definition from a map of branded definitions.
+ */
+export function readStampedConnectionProtocol(definition: unknown): ConnectionProtocol | undefined {
+  if (typeof definition !== "object" || definition === null || !(PROTOCOL_KEY in definition)) {
+    return undefined;
   }
-  return "mcp";
+  return (definition as Record<symbol, ConnectionProtocol | undefined>)[PROTOCOL_KEY];
 }

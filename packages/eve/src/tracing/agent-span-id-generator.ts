@@ -1,13 +1,16 @@
 import { createHash } from "node:crypto";
 
+import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
+
 /**
  * Id generator shared by `registerOTel` and the agent OTel provider. A span
- * whose lifetime crosses durable worker boundaries (`agent.turn`) is emitted
+ * whose lifetime crosses durable worker boundaries (`invoke_agent`) is emitted
  * at its terminal; priming the next span id lets that span carry the
  * pre-allocated id its descendants already parented to.
  */
 export class AgentSpanIdGenerator {
   #primedSpanId: string | undefined;
+  #primedTraceId: string | undefined;
 
   /** Reserves a span id for a span emitted later via {@link withSpanId}. */
   allocateSpanId(): string {
@@ -16,8 +19,12 @@ export class AgentSpanIdGenerator {
 
   /** Derives one span id for a replay-stable instrumentation event. */
   deriveSpanId(key: string): string {
-    const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
-    return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
+    return deriveAgentSpanId(key);
+  }
+
+  deriveTraceId(key: string): string {
+    const traceId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+    return /^0+$/u.test(traceId) ? "00000000000000000000000000000001" : traceId;
   }
 
   generateSpanId(): string {
@@ -30,6 +37,11 @@ export class AgentSpanIdGenerator {
   }
 
   generateTraceId(): string {
+    const primed = this.#primedTraceId;
+    if (primed !== undefined) {
+      this.#primedTraceId = undefined;
+      return primed;
+    }
     return randomHexId(32);
   }
 
@@ -42,6 +54,24 @@ export class AgentSpanIdGenerator {
       this.#primedSpanId = undefined;
     }
   }
+
+  withTraceId<T>(traceId: string, startSpan: () => T): T {
+    this.#primedTraceId = traceId;
+    try {
+      return startSpan();
+    } finally {
+      this.#primedTraceId = undefined;
+    }
+  }
+}
+
+export function deriveAgentSpanId(key: string): string {
+  const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
+  return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
+}
+
+export function deriveAgentActionSpanId(sessionId: string, turnId: string, callId: string): string {
+  return deriveAgentSpanId(`action:${actionIdempotencyKey(sessionId, turnId, callId)}`);
 }
 
 const HEX_DIGITS = "0123456789abcdef";

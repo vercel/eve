@@ -52,6 +52,23 @@ function callEvent(
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
+describe("discordChannel() audience classification", () => {
+  it.each(["private", "unknown"] as const)("classifies the %s audience", (audience) => {
+    const adapter = withState(getAdapter(discordChannel()), { audience });
+
+    expect(
+      adapter.instrumentation?.audience?.({
+        auth: null,
+        caller: { type: "anonymous" },
+        channel: { kind: "channel:discord" },
+        environment: "production",
+        mode: "conversation",
+        state: adapter.state,
+      }),
+    ).toBe(audience);
+  });
+});
+
 function captureAccessor(initialContinuationToken: string): {
   accessor: any;
   writes: Array<[string, unknown]>;
@@ -192,7 +209,13 @@ describe("discordChannel() inbound route", () => {
 
   it("dispatches verified application commands with Discord auth and state", async () => {
     const { privateKey, publicKeyHex } = testKeys();
-    const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
+    const channel = discordChannel({
+      credentials: { publicKey: publicKeyHex },
+      onCommand: (_ctx, interaction) => ({
+        auth: defaultDiscordAuth(interaction),
+        title: "Discord run",
+      }),
+    });
 
     const { response, send } = await firePost(
       channel,
@@ -204,6 +227,7 @@ describe("discordChannel() inbound route", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
     expect((input as { context: string[] }).context[0]).toContain("<discord_context>");
+    expect((input as { context: string[] }).context[0]).toContain("application_id: APP1");
     expect(String((input as { message: string }).message)).toContain("hello discord");
     expect(continuationToken).toBe("C01:I01");
     expect(input).toMatchObject({
@@ -220,6 +244,7 @@ describe("discordChannel() inbound route", () => {
         initialResponseSent: false,
         interactionToken: "tok",
       },
+      title: "Discord run",
     });
   });
 
@@ -465,7 +490,7 @@ describe("discordChannel() default event handlers", () => {
     );
   });
 
-  it("edits the original response and rekeys the session on the first post", async () => {
+  it("edits the original response and aliases the session on the first post", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ channel_id: "C01", id: "M01" }), {
         headers: { "content-type": "application/json" },

@@ -20,7 +20,7 @@ export const AGENT_SOURCE_MANIFEST_KIND = "eve-agent-discovery-manifest";
 /**
  * Current manifest schema version.
  */
-export const AGENT_SOURCE_MANIFEST_VERSION = 13;
+export const AGENT_SOURCE_MANIFEST_VERSION = 15;
 
 /**
  * Channel source reference preserved by the discovery manifest.
@@ -65,6 +65,10 @@ export type SkillSourceRef =
  * Tool source reference preserved by the discovery manifest.
  */
 export type ToolSourceRef = ModuleSourceRef;
+
+export interface MemorySourceRef extends ModuleSourceRef {
+  readonly slot: string;
+}
 
 /**
  * Recursive manifest entry for a local subagent package.
@@ -143,6 +147,11 @@ export type ExtensionSourceRef = ModuleSourceRef;
  * consuming agent, prefixing contributions with {@link namespace}.
  */
 export interface ResolvedExtensionMount {
+  /** Programmatic declaration used when the mount does not exist on disk. */
+  readonly programmaticDeclaration?: {
+    readonly logicalPath: string;
+    readonly sourceId: string;
+  };
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;
   /** Package specifier the mount imports (e.g. `@acme/crm`). */
@@ -155,6 +164,8 @@ export interface ResolvedExtensionMount {
   readonly sourceRoot: string;
   /** Discovered agent-shaped source manifest for the extension. */
   readonly manifest: AgentSourceManifest;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
   /**
    * Consumer-authored overrides discovered in the mount directory form
    * (`extensions/<ns>/{tools,connections,…}/`). Composed under the same
@@ -200,6 +211,7 @@ export interface AgentSourceManifest {
    */
   resolvedExtensions: ResolvedExtensionMount[];
   hooks: ModuleSourceRef[];
+  memories: MemorySourceRef[];
   lib: LibSourceRef[];
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
   /**
@@ -246,6 +258,7 @@ export interface CreateAgentSourceManifestInput {
   extensions?: readonly ExtensionSourceRef[];
   resolvedExtensions?: readonly ResolvedExtensionMount[];
   hooks?: readonly ModuleSourceRef[];
+  memories?: readonly MemorySourceRef[];
   lib?: readonly LibSourceRef[];
   /**
    * Optional package name read from the app root's package.json.
@@ -321,6 +334,7 @@ export function createAgentSourceManifest(
     extensions: [...(input.extensions ?? [])],
     resolvedExtensions: [...(input.resolvedExtensions ?? [])],
     hooks: [...(input.hooks ?? [])],
+    memories: [...(input.memories ?? [])],
     instructions: [...(input.instructions ?? [])],
     lib: [...(input.lib ?? [])],
     kind: AGENT_SOURCE_MANIFEST_KIND,
@@ -336,7 +350,6 @@ export function createAgentSourceManifest(
   if (input.configModule !== undefined) {
     manifest.configModule = input.configModule;
   }
-
   return manifest;
 }
 

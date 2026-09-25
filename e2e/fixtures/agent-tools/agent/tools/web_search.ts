@@ -1,3 +1,3 @@
-import { webSearch } from "eve/tools";
+import { webSearch } from "eve/tools/web_search";
 
 export default webSearch({ provider: "exa" });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   classifyModelCallError,
+  ContentFilteredModelResponseError,
   EmptyModelResponseError,
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
@@ -130,6 +131,20 @@ describe("EmptyModelResponseError", () => {
   });
 });
 
+describe("ContentFilteredModelResponseError", () => {
+  it("reports safe filtering diagnostics without classifying the response as retryable", () => {
+    const error = new ContentFilteredModelResponseError("gen_filtered");
+    expect(classifyModelCallError(error)).toBe("recoverable");
+    expect(extractModelCallErrorDetails(error)).toEqual({
+      finishReason: "content-filter",
+      generationId: "gen_filtered",
+    });
+    expect(extractModelCallErrorDetails(new ContentFilteredModelResponseError())).toEqual({
+      finishReason: "content-filter",
+    });
+  });
+});
+
 describe("normalizeModelStreamError", () => {
   it("retains a plain provider payload for classification", () => {
     const raw = { message: "Overloaded", type: "overloaded_error" };
@@ -206,6 +221,26 @@ describe("classifyModelCallError", () => {
       statusCode: 400,
       upstreamStatusCode: 400,
       upstreamType: "internal_server_error",
+    });
+
+    expect(classifyModelCallError(err)).toBe("recoverable");
+  });
+
+  it("returns recoverable when AI Gateway billing can be fixed outside the session", () => {
+    expect(
+      classifyModelCallError(Object.assign(new Error("payment required"), { statusCode: 402 })),
+    ).toBe("recoverable");
+  });
+
+  it.each([
+    "AI Gateway requires a valid credit card on file to service requests.",
+    "Model call failed: Free tier users do not have access to this model.",
+    "Model call failed: Free tier requests on this model are rate-limited.",
+  ])("returns recoverable for the AI Gateway plan error: %s", (message) => {
+    const err = Object.assign(new Error(message), {
+      name: "GatewayInvalidRequestError",
+      statusCode: 403,
+      type: "invalid_request_error",
     });
 
     expect(classifyModelCallError(err)).toBe("recoverable");

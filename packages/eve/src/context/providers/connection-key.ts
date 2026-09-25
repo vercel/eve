@@ -1,5 +1,5 @@
 import { ContextKey } from "#context/key.js";
-import type { ConnectionRegistry } from "#runtime/connections/types.js";
+import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 
 /**
  * Context key for the per-session connection registry.

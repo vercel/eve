@@ -1,4 +1,5 @@
 import { getVercelSandboxFetch } from "#execution/sandbox/bindings/vercel-credentials.js";
+import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import type {
   VercelCreateOptions,
   VercelModule,
@@ -25,7 +26,7 @@ export async function createVercelEveImageSandbox(input: {
   readonly createOptions: VercelSandboxCreateParams;
   readonly sandboxModule: VercelModule;
 }): Promise<VercelSandbox> {
-  const { image: _image, runtime: _runtime, source, ...createOptions } = input.createOptions;
+  const { image, runtime: _runtime, source, ...createOptions } = input.createOptions;
   const fetch = getVercelSandboxFetch(input.createOptions);
 
   /*
@@ -42,9 +43,7 @@ export async function createVercelEveImageSandbox(input: {
   return await input.sandboxModule.Sandbox.create({
     ...createOptions,
     source,
-    image: VERCEL_EVE_SANDBOX_IMAGE,
+    image: image ?? VERCEL_EVE_SANDBOX_IMAGE,
     fetch,
   });
 }
-
-const VERCEL_EVE_SANDBOX_IMAGE = "vercel/eve:latest";

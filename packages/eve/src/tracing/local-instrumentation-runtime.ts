@@ -1,10 +1,21 @@
 import {
   getInstrumentationRuntime,
   type InstrumentationRuntime,
-} from "#harness/instrumentation/runtime.js";
+} from "#instrumentation/runtime.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
-import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
-import { collectOtelPipeline, otel, otelIntegration } from "#tracing/otel-declaration.js";
+import {
+  createLocalTracesProcessor,
+  resolveLocalTracesExportPolicy,
+} from "#tracing/local-traces.js";
+import {
+  collectOtelPipeline,
+  managedOtelIntegration,
+  otel,
+  type TraceCapturePolicy,
+} from "#tracing/otel-declaration.js";
+
+/** Zero-config local tracing admits every session in the development worker. @internal */
+export const localTracePolicy: TraceCapturePolicy = () => true;
 
 /** Installs the zero-config local OTel runtime once in an `eve dev` worker. */
 export function installLocalInstrumentationRuntime(input: {
@@ -18,8 +29,11 @@ export function installLocalInstrumentationRuntime(input: {
   const spool = createLocalTracesProcessor({ appRoot: input.appRoot });
   return installInstrumentationRuntime({
     collected: collectOtelPipeline([
-      otel(),
-      otelIntegration({ ...resolveLocalTracesContent(), spanProcessors: [spool] }),
+      otel({ tracePolicy: localTracePolicy }),
+      managedOtelIntegration({
+        exportPolicy: resolveLocalTracesExportPolicy(),
+        spanProcessors: [spool],
+      }),
     ]),
     frameworkVersion: input.frameworkVersion,
     providers: [],

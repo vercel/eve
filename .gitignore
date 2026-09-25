@@ -16,10 +16,18 @@ coverage/
 __pycache__/
 
 # Test artifacts
+.eve-bench-runner/
+benchmark-results/
 .vitest/
+apps/benchmarks/experiments/
+apps/benchmarks/results/
+apps/benchmarks/evals/*/PROMPT.md
+apps/benchmarks/evals/*/package.json
+apps/benchmarks/evals/*/.eve-authoring-bootstrap.json
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
+packages/eve/src/extensions/code/extension/
 packages/eve-bench/.generated/
 playwright-report/
 test-results/
@@ -50,6 +58,7 @@ Thumbs.db
 
 # IDE/editor
 .codex/
+.githooks/
 .vscode/
 .idea/
 

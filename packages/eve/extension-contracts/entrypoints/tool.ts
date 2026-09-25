@@ -1,16 +1,27 @@
 export {
-  defineBashTool,
-  defineGlobTool,
-  defineGrepTool,
-  defineReadFileTool,
   defineTool,
-  defineWriteFileTool,
+  defineWorkflowTool,
   disableTool,
-  experimental_workflow,
   isDisabledToolSentinel,
-  isExperimentalWorkflowToolDefinition,
   toolOutput,
   toolOutputPart,
   toolResultFrom,
-  webSearch,
+  type WorkflowStepToolContext,
 } from "../../src/public/tools/index.ts";
+export {
+  agentRouter,
+  type AgentRouterInput,
+  type AgentRouterTool,
+} from "../../src/public/tools/agent-router.ts";
+export {
+  defaultWebSearch,
+  isWebSearchToolDefinition,
+  webSearch,
+} from "../../src/public/tools/web-search.ts";
+export {
+  workflow,
+  type WorkflowTool,
+  type WorkflowToolInput,
+  type WorkflowToolOptions,
+} from "../../src/public/tools/workflow.ts";
+export { evaluate } from "../../src/public/ai/index.ts";

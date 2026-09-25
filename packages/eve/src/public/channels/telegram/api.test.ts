@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   callTelegramApi,
+  editTelegramMessageText,
   sendTelegramChatAction,
   sendTelegramMessage,
   splitTelegramMessageText,
@@ -81,6 +82,25 @@ describe("sendTelegramMessage", () => {
     expect(posted).toMatchObject({ chatId: "-1001", id: "42" });
   });
 
+  it("includes Telegram's error description when delivery fails", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ description: "Bad Request: bot is not an administrator" }), {
+        status: 400,
+      }),
+    );
+
+    await expect(
+      sendTelegramMessage({
+        body: { text: "hello" },
+        chatId: -1001,
+        credentials: { botToken: "bot-token" },
+        fetch: fetchMock,
+      }),
+    ).rejects.toThrow(
+      "Telegram sendMessage failed with HTTP 400: Bad Request: bot is not an administrator",
+    );
+  });
+
   it("extracts recognized chat types from Telegram's response", async () => {
     for (const chatType of ["channel", "group", "private", "supergroup"] as const) {
       const fetchMock = vi.fn().mockResolvedValue(
@@ -123,6 +143,27 @@ describe("sendTelegramMessage", () => {
 
       expect(posted.chatType).toBeUndefined();
     }
+  });
+});
+
+describe("editTelegramMessageText", () => {
+  it("sends the replacement text and removes reply markup when omitted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })));
+
+    await editTelegramMessageText({
+      chatId: "C1",
+      credentials: { botToken: "bot-token" },
+      fetch: fetchMock,
+      messageId: "42",
+      text: "Notion connected.",
+    });
+
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      chat_id: "C1",
+      message_id: 42,
+      text: "Notion connected.",
+    });
   });
 });
 

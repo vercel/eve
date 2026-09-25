@@ -1,8 +1,4 @@
-import type { Optional } from "#shared/optional.js";
-import type {
-  SandboxDefinitionWithBootstrap as SharedSandboxDefinitionWithBootstrap,
-  SandboxDefinitionWithoutBootstrap as SharedSandboxDefinitionWithoutBootstrap,
-} from "#shared/sandbox-definition.js";
+import type { SandboxSelector } from "#shared/sandbox-environment.js";
 
 export type {
   SandboxCommandResult,
@@ -14,43 +10,31 @@ export type {
   SandboxRunOptions,
   SandboxSession,
   RuntimeSandboxSession,
+  RuntimeSandboxSessionFor,
   SandboxSpawnOptions,
   SandboxWriteBinaryFileOptions,
   SandboxWriteFileOptions,
   SandboxWriteTextFileOptions,
 } from "#shared/sandbox-session.js";
 export type {
-  SandboxBootstrapUseFn,
-  SandboxRevalidationKeyFn,
-  SandboxSessionUseFn,
-  SandboxBootstrapContext,
-  SandboxSessionContext,
-} from "#shared/sandbox-definition.js";
+  SandboxOpenArguments,
+  SandboxEnvironment,
+  SandboxSelector,
+  SandboxSelectorContext,
+} from "#shared/sandbox-environment.js";
 
-/**
- * The shape passed to {@link defineSandbox}: a discriminated union over
- * whether a `bootstrap` hook is present. `backend` is optional here (it is
- * required on the shared base): when omitted, eve substitutes
- * `defaultBackend()` at runtime. `BO`/`SO` type the options for the
- * bootstrap-use and session-use functions respectively.
- */
-export type SandboxDefinition<BO = Record<string, never>, SO = Record<string, never>> =
-  | Optional<SharedSandboxDefinitionWithBootstrap<BO, SO>, "backend">
-  | Optional<SharedSandboxDefinitionWithoutBootstrap<BO, SO>, "backend">;
+const SELECTOR = Symbol.for("eve.sandbox-selector");
+const PARENT = Symbol.for("eve.sandbox-parent-definition");
 
-/**
- * Defines the sandbox an agent (or subagent) runs in. Authored at the
- * path-derived location `agent/sandbox.ts` (or `agent/sandbox/sandbox.ts`
- * when paired with a `workspace/` folder); subagents use
- * `subagents/<name>/sandbox.ts`.
- *
- * Returns the definition unchanged: this is an identity helper that only
- * attaches types. `backend` is optional and defaults to `defaultBackend()`
- * at runtime. The `BO`/`SO` generics type the options accepted by the
- * `use()` calls inside `bootstrap` and `onSession` respectively.
- */
-export function defineSandbox<BO = Record<string, never>, SO = Record<string, never>>(
-  definition: SandboxDefinition<BO, SO>,
-): SandboxDefinition<BO, SO> {
+export function defineSandbox(definition: SandboxSelector): SandboxSelector {
+  Object.defineProperty(definition, SELECTOR, { value: true });
   return definition;
+}
+
+export function defineParentSandbox(): SandboxSelector {
+  const selector = defineSandbox(async () => {
+    throw new Error("Parent sandbox selection is resolved by eve.");
+  });
+  Object.defineProperty(selector, PARENT, { value: true });
+  return selector;
 }

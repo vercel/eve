@@ -9,12 +9,13 @@ export default defineEval({
     const first = await t.send(
       "Use the `get_io_count` tool and tell me the ioCallCount number from the result.",
     );
+    const session = first.session;
     first.expectOk();
     first.calledTool("get_io_count", {
       output: { ioCallCount: 1 },
     });
 
-    const second = await t.send(
+    const second = await session.send(
       "Use the `get_io_count` tool again right now and tell me the ioCallCount value from the result.",
     );
     second.calledTool("get_io_count", {

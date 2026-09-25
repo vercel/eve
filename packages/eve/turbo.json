@@ -2,7 +2,14 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["$TURBO_EXTENDS$"]
+      "dependsOn": ["$TURBO_EXTENDS$"],
+      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+    },
+    "build:types": {
+      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+    },
+    "typecheck": {
+      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
     }
   }
 }

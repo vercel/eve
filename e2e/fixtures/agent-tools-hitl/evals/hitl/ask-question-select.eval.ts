@@ -1,31 +1,32 @@
 import { defineEval } from "eve/evals";
 
 /**
- * HITL flow: the `ask_question` tool parks the turn with a select display,
- * and responding resumes it. Parking is server-side, so every park/resume
- * here is deterministic.
+ * HITL flow: the `ask_question` workflow tool asks with a select display, and
+ * responding resumes it. The model receives the chosen option's label.
  */
 export default defineEval({
   tags: ["real-model"],
-  description: "HITL smoke: ask-question select parks and resumes with the chosen option.",
+  description: "HITL smoke: ask-question select waits and resumes with the chosen option.",
   async test(t) {
-    await t.send(
+    const { session } = await t.send(
       [
         "Use the `ask_question` tool exactly once to ask me which color I prefer.",
-        "Set prompt to: 'Pick a color.'",
-        'Provide exactly two options: - id "red", label "Red" - id "blue", label "Blue"',
+        "Set the question to: 'Pick a color.'",
+        'Provide exactly two options, labeled "Red" and "Blue".',
         "Do not answer the question yourself, wait for my response.",
         "After I respond, reply confirming the color I chose by name.",
       ].join("\n"),
     );
 
-    t.requireInputRequest({
+    const request = session.requireInputRequest({
       display: (value) => value === undefined || value === "select",
-      optionIds: ["red", "blue"],
+      optionIds: (ids) => ids.length === 2,
       toolName: "ask_question",
     });
+    const blue = request.options?.find((option) => /\bblue\b/i.test(option.label));
+    if (blue === undefined) throw new Error("ask_question did not offer a Blue option.");
 
-    await t.respondAll("blue");
+    await session.respond([{ optionId: blue.id, requestId: request.requestId }]);
 
     t.succeeded();
     t.messageIncludes(/\bblue\b/i);

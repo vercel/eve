@@ -20,7 +20,7 @@ import {
   type RemoteAuthPreparation,
 } from "./remote-auth-result.js";
 import { toErrorMessage } from "#shared/errors.js";
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 /** Injectable entry point for the remote authentication flow. */
 export type RemoteAuthFlow = typeof runRemoteAuthFlow;
@@ -69,14 +69,14 @@ function loginFailure(result: LoginFlowResult): RemoteAuthPreparation | undefine
       return cancelled();
     case "cli-missing":
       return failed(
-        "The Vercel CLI is not installed. Install it with `npm i -g vercel@latest`, then retry /vc:login.",
+        "The Vercel CLI is not installed. Install it with `npm i -g vercel@latest`, then reconnect.",
       );
     case "failed":
-      return failed("Vercel login did not complete. Retry /vc:login.");
-    case "unavailable":
       return failed(
-        "Vercel could not verify your account. Check your connection, then retry /vc:login.",
+        "Vercel login did not complete. Connect your Vercel account when deploying the local project, then reconnect.",
       );
+    case "unavailable":
+      return failed("Vercel could not verify your account. Check your connection, then reconnect.");
   }
 }
 
@@ -124,7 +124,12 @@ export async function runRemoteAuthFlow(input: {
   try {
     // Authenticate first so the resolve runs under real credentials. When the
     // user is already logged in this is a no-op and shows no dialogue.
-    const login = await deps.runLoginFlow({ appRoot: workspaceRoot, prompter, signal });
+    const login = await deps.runLoginFlow({
+      appRoot: workspaceRoot,
+      prompter,
+      signal,
+      allowLogin: false,
+    });
     const loginOutcome = loginFailure(login);
     if (loginOutcome !== undefined) return loginOutcome;
     if (login.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });
@@ -132,19 +137,6 @@ export async function runRemoteAuthFlow(input: {
     // Prefer direct host resolution. If the active Vercel scope cannot see the
     // deployment, the picker supplies an explicit team scope.
     let resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
-    if (resolution.kind === "forbidden") {
-      const reauth = await deps.runLoginFlow({
-        appRoot: workspaceRoot,
-        force: true,
-        prompter,
-        signal,
-      });
-      const reauthOutcome = loginFailure(reauth);
-      if (reauthOutcome !== undefined) return reauthOutcome;
-      if (reauth.kind === "logged-in") completedMutations.push({ kind: "vercel-login" });
-      signal?.throwIfAborted();
-      resolution = await deps.resolveVercelDeployment({ workspaceRoot, host, signal });
-    }
     if (resolution.kind === "not-found") {
       try {
         const scope = await selectVercelDeploymentScope(
@@ -175,7 +167,7 @@ export async function runRemoteAuthFlow(input: {
         return cancelled(completedMutations);
       case "forbidden":
         return failed(
-          `Could not access ${host}. Re-authenticate (for example to complete a team's SSO), then retry /vc:login.`,
+          `Could not access ${host}. Check your team access and SSO, then reconnect.`,
           completedMutations,
         );
       case "not-found":

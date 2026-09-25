@@ -19,6 +19,8 @@ export interface RunEvalsOptions {
   readonly evaluations: readonly EveEval[];
   /** Run-wide configuration from `evals.config.ts` (defaults shared by every eval). */
   readonly config: EveEvalConfig;
+  /** Shared setup context; stays in the runner process. */
+  readonly setupContext?: unknown;
   readonly target: EveEvalTargetHandle;
   readonly client: Client;
   readonly appRoot: string;
@@ -33,7 +35,7 @@ export interface RunEvalsOptions {
   readonly maxConcurrency?: number;
   /** Overrides every eval's `timeoutMs` when set (CLI `--timeout`). */
   readonly timeoutMs?: number;
-  /** Receives `t.log` lines as evals run (used by `--verbose`). */
+  /** Receives verbose activity lines as evals run. */
   readonly onEvalLog?: (evalId: string, message: string) => void;
 }
 
@@ -118,6 +120,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
         const result = await executeEval({
           client,
           evaluation,
+          setupContext: options.setupContext,
           onLog:
             options.onEvalLog === undefined
               ? undefined
@@ -139,6 +142,12 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
           timeoutMs: options.timeoutMs,
         });
         results.push(result);
+
+        for (const session of result.result.sessions ?? []) {
+          if (session.sessionId === undefined) continue;
+          const role = session.primary ? "primary session" : "secondary session";
+          options.onEvalLog?.(evaluation.id, `workflow run id (${role}): ${session.sessionId}`);
+        }
 
         enqueueReporterCallback(evaluation, async (reporter) => {
           await reporter.onEvalComplete(result, {

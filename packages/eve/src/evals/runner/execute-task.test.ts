@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { ClientSession } from "#client/session.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
@@ -37,6 +42,147 @@ function createTestEval(test: (t: EveEvalContext) => unknown, id = "test-eval"):
 }
 
 describe("executeTask", () => {
+  it("creates accepted sessions without consuming events and reuses them for sends", async () => {
+    const server = createScriptedServer([
+      { sessionId: "session_1", events: [turnStarted("turn_0", TRACE_A), sessionWaiting()] },
+    ]);
+    let evalSignal: AbortSignal;
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if (new URL(String(request)).pathname === "/eve/v1/session") {
+        expect(init?.body).toBeUndefined();
+        expect(init?.signal).toBe(evalSignal);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer eval-token");
+        expect(new Headers(init?.headers).get("x-create")).toBe("yes");
+        return Response.json({ sessionId: "session_1" }, { status: 202 });
+      }
+      return await server.fetch(request, init);
+    });
+    const onSessionStart = vi.fn();
+    const outcome = await executeTask({
+      client: new Client({ host: target.url, auth: { bearer: "eval-token" } }),
+      target,
+      onSessionStart,
+      evaluation: createTestEval(async (t) => {
+        evalSignal = t.signal;
+        const session = await t.session({ headers: { "x-create": "yes" } });
+        expect(session.sessionId).toBe("session_1");
+        expect(session.state).toEqual({ sessionId: "session_1", streamIndex: 0 });
+        expect(session.events).toEqual([]);
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(onSessionStart).not.toHaveBeenCalled();
+        const turn = await session.send("Hello Alice");
+        expect(turn.session).toBe(session);
+        expect(turn.sessionId).toBe(session.sessionId);
+      }),
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(server.posts.map((post) => new URL(post.url).pathname)).toEqual([
+      "/eve/v1/session/session_1",
+    ]);
+    expect(outcome.result.sessions).toHaveLength(1);
+    expect(onSessionStart).toHaveBeenCalledOnce();
+  });
+
+  it("creates a fresh session for each send in one request and continues through the returned session", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "alice",
+        events: [turnStarted("turn_0"), messageCompleted("Alice", "turn_0"), sessionWaiting()],
+      },
+      {
+        sessionId: "bob",
+        events: [turnStarted("turn_0"), messageCompleted("Bob", "turn_0"), sessionWaiting()],
+      },
+      {
+        sessionId: "alice",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("Welcome back Alice", "turn_1"),
+          sessionWaiting(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const alice = await t.send("I am Alice");
+        const bob = await t.send("I am Bob");
+        expect(alice.session).not.toBe(bob.session);
+        const followup = await alice.session.send("Hello again");
+        expect(followup.session).toBe(alice.session);
+        expect(alice.message).toBe("Alice");
+        expect(bob.session.events).not.toContainEqual(
+          expect.objectContaining({
+            type: "turn.started",
+            data: expect.objectContaining({ turnId: "turn_1" }),
+          }),
+        );
+      }),
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(server.posts.map((post) => new URL(post.url).pathname)).toEqual([
+      "/eve/v1/session",
+      "/eve/v1/session",
+      "/eve/v1/session/alice",
+    ]);
+    expect(server.posts.map((post) => post.body)).toEqual([
+      { message: "I am Alice" },
+      { message: "I am Bob" },
+      { message: "Hello again", turnPolicy: "queue" },
+    ]);
+    expect(outcome.result.sessions).toHaveLength(2);
+    expect(outcome.result.finalMessage).toBe("Welcome back Alice");
+  });
+
+  it("creates independent sessions concurrently and does not expose failed creations", async () => {
+    const failed = new Error("Create failed");
+    let count = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      if (++count === 1) throw failed;
+      return Response.json({ sessionId: `session_${count}` }, { status: 202 });
+    });
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await expect(t.session()).rejects.toBe(failed);
+        const [first, second] = await Promise.all([t.session(), t.session()]);
+        expect(first.sessionId).not.toBe(second.sessionId);
+        expect(first.events).toEqual([]);
+        expect(second.events).toEqual([]);
+      }),
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.result.sessions?.map((session) => session.sessionId)).toEqual([
+      "session_2",
+      "session_3",
+    ]);
+  });
+
+  it("cleans up a prewarmed session when the eval times out before sending", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ sessionId: "idle-session" }, { status: 202 }),
+    );
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "idle-session",
+      status: "reset",
+    });
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.session();
+        await new Promise<void>(() => {});
+      }),
+      timeoutMs: 50,
+    });
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(reset).toHaveBeenCalledOnce();
+    expect((reset.mock.contexts[0] as ClientSession).state.sessionId).toBe("idle-session");
+  });
+
   it("settles when an eval ignores its timeout signal", async () => {
     const outcome = await executeTask({
       client: new Client({ host: target.url }),
@@ -52,6 +198,75 @@ describe("executeTask", () => {
     });
 
     expect(outcome.error).toMatch(/timed out|timeout/i);
+  });
+
+  it("resets each distinct known session after a configured timeout", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "ignored-by-runner",
+      status: "reset",
+    });
+    let evalSignal: AbortSignal | undefined;
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        evalSignal = t.signal;
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("shared-root");
+        t.target.watchTurn("other-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(reset).toHaveBeenCalledTimes(2);
+    expect(
+      reset.mock.contexts.map((session) => (session as ClientSession).state.sessionId),
+    ).toEqual(["shared-root", "other-root"]);
+    for (const [options] of reset.mock.calls) {
+      expect(options).toMatchObject({ reason: "Eval timed out", signal: expect.any(AbortSignal) });
+      expect(options?.signal).not.toBe(evalSignal);
+      expect(options?.signal?.aborted).toBe(false);
+    }
+  });
+
+  it("does not run timeout cleanup for an ordinary eval failure", async () => {
+    const reset = vi.spyOn(ClientSession.prototype, "reset").mockResolvedValue({
+      previousSessionId: "known-root",
+      status: "reset",
+    });
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval((t) => {
+        t.target.watchTurn("known-root");
+        throw new Error("eval failed");
+      }, "failure-with-timeout-configured"),
+      timeoutMs: 1_000,
+    });
+
+    expect(outcome.error).toBe("eval failed");
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it("preserves the timeout verdict and appends cleanup failures", async () => {
+    vi.spyOn(ClientSession.prototype, "reset").mockRejectedValue(new Error("cleanup exploded"));
+
+    const outcome = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        t.target.watchTurn("known-root");
+        await new Promise<void>(() => {});
+      }, "timeout-cleanup-failure"),
+      timeoutMs: 1,
+    });
+
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(outcome.error).toContain("Eval timeout cleanup failed: cleanup exploded");
   });
 
   it("exposes a sleep helper with a one-second default", async () => {
@@ -106,8 +321,9 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const parked = await t.send("run pwd");
+        const session = parked.session;
         parked.calledTool("bash", { status: "pending", count: 1 });
-        const request = t.requireInputRequest({
+        const request = session.requireInputRequest({
           display: "confirmation",
           input: { command: "pwd" },
           optionIds: ["approve", "cancel"],
@@ -115,7 +331,7 @@ describe("executeTask", () => {
           toolName: "bash",
         });
         expect(request.requestId).toBe("approval_1");
-        const approved = await t.respondAll("approve");
+        const approved = await session.respondAll("approve");
         approved.calledTool("bash", { status: "completed", count: 1 });
         t.calledTool("bash", { status: "completed", count: 1 });
       }, "approve"),
@@ -158,8 +374,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        await t.send("first");
-        await t.send("second");
+        const { session } = await t.send("first");
+        await session.send("second");
       }, "trace-contexts"),
       onSessionStart,
     });
@@ -175,6 +391,53 @@ describe("executeTask", () => {
       { ...TRACE_A, primary: true, sessionId: "session_1" },
       { ...TRACE_B, primary: true, sessionId: "session_1" },
     ]);
+  });
+
+  it("exposes the session transcript after each turn", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageReceived("Remember marigold.", "turn_1"),
+          messageCompleted("I will remember marigold.", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          messageReceived("What word did I ask you to remember?", "turn_2"),
+          messageCompleted("marigold", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const { session } = await t.send("Remember marigold.");
+        expect(session.transcript).toBe(
+          "User:\nRemember marigold.\n\nAssistant:\nI will remember marigold.",
+        );
+
+        await session.send("What word did I ask you to remember?");
+        expect(session.transcript).toBe(
+          [
+            "User:\nRemember marigold.",
+            "Assistant:\nI will remember marigold.",
+            "User:\nWhat word did I ask you to remember?",
+            "Assistant:\nmarigold",
+          ].join("\n\n"),
+        );
+      }, "transcript"),
+    });
   });
 
   it("sends a single turn for input evals", async () => {
@@ -203,7 +466,7 @@ describe("executeTask", () => {
     expect(server.posts[0]?.body).toEqual({ message: "case prompt" });
   });
 
-  it("captures independent sessions created by newSession", async () => {
+  it("captures independent sessions created by send", async () => {
     const server = createScriptedServer([
       {
         sessionId: "primary",
@@ -218,6 +481,7 @@ describe("executeTask", () => {
         sessionId: "secondary",
         events: [
           turnStarted("turn_2"),
+          messageReceived("secondary", "turn_2"),
           messageCompleted("secondary done", "turn_2"),
           actionsRequested("turn_2", "get_weather"),
           turnCompleted("turn_2"),
@@ -227,18 +491,21 @@ describe("executeTask", () => {
     ]);
     vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
 
+    let secondaryTranscript: string | undefined;
     const { result } = await executeTask({
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
         await t.send("primary");
-        await t.newSession().send("secondary");
+        const { session: secondary } = await t.send("secondary");
+        secondaryTranscript = secondary.transcript;
       }, "multi-session"),
     });
 
     expect(result.sessionId).toBe("primary");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["primary", "secondary"]);
-    expect(result.events).toHaveLength(9);
+    expect(result.events).toHaveLength(10);
+    expect(secondaryTranscript).toBe("User:\nsecondary\n\nAssistant:\nsecondary done");
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
   });
 
@@ -270,7 +537,8 @@ describe("executeTask", () => {
       target,
       evaluation: createTestEval(async (t) => {
         const first = await t.send("first");
-        const second = await t.send("second");
+        const session = first.session;
+        const second = await session.send("second");
         expect(first.requireToolCall("alpha", { status: "pending" }).name).toBe("alpha");
         first.calledTool("alpha", { status: "pending", count: 1 });
         second.notCalledTool("alpha");
@@ -309,8 +577,7 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const session = t.newSession();
-        await session.send("first");
+        const { session } = await t.send("first");
         session.calledTool("alpha", { status: "pending", count: 1 });
         session.event("turn.started", { count: 1 });
         await session.send("second");
@@ -440,7 +707,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const parent = await t.start("delegate");
+        const conversation = await t.session();
+        const parent = await conversation.start("delegate");
         expect(parent.sessionId).toBe("parent-session");
 
         const called = await parent.waitForEvent("subagent.called", {
@@ -511,7 +779,8 @@ describe("executeTask", () => {
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
-        const live = await t.start("fail");
+        const session = await t.session();
+        const live = await session.start("fail");
         await expect(live.waitForEvent("actions.requested")).rejects.toThrow(/session\.failed/);
         await expect(live.result()).resolves.toMatchObject({ status: "failed" });
       }, "live-turn-failure"),
@@ -676,13 +945,16 @@ function createScriptedServer(
   } = {},
 ) {
   const pendingTurns = [...turns];
-  const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
+  const streamQueues = new Map<
+    string,
+    { events: readonly UnstampedMessageStreamEvent[]; deliveryId?: string }[]
+  >();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
 
   for (const stream of options.streams ?? []) {
     const queue = streamQueues.get(stream.sessionId) ?? [];
-    queue.push([...stream.events]);
+    queue.push({ events: stream.events });
     streamQueues.set(stream.sessionId, queue);
   }
 
@@ -707,6 +979,9 @@ function createScriptedServer(
         );
       }
 
+      if (method === "POST" && pathname === "/eve/v1/session" && init?.body === undefined) {
+        return Response.json({ sessionId: pendingTurns[0]?.sessionId }, { status: 202 });
+      }
       if (method === "POST") {
         const next = pendingTurns.shift();
         if (next === undefined) {
@@ -714,41 +989,50 @@ function createScriptedServer(
         }
 
         posts.push({ body: JSON.parse(String(init?.body)), method, url });
+        const deliveryId = `delivery_${posts.length}`;
         const queue = streamQueues.get(next.sessionId) ?? [];
-        queue.push([...next.events]);
+        queue.push({ events: next.events, deliveryId });
         streamQueues.set(next.sessionId, queue);
 
         return Response.json(
           {
             ok: true,
             sessionId: next.sessionId,
+            deliveryId,
           },
           { status: posts.length === 1 ? 202 : 200 },
         );
       }
 
       const sessionId = decodeURIComponent(new URL(url).pathname.split("/").at(-2) ?? "");
-      const events = streamQueues.get(sessionId)?.shift();
-      if (events === undefined) {
+      const stream = streamQueues.get(sessionId)?.shift();
+      if (stream === undefined) {
         return Response.json({ error: "No stream.", ok: false }, { status: 404 });
       }
 
-      return streamResponse(events);
+      return streamResponse(stream.events, stream.deliveryId);
     },
   };
 }
 
-function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function streamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  deliveryId?: string,
+): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of stampTestEvents(events)) {
+          if (deliveryId !== undefined) Object.assign(event.meta, { deliveryIds: [deliveryId] });
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -757,6 +1041,13 @@ function turnStarted(
   trace?: { readonly spanId: string; readonly traceFlags: number; readonly traceId: string },
 ): UnstampedMessageStreamEvent {
   return { data: { sequence: 0, trace, turnId }, type: "turn.started" };
+}
+
+function messageReceived(message: string, turnId: string): UnstampedMessageStreamEvent {
+  return {
+    data: { message, parts: [{ text: message, type: "text" }], sequence: 1, turnId },
+    type: "message.received",
+  };
 }
 
 function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
@@ -852,6 +1143,7 @@ function subagentCalled(
     data: {
       callId: "call_subagent",
       childSessionId,
+      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       sessionId: "parent-session",
       sequence: 1,
       name,

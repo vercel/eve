@@ -32,3 +32,13 @@ export interface InternalInstructionsDefinition {
   readonly name: string;
   readonly role: InstructionsRole;
 }
+
+export const INSTRUCTIONS_BRAND = Symbol.for("eve:instructions-brand");
+
+export function isBrandedInstructionsEntry(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as Record<symbol, unknown>)[INSTRUCTIONS_BRAND] === true
+  );
+}

@@ -26,7 +26,7 @@ const approvalHistory: ModelMessage[] = [
   },
 ];
 
-const questionHistory: ModelMessage[] = [
+const unrecoverableHistory: ModelMessage[] = [
   {
     content: [
       {
@@ -70,9 +70,9 @@ it("converts a stale approval into a non-authorizing user message", () => {
   );
 });
 
-it("converts an attributed stale question selection using its option label", () => {
+it("converts an attributed stale approval using its option label", () => {
   const result = convertStaleResponsesToUserMessage({
-    history: questionHistory,
+    history: approvalHistory,
     pendingRequestIds: new Set(),
     stepInput: {
       attributedInputResponses: [
@@ -83,7 +83,7 @@ it("converts an attributed stale question selection using its option label", () 
             principalId: "user-1",
             principalType: "user",
           },
-          response: { optionId: "candidate", requestId: "question-1" },
+          response: { optionId: "approve", requestId: "approval-1" },
         },
       ],
     },
@@ -94,17 +94,14 @@ it("converts an attributed stale question selection using its option label", () 
     throw new Error("Expected the stale response to be converted.");
   }
 
-  expect(result.displayMessage).toBe("Use the candidate");
-  expect(result.stepInput.message).toEqual(expect.stringContaining("Which context should I use?"));
-  expect(result.stepInput.message).toEqual(expect.stringContaining('"requestType": "question"'));
-  expect(result.stepInput.message).not.toEqual(
-    expect.stringContaining("This does not authorize an earlier action"),
-  );
+  expect(result.displayMessage).toBe("Approve");
+  expect(result.stepInput.attributedInputResponses).toBeUndefined();
+  expect(result.stepInput.message).toEqual(expect.stringContaining('"requestType": "approval"'));
 });
 
 it("keeps responses for pending requests structured while converting stale ones", () => {
   const result = convertStaleResponsesToUserMessage({
-    history: questionHistory,
+    history: unrecoverableHistory,
     pendingRequestIds: new Set(["question-2"]),
     stepInput: {
       inputResponses: [
@@ -219,7 +216,7 @@ it("converts remaining stale responses after the drop pass", () => {
     },
   });
   const result = convertStaleResponsesToUserMessage({
-    history: questionHistory,
+    history: unrecoverableHistory,
     pendingRequestIds,
     stepInput,
   });

@@ -82,6 +82,38 @@ export function moveRight(state: LineState): LineState {
     : { text: state.text, cursor: nextGraphemeBoundary(state.text, state.cursor) };
 }
 
+/** Moves to the beginning of the current or previous word (Alt+B). */
+export function moveWordBackward(state: LineState): LineState {
+  let cursor = state.cursor;
+  while (cursor > 0) {
+    const previous = previousGraphemeBoundary(state.text, cursor);
+    if (isWordCharacter(state.text.slice(previous, cursor))) break;
+    cursor = previous;
+  }
+  while (cursor > 0) {
+    const previous = previousGraphemeBoundary(state.text, cursor);
+    if (!isWordCharacter(state.text.slice(previous, cursor))) break;
+    cursor = previous;
+  }
+  return cursor === state.cursor ? state : { text: state.text, cursor };
+}
+
+/** Moves to the end of the current or next word (Alt+F). */
+export function moveWordForward(state: LineState): LineState {
+  let cursor = state.cursor;
+  while (cursor < state.text.length) {
+    const next = nextGraphemeBoundary(state.text, cursor);
+    if (isWordCharacter(state.text.slice(cursor, next))) break;
+    cursor = next;
+  }
+  while (cursor < state.text.length) {
+    const next = nextGraphemeBoundary(state.text, cursor);
+    if (!isWordCharacter(state.text.slice(cursor, next))) break;
+    cursor = next;
+  }
+  return cursor === state.cursor ? state : { text: state.text, cursor };
+}
+
 /** Moves the caret to the start of the line (Home / Ctrl+A). */
 export function moveHome(state: LineState): LineState {
   const cursor = logicalLineStart(state.text, state.cursor);
@@ -112,6 +144,14 @@ export function killToStart(state: LineState): LineState {
     text: state.text.slice(0, lineStart) + state.text.slice(state.cursor),
     cursor: lineStart,
   };
+}
+
+/** Deletes to the previous readline-style word boundary (Alt+Backspace). */
+export function deleteWordBackward(state: LineState): LineState {
+  const start = moveWordBackward(state).cursor;
+  if (start === state.cursor) return state;
+  const text = state.text.slice(0, start) + state.text.slice(state.cursor);
+  return { text, cursor: graphemeBoundaryAtOrAfter(text, start) };
 }
 
 /** Deletes the whitespace-delimited word before the caret (Ctrl+W). */
@@ -146,7 +186,7 @@ function logicalLineEnd(text: string, cursor: number): number {
 }
 
 /** Options for {@link applyLineEditorKey}. */
-interface LineEditorOptions {
+export interface LineEditorOptions {
   /** Single-line inputs flatten pasted newlines and ignore Shift+Enter. */
   readonly multiline?: boolean;
 }
@@ -172,9 +212,17 @@ export function applyLineEditorKey(
     case "delete":
       return deleteForward(state);
     case "left":
+    case "ctrl-b":
       return moveLeft(state);
     case "right":
+    case "ctrl-f":
       return moveRight(state);
+    case "alt-b":
+      return moveWordBackward(state);
+    case "alt-f":
+      return moveWordForward(state);
+    case "alt-backspace":
+      return deleteWordBackward(state);
     case "home":
     case "ctrl-a":
       return moveHome(state);
@@ -192,8 +240,98 @@ export function applyLineEditorKey(
   }
 }
 
+interface YankState {
+  readonly state: LineState;
+  readonly start: number;
+  readonly replacementEnd: number;
+  readonly ringIndex: number;
+}
+
+/** Session-local killed text shared by the TUI's line editors. */
+export class KillRing {
+  readonly #entries: string[] = [];
+  readonly #capacity: number;
+  #yank?: YankState;
+
+  constructor(capacity = 20) {
+    this.#capacity = capacity;
+  }
+
+  clear(): void {
+    this.#entries.length = 0;
+    this.#yank = undefined;
+  }
+
+  interruptYank(key: TerminalKey): void {
+    if (key.type !== "ctrl-y" && key.type !== "alt-y") this.#yank = undefined;
+  }
+
+  apply(state: LineState, key: TerminalKey, options?: LineEditorOptions): LineState | undefined {
+    if (key.type === "ctrl-y") return this.#yankLatest(state);
+    if (key.type === "alt-y") return this.#yankPrevious(state);
+
+    this.#yank = undefined;
+    const next = applyLineEditorKey(state, key, options);
+    if (next !== undefined) this.#record(killedText(state, next, key));
+    return next;
+  }
+
+  #record(text: string): void {
+    if (text.length === 0 || this.#capacity <= 0) return;
+    this.#entries.unshift(text);
+    if (this.#entries.length > this.#capacity) this.#entries.length = this.#capacity;
+  }
+
+  #yankLatest(state: LineState): LineState {
+    const text = this.#entries[0];
+    if (text === undefined) {
+      this.#yank = undefined;
+      return state;
+    }
+    const next = insert(state, text);
+    this.#yank = {
+      state: next,
+      start: state.cursor,
+      replacementEnd: state.cursor + text.length,
+      ringIndex: 0,
+    };
+    return next;
+  }
+
+  #yankPrevious(state: LineState): LineState {
+    const yank = this.#yank;
+    if (yank === undefined || this.#entries.length < 2 || state !== yank.state) return state;
+    const ringIndex = (yank.ringIndex + 1) % this.#entries.length;
+    const text = this.#entries[ringIndex]!;
+    const replacementEnd = yank.start + text.length;
+    const nextText = state.text.slice(0, yank.start) + text + state.text.slice(yank.replacementEnd);
+    const next = {
+      text: nextText,
+      cursor: graphemeBoundaryAtOrAfter(nextText, replacementEnd),
+    };
+    this.#yank = { state: next, start: yank.start, replacementEnd, ringIndex };
+    return next;
+  }
+}
+
+function killedText(before: LineState, after: LineState, key: TerminalKey): string {
+  switch (key.type) {
+    case "ctrl-k":
+      return before.text.slice(before.cursor, logicalLineEnd(before.text, before.cursor));
+    case "ctrl-u":
+    case "ctrl-w":
+      return before.text.slice(after.cursor, before.cursor);
+    default:
+      return "";
+  }
+}
+
 function isWhitespace(text: string): boolean {
   return /^\s+$/u.test(text);
+}
+
+function isWordCharacter(text: string): boolean {
+  return /^[\p{L}\p{M}\p{N}_]/u.test(text);
 }
 
 /**

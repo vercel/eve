@@ -11,6 +11,8 @@ export type RuntimeCompiledArtifactsSource =
  */
 export interface RuntimeBundledCompiledArtifactsSource {
   readonly kind: "bundled";
+  /** Stable app partition embedded by a production build for local providers. */
+  readonly sandboxScope?: string;
 }
 
 /**
@@ -27,6 +29,8 @@ export interface RuntimeDiskCompiledArtifactsSource {
    * emitted by the build.
    */
   readonly moduleMapLoaderPath?: string;
+  /** Stable app partition shared by production build preparation and runtime. */
+  readonly sandboxScope?: string;
   /**
    * Stable application root used for local sandbox template/session caches.
    * In development, `appRoot` can point at an immutable runtime snapshot
@@ -46,10 +50,10 @@ export interface RuntimeDiskCompiledArtifactsSource {
 /**
  * Creates the bundled compiled-artifact source.
  */
-export function createBundledRuntimeCompiledArtifactsSource(): RuntimeBundledCompiledArtifactsSource {
-  return {
-    kind: "bundled",
-  };
+export function createBundledRuntimeCompiledArtifactsSource(
+  sandboxScope?: string,
+): RuntimeBundledCompiledArtifactsSource {
+  return sandboxScope === undefined ? { kind: "bundled" } : { kind: "bundled", sandboxScope };
 }
 
 /**
@@ -61,11 +65,13 @@ export function createDiskRuntimeCompiledArtifactsSource(
     readonly durableReference?: "development-generation";
     readonly moduleMapLoaderPath?: string;
     readonly sandboxAppRoot?: string;
+    readonly sandboxScope?: string;
   } = {},
 ): RuntimeDiskCompiledArtifactsSource {
   if (
     options.moduleMapLoaderPath !== undefined ||
     options.sandboxAppRoot !== undefined ||
+    options.sandboxScope !== undefined ||
     options.durableReference !== undefined
   ) {
     return {
@@ -74,6 +80,7 @@ export function createDiskRuntimeCompiledArtifactsSource(
       kind: "disk",
       moduleMapLoaderPath: options.moduleMapLoaderPath,
       sandboxAppRoot: options.sandboxAppRoot,
+      sandboxScope: options.sandboxScope,
     };
   }
 

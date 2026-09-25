@@ -1,6 +1,6 @@
 import { defineEval } from "eve/evals";
 
-const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-5.6-sol";
+const model = process.env.EVE_E2E_MODEL ?? "openai/gpt-6-sol";
 
 export default defineEval({
   tags: ["real-model"],
@@ -9,10 +9,11 @@ export default defineEval({
     const first = await t.send(
       '[model: catalog] Reply with exactly the text "catalog one" and nothing else.',
     );
+    const session = first.session;
     first.expectOk();
     first.messageIncludes("catalog one");
 
-    const second = await t.send(
+    const second = await session.send(
       '[model: catalog] Reply with exactly the text "catalog two" and nothing else.',
     );
     second.expectOk();

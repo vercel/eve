@@ -20,6 +20,7 @@ import type {
 } from "#compiled/@chat-adapter/slack/webhook.js";
 
 import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { isObject } from "#shared/guards.js";
 
 /**
@@ -56,7 +57,11 @@ export interface SlackAttachment {
  * `onAppMention(ctx, message)`).
  */
 export interface SlackMessage {
-  /** The original Slack text (mrkdwn). */
+  /**
+   * The message body (mrkdwn). Usually the top-level Slack `text`; when
+   * that is empty or a short fallback, derived from Block Kit blocks and
+   * legacy attachments on the raw event.
+   */
   readonly text: string;
   /** {@link text} re-rendered as GFM markdown for the agent. */
   readonly markdown: string;
@@ -133,6 +138,7 @@ export interface SlackEventCallback {
   readonly team_id?: string;
   readonly authorizations?: readonly {
     readonly is_bot?: boolean;
+    readonly team_id?: string;
     readonly user_id?: string;
   }[];
   readonly event?: { readonly type?: string } & Record<string, unknown>;
@@ -199,6 +205,41 @@ export function slackEventBotUserId(envelope: SlackEventCallback): string | unde
   return authorization?.user_id;
 }
 
+/**
+ * Returns the receiving bot user id that is safe to expose in model context.
+ * Authorizations explicitly marked as non-bot identify an installer, not the
+ * receiving bot. When Slack omits `is_bot`, an `app_mention` can still prove
+ * the identity by mentioning the same authorization user id in its text.
+ */
+export function slackEventReceivingBotUserId(envelope: SlackEventCallback): string | undefined {
+  const botUserId = slackEventBotUserId(envelope);
+  if (botUserId !== undefined) return botUserId;
+
+  const event = envelope.event;
+  const text = typeof event?.text === "string" ? event.text : undefined;
+  if (event?.type !== "app_mention" || text === undefined) return undefined;
+  return envelope.authorizations?.find(
+    (entry) =>
+      entry.is_bot === undefined &&
+      typeof entry.user_id === "string" &&
+      text.includes(`<@${entry.user_id}>`),
+  )?.user_id;
+}
+
+/** Returns the workspace whose app installation authorized this event. */
+export function slackEventInstallationTeamId(envelope: SlackEventCallback): string | undefined {
+  const authorizations = envelope.authorizations ?? [];
+  const botAuthorization = authorizations.find(
+    (entry) => entry.is_bot === true && typeof entry.team_id === "string",
+  );
+  if (botAuthorization?.team_id !== undefined) return botAuthorization.team_id;
+  // Slack documents `app_mention`, which requires a bot user, with
+  // `is_bot: false`. The flag describes this authorization, not whether the
+  // app installation has a bot, so its team id remains valid token context.
+  // See https://docs.slack.dev/reference/events/app_mention.
+  return authorizations.find((entry) => typeof entry.team_id === "string")?.team_id;
+}
+
 /** Parses a Slack message event without applying bot or subtype policy. */
 export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
   if (envelope.type !== "event_callback") return null;
@@ -245,9 +286,10 @@ export function slackMessageFromWebhookPayload(
   }
 
   if (!payload.channelId || !payload.ts) return null;
+  const text = resolveSlackInboundMrkdwn(payload.text, payload.raw);
   return {
-    text: payload.text,
-    markdown: slackMrkdwnToGfm(payload.text),
+    text,
+    markdown: slackMrkdwnToGfm(text),
     ts: payload.ts,
     threadTs: payload.threadTs,
     channelId: payload.channelId,
@@ -266,7 +308,8 @@ function buildSlackMessage(
   const ts = typeof event.ts === "string" ? event.ts : "";
   if (!channelId || !ts) return null;
 
-  const text = typeof event.text === "string" ? event.text : "";
+  const topLevelText = typeof event.text === "string" ? event.text : "";
+  const text = resolveSlackInboundMrkdwn(topLevelText, event as Record<string, unknown>);
   const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : ts;
   const teamId = typeof envelopeTeamId === "string" ? envelopeTeamId : undefined;
 
@@ -360,10 +403,12 @@ function parsePayloadAttachments(files: readonly SlackFile[] | undefined): Slack
  * `SlackMessage` and is therefore trivially testable in isolation.
  */
 export interface SlackInboundContext {
+  readonly botUserId?: string;
   readonly userId: string;
   readonly userName?: string;
   readonly fullName?: string;
   readonly channelId: string;
+  readonly isMentioned?: boolean;
   readonly threadTs: string;
   readonly teamId?: string;
 }

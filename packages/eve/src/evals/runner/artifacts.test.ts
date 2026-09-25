@@ -70,14 +70,16 @@ describe("eval artifacts", () => {
         {
           assertions: [
             {
-              message: 'prompt: "Name the source."',
+              message: 'state: {"input":"Name the source.","output":"No source."}',
               metadata: {
-                criteria: "cites a source",
-                input: "Name the source.",
-                rationale: "No source was cited.",
+                question: { type: "boolean", instructions: "cites a source" },
+                state: { input: "Name the source.", output: "No source." },
+                answer: { type: "boolean", probability: 0 },
+                usageScope: "assertion",
               },
-              name: "judge.autoevals.closedQA",
+              name: "judge.boolean",
               passed: false,
+              errored: false,
               score: 0,
               severity: "soft",
               threshold: 0.8,
@@ -132,16 +134,18 @@ function judgedSummary(): EveEvalRunSummary {
     id: "quality/source",
     assertions: [
       {
-        name: "judge.autoevals.closedQA",
+        name: "judge.boolean",
         score: 0,
         severity: "soft",
         threshold: 0.8,
         passed: false,
-        message: 'prompt: "Name the source."',
+        errored: false,
+        message: 'state: {"input":"Name the source.","output":"No source."}',
         metadata: {
-          criteria: "cites a source",
-          input: "Name the source.",
-          rationale: "No source was cited.",
+          question: { type: "boolean", instructions: "cites a source" },
+          state: { input: "Name the source.", output: "No source." },
+          answer: { type: "boolean", probability: 0 },
+          usageScope: "assertion",
         },
       },
     ],

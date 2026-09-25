@@ -1,4 +1,6 @@
 import { type Command, InvalidArgumentError } from "#compiled/commander/index.js";
+import type { CliApplicationContext } from "#cli/application-command.js";
+import { agentCommand } from "#cli/agent-command.js";
 import {
   parseDevelopmentHeaderOption,
   resolveDevelopmentUrlTarget,
@@ -37,7 +39,7 @@ interface InvokeCommandLogger {
 
 /** Registers the invoke command with lazily loaded production dependencies. */
 export function registerRuntimeInvokeCommand(input: {
-  readonly appRoot: string;
+  readonly applicationContext: CliApplicationContext;
   readonly logger: InvokeCommandLogger;
   readonly program: Command;
   readonly runtime: Partial<InvokeCliRuntimeDependencies>;
@@ -46,7 +48,7 @@ export function registerRuntimeInvokeCommand(input: {
     ...input,
     deps: {
       loadEnvironment: async (root) =>
-        (await import("#cli/dev/environment.js")).loadDevelopmentEnvironmentFiles(root),
+        await (await import("#cli/dev/environment.js")).loadDevelopmentEnvironmentFiles(root),
       runInvoke: async (invokeInput) =>
         await (input.runtime.runInvoke ?? (await import("./invoke.js")).runInvoke)(invokeInput),
       startHost: async (root) =>
@@ -60,13 +62,15 @@ export function registerRuntimeInvokeCommand(input: {
 
 /** Registers the non-interactive invoke command. */
 export function registerInvokeCommand(input: {
-  readonly appRoot: string;
+  readonly applicationContext: CliApplicationContext;
   readonly deps: InvokeCommandDependencies;
   readonly logger: InvokeCommandLogger;
   readonly program: Command;
 }): void {
-  input.program
-    .command("invoke")
+  agentCommand(input.program.command("invoke"), input.applicationContext, (command) => {
+    const options = command.opts<InvokeCliOptions>();
+    return options.url === undefined && options.jsonSchema !== true;
+  })
     .description("Invoke an eve agent without a terminal UI.")
     .argument("[prompt]", "Prompt, follow-up message, or answer to a pending input")
     .option("-u, --url <url>", "Invoke an existing server URL", parseDevelopmentServerUrl)
@@ -84,7 +88,7 @@ export function registerInvokeCommand(input: {
 }
 
 async function runInvokeCommand(input: {
-  readonly appRoot: string;
+  readonly applicationContext: CliApplicationContext;
   readonly deps: InvokeCommandDependencies;
   readonly logger: InvokeCommandLogger;
   readonly options: InvokeCliOptions;
@@ -124,14 +128,14 @@ async function runInvokeCommand(input: {
   }
   const operation = resolveInvokeOperation({ previous, prompt: input.prompt });
 
-  await input.deps.loadEnvironment(input.appRoot);
+  await input.deps.loadEnvironment(input.applicationContext.root);
   if (remoteTarget !== undefined) {
     await executeWithSignals(
       input,
       {
         kind: "remote",
         serverUrl: remoteTarget.serverUrl,
-        workspaceRoot: input.appRoot,
+        workspaceRoot: input.applicationContext.root,
       },
       remoteTarget.headers,
       operation,
@@ -140,7 +144,7 @@ async function runInvokeCommand(input: {
     return;
   }
 
-  const server = await input.deps.startHost(input.appRoot);
+  const server = await input.deps.startHost(input.applicationContext.root);
   try {
     const handle = await server.start();
     await executeWithSignals(

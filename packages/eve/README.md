@@ -55,24 +55,24 @@ my-agent/
 
 Every authored directory has a typed helper. Import each from the matching subpath:
 
-| Helper                                                                                                              | Subpath                               | Authored Location                                |
-| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
-| `defineAgent(...)`                                                                                                  | `eve`                                 | `agent.ts`, `subagents/<id>/agent.ts`            |
-| `defineInstructions(...)`                                                                                           | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
-| `defineTool(...)`, `defineBashTool(...)`, `defineReadFileTool(...)`, `defineWriteFileTool(...)`, `disableTool(...)` | `eve/tools`                           | `tools/<name>.ts`                                |
-| `defineSkill(...)`, `getSkill(...)`                                                                                 | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
-| `defineHook(...)`                                                                                                   | `eve/hooks`                           | `hooks/<slug>.ts`                                |
-| `defineChannel(...)`, `POST`, `GET`                                                                                 | `eve/channels`                        | `channels/<name>.ts`                             |
-| `eveChannel(...)`, `slackChannel(...)`, `vercelOidc(...)`                                                           | `eve/channels/eve`, `/slack`, `/auth` | reused from `channels/<name>.ts`                 |
-| `defineSandbox(...)`                                                                                                | `eve/sandbox`                         | `sandbox.ts` (or `sandbox/sandbox.ts`)           |
-| `defineSchedule(...)`                                                                                               | `eve/schedules`                       | `schedules/<name>.ts` (or `schedules/<name>.md`) |
-| `defineEval(...)`, `defineEvalConfig(...)`                                                                          | `eve/evals`                           | `evals/<name>.eval.ts`, `evals/evals.config.ts`  |
+| Helper                                                          | Subpath                               | Authored Location                                |
+| --------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
+| `defineAgent(...)`                                              | `eve`                                 | `agent.ts`, `subagents/<id>/agent.ts`            |
+| `defineInstructions(...)`                                       | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
+| `defineTool(...)`, `defineDynamic(...)`, `disableTool(...)`     | `eve/tools`                           | `tools/<name>.ts`                                |
+| `bash`, `readFile`, `writeFile`, and other provided definitions | `eve/tools/<name>`                    | `tools/<name>.ts`                                |
+| `defineSkill(...)`                                              | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
+| `defineHook(...)`                                               | `eve/hooks`                           | `hooks/<slug>.ts`                                |
+| `defineChannel(...)`, `POST`, `GET`                             | `eve/channels`                        | `channels/<name>.ts`                             |
+| `eveChannel(...)`, `slackChannel(...)`, `vercelOidc(...)`       | `eve/channels/eve`, `/slack`, `/auth` | reused from `channels/<name>.ts`                 |
+| `defineSandbox(...)`                                            | `eve/sandbox`                         | `sandbox.ts` (or `sandbox/sandbox.ts`)           |
+| `defineSchedule(...)`                                           | `eve/schedules`                       | `schedules/<name>.ts` (or `schedules/<name>.md`) |
+| `defineEval(...)`, `defineEvalConfig(...)`                      | `eve/evals`                           | `evals/<name>.eval.ts`, `evals/evals.config.ts`  |
 
 Runtime accessors live on the subpath that owns the concern:
 
 - `getSession()` — current session, turn, auth, parent lineage (`eve/context`)
 - `getSandbox()` — live sandbox handle for the current agent (`eve/sandbox`)
-- `getSkill(identifier)` — handle for a named skill visible to the current agent (`eve/skills`)
 - `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
 
 The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api).
@@ -133,6 +133,7 @@ project or deploy the agent.
 
 CLI commands:
 
+- `eve` (including `npx eve`) — initialize the current directory, or start development in an eve project
 - `eve init <name>` — create a new agent
 - `eve info` — discovery results and compiled artifacts
 - `eve build` — compile `.eve/` and build the host output
@@ -154,6 +155,7 @@ These files ship inside the installed package at `node_modules/eve/docs/`:
 - [Getting Started](https://eve.dev/docs/getting-started) — install, scaffold, and run locally
 - [Project Layout](https://eve.dev/docs/getting-started#project-layout) — every authored directory in depth
 - [`agent.ts`](https://eve.dev/docs/agent-config) — agent config reference
+- [Automatic Model Selection](https://eve.dev/docs/guides/evaluate) — choose an agent model for each request
 - [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api) — complete `define*` and runtime helper reference
 - [Vercel Deployment](https://eve.dev/docs/guides/deployment/overview) — deploy to production
 

@@ -65,7 +65,6 @@ export async function materializeWorkspaceResources(input: {
     ...rootAgent,
     kind: input.manifest.kind,
     extensionMounts: input.manifest.extensionMounts,
-    subagentEdges: input.manifest.subagentEdges,
     subagents,
     version: input.manifest.version,
   };
@@ -95,6 +94,10 @@ async function materializeNode<TManifest extends CompiledAgentResources>(input: 
   await mkdir(nodeRoot, { recursive: true });
 
   const workspaceRoot = join(nodeRoot, RESOURCE_WORKSPACE_DIRECTORY);
+  await Promise.all([
+    mkdir(workspaceRoot, { recursive: true }),
+    mkdir(join(nodeRoot, RESOURCE_SKILLS_DIRECTORY), { recursive: true }),
+  ]);
   for (const workspace of input.manifest.sandboxWorkspaces) {
     await copyDirectoryContents({
       sourcePath: workspace.sourcePath,

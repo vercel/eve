@@ -1,12 +1,13 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import {
   readVercelProjectLink,
   type VercelProjectLink,
   VercelProjectLinkSchema,
 } from "#internal/vercel/project-link.js";
+import { readVercelResourceName } from "#internal/vercel/api-resource.js";
 import { captureVercel } from "./primitives/run-vercel.js";
 
 /** Link and production-deployment status for a Vercel project directory. */
@@ -137,11 +138,6 @@ export interface ProjectIdentity {
   teamName?: string;
 }
 
-interface VercelApiNamed {
-  name?: unknown;
-  slug?: unknown;
-}
-
 /** Reads a `name` (or `slug` fallback) off a Vercel API resource, or undefined. */
 async function fetchVercelName(
   apiPath: string,
@@ -155,10 +151,7 @@ async function fetchVercelName(
   });
   if (!result.ok) return undefined;
   try {
-    const parsed = JSON.parse(result.stdout) as VercelApiNamed;
-    if (typeof parsed.name === "string" && parsed.name.length > 0) return parsed.name;
-    if (typeof parsed.slug === "string" && parsed.slug.length > 0) return parsed.slug;
-    return undefined;
+    return readVercelResourceName(JSON.parse(result.stdout));
   } catch {
     return undefined;
   }

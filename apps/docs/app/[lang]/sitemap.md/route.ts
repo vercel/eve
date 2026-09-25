@@ -6,9 +6,6 @@ import { geistdocsSource } from "@/lib/geistdocs/source";
 import { integrationSource } from "@/lib/integrations/source";
 import { templateManifest } from "@/lib/templates/manifest";
 
-export const revalidate = false;
-export const dynamic = "error";
-
 const sitemapRoute = createSitemapMarkdownRoute({
   config,
   sources: [{ source: geistdocsSource }, { source: integrationSource }],

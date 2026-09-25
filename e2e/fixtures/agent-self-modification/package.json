@@ -1,0 +1,54 @@
+{
+  "name": "agent-self-modification",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e:prepare": "node scripts/prepare.mjs",
+    "build": "pnpm run e2e:prepare && eve build",
+    "dev": "pnpm run e2e:prepare && eve dev",
+    "start": "eve start",
+    "typecheck": "pnpm run e2e:prepare && eve build --skip-sandbox-prewarm && tsc",
+    "test:e2e": "pnpm run e2e:prepare && eve eval --strict",
+    "test:scenario": "node --test test/*.scenario.test.mjs"
+  },
+  "dependencies": {
+    "@eve-e2e/config": "workspace:*",
+    "@vercel/connect": "2.2.0",
+    "@workflow/world-postgres": "catalog:",
+    "eve": "workspace:*",
+    "just-bash": "3.1.0",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "e2e": {
+    "worlds": [],
+    "modelShards": [
+      {
+        "name": "repair",
+        "evals": [
+          "self-modification/offer-repair",
+          "self-modification/repair-order-total"
+        ]
+      },
+      {
+        "name": "registry",
+        "evals": [
+          "self-modification/add-agent-browser",
+          "self-modification/add-slack-channel"
+        ]
+      },
+      {
+        "name": "create",
+        "evals": [
+          "self-modification/create-background-replication-check",
+          "self-modification/create-shipping-quote",
+          "self-modification/create-incident-triage"
+        ]
+      }
+    ]
+  }
+}

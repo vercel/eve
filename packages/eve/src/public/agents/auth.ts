@@ -1,6 +1,6 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 
-import type { TokenValue } from "#client/types.js";
+import { type TokenValue, VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 
 /**
  * Outbound request auth hook for remote agent dispatch. Runs once per
@@ -26,18 +26,26 @@ export interface VercelOidcOptions {
 }
 
 /**
- * Returns an {@link OutboundAuthFn} that emits a `Bearer` Vercel OIDC token for
- * outbound remote-agent requests. Reads the token from the request context or
- * the `VERCEL_OIDC_TOKEN` environment variable (refreshed in development when
- * expired). Pass {@link VercelOidcOptions} to scope the refresh to a team or
- * project; defaults to `{}`.
+ * Returns an {@link OutboundAuthFn} that emits a Vercel OIDC token in both the
+ * bearer and trusted-identity-provider headers for outbound remote-agent
+ * requests. The bearer authenticates the eve route, while the trusted header
+ * passes Vercel Deployment Protection.
+ *
+ * Reads the token from the request context or the `VERCEL_OIDC_TOKEN`
+ * environment variable (refreshed in development when expired). Pass
+ * {@link VercelOidcOptions} to scope the refresh to a team or project; defaults
+ * to `{}`.
  */
 export function vercelOidc(options: VercelOidcOptions = {}): OutboundAuthFn {
-  return async () => ({
-    headers: {
-      authorization: `Bearer ${await getVercelOidcToken(options)}`,
-    },
-  });
+  return async () => {
+    const token = await getVercelOidcToken(options);
+    return {
+      headers: {
+        authorization: `Bearer ${token}`,
+        [VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER]: token,
+      },
+    };
+  };
 }
 
 /**

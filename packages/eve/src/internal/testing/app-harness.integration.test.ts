@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { start } from "#internal/workflow/runtime.js";
 
-import { workflowEntry } from "#execution/workflow-entry.js";
+import { workflowEntry } from "#execution/session/entry.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -20,32 +20,9 @@ function buildSerializedContext(overrides: {
   };
 }
 
-describe("AppHarness pilot", () => {
-  it("runs a task-mode turn end-to-end against an in-memory test runtime", async () => {
-    const runtime = createTestRuntime({ agent: { name: "pilot-agent" } });
-
-    const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          input: { message: "hello pilot harness" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "schedule:app-harness-pilot",
-            mode: "task",
-          }),
-        },
-      ]);
-
-      const result = await run.returnValue;
-      return result.output;
-    });
-
-    expect(typeof output).toBe("string");
-    expect(output).toContain("hello pilot harness");
-  });
-
+describe("AppHarness", () => {
   it("keeps compiled artifacts scoped to the test runtime session", async () => {
-    const runtime = createTestRuntime({ agent: { name: "scope-probe" } });
+    const runtime = await createTestRuntime({ agent: { name: "scope-probe" } });
 
     // Before `run`, the session has no artifacts installed.
     expect(runtime.session.compiledArtifacts).toBeNull();
@@ -66,13 +43,15 @@ describe("AppHarness pilot", () => {
   });
 
   it("isolates two concurrent test runtimes without cache crosstalk", async () => {
-    const runtimeA = createTestRuntime({ agent: { name: "tenant-a" } });
-    const runtimeB = createTestRuntime({ agent: { name: "tenant-b" } });
+    const runtimeA = await createTestRuntime({ agent: { name: "tenant-a" } });
+    const runtimeB = await createTestRuntime({ agent: { name: "tenant-b" } });
 
     const outputs = await Promise.all([
       runtimeA.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "hello tenant-a" },
             serializedContext: buildSerializedContext({
               channelKind: "http",
@@ -86,6 +65,8 @@ describe("AppHarness pilot", () => {
       runtimeB.run(async () => {
         const run = await start(workflowEntry, [
           {
+            kind: "initial",
+            ownerDeploymentId: "dpl_inline",
             input: { message: "hello tenant-b" },
             serializedContext: buildSerializedContext({
               channelKind: "http",

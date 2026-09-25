@@ -1,0 +1,15 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "dynamicTool",
+  "epoch": 42,
+  "sha256": "99c570c38501cfe569d29da9c636337e3d3646457cd168d8f1ee7f7631c6e425",
+  "exports": [
+    "DynamicToolEntry",
+    "DynamicToolEvents",
+    "DynamicToolResult",
+    "DynamicToolSet",
+    "autoModel",
+    "defineDurableCallback",
+    "defineDynamic"
+  ]
+}

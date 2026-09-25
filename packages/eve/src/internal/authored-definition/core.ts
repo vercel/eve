@@ -1,3 +1,4 @@
+import { isAgentReasoningDefinition } from "#internal/runtime-model.js";
 import type {
   AgentDefinition,
   AgentBuildDefinition,
@@ -6,6 +7,7 @@ import type {
 import type { ScheduleDefinition, ScheduleRunHandler } from "#public/definitions/schedule.js";
 import type { SkillDefinition, SkillFileContent } from "#public/definitions/skill.js";
 import {
+  expectBoolean,
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
@@ -14,12 +16,15 @@ import {
   expectString,
   getOptionalStringRecordProperty,
 } from "#internal/authored-module.js";
-import type { PublicAgentStaticModelDefinition } from "#shared/agent-definition.js";
+import {
+  AGENT_WORKFLOW_RETENTION_VALUES,
+  type PublicAgentStaticModelDefinition,
+} from "#shared/agent-definition.js";
 import {
   isDynamicSentinel,
   type DynamicEvents,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 type MutableDynamicEvents = {
@@ -48,6 +53,7 @@ export function normalizeAgentDefinition(
     [
       "build",
       "compaction",
+      "defaultTools",
       "description",
       "experimental",
       "limits",
@@ -56,6 +62,7 @@ export function normalizeAgentDefinition(
       "modelOptions",
       "outputSchema",
       "reasoning",
+      "tool",
     ],
     message,
   );
@@ -78,6 +85,10 @@ export function normalizeAgentDefinition(
 
   if (record.description !== undefined) {
     definition.description = expectString(record.description, message);
+  }
+
+  if (record.defaultTools !== undefined) {
+    definition.defaultTools = expectBoolean(record.defaultTools, message);
   }
 
   if (record.compaction !== undefined) {
@@ -111,6 +122,10 @@ export function normalizeAgentDefinition(
     definition.reasoning = normalizeAgentReasoningDefinition(record.reasoning, message);
   }
 
+  if (record.tool !== undefined) {
+    definition.tool = expectBoolean(record.tool, message);
+  }
+
   if (record.limits !== undefined) {
     definition.limits = normalizeAgentLimitsDefinition(record.limits, message);
   }
@@ -122,20 +137,8 @@ function normalizeAgentReasoningDefinition(
   value: unknown,
   message: string,
 ): NonNullable<NormalizedAgentDefinition["reasoning"]> {
-  const reasoning = expectString(value, message);
-
-  switch (reasoning) {
-    case "provider-default":
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return reasoning;
-    default:
-      throw new Error(message);
-  }
+  if (!isAgentReasoningDefinition(value)) throw new Error(message);
+  return value;
 }
 
 function normalizeAgentModelDefinition(
@@ -172,6 +175,16 @@ function expectPositiveIntegerOrFalse(value: unknown, message: string): number |
   return expectPositiveInteger(value, message);
 }
 
+function expectPositiveNumberOrFalse(value: unknown, message: string): number | false {
+  if (value === false) {
+    return false;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(message);
+  }
+  return value;
+}
+
 function normalizeAgentLimitsDefinition(
   value: unknown,
   message: string,
@@ -179,7 +192,12 @@ function normalizeAgentLimitsDefinition(
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["maxInputTokensPerSession", "maxOutputTokensPerSession", "sessionTimeoutMs"],
+    [
+      "maxInputTokensPerSession",
+      "maxOutputTokensPerSession",
+      "maxTokenCostUsdPerSession",
+      "sessionTimeoutMs",
+    ],
     message,
   );
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["limits"]>> = {};
@@ -199,6 +217,12 @@ function normalizeAgentLimitsDefinition(
   if (record.maxOutputTokensPerSession !== undefined) {
     normalizedDefinition.maxOutputTokensPerSession = expectPositiveIntegerOrFalse(
       record.maxOutputTokensPerSession,
+      message,
+    );
+  }
+  if (record.maxTokenCostUsdPerSession !== undefined) {
+    normalizedDefinition.maxTokenCostUsdPerSession = expectPositiveNumberOrFalse(
+      record.maxTokenCostUsdPerSession,
       message,
     );
   }
@@ -231,14 +255,43 @@ function normalizeAgentWorkflowDefinition(
   message: string,
 ): AgentWorkflowDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["world"], message);
+  expectOnlyKnownKeys(record, ["modelCallsPerStep", "retention", "world"], message);
   const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.modelCallsPerStep !== undefined) {
+    normalizedDefinition.modelCallsPerStep = expectPositiveInteger(
+      record.modelCallsPerStep,
+      message,
+    );
+  }
+
+  if (record.retention !== undefined) {
+    normalizedDefinition.retention = normalizeAgentWorkflowRetentionDefinition(
+      record.retention,
+      message,
+    );
+  }
 
   if (record.world !== undefined) {
     normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);
   }
 
   return normalizedDefinition;
+}
+
+function normalizeAgentWorkflowRetentionDefinition(
+  value: unknown,
+  message: string,
+): NonNullable<AgentWorkflowDefinition["retention"]> {
+  const match = AGENT_WORKFLOW_RETENTION_VALUES.find((accepted) => accepted === value);
+  if (match === undefined) {
+    const accepted = AGENT_WORKFLOW_RETENTION_VALUES.map((entry) => JSON.stringify(entry)).join(
+      " or ",
+    );
+    throw new Error(`${message} "experimental.workflow.retention" must be ${accepted}.`);
+  }
+
+  return match;
 }
 
 function normalizeAgentWorkflowWorldDefinition(
@@ -258,26 +311,8 @@ function normalizeAgentExperimentalDefinition(
   message: string,
 ): NonNullable<NormalizedAgentDefinition["experimental"]> {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(
-    record,
-    ["instrumentationProviders", "subagentPersistentSessions", "workflow"],
-    message,
-  );
+  expectOnlyKnownKeys(record, ["workflow"], message);
   const normalizedDefinition: Mutable<NonNullable<NormalizedAgentDefinition["experimental"]>> = {};
-
-  if (record.instrumentationProviders !== undefined) {
-    if (typeof record.instrumentationProviders !== "boolean") {
-      throw new Error(`${message} "experimental.instrumentationProviders" must be a boolean.`);
-    }
-    normalizedDefinition.instrumentationProviders = record.instrumentationProviders;
-  }
-
-  if (record.subagentPersistentSessions !== undefined) {
-    if (typeof record.subagentPersistentSessions !== "boolean") {
-      throw new Error(`${message} "experimental.subagentPersistentSessions" must be a boolean.`);
-    }
-    normalizedDefinition.subagentPersistentSessions = record.subagentPersistentSessions;
-  }
 
   if (record.workflow !== undefined) {
     normalizedDefinition.workflow = normalizeAgentWorkflowDefinition(record.workflow, message);

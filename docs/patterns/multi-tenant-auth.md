@@ -91,7 +91,7 @@ eve to require the authenticated user from route auth, key the step-local token
 cache by that user, and pass the projected principal into `getToken`:
 
 ```ts title="agent/lib/tenant-connection-auth.ts"
-import type { ConnectionPrincipal, NonInteractiveAuthorizationDefinition } from "eve/connections";
+import type { ConnectionAuthProvider, ConnectionPrincipal } from "eve/connections";
 import { tenantCredentials, type TenantService } from "./tenant-credentials";
 
 function requireTenantPrincipal(principal: ConnectionPrincipal): {
@@ -107,9 +107,9 @@ function requireTenantPrincipal(principal: ConnectionPrincipal): {
   return { tenantId, userId: principal.id };
 }
 
-export function tenantBearerAuth(service: TenantService): NonInteractiveAuthorizationDefinition {
+export function tenantBearerAuth(service: TenantService): ConnectionAuthProvider {
   return {
-    principalType: "user",
+    credentialOwner: "user",
     async getToken({ principal }) {
       const { tenantId, userId } = requireTenantPrincipal(principal);
       const credential = await tenantCredentials.getBearer(tenantId, service, { userId });

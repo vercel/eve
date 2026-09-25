@@ -70,9 +70,7 @@ export class TraceViewerSession {
   /**
    * Pending one-time preference for the current chat session. Trace ids are
    * provider-generated, so the session's trace is found by reading candidates
-   * newest-first and matching `sessionIds` — a windowed session resolves to
-   * its most recently active window, and a subagent session to the parent
-   * trace it recorded into.
+   * newest-first and matching its root conversation ID.
    */
   #preferSessionId?: string;
   #pollTimer?: ReturnType<typeof setInterval>;
@@ -288,7 +286,7 @@ export class TraceViewerSession {
     for (const entry of entries) {
       const trace = await this.#store.read(entry.traceId);
       if (this.#disposed) return undefined;
-      if (trace?.sessionIds.includes(sessionId)) return entry.traceId;
+      if (trace?.conversationIds.includes(sessionId)) return entry.traceId;
     }
     return undefined;
   }

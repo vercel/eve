@@ -1,5 +1,3 @@
-import { tool, type ToolSet } from "ai";
-
 import { createLogger } from "#internal/logging.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { passesToolFilter, resolveHeaders } from "#runtime/connections/mcp-client.js";
@@ -28,9 +26,9 @@ import type {
   ConnectionClient,
   ConnectionToolExecuteOptions,
   ConnectionToolMetadata,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import { isObject } from "#shared/guards.js";
-import { toInputSchema, type ToolSchema } from "#shared/tool-schema.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 const log = createLogger("runtime.connections.openapi-client");
@@ -38,7 +36,6 @@ const log = createLogger("runtime.connections.openapi-client");
 interface OpenApiToolCache {
   readonly metadata: readonly ConnectionToolMetadata[];
   readonly operations: ReadonlyMap<string, OpenApiOperation>;
-  readonly tools: ToolSet;
   readonly baseUrl: string;
 }
 
@@ -103,15 +100,10 @@ export class OpenApiConnectionClient implements ConnectionClient {
     return cache.metadata;
   }
 
-  async getTools(): Promise<ToolSet> {
-    const cache = await this.#ensureTools();
-    return cache.tools;
-  }
-
   async executeTool(
     toolName: string,
     args: unknown,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<OpenApiToolResult> {
     const cache = await this.#ensureTools();
     const operation = cache.operations.get(toolName);
@@ -121,7 +113,8 @@ export class OpenApiConnectionClient implements ConnectionClient {
       );
     }
     return this.#request(operation, cache.baseUrl, isObject(args) ? args : {}, {
-      abortSignal: options?.abortSignal,
+      abortSignal: options.abortSignal,
+      callId: options.callId,
     });
   }
 
@@ -160,17 +153,14 @@ export class OpenApiConnectionClient implements ConnectionClient {
 
     const metadata: ConnectionToolMetadata[] = [];
     const operationMap = new Map<string, OpenApiOperation>();
-    const tools: ToolSet = {};
     const providedArgumentNames = Object.keys(this.#connection.toolCall?.providedArguments ?? {});
 
     for (const operation of selected) {
-      const projectedInputSchema = omitProvidedArgumentsFromSchema(
-        operation.inputSchema,
-        providedArgumentNames,
-      );
-      let inputSchema: ToolSchema;
+      let inputSchema: JsonObject;
       try {
-        inputSchema = toInputSchema(projectedInputSchema);
+        inputSchema = parseJsonObject(
+          omitProvidedArgumentsFromSchema(operation.inputSchema, providedArgumentNames),
+        );
       } catch (error) {
         log.warn("omitting OpenAPI operation with an invalid input schema", {
           connectionName: this.#connection.connectionName,
@@ -183,20 +173,12 @@ export class OpenApiConnectionClient implements ConnectionClient {
       operationMap.set(operation.toolName, operation);
       metadata.push({
         description: operation.description,
-        inputSchema: projectedInputSchema,
-        name: operation.toolName,
-      });
-      tools[operation.toolName] = tool({
-        description: operation.description,
         inputSchema,
-        execute: async (input: unknown, toolOptions) =>
-          this.#request(operation, baseUrl, isObject(input) ? input : {}, {
-            abortSignal: toolOptions?.abortSignal,
-          }),
+        name: operation.toolName,
       });
     }
 
-    return { metadata, operations: operationMap, tools, baseUrl };
+    return { metadata, operations: operationMap, baseUrl };
   }
 
   /**
@@ -425,10 +407,11 @@ export class OpenApiConnectionClient implements ConnectionClient {
     operation: OpenApiOperation,
     baseUrl: string,
     args: Record<string, unknown>,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<OpenApiToolResult> {
     const resolvedArgs = await resolveProvidedArguments({
       args,
+      callId: options.callId,
       connection: this.#connection,
       toolName: operation.toolName,
     });

@@ -4,7 +4,7 @@ The weather-focused eve fixture. It backs the repo root `pnpm dev`, the
 bundle-analysis workflow, and manual smoke testing as a small representative
 eve app:
 
-- `agent/agent.ts` — model config (`openai/gpt-5.5` with adaptive
+- `agent/agent.ts` — model config (`openai/gpt-5.6-luna-fast` with adaptive
   thinking)
 - `agent/instructions.md` — the always-on instructions prompt
 - `agent/tools/get_weather.ts` — a typed weather lookup tool

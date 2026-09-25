@@ -39,7 +39,7 @@ let WARNED_ABOUT_TAG_FAILURE = false;
  * - `undefined` entries are dropped so callers can build attribute
  *   maps with optional fields (`$eve.subagent` is only present on
  *   subagent roots, for example).
- * - Numbers are stringified (the runtime stores all values as strings).
+ * - Numbers and booleans are stringified (the runtime stores all values as strings).
  * - Strings are truncated to {@link EVE_ATTRIBUTE_VALUE_MAX_BYTES} via
  *   {@link truncateForTag} so a long free-form value (e.g. `$eve.title`)
  *   can never trip the runtime's per-value byte budget.
@@ -60,8 +60,8 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
   }
 
   try {
-    // Import `@workflow/core` dynamically (matching `workflow-steps.ts`,
-    // `turn-workflow.ts`, etc.). A static import here would pull the
+    // Import `@workflow/core` dynamically (matching `session/turn-step.ts`,
+    // `session/entry.ts`, etc.). A static import here would pull the
     // compiled core into emit.js's static graph and defeat the dynamic
     // chunking those modules rely on — the build emits an
     // `INEFFECTIVE_DYNAMIC_IMPORT` warning and `bin-build-output` fails.

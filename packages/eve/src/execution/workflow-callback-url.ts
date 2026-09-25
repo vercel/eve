@@ -1,3 +1,4 @@
+import { joinEveRoutePath } from "#shared/eve-route-path.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -6,6 +7,11 @@ import {
 const PRODUCTION_ENVIRONMENT = "production";
 const VERCEL_PROTECTION_BYPASS_QUERY = "x-vercel-protection-bypass";
 const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
+const VERCEL_CALLBACK_HOST_ENVS = [
+  "VERCEL_URL",
+  "VERCEL_BRANCH_URL",
+  "VERCEL_PROJECT_PRODUCTION_URL",
+] as const;
 
 /**
  * Workflow metadata is deployment-specific, so on Vercel it can point at
@@ -56,7 +62,10 @@ export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
  * `new URL(path, base)` would drop for absolute paths.
  */
 export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
-  const url = new URL(`${baseUrl.replace(/\/$/, "")}${callbackPath}`);
+  const callback = new URL(callbackPath, "http://eve.local");
+  const url = new URL(baseUrl);
+  url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
+  url.search = callback.search;
 
   // https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
@@ -64,5 +73,24 @@ export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string)
     url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
   }
 
+  return url.toString();
+}
+
+/**
+ * Builds a callback to a remote task child without disclosing this deployment's
+ * protection bypass secret to an authored external origin.
+ */
+export function createRemoteTaskInputCallbackUrl(baseUrl: string, callbackPath: string): string {
+  const callback = new URL(callbackPath, "http://eve.local");
+  const url = new URL(baseUrl);
+  url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
+  url.search = callback.search;
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+  const isCurrentVercelHost = VERCEL_CALLBACK_HOST_ENVS.some(
+    (name) => process.env[name]?.trim().toLowerCase() === url.hostname.toLowerCase(),
+  );
+  if (bypassSecret && url.protocol === "https:" && isCurrentVercelHost) {
+    url.searchParams.set(VERCEL_PROTECTION_BYPASS_QUERY, bypassSecret);
+  }
   return url.toString();
 }

@@ -77,7 +77,7 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
   ask_question: {
     verb: "Ask",
     pastVerb: "Asked",
-    argKey: "prompt",
+    argKey: "question",
     singularNoun: "question",
     pluralNoun: "questions",
   },
@@ -122,6 +122,14 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     argKey: "filePath",
     singularNoun: "file",
     pluralNoun: "files",
+  },
+  task_cancel: {
+    verb: "Cancel",
+    pastVerb: "Cancelled",
+    argKey: "taskIds",
+    extractItem: taskIdsArg,
+    singularNoun: "task",
+    pluralNoun: "tasks",
   },
   web_fetch: {
     verb: "Fetch",
@@ -212,7 +220,6 @@ export function presentTool(
   context?: ToolPresentationContext,
 ): ToolPresentation {
   const baseName = toolBaseName(toolName);
-  if (baseName === "todo") return presentTodoTool(input);
   if (baseName === "write_file") return presentWriteFileTool(toolName, input, context);
   if (context?.isSubagent === true) {
     // Named subagent dispatch: the tool name is the delegation target; the
@@ -292,39 +299,18 @@ export function presentPreparingTool(
 }
 
 /**
- * Tools whose whole story renders through a dedicated surface — the pinned
- * todo panel, the question overlay — instead of a transcript tool block.
- * Both the preparing announcement and the full call must agree on this
- * set, or a panel-routed tool ghosts as a preparing block.
+ * Tools whose whole story renders through a dedicated surface — the question
+ * overlay — instead of a transcript tool block. Both the preparing
+ * announcement and the full call must agree on this set, or a panel-routed
+ * tool ghosts as a preparing block.
  */
 export function isPanelRoutedTool(toolName: string): boolean {
-  const baseName = toolBaseName(toolName);
-  return baseName === "todo" || baseName === "ask_question";
+  return toolBaseName(toolName) === "ask_question";
 }
 
 /** The tool's short name with any connection/server namespace stripped. */
 export function toolBaseName(toolName: string): string {
   return toolName.split(/[.:/]/u).at(-1) ?? toolName;
-}
-
-/**
- * `todo` writes the whole list (or reads it when `todos` is omitted), so its
- * call reads as list maintenance, not as one salient argument. The list body
- * stays behind the expanded `--tools full` view, like other builtin outputs.
- */
-function presentTodoTool(input: unknown): ToolPresentation {
-  const todos =
-    input !== null && typeof input === "object" && !Array.isArray(input)
-      ? (input as Record<string, unknown>)["todos"]
-      : undefined;
-  if (!Array.isArray(todos)) {
-    return { title: "Read todo list", subtitle: "", summarizeResult: () => undefined };
-  }
-  return {
-    title: "Update todo list",
-    subtitle: `${todos.length} task${todos.length === 1 ? "" : "s"}`,
-    summarizeResult: () => undefined,
-  };
 }
 
 /**
@@ -359,6 +345,16 @@ function webSearchActionArg(input: unknown): string | undefined {
  * renders verbatim in aggregated rows, so a model-controlled value must lose
  * its terminal controls here, not at the render call sites.
  */
+/** Joins a `taskIds: string[]` argument into one salient line. */
+function taskIdsArg(input: unknown): string | undefined {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const value = (input as Record<string, unknown>).taskIds;
+  if (!Array.isArray(value)) return undefined;
+  const ids = value.filter((id): id is string => typeof id === "string");
+  if (ids.length === 0) return undefined;
+  return salientLine(ids.join(", "));
+}
+
 function salientArg(input: unknown, key: string): string | undefined {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
   const value = (input as Record<string, unknown>)[key];

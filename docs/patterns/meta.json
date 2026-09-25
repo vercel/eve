@@ -2,9 +2,10 @@
   "title": "Patterns",
   "defaultOpen": false,
   "pages": [
-    "multi-tenant-memory",
     "dynamic-scheduling",
+    "durable-cross-channel-notifications",
     "multi-tenant-auth",
-    "multi-tenant-approvals"
+    "multi-tenant-approvals",
+    "../protocols/ucp"
   ]
 }

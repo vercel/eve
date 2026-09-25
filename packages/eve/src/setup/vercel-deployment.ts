@@ -1,6 +1,6 @@
 import { captureVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
 import type { VercelProjectReference } from "#setup/project-resolution.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import {
   isForbiddenApiFailure,

@@ -105,12 +105,13 @@ describe("Telegram context rendering", () => {
         chatId: "-1001",
         chatTitle: "Ops",
         chatType: "supergroup",
+        isMentioned: true,
         messageId: "10",
         messageThreadId: 7,
         userId: "42",
         username: "ada",
       }),
-    ).toContain("<telegram_context>\nresponse_medium: telegram");
+    ).toContain("is_mentioned: true");
   });
 
   it("renders chat and actor identity into the block", () => {

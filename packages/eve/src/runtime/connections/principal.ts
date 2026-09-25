@@ -12,29 +12,27 @@
 
 import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
-import { ConnectionAuthorizationFailedError } from "#public/connections/errors.js";
-import type { AuthorizationDefinition, ConnectionPrincipal } from "#runtime/connections/types.js";
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
+import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
 /**
  * Stable string key identifying one principal within a connection's
  * per-principal token cache.
  *
  * - `{ type: "app" }` → `"app"`. Shared across all sessions.
- * - `{ type: "user", issuer, id }` → `"user:${issuer}:${id}"`. The
- *   issuer prefix prevents collisions when the same `id` across
- *   identity providers (for example Slack `U123` vs Google `U123`)
- *   would otherwise alias to the same cache slot.
- * - `{ type: "user", id }` → `"user:${id}"`. This is the native
- *   Vercel Connect user projection.
+ * - `{ type: "user", issuer, id }` → `["user", issuer, id]` JSON.
+ * - `{ type: "user", id }` → `["user", null, id]` JSON. This is the
+ *   native Vercel Connect user projection.
+ *
+ * JSON tuple encoding preserves the boundaries between issuer and id, so
+ * user-provided separators and percent sequences cannot alias cache entries.
  */
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
     return "app";
   }
-  if (principal.issuer === undefined) {
-    return `user:${principal.id}`;
-  }
-  return `user:${principal.issuer}:${principal.id}`;
+  return JSON.stringify(["user", principal.issuer ?? null, principal.id]);
 }
 
 /**
@@ -124,7 +122,7 @@ export function resolveConnectionPrincipalFromAuth(
 function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
   return (
     current.authenticator === "oidc" &&
-    current.issuer?.startsWith("https://oidc.vercel.com/") === true &&
+    isVercelOidcIssuer(current.issuer) &&
     current.attributes.environment === "development" &&
     current.subject === current.attributes.user_id
   );

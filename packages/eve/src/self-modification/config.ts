@@ -1,0 +1,218 @@
+import type { SessionAuthContext } from "#channel/types.js";
+import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
+
+import { assertGitRef, assertRepositoryPart } from "./identifiers.js";
+
+/** Principal and channel that requested a deployed source modification. */
+export interface SelfModificationAuthorizationContext {
+  readonly channel: {
+    /** Channel adapter family, such as `"slack"` or `"http"`. */
+    readonly kind?: string;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  };
+  readonly principal: SessionAuthContext | null;
+}
+
+/** Decides whether a principal may use deployed self-modification. */
+export type SelfModificationAuthorization = (
+  context: SelfModificationAuthorizationContext,
+) => boolean | Promise<boolean>;
+
+export interface GitHubRepository {
+  readonly owner: string;
+  readonly repo: string;
+}
+
+export type GitHubCredentialCapability = "checkout" | "publish";
+
+export interface GitHubCredentialRequest {
+  readonly capability: GitHubCredentialCapability;
+  readonly repository: GitHubRepository;
+}
+
+/** Application-supplied GitHub credentials for deployed self-modification. */
+export interface GitHubCredentialProvider {
+  resolve(request: GitHubCredentialRequest): Promise<string>;
+}
+
+export interface SelfModificationConfig {
+  readonly local?: { readonly enabled?: boolean };
+  readonly deployed?: {
+    readonly source: {
+      readonly git: {
+        /** GitHub repository in github.com/owner/repository form. */
+        readonly repository: string;
+        /** Application directory relative to the repository root. */
+        readonly directory: string;
+      };
+    };
+    readonly target: { readonly branch: string };
+    /** Fail-closed policy for principals that may create draft proposals. */
+    readonly authorize: SelfModificationAuthorization;
+    readonly credentials?:
+      | GitHubCredentialProvider
+      | {
+          /**
+           * Self-hosted exception. Reads `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from
+           * the trusted deployment environment; never injects it into the sandbox.
+           */
+          readonly pat: true;
+        };
+  };
+}
+
+/** Values accepted by the self-modification extension mount. */
+export interface SelfModificationExtensionConfig extends SelfModificationConfig {
+  readonly model?: AgentStaticModelDefinition;
+  readonly reasoning?: AgentReasoningDefinition;
+}
+
+export interface ResolvedSelfModificationConfig {
+  readonly localEnabled: boolean;
+  readonly deployed?: ResolvedDeployedSelfModificationConfig;
+}
+
+export interface ResolvedDeployedSelfModificationConfig {
+  readonly authorize: SelfModificationAuthorization;
+  readonly credentials: ResolvedGitHubCredentials;
+  readonly directory: string;
+  readonly repository: GitHubRepository;
+  readonly targetBranch: string;
+}
+
+export type ResolvedGitHubCredentials =
+  | { readonly kind: "pat" }
+  | { readonly kind: "provider"; readonly provider: GitHubCredentialProvider };
+
+/** Defines the policy shared by the self-modification agent, sandbox, and extension. */
+export function defineSelfModificationConfig(
+  config: SelfModificationConfig = {},
+): SelfModificationConfig {
+  resolveSelfModificationConfig(config);
+  return config;
+}
+
+export function resolveSelfModificationConfig(
+  config: SelfModificationConfig = {},
+): ResolvedSelfModificationConfig {
+  if (!isRecord(config)) throw new Error("Self-modification configuration must be an object.");
+
+  const local = config.local;
+  if (local !== undefined && !isRecord(local)) {
+    throw new Error("Self-modification local must be an object.");
+  }
+  const localEnabled = local?.enabled ?? true;
+  if (typeof localEnabled !== "boolean") {
+    throw new Error("Self-modification local.enabled must be a boolean.");
+  }
+
+  const deployed = config.deployed;
+  if (deployed === undefined) return { localEnabled };
+  if (!isRecord(deployed)) throw new Error("Self-modification deployed must be an object.");
+  const { source, target, authorize, credentials } = deployed;
+  if (source === undefined || target === undefined || authorize === undefined) {
+    throw new Error(
+      "Self-modification deployed requires source, target, and authorization configuration.",
+    );
+  }
+  if (!isRecord(source)) throw new Error("Self-modification deployed.source must be an object.");
+  if (!isRecord(source.git)) {
+    throw new Error("Self-modification deployed.source.git must be an object.");
+  }
+  if (!isRecord(target)) throw new Error("Self-modification deployed.target must be an object.");
+  if (typeof authorize !== "function") {
+    throw new Error("Self-modification deployed.authorize must be a function.");
+  }
+
+  const { git } = source;
+  if (typeof git.repository !== "string" || typeof git.directory !== "string") {
+    throw new Error(
+      "Self-modification deployed.source.git.repository and deployed.source.git.directory must be strings.",
+    );
+  }
+  if (typeof target.branch !== "string") {
+    throw new Error("Self-modification deployed.target.branch must be a string.");
+  }
+  return {
+    deployed: {
+      authorize: authorize as SelfModificationAuthorization,
+      credentials: parseCredentials(credentials),
+      directory: parseDirectory(git.directory),
+      repository: parseGitHubRepository(git.repository),
+      targetBranch: parseBranch(target.branch),
+    },
+    localEnabled,
+  };
+}
+
+function parseCredentials(value: unknown): ResolvedGitHubCredentials {
+  if (!isRecord(value)) {
+    throw new Error(
+      "Self-modification deployed.credentials must explicitly configure a credential provider or the self-hosted PAT exception.",
+    );
+  }
+  const hasProvider = value.resolve !== undefined;
+  const hasPat = value.pat !== undefined;
+  if (hasProvider && hasPat) {
+    throw new Error(
+      "Self-modification deployed.credentials must configure either a credential provider or pat, not both.",
+    );
+  }
+  if (hasPat) {
+    if (value.pat !== true) {
+      throw new Error("Self-modification deployed.credentials.pat must be true.");
+    }
+    return { kind: "pat" };
+  }
+  if (!isGitHubCredentialProvider(value)) {
+    throw new Error(
+      "Self-modification deployed.credentials must be an object with a resolve function.",
+    );
+  }
+  return { kind: "provider", provider: value };
+}
+
+function isGitHubCredentialProvider(value: unknown): value is GitHubCredentialProvider {
+  return isRecord(value) && typeof value.resolve === "function";
+}
+
+function parseGitHubRepository(repository: string): GitHubRepository {
+  const match = /^github\.com\/([^/]+)\/([^/]+)$/u.exec(repository);
+  if (match?.[1] === undefined || match[2] === undefined) {
+    throw new Error(
+      "Self-modification deployed.source.git.repository must use github.com/owner/repo form.",
+    );
+  }
+  assertRepositoryPart(match[1], "repository owner");
+  assertRepositoryPart(match[2], "repository name");
+  return { owner: match[1], repo: match[2] };
+}
+
+function parseDirectory(directory: string): string {
+  if (
+    directory !== "." &&
+    (directory.length === 0 ||
+      directory.startsWith("/") ||
+      directory.includes("\\") ||
+      directory.split("/").some((part) => part === "" || part === "." || part === ".."))
+  ) {
+    throw new Error(
+      "Self-modification deployed.source.git.directory must be a safe repository-relative path.",
+    );
+  }
+  return directory;
+}
+
+function parseBranch(branch: string): string {
+  assertGitRef(branch, "target branch");
+  if (branch.startsWith("refs/")) {
+    throw new Error(
+      "Self-modification deployed.target.branch must be a branch name, not a full Git ref.",
+    );
+  }
+  return branch;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

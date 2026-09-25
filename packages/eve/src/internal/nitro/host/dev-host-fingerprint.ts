@@ -30,11 +30,11 @@ export async function computeDevelopmentHostFingerprint(
           sourceRoot: mount.sourceRoot,
         }))
         .sort((left, right) => left.sourceRoot.localeCompare(right.sourceRoot)),
-      sandboxBackends: [
+      sandboxProviders: [
         ...new Set(
           agentNodes
-            .map((node) => node.sandbox?.backendName)
-            .filter((backendName): backendName is string => backendName !== undefined),
+            .map((node) => node.sandbox?.providerName)
+            .filter((providerName): providerName is string => providerName !== undefined),
         ),
       ].sort((left, right) => left.localeCompare(right)),
     },
@@ -42,7 +42,12 @@ export async function computeDevelopmentHostFingerprint(
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),
     instrumentation: await readInstrumentationSource(host),
     workflow: {
-      enabled: agentNodes.some((node) => node.workflowTool !== undefined),
+      // Authored workflow bodies and step registrations are bundled into the
+      // host, so their sources are structural, not runtime, state.
+      authoredSources: host.generation.workflowSourceFingerprint ?? null,
+      enabled: agentNodes.some((node) =>
+        node.tools.some((tool) => tool.workflowProgram !== undefined),
+      ),
       world: manifest.config.experimental?.workflow?.world ?? "local",
     },
   };
@@ -51,8 +56,8 @@ export async function computeDevelopmentHostFingerprint(
 }
 
 async function readInstrumentationSource(host: PreparedDevelopmentApplicationHost): Promise<{
-  readonly kind: "directory" | "file";
-  readonly modules: readonly { readonly slot: string | null; readonly source: string }[];
+  readonly kind: "directory";
+  readonly modules: readonly { readonly slot: string; readonly source: string }[];
 } | null> {
   const paths = host.compiledArtifacts.instrumentationSourcePaths;
   const layout = host.compiledArtifacts.instrumentationLayout;
@@ -63,7 +68,7 @@ async function readInstrumentationSource(host: PreparedDevelopmentApplicationHos
   return {
     kind: layout.kind,
     modules: sources.map((source, index) => ({
-      slot: layout.kind === "directory" ? (layout.slots[index] ?? null) : null,
+      slot: layout.slots[index]!,
       source,
     })),
   };

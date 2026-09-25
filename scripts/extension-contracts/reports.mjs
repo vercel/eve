@@ -13,6 +13,7 @@ import {
   REPORT_ROOT,
   REPO_ROOT,
   collectExportNames,
+  publicSurfacePaths,
   toPosix,
 } from "./configuration.mjs";
 import { collectReportDeclarationNames } from "./compatibility.mjs";
@@ -60,9 +61,24 @@ async function rewriteDeclarationSpecifiers(declarationRoot) {
   }
 }
 
-async function emitDeclarations(tempRoot, { contractRoot, eveRoot }) {
+async function emitDeclarations(tempRoot, configuration, { contractRoot, eveRoot }) {
   const declarationRoot = join(tempRoot, "declarations");
   await mkdir(declarationRoot, { recursive: true });
+  const tsconfigPath = join(tempRoot, "tsconfig.json");
+  await writeFile(
+    tsconfigPath,
+    JSON.stringify({
+      extends: join(contractRoot, "tsconfig.json"),
+      include: [
+        join(contractRoot, "entrypoints/**/*.ts"),
+        ...Object.entries(configuration.contracts ?? {}).flatMap(([capability, contract]) =>
+          contract.supported
+            .filter((version) => version < contract.current)
+            .map((version) => join(contractRoot, "compatibility", capability, `v${version}.ts`)),
+        ),
+      ],
+    }),
+  );
   execFileSync(process.execPath, [join(eveRoot, "scripts/vendor-compiled.mjs")], {
     cwd: eveRoot,
     stdio: ["ignore", "pipe", "pipe"],
@@ -75,7 +91,7 @@ async function emitDeclarations(tempRoot, { contractRoot, eveRoot }) {
     [
       tsc,
       "-p",
-      join(contractRoot, "tsconfig.json"),
+      tsconfigPath,
       "--outDir",
       declarationRoot,
       "--declarationMap",
@@ -171,7 +187,10 @@ export async function generateCapabilityReports(
   await mkdir(cacheRoot, { recursive: true });
   const tempRoot = await mkdtemp(join(cacheRoot, "extension-contracts-"));
   try {
-    const declarationRoot = await emitDeclarations(tempRoot, { contractRoot, eveRoot });
+    const declarationRoot = await emitDeclarations(tempRoot, configuration, {
+      contractRoot,
+      eveRoot,
+    });
     const capabilities = Object.keys(configuration.current);
     const configs = [];
     for (const [capability, version] of Object.entries(configuration.current)) {
@@ -281,9 +300,16 @@ export async function checkCapabilityReports(configuration, update) {
   try {
     const reports = await generateCapabilityReports(configuration);
     for (const surface of PUBLIC_SURFACES) {
-      const publicSource = await readFile(join(EVE_ROOT, surface.path), "utf8");
-      const publicNames = collectExportNames(publicSource);
-      const publicValues = collectExportNames(publicSource, { valuesOnly: true });
+      const paths = publicSurfacePaths(surface);
+      const publicNames = new Set();
+      const publicValues = new Set();
+      for (const path of paths) {
+        const publicSource = await readFile(join(EVE_ROOT, path), "utf8");
+        for (const name of collectExportNames(publicSource)) publicNames.add(name);
+        for (const name of collectExportNames(publicSource, { valuesOnly: true })) {
+          publicValues.add(name);
+        }
+      }
       const tracedNames = new Set();
       for (const capability of surface.capabilities) {
         const report = reports.get(capability);
@@ -295,7 +321,7 @@ export async function checkCapabilityReports(configuration, update) {
         .sort();
       if (missingTypes.length > 0) {
         issues.push({
-          file: toPosix(relative(REPO_ROOT, join(EVE_ROOT, surface.path))),
+          file: toPosix(relative(REPO_ROOT, join(EVE_ROOT, paths[0]))),
           message: `Public extension types are not reachable from the ${surface.capabilities.join("/")} authoring roots: ${missingTypes.join(", ")}. Add only these standalone types to the appropriate capability entrypoint.`,
         });
       }

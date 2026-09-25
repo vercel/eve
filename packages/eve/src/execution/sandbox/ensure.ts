@@ -1,258 +1,306 @@
-import type { SandboxSession } from "#public/definitions/sandbox.js";
-import type {
-  SandboxBackend,
-  SandboxBackendCreateInput,
-  SandboxBackendHandle,
-  SandboxBackendTags,
-} from "#public/definitions/sandbox-backend.js";
-import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
-import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
+import { ensureDevelopmentSandboxesPrepared } from "#execution/sandbox/development-lazy-prewarm.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import { contextStorage } from "#context/container.js";
+import {
+  buildCallbackContext,
+  withRuntimeSandboxLifecycle,
+} from "#context/build-callback-context.js";
+import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
+import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
+import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import {
   getRuntimeCompiledArtifactsSandboxAppRoot,
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
-import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
-import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development-prewarm.js";
-import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
-import { waitForSandboxTemplatePrewarmLock } from "#execution/sandbox/template-prewarm-lock.js";
-import { buildCallbackContext } from "#context/build-callback-context.js";
-import { createRuntimeSandboxKeys } from "#runtime/sandbox/keys.js";
+import { loadSandboxPreparedArtifact } from "#runtime/sandbox/prepared-artifacts.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
-import { createRuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.js";
 import type { SandboxAccess, SandboxSessionState, SandboxState } from "#sandbox/state.js";
+import {
+  getSandboxEnvironmentRuntime,
+  runWithSandboxConstructorRuntime,
+} from "#shared/sandbox-environment.js";
+import {
+  isSandboxPreparedArtifact,
+  type SandboxDeleteOptions,
+  type SandboxProviderHandle,
+  type SandboxProviderRuntime,
+  type SandboxProviderSessionContext,
+} from "#shared/sandbox-provider.js";
+import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
+import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 
-/**
- * Input for creating or reattaching the live sandbox for one step execution.
- */
 export interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
+  readonly ownsSandbox?: boolean;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
-  readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
   readonly state: SandboxState | null;
-  readonly tags?: SandboxBackendTags;
 }
 
-/**
- * Creates or reattaches the live sandbox from the compiled agent bundle's
- * registry and persisted session state, returning a {@link SandboxAccess}
- * suitable for the runtime context.
- *
- * Every agent has exactly one sandbox. The sandbox carries its own
- * `SandboxBackend` value (resolved from the authored module or
- * substituted with `defaultSandbox()` when omitted), and the runtime
- * simply calls `backend.create(...)`.
- */
+interface OpenedSandbox {
+  readonly handle: SandboxProviderHandle;
+  readonly providerName: string;
+  readonly sandbox: RuntimeSandboxSession;
+}
+
 export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Promise<SandboxAccess> {
-  let initialized = input.state?.initialized ?? false;
-  let persistedSession: SandboxSessionState | null = input.state?.session ?? null;
+  let persisted: SandboxSessionState | null = input.state?.session ?? null;
+  let opened: OpenedSandbox | undefined;
+  let opening: Promise<SandboxProviderHandle> | undefined;
+  let requiring: Promise<SandboxProviderHandle> | undefined;
   const appRoot =
     getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
-
   const registered = input.registry.sandbox;
-  let handlePromise: Promise<SandboxBackendHandle | null> | undefined;
-
-  function getHandle(): Promise<SandboxBackendHandle | null> {
-    if (handlePromise !== undefined) {
-      return handlePromise;
-    }
-    handlePromise = createHandle().catch((error) => {
-      handlePromise = undefined;
-      throw error;
-    });
-    return handlePromise;
+  if (registered === null) {
+    return {
+      async captureState() {
+        return { session: persisted };
+      },
+      async get() {
+        return null;
+      },
+      async stop() {},
+    };
   }
 
-  async function createHandle(): Promise<SandboxBackendHandle | null> {
-    if (registered === null) {
-      return null;
+  async function open(
+    provider: SandboxProviderRuntime,
+    options: object | undefined,
+    environment: object,
+    session: SandboxProviderSessionContext["session"],
+  ): Promise<RuntimeSandboxSession> {
+    if (opening !== undefined) throw new Error("A sandbox definition can open only one sandbox.");
+    const inherited = registered.inheritance;
+    const definition = inherited?.definition ?? registered.definition;
+    if (definition.kind !== "independent")
+      throw new Error(`Sandbox "${definition.logicalPath}" has no environment.`);
+    if (environment !== definition.environment)
+      throw new Error(`Sandbox "${definition.logicalPath}" selected a different environment.`);
+    if (provider !== getSandboxEnvironmentRuntime(definition.environment))
+      throw new Error(`Sandbox "${definition.logicalPath}" selected a different provider.`);
+    if (persisted !== null) {
+      throw new Error(`Sandbox "${definition.logicalPath}" is already initialized.`);
     }
-    const definition = registered.definition;
-    const backend = definition.backend;
-    const templatePlan = createRuntimeSandboxTemplatePlan({
-      definition,
-      workspaceResourceRoot: registered.workspaceResourceRoot,
-    });
 
-    const keys = await createRuntimeSandboxKeys({
-      backendName: backend.name,
+    const artifactNodeId = inherited?.nodeId ?? input.nodeId;
+    const artifact = await loadSandboxPreparedArtifact({
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: input.nodeId,
-      sessionId: input.sessionId,
-      sourceId: definition.sourceId,
-      templatePlan,
+      nodeId: artifactNodeId,
+      providerName: provider.providerName,
     });
-
-    if (keys.templateKey !== null) {
-      await waitForDevelopmentSandboxPrewarm({
-        appRoot,
-        compiledArtifactsSource: input.compiledArtifactsSource,
-        log: (message) =>
-          logDevelopmentSandbox(
-            `eve: sandbox template "${formatNodeLabel(input.nodeId)}" (${backend.name}): ${message}`,
-          ),
-      });
-      await waitForSandboxTemplatePrewarmLock({
-        appRoot,
-        backendName: backend.name,
-        log: (message) =>
-          logDevelopmentSandbox(
-            `eve: sandbox template "${formatNodeLabel(input.nodeId)}" (${backend.name}): ${message}`,
-          ),
-        templateKey: keys.templateKey,
+    if (artifact === undefined) {
+      throw new SandboxTemplateNotProvisionedError({
+        providerName: provider.providerName,
+        templateKey: artifactNodeId,
       });
     }
 
-    // The session eve may reattach to: the persisted record is only
-    // meaningful when it names the sandbox this step derived. A rotated
-    // session key (the sandbox definition changed) means the backend
-    // provisions a fresh sandbox, so per-session initialization must run
-    // again even though the durable state says it already did.
-    const reattachSession =
-      persistedSession !== null &&
-      persistedSession.backendName === backend.name &&
-      persistedSession.sessionKey === keys.sessionKey
-        ? persistedSession
-        : null;
-    if (reattachSession === null) {
-      initialized = false;
-    }
-
-    const createInput: SandboxBackendCreateInput = {
-      existingMetadata: reattachSession?.metadata,
-      runtimeContext: { appRoot },
-      sessionKey: keys.sessionKey,
-      tags: input.tags,
-      templateKey: keys.templateKey,
+    const context: SandboxProviderSessionContext = {
+      host: createSandboxProviderHost(appRoot),
+      session,
+      storagePath: resolveSandboxCacheDirectory(appRoot),
     };
-
-    const handle = await withDevelopmentSandboxProgress(
-      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"...`,
-      `eve: opening sandbox session "${formatNodeLabel(input.nodeId)}" on backend "${backend.name}"`,
-      async () =>
-        await createBackendHandleWithPrewarmRetry({
-          appRoot,
-          backend,
-          compiledArtifactsSource: input.compiledArtifactsSource,
-          createInput,
-        }),
-    );
-    trackActiveSandboxHandle({
-      backendName: backend.name,
-      handle,
-      sessionKey: keys.sessionKey,
+    const createHandle = async () => {
+      const result = await provider.implementation.start(context, options, artifact);
+      if (!isSandboxPreparedArtifact(result.state)) {
+        throw new Error(
+          `Sandbox provider "${provider.providerName}" returned non-serializable session state.`,
+        );
+      }
+      persisted = {
+        providerName: provider.providerName,
+        state: result.state,
+        stateProtocolVersion: provider.stateProtocolVersion,
+      };
+      return result.handle;
+    };
+    opening = createHandle().catch((error: unknown) => {
+      opening = undefined;
+      throw error;
     });
 
-    if (!initialized) {
-      await runOnSession(async () => {
-        await definition.onSession?.({ ctx: buildCallbackContext(), use: handle.useSessionFn });
-      });
-      initialized = true;
-    }
+    const handle = await opening;
+    return installHandle(provider.providerName, handle);
+  }
 
+  function installHandle(
+    providerName: string,
+    handle: SandboxProviderHandle,
+  ): RuntimeSandboxSession {
+    const sandbox = withRuntimeSandboxLifecycle(
+      handle.sandbox,
+      (deleteOptions?: SandboxDeleteOptions) => handle.onSessionDelete(deleteOptions),
+      () => handle.onSessionStop(),
+    );
+    opened = { handle, providerName, sandbox };
+    return sandbox;
+  }
+
+  async function resumePersisted(
+    definition: Extract<typeof registered.definition, { readonly kind: "independent" }>,
+    session: SandboxProviderSessionContext["session"],
+  ): Promise<SandboxProviderHandle> {
+    if (persisted === null) throw new Error("Sandbox session state is missing.");
+    const provider = getSandboxEnvironmentRuntime(definition.environment);
+    if (persisted.providerName !== provider.providerName) {
+      throw new Error(
+        `Sandbox session state belongs to provider "${persisted.providerName}", not "${provider.providerName}".`,
+      );
+    }
+    if (persisted.stateProtocolVersion !== provider.stateProtocolVersion) {
+      throw new Error(
+        `Sandbox session state protocol ${persisted.stateProtocolVersion} is incompatible with provider "${provider.providerName}" protocol ${provider.stateProtocolVersion}.`,
+      );
+    }
+    const inherited = registered.inheritance;
+    const artifactNodeId = inherited?.nodeId ?? input.nodeId;
+    const artifact = await loadSandboxPreparedArtifact({
+      compiledArtifactsSource: input.compiledArtifactsSource,
+      nodeId: artifactNodeId,
+      providerName: provider.providerName,
+    });
+    if (artifact === undefined) {
+      throw new SandboxTemplateNotProvisionedError({
+        providerName: provider.providerName,
+        templateKey: artifactNodeId,
+      });
+    }
+    const context: SandboxProviderSessionContext = {
+      host: createSandboxProviderHost(appRoot),
+      session,
+      storagePath: resolveSandboxCacheDirectory(appRoot),
+    };
+    opening = provider.implementation
+      .resume(context, artifact, persisted.state)
+      .catch((error: unknown) => {
+        opening = undefined;
+        throw error;
+      });
+    const handle = await opening;
+    installHandle(provider.providerName, handle);
+    trackActiveSandboxHandle({
+      handle,
+      providerName: provider.providerName,
+      sessionId: input.sessionId,
+    });
     return handle;
   }
 
-  async function runOnSession(callback: () => Promise<void>): Promise<void> {
-    if (input.runOnSession !== undefined) {
-      await input.runOnSession(callback);
-      return;
+  async function resolveHandle(): Promise<SandboxProviderHandle> {
+    const inherited = registered.inheritance;
+    const definition = inherited?.definition ?? registered.definition;
+    if (definition.kind !== "independent")
+      throw new Error(`Sandbox "${definition.logicalPath}" has no resolved parent.`);
+
+    if (isEveDevEnvironment() && input.compiledArtifactsSource.kind === "disk") {
+      await ensureDevelopmentSandboxesPrepared({
+        compiledArtifactsSource: input.compiledArtifactsSource,
+        nodeId: inherited?.nodeId ?? input.nodeId,
+        providerName: getSandboxEnvironmentRuntime(definition.environment).providerName,
+      });
     }
-    await callback();
+
+    const activeSession =
+      contextStorage.getStore() === undefined
+        ? {
+            auth: { current: null, initiator: null },
+            id: input.sessionId,
+            turn: { id: "sandbox-initialization", sequence: 0 },
+          }
+        : buildCallbackContext().session;
+    const session = { ...activeSession, id: input.sessionId };
+
+    if (persisted !== null) {
+      return await resumePersisted(definition, session);
+    }
+
+    if (inherited !== undefined) {
+      await open(
+        getSandboxEnvironmentRuntime(definition.environment),
+        undefined,
+        definition.environment,
+        session,
+      );
+    } else {
+      try {
+        const selected = await runWithSandboxConstructorRuntime(
+          {
+            open: ({ environment, options, provider }) =>
+              open(provider, options, environment, session),
+          },
+          async () => definition.selector({ session }),
+        );
+        if (opened === undefined || selected !== opened.sandbox) {
+          throw new Error(`Sandbox "${definition.logicalPath}" must return the sandbox it opens.`);
+        }
+      } catch (error) {
+        const failed = opened?.handle;
+        opened = undefined;
+        opening = undefined;
+        persisted = null;
+        if (failed !== undefined) {
+          try {
+            await failed.onSessionDelete();
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              `Sandbox "${definition.logicalPath}" initialization and cleanup both failed.`,
+              { cause: error },
+            );
+          }
+        }
+        throw error;
+      }
+    }
+
+    if (opened === undefined)
+      throw new Error(`Sandbox "${definition.logicalPath}" did not open a provider handle.`);
+    trackActiveSandboxHandle({
+      handle: opened.handle,
+      providerName: opened.providerName,
+      sessionId: input.sessionId,
+    });
+    return opened.handle;
   }
+
+  function requireHandle(): Promise<SandboxProviderHandle> {
+    if (requiring !== undefined) return requiring;
+    requiring = resolveHandle().catch((error: unknown) => {
+      requiring = undefined;
+      throw error;
+    });
+    return requiring;
+  }
+
+  const activeDefinition = registered.inheritance?.definition ?? registered.definition;
 
   return {
+    environment: activeDefinition.kind === "independent" ? activeDefinition.environment : undefined,
     async captureState() {
-      if (handlePromise !== undefined) {
-        const handle = await handlePromise;
-        if (handle !== null) {
-          persistedSession = await handle.captureState();
-        }
-      }
-
-      return {
-        initialized,
-        session: persistedSession,
-      };
+      if (opening !== undefined) await opening;
+      return { session: persisted };
     },
-    async get(): Promise<SandboxSession | null> {
-      const handle = await getHandle();
-      return handle?.session ?? null;
+    async delete(deleteOptions) {
+      if (input.ownsSandbox === false)
+        throw new Error("Only the owning session can delete this sandbox.");
+      const current = await requireHandle();
+      await current.onSessionDelete(deleteOptions);
+      opened = undefined;
+      opening = undefined;
+      persisted = null;
+      requiring = undefined;
     },
-    async stop(): Promise<void> {
-      const handle = await getHandle();
-      if (handle === null) {
-        throw new Error("The sandbox is not available in the current authored runtime context.");
-      }
-      await handle.stop();
+    async get() {
+      await requireHandle();
+      return opened?.sandbox ?? null;
+    },
+    async stop() {
+      const current = await requireHandle();
+      await current.onSessionStop();
+      opened = undefined;
+      opening = undefined;
+      requiring = undefined;
     },
   };
-}
-
-async function createBackendHandleWithPrewarmRetry(input: {
-  readonly appRoot: string;
-  readonly backend: SandboxBackend;
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
-  readonly createInput: SandboxBackendCreateInput;
-}): Promise<SandboxBackendHandle> {
-  try {
-    return await input.backend.create(input.createInput);
-  } catch (error) {
-    if (
-      input.createInput.templateKey === null ||
-      input.compiledArtifactsSource.kind !== "disk" ||
-      !SandboxTemplateNotProvisionedError.is(error)
-    ) {
-      throw error;
-    }
-
-    await prewarmAppSandboxes({
-      appRoot: input.appRoot,
-      compiledArtifactsSource: input.compiledArtifactsSource,
-      log: (message) => logDevelopmentSandbox(message),
-    });
-    await waitForSandboxTemplatePrewarmLock({
-      appRoot: input.appRoot,
-      backendName: input.backend.name,
-      log: (message) => logDevelopmentSandbox(`eve: ${message}`),
-      templateKey: input.createInput.templateKey,
-    });
-    logDevelopmentSandbox("eve: sandbox template is ready; retrying sandbox creation...");
-    return await input.backend.create(input.createInput);
-  }
-}
-
-function logDevelopmentSandbox(message: string): void {
-  if (isEveDevEnvironment()) {
-    console.log(message);
-  }
-}
-
-async function withDevelopmentSandboxProgress<T>(
-  startMessage: string,
-  progressMessage: string,
-  callback: () => Promise<T>,
-): Promise<T> {
-  logDevelopmentSandbox(startMessage);
-  if (!isEveDevEnvironment()) {
-    return await callback();
-  }
-
-  const startedAt = Date.now();
-  const timer = setInterval(() => {
-    const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
-    logDevelopmentSandbox(`${progressMessage} (${elapsedSeconds}s elapsed)...`);
-  }, 5_000);
-  timer.unref?.();
-
-  try {
-    return await callback();
-  } finally {
-    clearInterval(timer);
-  }
-}
-
-function formatNodeLabel(nodeId: string): string {
-  return nodeId === "__root__" ? "root" : nodeId;
 }

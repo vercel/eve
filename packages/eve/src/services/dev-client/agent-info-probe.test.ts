@@ -6,40 +6,14 @@ import {
   type AgentInfoResult,
   type Client,
 } from "#client/index.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { probeAgentInfo } from "./agent-info-probe.js";
 
-const AGENT_INFO = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: { id: "gpt-5", routing: { kind: "gateway", target: "openai" } },
-    name: "Weather Agent",
-  },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-} satisfies AgentInfoResult;
+const AGENT_INFO = createTestAgentInfoResult({
+  modelId: "gpt-5",
+  name: "Weather Agent",
+}) satisfies AgentInfoResult;
 
 async function advanceRetry(): Promise<void> {
   await Promise.resolve();
@@ -48,6 +22,27 @@ async function advanceRetry(): Promise<void> {
 }
 
 describe("probeAgentInfo", () => {
+  it("bounds stalled inspection, aborts the request, and does not retry", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const info = vi.fn(async (options?: { signal?: AbortSignal }) => {
+        signal = options?.signal;
+        return await new Promise<AgentInfoResult>(() => {});
+      });
+      const probe = probeAgentInfo({ client: { info }, timeoutMs: 2000 });
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await probe).toMatchObject({ kind: "unavailable" });
+      expect(signal?.aborted).toBe(true);
+      expect(info).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries a transient server failure and returns inspection once the server is ready", async () => {
     vi.useFakeTimers();
     try {

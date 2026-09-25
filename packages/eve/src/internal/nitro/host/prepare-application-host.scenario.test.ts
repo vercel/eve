@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { defaultDevelopmentExtensions } from "#compiler/development-extensions.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   createApplicationBuildWorkspace,
@@ -77,6 +79,33 @@ describe("application host preparation", () => {
     }
   });
 
+  it("stages the bundled development extension subagent outside the eve workspace", async () => {
+    const { appRoot } = await createAppRoot("eve-bundled-dev-extension-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "Help Alice maintain her agent.",
+      },
+      packageName: "bundled-dev-extension",
+    });
+    const host = await prepareDevelopmentApplicationHost(appRoot, {
+      developmentExtensions: defaultDevelopmentExtensions(),
+    });
+    const manifest = compiledAgentManifestSchema.parse(
+      JSON.parse(
+        await readFile(
+          join(host.generation.runtimeAppRoot, ".eve", "compile", "compiled-agent-manifest.json"),
+          "utf8",
+        ),
+      ),
+    );
+    const subagent = manifest.subagents.find((node) => node.name === "self-modification__agent");
+    expect(subagent).toBeDefined();
+    expect(subagent!.agent.appRoot).toBe(
+      join(host.generation.runtimeAppRoot, "node_modules", "eve"),
+    );
+    expect(subagent!.agent.agentRoot.startsWith(`${subagent!.agent.appRoot}/`)).toBe(true);
+  });
+
   it("keeps Nitro host inputs outside retained runtime generations", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-stable-dev-host-artifacts-", {
       files: {
@@ -85,8 +114,9 @@ describe("application host preparation", () => {
       packageName: "stable-dev-host-artifacts",
     });
     const agentModulePath = join(agentRoot, "agent.mjs");
-    const instrumentationModulePath = join(agentRoot, "instrumentation.mjs");
+    const instrumentationModulePath = join(agentRoot, "instrumentation", "audit.mjs");
     await writeFile(agentModulePath, 'export default { model: "openai/gpt-5.4" };\n');
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(instrumentationModulePath, "export default {};\n");
 
     const firstHost = await prepareDevelopmentApplicationHost(appRoot);
@@ -109,7 +139,7 @@ describe("application host preparation", () => {
     );
     expect(firstHost.compiledArtifacts.bootstrapPath).not.toContain("/.eve/dev-runtime/snapshots/");
     expect(firstHost.compiledArtifacts.instrumentationSourcePaths).toEqual([
-      join(firstHostDirectory, "compiled-artifacts-instrumentation-source.mjs"),
+      join(firstHostDirectory, "compiled-artifacts-instrumentation-audit.mjs"),
     ]);
     expect(await readFile(firstBootstrapPath, "utf8")).not.toContain(
       normalizeEsmImportSpecifier(agentModulePath),

@@ -1,8 +1,11 @@
+import { MODEL_CONNECTION_ENV } from "#shared/model-helper.js";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
+import { findEveProjectRoot } from "#internal/eve-project-root.js";
 import { isObject } from "#shared/guards.js";
+import { readProviderSettingsSync } from "#setup/provider-settings.js";
 
 /**
  * Development environment files loaded by local CLI commands such as
@@ -21,6 +24,7 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
 }
 
 interface DevelopmentEnvironmentLoader {
+  readonly environmentRoot: string;
   reload(): void;
   stageReload(): DevelopmentEnvironmentReload;
 }
@@ -37,9 +41,9 @@ const developmentEnvironmentLoaders = new Map<string, DevelopmentEnvironmentLoad
  * application root, ordered from highest to lowest precedence.
  */
 export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
-  const resolvedAppRoot = resolve(appRoot);
-
-  return DEVELOPMENT_ENV_FILE_NAMES.map((fileName) => join(resolvedAppRoot, fileName));
+  return DEVELOPMENT_ENV_FILE_NAMES.map((fileName) =>
+    join(getDevelopmentEnvironmentLoader(appRoot).environmentRoot, fileName),
+  );
 }
 
 /**
@@ -50,8 +54,10 @@ export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
  * precedence. Variables supplied by env files are refreshed on subsequent
  * reloads so dev-mode file watching can pick up changed values.
  */
-export function loadDevelopmentEnvironmentFiles(appRoot: string): void {
-  getDevelopmentEnvironmentLoader(appRoot).reload();
+export async function loadDevelopmentEnvironmentFiles(appRoot: string): Promise<void> {
+  const resolvedAppRoot = resolve(appRoot);
+  const environmentRoot = await findEveProjectRoot(resolvedAppRoot);
+  getDevelopmentEnvironmentLoader(resolvedAppRoot, environmentRoot).reload();
 }
 
 export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {
@@ -62,40 +68,69 @@ export function readDevelopmentEnvironmentHostValues(
   appRoot: string,
 ): Readonly<Record<string, string | null>> {
   const values: Record<string, string | null> = {};
-  const fileValues = readDevelopmentEnvironmentValues(resolve(appRoot));
+  const fileValues = readDevelopmentEnvironmentValues(
+    getDevelopmentEnvironmentLoader(appRoot).environmentRoot,
+  );
+  const hostKeys = new Set(fileValues.keys());
 
-  for (const key of [...fileValues.keys()].sort((left, right) => left.localeCompare(right))) {
+  for (const key of [...hostKeys].sort((left, right) => left.localeCompare(right))) {
     values[key] = process.env[key] ?? null;
   }
 
   return values;
 }
 
-function getDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
+function getDevelopmentEnvironmentLoader(
+  appRoot: string,
+  environmentRoot?: string,
+): DevelopmentEnvironmentLoader {
   const resolvedAppRoot = resolve(appRoot);
   const existingLoader = developmentEnvironmentLoaders.get(resolvedAppRoot);
+  if (existingLoader !== undefined && environmentRoot === undefined) return existingLoader;
 
-  if (existingLoader !== undefined) {
-    return existingLoader;
-  }
+  const resolvedEnvironmentRoot = resolve(environmentRoot ?? resolvedAppRoot);
+  if (existingLoader?.environmentRoot === resolvedEnvironmentRoot) return existingLoader;
 
-  const loader = createDevelopmentEnvironmentLoader(resolvedAppRoot);
+  const loader = createDevelopmentEnvironmentLoader(resolvedAppRoot, resolvedEnvironmentRoot);
   developmentEnvironmentLoaders.set(resolvedAppRoot, loader);
   return loader;
 }
 
-function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
+function createDevelopmentEnvironmentLoader(
+  appRoot: string,
+  environmentRoot: string,
+): DevelopmentEnvironmentLoader {
   const protectedKeys = new Set(Object.keys(process.env));
   const managedValues = new Map<string, string>();
 
   const stageReload = (): DevelopmentEnvironmentReload => {
     const previousManagedValues = new Map(managedValues);
-    const nextValues = readDevelopmentEnvironmentValues(appRoot);
-    const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
+    const nextValues = readDevelopmentEnvironmentValues(environmentRoot);
+    const settings = readProviderSettingsSync(appRoot);
+    const affectedKeys = new Set([
+      ...managedValues.keys(),
+      ...nextValues.keys(),
+      MODEL_CONNECTION_ENV,
+      "EVE_MODEL_TEAM",
+      "EVE_MODEL_TEAM_NAME",
+      "EVE_MODEL_KEY_SOURCE",
+    ]);
     const previousEnvironment = new Map(
       [...affectedKeys].map((key) => [key, process.env[key]] as const),
     );
     let settled = false;
+    if (settings) process.env[MODEL_CONNECTION_ENV] = settings.selected;
+    else delete process.env[MODEL_CONNECTION_ENV];
+    const keySource = settings?.keySource;
+    if (keySource) process.env.EVE_MODEL_KEY_SOURCE = keySource;
+    else delete process.env.EVE_MODEL_KEY_SOURCE;
+    if (settings?.teamId && settings.teamName) {
+      process.env.EVE_MODEL_TEAM = settings.teamId;
+      process.env.EVE_MODEL_TEAM_NAME = settings.teamName;
+    } else {
+      delete process.env.EVE_MODEL_TEAM;
+      delete process.env.EVE_MODEL_TEAM_NAME;
+    }
 
     applyDevelopmentEnvironmentValues({
       managedValues,
@@ -128,6 +163,7 @@ function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnviron
   };
 
   return {
+    environmentRoot,
     reload() {
       stageReload().commit();
     },
@@ -162,24 +198,18 @@ function applyDevelopmentEnvironmentValues(input: {
   }
 }
 
-function readDevelopmentEnvironmentValues(appRoot: string): Map<string, string> {
+function readDevelopmentEnvironmentValues(environmentRoot: string): Map<string, string> {
   const values = new Map<string, string>();
 
   for (const fileName of [...DEVELOPMENT_ENV_FILE_NAMES].reverse()) {
     try {
-      const parsedValues = parseEnv(readFileSync(join(appRoot, fileName), "utf8"));
+      const parsedValues = parseEnv(readFileSync(join(environmentRoot, fileName), "utf8"));
 
       for (const [key, value] of Object.entries(parsedValues)) {
-        if (value === undefined) {
-          continue;
-        }
-
-        values.set(key, value);
+        if (value !== undefined) values.set(key, value);
       }
     } catch (error) {
-      if (!isMissingEnvironmentFileError(error)) {
-        throw error;
-      }
+      if (!isMissingEnvironmentFileError(error)) throw error;
     }
   }
 

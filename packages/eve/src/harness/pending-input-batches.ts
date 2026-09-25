@@ -1,6 +1,8 @@
 import type { ModelMessage } from "ai";
 
-import type { InputRequest } from "#runtime/input/types.js";
+import { contextStorage } from "#context/container.js";
+import { ActivityRootTurnIdKey } from "#context/keys.js";
+import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 
@@ -26,7 +28,9 @@ export interface PendingInputBatchEvent {
  * assistant turn's requests plus its withheld model output.
  */
 export interface PendingInputBatch {
+  readonly toolReplayIdentities?: Readonly<Record<string, string>>;
   readonly event?: PendingInputBatchEvent;
+  readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -34,7 +38,7 @@ export interface PendingInputBatch {
 
 /**
  * Returns true when the session holds at least one pending HITL batch
- * (tool approvals or `ask_question` prompts).
+ * (tool approvals or a session-limit continuation prompt).
  */
 export function hasPendingInputBatch(state: SessionStateMap | undefined): boolean {
   return getPendingInputBatches(state).length > 0;
@@ -133,7 +137,9 @@ function setPendingInputBatches(
   } else {
     state[PENDING_INPUT_BATCHES_KEY] = batches.map((batch) => ({
       event: batch.event,
+      activityRootTurnId: batch.activityRootTurnId,
       responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
+      toolReplayIdentities: batch.toolReplayIdentities,
       requests: [...batch.requests],
       responseMessages: [...batch.responseMessages],
     }));
@@ -147,7 +153,9 @@ function setPendingInputBatches(
  * batches stay open and independently answerable.
  */
 export function appendPendingInputBatch(input: {
+  readonly toolReplayIdentities?: Readonly<Record<string, string>>;
   readonly event?: PendingInputBatchEvent;
+  readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -157,11 +165,34 @@ export function appendPendingInputBatch(input: {
     ...getPendingInputBatches(input.session.state),
     {
       event: input.event,
+      activityRootTurnId:
+        input.activityRootTurnId ?? contextStorage.getStore()?.get(ActivityRootTurnIdKey),
       responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
+      toolReplayIdentities: input.toolReplayIdentities,
       requests: input.requests,
       responseMessages: input.responseMessages,
     },
   ]);
+}
+
+export function activityRootTurnIdForInputResponses(
+  state: SessionStateMap | undefined,
+  requestIds: ReadonlySet<string>,
+): string | undefined {
+  return getPendingInputBatches(state).find((batch) =>
+    batch.requests.some((request) => requestIds.has(request.requestId)),
+  )?.activityRootTurnId;
+}
+
+export function activityRequestIdsForRootTurn(
+  state: SessionStateMap | undefined,
+  rootTurnId: string,
+): readonly string[] {
+  return getPendingInputBatches(state).flatMap((batch) =>
+    batch.activityRootTurnId === rootTurnId
+      ? batch.requests.map((request) => request.requestId)
+      : [],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +250,7 @@ export function hasDeferredStepInput(session: HarnessSession): boolean {
   return getDeferredStepInput(session) !== undefined;
 }
 
-function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
+export function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
   return session.state?.[DEFERRED_STEP_INPUT_KEY] as StepInput | undefined;
 }
 

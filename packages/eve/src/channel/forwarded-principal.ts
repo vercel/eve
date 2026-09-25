@@ -15,7 +15,7 @@ const log = createLogger("channel.forwarded-principal");
 export const FORWARDED_BY_ATTRIBUTE = "eve:forwarded-by";
 
 /**
- * Wire shape of the create-session `forwardedPrincipal` body field: the
+ * Wire shape of the session-request `forwardedPrincipal` body field: the
  * dispatching turn's session principals, asserted by a trusted forwarder.
  * Only principal metadata crosses the wire — never tokens or credentials.
  */
@@ -25,11 +25,35 @@ export interface ForwardedPrincipal {
 }
 
 /**
- * Authorizes which transport-authenticated forwarders may assert a forwarded
- * principal. Receives the *verified* route-auth principal (who is asserting),
- * never the forwarded identity (what is asserted).
+ * What a forwarder asks the receiving deployment to adopt, passed to
+ * {@link TrustedForwarders} next to the verified forwarder.
  */
-export type TrustedForwarders = (forwarder: SessionAuthContext) => boolean | Promise<boolean>;
+export interface ForwardedAssertion {
+  /**
+   * The session principals the forwarder asserts, present when it forwards a
+   * principal and absent when only remote parent lineage is being trusted.
+   * Both contexts are already stamped with {@link FORWARDED_BY_ATTRIBUTE}, and
+   * `initiator` is `current` when the sender omitted it. `initiator` takes
+   * effect only on session creation: continuation requests install only
+   * `current`, so there `initiator` is the asserted value, not the session's
+   * pinned initiator.
+   */
+  readonly principal?: {
+    readonly current: SessionAuthContext;
+    readonly initiator: SessionAuthContext;
+  };
+}
+
+/**
+ * Authorizes a transport-authenticated forwarder to supply eve delegation
+ * context. Receives the *verified* route-auth principal (who is asserting) and
+ * the principals it asserts, so a receiver can limit each forwarder to the
+ * identities it may speak for.
+ */
+export type TrustedForwarders = (
+  forwarder: SessionAuthContext,
+  assertion: ForwardedAssertion,
+) => boolean | Promise<boolean>;
 
 export type ForwardedPrincipalParseResult =
   | {
@@ -43,7 +67,7 @@ export type ForwardedPrincipalParseResult =
     };
 
 /**
- * The create route's effective session principals after the forwarded
+ * A session route's effective principals after the forwarded
  * principal gate: the transport principal untouched when the body carries no
  * assertion, or the stamped forwarded contexts once a trusted forwarder's
  * assertion is accepted.
@@ -85,11 +109,11 @@ const forwardedPrincipalSchema = z
   .strict();
 
 /**
- * Gates the create-session `forwardedPrincipal` body field and resolves the
+ * Gates the `forwardedPrincipal` body field and resolves the
  * effective session principals. Returns the failure `Response` on rejection:
  * 403 when the channel accepts no forwarded principal or the predicate
- * refuses the forwarder, 400 on a malformed payload, 500 when the authored
- * predicate throws. Accepted contexts are stamped with
+ * refuses the forwarder or what it asserts, 400 on a malformed payload, 500
+ * when the authored predicate throws. Accepted contexts are stamped with
  * {@link FORWARDED_BY_ATTRIBUTE} before they are returned, so a custom
  * `onMessage` always sees the transport forwarder on the replaced principal.
  */
@@ -113,9 +137,17 @@ export async function resolveForwardedPrincipal(input: {
     return Response.json({ error: parsed.message, ok: false }, { status: 400 });
   }
 
+  const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
+  const initiator =
+    parsed.forwardedPrincipal.initiator === undefined
+      ? current
+      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
+
   let accepted: boolean;
   try {
-    accepted = await input.trustedForwarders(input.forwarder);
+    accepted = await input.trustedForwarders(input.forwarder, {
+      principal: { current, initiator },
+    });
   } catch (error) {
     const errorId = logError(log, "trustedForwarders handler failed", error, {
       forwarder: input.forwarder.principalId,
@@ -132,16 +164,11 @@ export async function resolveForwardedPrincipal(input: {
     );
   }
 
-  const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
-  const initiator =
-    parsed.forwardedPrincipal.initiator === undefined
-      ? current
-      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
   return { accepted: true, auth: current, initiatorAuth: initiator };
 }
 
 /**
- * Parses the create-session `forwardedPrincipal` body field against the
+ * Parses the `forwardedPrincipal` body field against the
  * strict wire schema. Mirrors `parseSessionCallback` for `callback`: strict
  * keys, formatted error strings, and no exceptions.
  */

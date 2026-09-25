@@ -37,6 +37,10 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain("/compiled/@workflow/world-local/index.js");
     expect(source).toContain("resolveLocalWorkflowWorldDataDirectory(process.cwd())");
+    expect(source).toContain("applyLocalWorkflowWorldDeliveryTimeoutDefaults");
+    expect(source.indexOf("applyLocalWorkflowWorldDeliveryTimeoutDefaults();")).toBeLessThan(
+      source.indexOf("workflowWorldModule.createWorld"),
+    );
     expect(source).not.toContain("createWorldFromModule(workflowWorldModule)");
   });
 
@@ -49,6 +53,10 @@ describe("createWorkflowWorldPluginSource", () => {
 
     expect(source).toContain("/compiled/@workflow/world-vercel/index.js");
     expect(source).toMatch(/headers: \{ "User-Agent": "eve\/.+" \}/);
+    expect(source).toContain("applyVercelWorkflowWorldDefaults(workflowWorld);");
+    expect(source.indexOf("applyVercelWorkflowWorldDefaults(workflowWorld);")).toBeLessThan(
+      source.indexOf("setWorld(workflowWorld);"),
+    );
   });
 });
 

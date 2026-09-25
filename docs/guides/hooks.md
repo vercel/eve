@@ -28,6 +28,30 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
+## Scope side effects to a channel
+
+A hook under `agent/hooks/` observes matching events from every channel on the root agent. `defineHook` has no channel filter. Use a channel's `events` configuration when a handler assumes a specific platform or should run only for sessions owned by that channel:
+
+```ts title="agent/channels/github.ts"
+import { githubChannel } from "eve/channels/github";
+
+export default githubChannel({
+  events: {
+    async "turn.completed"(event, channel, ctx) {
+      console.info("GitHub turn completed", {
+        repository: channel.repository.fullName,
+        sessionId: ctx.session.id,
+        turnId: event.turnId,
+      });
+    },
+  },
+});
+```
+
+A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts.
+
+Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
+
 ## Hook structure and context
 
 Every handler receives the same `HookContext`, including the shared session
@@ -61,6 +85,11 @@ durable session and filesystem for the next callback. On Vercel, the current
 handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
+
+For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
+parent session. Typed handlers and `*` handlers receive this context even when
+the subagent event arrives between parent turns. These hooks can use
+`ctx.getSandbox()` against the parent session.
 
 ### Narrowing tool results
 
@@ -146,17 +175,21 @@ When a stream event fires, three things happen in order:
 
 1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is written to the durable stream.
 2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-3. Dynamic tool resolvers. Resolvers subscribed to the event type run and update the tool set.
+3. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
 
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 
 ## What happens when a hook throws
 
-A thrown handler propagates through the emit composer and surfaces as `turn.failed`. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+A thrown handler during a model turn propagates through turn execution and surfaces as `turn.failed`. In a conversation session, this includes handlers for `turn.started` and the first `step.started` of a model call: the failed turn ends with `session.waiting`, and the next message can start another turn. Task-mode boundary failures remain terminal. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+
+For `subagent.called`, `subagent.completed`, and events proxied from a child, a thrown handler fails the publishing step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the publishing step to finish or exhaust its retries. Exhausting retries fails the session.
 
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
+
+Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. The accompanying parent `turn.completed` and `session.waiting` events also invoke parent hooks; they do not resolve pending input requests.
 
 ## Hook vs tool vs provider
 

@@ -11,12 +11,16 @@ The Linear channel uses Linear's Agent Session surface rather than ordinary comm
 Run the registry setup from the agent directory:
 
 ```bash
-eve add linear
+eve add channel/linear
 ```
 
-Select **Linear Channel** in the component checklist. **Linear MCP** is also selected by default if you want the agent to search and update Linear through MCP. Run `eve add channel/linear-agent` instead to install only the channel directly.
+To let the agent search and update Linear through MCP, install the separate Linear connection:
 
-The flow signs you in to Vercel when needed, creates or links a Vercel project, reuses a compatible existing connector when available or provisions an app-scoped Linear Connect client, and registers `/eve/v1/linear` as a trigger destination. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
+```bash
+eve add connection/linear
+```
+
+The channel setup flow signs you in to Vercel when needed, creates or links a Vercel project, reuses a compatible existing connector when available or provisions an app-scoped Linear Connect client, and registers `/eve/v1/linear` as a trigger destination. It then installs `@vercel/connect` and writes `agent/channels/linear.ts` with the connector UID.
 
 Vercel Connect creates the Linear app with the `app:assignable` and `app:mentionable` scopes required for Agent Sessions, receives and verifies `AgentSessionEvent` webhooks, and forwards them to the deployed agent. After deploying, open the Linear app in the Connect dashboard and install it in the workspace where you want to delegate work. Then delegate an issue or mention the agent in a Linear Agent Session.
 
@@ -71,7 +75,7 @@ Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC ove
 
 ### Dispatch
 
-The default hook dispatches `created` and `prompted` Agent Session events. eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
+The default hook dispatches `created` and `prompted` Agent Session events. The Linear context includes `app_user_id` when available, plus the agent session, issue, comment, and organization identifiers. The session continues with `agent-session:<id>`.
 
 ### Delivery
 
@@ -99,7 +103,7 @@ Event handlers receive `channel.linear`, which exposes `createActivity`, `listAc
 
 ## Custom hooks
 
-Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent.
+Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent. Return `title` alongside `auth` to set the title when the dispatch starts a run.
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";

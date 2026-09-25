@@ -38,11 +38,9 @@ function span(attributes: Record<string, unknown>): unknown {
 describe("contentFilteringProcessor", () => {
   it("forwards the span untouched when the destination declined nothing", () => {
     const downstream = recordingProcessor();
-    const original = span({ "ai.prompt.messages": "what the user said" });
+    const original = span({ "gen_ai.input.messages": "what the user said" });
 
-    contentFilteringProcessor(downstream, { recordInputs: true, recordOutputs: true }).onEnd(
-      original as never,
-    );
+    contentFilteringProcessor(downstream).onEnd(original as never);
 
     expect(downstream.ended).toEqual([original]);
   });
@@ -50,9 +48,11 @@ describe("contentFilteringProcessor", () => {
   it("forwards a copy without what the destination declined", () => {
     const downstream = recordingProcessor();
 
-    contentFilteringProcessor(downstream, { recordInputs: false, recordOutputs: true }).onEnd(
+    contentFilteringProcessor(downstream, {
+      span: () => ({ redact: true, inputs: true }),
+    }).onEnd(
       span({
-        "ai.prompt.messages": "what the user said",
+        "gen_ai.input.messages": "what the user said",
         "ai.response.text": "what the model said",
       }) as never,
     );
@@ -62,28 +62,88 @@ describe("contentFilteringProcessor", () => {
     });
   });
 
+  it("drops the span when its policy throws", () => {
+    const downstream = recordingProcessor();
+
+    contentFilteringProcessor(downstream, {
+      span: () => {
+        throw new Error("policy failed");
+      },
+    }).onEnd(
+      span({
+        "gen_ai.input.messages": "what the user said",
+        "service.name": "weather",
+      }) as never,
+    );
+
+    expect(downstream.ended).toEqual([]);
+  });
+
+  it("drops the span when a redaction decision names no direction", () => {
+    const downstream = recordingProcessor();
+
+    contentFilteringProcessor(downstream, {
+      span: () => ({ redact: true }) as never,
+    }).onEnd(span({ "gen_ai.input.messages": "what the user said" }) as never);
+
+    expect(downstream.ended).toEqual([]);
+  });
+
+  it("drops the span when one decision combines emission and redaction", () => {
+    const downstream = recordingProcessor();
+
+    contentFilteringProcessor(downstream, {
+      span: () => ({ emit: true, redact: true, inputs: true }) as never,
+    }).onEnd(span({ "gen_ai.input.messages": "what the user said" }) as never);
+
+    expect(downstream.ended).toEqual([]);
+  });
+
+  it("reports the content policy visible to each destination", () => {
+    const downstream = recordingProcessor();
+    const original = span({
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": true,
+      "gen_ai.input.messages": "what the user said",
+    });
+
+    contentFilteringProcessor(downstream, {
+      span: () => ({ redact: true, inputs: true }),
+    }).onEnd(original as never);
+
+    expect((downstream.ended[0] as { attributes: unknown }).attributes).toEqual({
+      "agent.trace.content.input": false,
+      "agent.trace.content.output": true,
+    });
+    expect((original as { attributes: unknown }).attributes).toEqual({
+      "agent.trace.content.input": true,
+      "agent.trace.content.output": true,
+      "gen_ai.input.messages": "what the user said",
+    });
+  });
+
   it("leaves the original span's attributes in place for the other destinations", () => {
     const kept = recordingProcessor();
     const declined = recordingProcessor();
-    const original = span({ "ai.prompt.messages": "what the user said" });
+    const original = span({ "gen_ai.input.messages": "what the user said" });
 
-    contentFilteringProcessor(declined, { recordInputs: false, recordOutputs: false }).onEnd(
-      original as never,
-    );
+    contentFilteringProcessor(declined, {
+      span: () => ({ redact: true, inputs: true, outputs: true }),
+    }).onEnd(original as never);
     kept.onEnd(original as never);
 
     expect((declined.ended[0] as { attributes: unknown }).attributes).toEqual({});
     expect((kept.ended[0] as { attributes: unknown }).attributes).toEqual({
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
     });
   });
 
   it("keeps the rest of the span surface reachable on the copy", () => {
     const downstream = recordingProcessor();
 
-    contentFilteringProcessor(downstream, { recordInputs: false, recordOutputs: false }).onEnd(
-      span({ "ai.prompt.messages": "what the user said" }) as never,
-    );
+    contentFilteringProcessor(downstream, {
+      span: () => ({ redact: true, inputs: true, outputs: true }),
+    }).onEnd(span({ "gen_ai.input.messages": "what the user said" }) as never);
 
     expect((downstream.ended[0] as { spanContext: () => unknown }).spanContext()).toEqual({
       spanId: "span",
@@ -102,9 +162,9 @@ describe("contentFilteringProcessor", () => {
       status: { code: 2, message: "private failure detail" },
     };
 
-    contentFilteringProcessor(downstream, { recordInputs: true, recordOutputs: false }).onEnd(
-      original as never,
-    );
+    contentFilteringProcessor(downstream, {
+      span: ({ name }) => ({ redact: true, outputs: name !== "metadata" }),
+    }).onEnd(original as never);
 
     const visible = downstream.ended[0] as {
       events: unknown[];
@@ -119,21 +179,20 @@ describe("contentFilteringProcessor", () => {
   it("redacts initial attributes before onStart without exposing the original", () => {
     const downstream = recordingProcessor();
     const original = span({
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
       "service.name": "weather",
     });
 
-    contentFilteringProcessor(downstream, { recordInputs: false, recordOutputs: true }).onStart(
-      original as never,
-      undefined as never,
-    );
+    contentFilteringProcessor(downstream, {
+      span: () => ({ redact: true, inputs: true }),
+    }).onStart(original as never, undefined as never);
 
     expect(downstream.started[0]).not.toBe(original);
     expect((downstream.started[0] as { attributes: unknown }).attributes).toEqual({
       "service.name": "weather",
     });
     expect((original as { attributes: unknown }).attributes).toHaveProperty(
-      "ai.prompt.messages",
+      "gen_ai.input.messages",
       "what the user said",
     );
   });
@@ -141,12 +200,11 @@ describe("contentFilteringProcessor", () => {
   it("reuses and refreshes one facade from onStart through onEnd", () => {
     const downstream = recordingProcessor();
     const original = span({
-      "ai.prompt.messages": "what the user said",
+      "gen_ai.input.messages": "what the user said",
       "service.name": "weather",
     }) as { attributes: Record<string, unknown> };
     const processor = contentFilteringProcessor(downstream, {
-      recordInputs: false,
-      recordOutputs: true,
+      span: () => ({ redact: true, inputs: true }),
     });
 
     processor.onStart(original as never, undefined as never);
@@ -170,7 +228,7 @@ describe("contentFilteringProcessor", () => {
       spanContext(): unknown;
     };
     original = {
-      attributes: { "ai.prompt.messages": "what the user said" },
+      attributes: { "gen_ai.input.messages": "what the user said" },
       fluent() {
         return this;
       },
@@ -185,8 +243,7 @@ describe("contentFilteringProcessor", () => {
     };
     const downstream = recordingProcessor();
     const processor = contentFilteringProcessor(downstream, {
-      recordInputs: false,
-      recordOutputs: true,
+      span: () => ({ redact: true, inputs: true }),
     });
 
     processor.onStart(original as never, undefined as never);
@@ -207,12 +264,11 @@ describe("contentFilteringProcessor", () => {
 
   it("continues refreshing after a processor freezes the facade", () => {
     const downstream = recordingProcessor();
-    const original = span({ "ai.prompt.messages": "what the user said" }) as {
+    const original = span({ "gen_ai.input.messages": "what the user said" }) as {
       attributes: Record<string, unknown>;
     };
     const processor = contentFilteringProcessor(downstream, {
-      recordInputs: false,
-      recordOutputs: true,
+      span: () => ({ redact: true, inputs: true }),
     });
 
     processor.onStart(original as never, undefined as never);
@@ -228,14 +284,13 @@ describe("contentFilteringProcessor", () => {
   it("facades a real OpenTelemetry span across both callbacks", () => {
     const downstream = recordingProcessor();
     const filtering = contentFilteringProcessor(downstream, {
-      recordInputs: false,
-      recordOutputs: true,
+      span: () => ({ redact: true, inputs: true }),
     });
     const provider = new BasicTracerProvider({
       spanProcessors: [filtering as OpenTelemetrySpanProcessor],
     });
     const span = provider.getTracer("test").startSpan("test", {
-      attributes: { "ai.prompt.messages": "what the user said" },
+      attributes: { "gen_ai.input.messages": "what the user said" },
     });
 
     span.setAttribute("ai.response.text", "what the model said");
@@ -250,17 +305,126 @@ describe("contentFilteringProcessor", () => {
     });
   });
 
-  it("preserves local trace session release through the wrapper", async () => {
-    const releaseSession = vi.fn(async () => true);
-    const downstream: SpanProcessor & {
-      releaseSession(sessionId: string): Promise<boolean>;
-    } = { ...recordingProcessor(), releaseSession };
-    const processor = contentFilteringProcessor(downstream, {
-      recordInputs: false,
-      recordOutputs: false,
-    }) as SpanProcessor & { releaseSession(sessionId: string): Promise<boolean> };
+  it.each([
+    ["public", true],
+    ["private", false],
+    ["unknown", false],
+  ] as const)("retains content for the %s audience: %s", (audience, retained) => {
+    const downstream = recordingProcessor();
+    contentFilteringProcessor(downstream, {
+      span: ({ audience }) =>
+        audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
+    }).onEnd(
+      span({
+        "agent.channel.audience": audience,
+        "gen_ai.input.messages": "input",
+        "ai.response.text": "output",
+      }) as never,
+    );
 
-    await expect(processor.releaseSession("session-1")).resolves.toBe(true);
-    expect(releaseSession).toHaveBeenCalledExactlyOnceWith("session-1");
+    const expected: Record<string, unknown> = { "agent.channel.audience": audience };
+    if (retained) {
+      expected["gen_ai.input.messages"] = "input";
+      expected["ai.response.text"] = "output";
+    }
+    expect((downstream.ended[0] as { attributes: Record<string, unknown> }).attributes).toEqual(
+      expected,
+    );
+  });
+
+  it("fails closed when audience attributes disagree", () => {
+    const downstream = recordingProcessor();
+    contentFilteringProcessor(downstream, {
+      span: ({ audience }) =>
+        audience === "public" ? { emit: true } : { redact: true, inputs: true, outputs: true },
+    }).onEnd(
+      span({
+        "agent.channel.audience": "public",
+        "gen_ai.input.messages": "private",
+        "ai.settings.context.eve.channel.audience": "private",
+      }) as never,
+    );
+
+    expect(
+      (downstream.ended[0] as { attributes: Record<string, unknown> }).attributes,
+    ).not.toHaveProperty("gen_ai.input.messages");
+  });
+
+  it("passes only attributes visible after earlier policy stages", () => {
+    const downstream = recordingProcessor();
+    const keys: string[] = [];
+
+    contentFilteringProcessor(downstream, [
+      { span: () => ({ redact: true, inputs: true }) },
+      {
+        attribute: ({ key }) => {
+          keys.push(key);
+          return { emit: true };
+        },
+      },
+    ]).onEnd(
+      span({
+        "gen_ai.input.messages": "private input",
+        "service.name": "weather",
+      }) as never,
+    );
+
+    expect(keys).not.toContain("gen_ai.input.messages");
+    expect(keys).toContain("service.name");
+    expect((downstream.ended[0] as { attributes: unknown }).attributes).toEqual({
+      "service.name": "weather",
+    });
+  });
+
+  it("can drop an individual span", () => {
+    const downstream = recordingProcessor();
+    contentFilteringProcessor(downstream, {
+      span: ({ name }) => ({ emit: name !== "private-work" }),
+    }).onEnd({
+      ...(span({}) as object),
+      name: "private-work",
+    } as never);
+
+    expect(downstream.ended).toEqual([]);
+  });
+
+  it("can drop and replace individual attributes", () => {
+    const downstream = recordingProcessor();
+    contentFilteringProcessor(downstream, {
+      attribute: ({ key }) =>
+        key === "secret"
+          ? { emit: false }
+          : key === "email"
+            ? { replace: true, value: "[redacted]" }
+            : key === "ambiguous"
+              ? ({ emit: false, replace: true, value: "replacement" } as never)
+              : key === "missing"
+                ? ({ replace: true } as never)
+                : { emit: true },
+    }).onEnd(
+      span({
+        ambiguous: "original",
+        email: "ada@example.com",
+        missing: "value",
+        secret: "value",
+      }) as never,
+    );
+
+    expect((downstream.ended[0] as { attributes: unknown }).attributes).toEqual({
+      email: "[redacted]",
+    });
+  });
+
+  it("preserves local trace session release through the wrapper", async () => {
+    const releaseConversation = vi.fn(async () => true);
+    const downstream: SpanProcessor & {
+      releaseConversation(sessionId: string): Promise<boolean>;
+    } = { ...recordingProcessor(), releaseConversation };
+    const processor = contentFilteringProcessor(downstream, {
+      span: () => ({ redact: true, inputs: true, outputs: true }),
+    }) as SpanProcessor & { releaseConversation(sessionId: string): Promise<boolean> };
+
+    await expect(processor.releaseConversation("session-1")).resolves.toBe(true);
+    expect(releaseConversation).toHaveBeenCalledExactlyOnceWith("session-1");
   });
 });

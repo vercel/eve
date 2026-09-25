@@ -8,10 +8,11 @@ export default defineEval({
   description: "Authenticated response policy emits candidate and settlement before execution.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
-    const approval = t.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
+    const session = parked.session;
+    const approval = session.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
-    const approved = await t.respond([
+    const approved = await session.respond([
       {
         optionId: "approve",
         requestId: approval.requestId,

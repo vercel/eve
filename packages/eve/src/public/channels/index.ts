@@ -1,6 +1,9 @@
 export {
   defineChannel,
+  disableRoute,
   GET,
+  HEAD,
+  OPTIONS,
   POST,
   PUT,
   PATCH,
@@ -12,6 +15,12 @@ export {
   type CompactSessionResult,
   type ResetSessionResult,
   type Channel,
+  type ChannelAudience,
+  type AudienceCaller,
+  type AudienceContext,
+  type AudienceInput,
+  type AudiencePrincipal,
+  type ConversationEnvironment,
   type ChannelFrom,
   type ChannelReceiveContext,
   type ChannelResolveSession,
@@ -21,6 +30,7 @@ export {
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,
+  type DisabledRouteSentinel,
   type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
@@ -30,6 +40,7 @@ export {
   type SessionRespondOptions,
   type SessionSendOptions,
   type TurnPolicy,
+  type TaskDeliveryPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
   type HttpRouteDefinition,
@@ -40,6 +51,7 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
+  isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export {
   createWebSocketUpgradeServer,
@@ -48,7 +60,6 @@ export {
 
 import { getChannelInstrumentationKind } from "#channel/compiled-channel.js";
 import type { Channel, InferChannelMetadata } from "#public/definitions/channel.js";
-
 /**
  * Base channel metadata shape used by framework channel kinds.
  */

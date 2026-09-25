@@ -59,12 +59,8 @@ function isFilesystemHandle(route: unknown): boolean {
 
 describe("framework-nuxt build", () => {
   it("builds the Nuxt framework fixture against the workspace eve dist", async () => {
-    // Runs `build:nuxt` rather than the fixture's `build` script: `build`
-    // regenerates the shared workspace `dist/`, which would corrupt scenario
-    // files running in parallel workers. The scenario globalSetup already
-    // rebuilt `dist/` before any worker forked.
     await runPnpmCommand({
-      args: ["--filter", "framework-nuxt", "build:nuxt"],
+      args: ["--filter", "framework-nuxt", "build"],
       cwd: REPO_ROOT,
     });
   }, 300_000);

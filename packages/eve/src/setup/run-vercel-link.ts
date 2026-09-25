@@ -12,6 +12,12 @@ export async function runVercelEnvPull(
   projectRoot: string,
   onOutput?: VercelOutputHandler,
   signal?: AbortSignal,
+  nonInteractive = false,
 ): Promise<boolean> {
-  return runVercel(["env", "pull", "--yes"], { cwd: projectRoot, onOutput, signal });
+  return runVercel(["env", "pull", "--yes"], {
+    cwd: projectRoot,
+    nonInteractive,
+    onOutput,
+    signal,
+  });
 }

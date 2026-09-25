@@ -73,6 +73,106 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders related resources after Configure and omits the section when empty", () => {
+    const kernel = getIntegration("kernel");
+    expect(kernel).toBeDefined();
+
+    const markdown = integrationMarkdown(kernel!);
+    expect(markdown).toContain("## Related resources");
+    expect(markdown.indexOf("## Related resources")).toBeGreaterThan(
+      markdown.indexOf("## Configure"),
+    );
+    expect(markdown).toContain(
+      "- [How to build a browser agent that works behind a login](https://vercel.com/kb/guide/build-a-browser-agent)",
+    );
+    expect(markdown).toContain(
+      "- [Give your software factory a browser](https://vercel.com/kb/guide/software-factory-browser)",
+    );
+
+    const agentBrowser = getIntegration("agent-browser");
+    expect(agentBrowser).toBeDefined();
+    expect(integrationMarkdown(agentBrowser!)).toContain(
+      "- [Give your eve agent a browser](https://vercel.com/changelog/give-your-eve-agent-a-browser)",
+    );
+
+    for (const slug of ["github", "linear-agent", "github-tools", "linear", "vercel"]) {
+      const integration = getIntegration(slug);
+      expect(integration).toBeDefined();
+      expect(integrationMarkdown(integration!)).toContain(
+        "- [Build a software factory with eve](https://vercel.com/kb/guide/eve-software-factory)",
+      );
+    }
+
+    const vercel = getIntegration("vercel");
+    expect(integrationMarkdown(vercel!)).toContain(
+      "- [Manage Vercel projects with a software factory](https://vercel.com/kb/guide/software-factory-vercel-mcp)",
+    );
+
+    for (const slug of [
+      "slack",
+      "github",
+      "github-tools",
+      "datadog",
+      "datadog-instrumentation",
+      "vercel",
+    ]) {
+      const integration = getIntegration(slug);
+      expect(integration).toBeDefined();
+      expect(integrationMarkdown(integration!)).toContain(
+        "- [Build an incident response SRE agent with eve](https://vercel.com/kb/guide/eve-incident-sre-agent)",
+      );
+    }
+
+    const vercelMarkdown = integrationMarkdown(vercel!);
+    expect(vercelMarkdown.indexOf("eve-incident-sre-agent")).toBeLessThan(
+      vercelMarkdown.indexOf("eve-software-factory"),
+    );
+
+    for (const slug of ["slack", "notion"]) {
+      const integration = getIntegration(slug);
+      expect(integration).toBeDefined();
+      expect(integrationMarkdown(integration!)).toContain(
+        "- [Run a marketing team from Slack with eve](https://vercel.com/kb/guide/marketing-team-eve)",
+      );
+    }
+
+    const resend = getIntegration("chat-sdk-resend");
+    expect(resend).toBeDefined();
+    expect(integrationMarkdown(resend!)).toContain(
+      "- [Give your eve agent an email inbox with Resend](https://vercel.com/kb/guide/eve-agent-with-resend)",
+    );
+
+    const browserbase = getIntegration("browserbase");
+    expect(browserbase).toBeDefined();
+    expect(integrationMarkdown(browserbase!)).not.toContain("## Related resources");
+  });
+
+  it("renders the BlitzReels extension setup", () => {
+    const blitzreels = getIntegration("blitzreels");
+    expect(blitzreels).toBeDefined();
+
+    const markdown = integrationMarkdown(blitzreels!);
+    expect(markdown).toContain("eve add extension/blitzreels");
+    expect(markdown).toContain('import blitzreels from "@blitzreels/eve"');
+    expect(markdown).toContain("BLITZREELS_API_KEY");
+    expect(markdown).toContain("blitzreels__create_clip_batch");
+    expect(markdown).toContain("require eve approval");
+    expect(integrationSearchText(blitzreels!)).toContain("video editing");
+  });
+
+  it("renders the Mux Video extension setup", () => {
+    const muxVideo = getIntegration("mux-video");
+    expect(muxVideo).toBeDefined();
+
+    const markdown = integrationMarkdown(muxVideo!);
+    expect(markdown).toContain("github.com/muxinc/mux-video-agent.git");
+    expect(markdown).toContain('import muxVideo from "@mux/eve-video"');
+    expect(markdown).toContain("MUX_TOKEN_ID");
+    expect(markdown).toContain("mux_video__run_workflow");
+    expect(markdown).toContain("require explicit human approval");
+    expect(integrationSearchText(muxVideo!)).toContain("Mux Robots");
+  });
+
   it("renders the Jetty extension and eval reporter setup", () => {
     const jetty = getIntegration("jetty");
     expect(jetty).toBeDefined();
@@ -85,29 +185,53 @@ describe("integration discovery", () => {
     expect(integrationSearchText(jetty!)).toContain("grading");
   });
 
-  it("renders the Upstash AgentKit extension setup", () => {
-    const agentkit = getIntegration("upstash-agentkit");
-    expect(agentkit).toBeDefined();
+  it("renders the Upstash AgentKit memory provider setup", () => {
+    const agentkitMemory = getIntegration("upstash-agentkit");
+    expect(agentkitMemory).toBeDefined();
 
-    const markdown = integrationMarkdown(agentkit!);
-    expect(markdown).toContain("eve add extension/upstash-agentkit");
-    expect(markdown).toContain('import agentkit from "@upstash/agentkit-eve-extension"');
+    const markdown = integrationMarkdown(agentkitMemory!);
+    expect(markdown).toContain("eve add memory/upstash-agentkit");
+    expect(markdown).toContain('import { redisMemory } from "@upstash/agentkit-eve/memory"');
     expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
-    expect(markdown).toContain("agentkit__recall_memory");
-    expect(markdown).toContain("chatHistory: true");
-    expect(integrationSearchText(agentkit!)).toContain("long-term memory");
+    expect(markdown).toContain("redisDocuments()");
+    expect(markdown).toContain("upstash-agentkit__search_memory");
+    expect(integrationSearchText(agentkitMemory!)).toContain("Memory provider");
   });
 
-  it("renders the Kybernesis Arcana memory extension setup", () => {
+  it("renders the Kybernesis Arcana memory provider setup", () => {
     const arcana = getIntegration("arcana");
     expect(arcana).toBeDefined();
 
     const markdown = integrationMarkdown(arcana!);
-    expect(markdown).toContain("eve add extension/arcana");
-    expect(markdown).toContain('import arcana from "@kybernesis/arcana"');
+    expect(markdown).toContain("eve add memory/arcana");
+    expect(markdown).toContain('import { arcanaMemory } from "@kybernesis/arcana/memory"');
     expect(markdown).toContain("ARCANA_API_KEY");
     expect(markdown).toContain("ARCANA_WORKSPACE");
-    expect(integrationSearchText(arcana!)).toContain("long-term memory");
+    expect(markdown).toContain("capture: { enabled: true }");
+    expect(integrationSearchText(arcana!)).toContain("Memory provider");
+  });
+
+  it("renders the Supermemory provider setup", () => {
+    const supermemory = getIntegration("supermemory");
+    expect(supermemory).toBeDefined();
+
+    const markdown = integrationMarkdown(supermemory!);
+    expect(markdown).toContain("eve add memory/supermemory");
+    expect(markdown).toContain('import supermemory from "@supermemory/eve"');
+    expect(markdown).toContain("SUPERMEMORY_API_KEY");
+    expect(markdown).toContain("supermemory__search");
+    expect(integrationSearchText(supermemory!)).toContain("Memory provider");
+  });
+
+  it("renders built-in file-memory provisioning guidance", () => {
+    const file = getIntegration("file");
+    expect(file).toBeDefined();
+
+    const markdown = integrationMarkdown(file!);
+    expect(markdown).toContain("eve add memory/file");
+    expect(markdown).toContain("eve integration setup file-memory");
+    expect(markdown).toContain("EVE_MEMORY_BLOB_STORE_ID");
+    expect(integrationSearchText(file!)).toContain("Memory provider");
   });
 
   it("renders the Hindsight memory extension setup", () => {
@@ -135,6 +259,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(githubTools!)).toContain("code review");
   });
 
+  it("renders the Blooio channel setup", () => {
+    const blooio = getIntegration("blooio");
+    expect(blooio).toBeDefined();
+
+    const markdown = integrationMarkdown(blooio!);
+    expect(markdown).toContain("eve add channel/blooio");
+    expect(markdown).toContain('import { blooioChannel } from "eve-channel-blooio"');
+    expect(markdown).toContain("BLOOIO_API_KEY");
+    expect(markdown).toContain("BLOOIO_WEBHOOK_SECRET");
+    expect(integrationSearchText(blooio!)).toContain("iMessage");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();
@@ -145,13 +281,25 @@ describe("integration discovery", () => {
     expect(markdown).toContain("agent/connections/notion.ts");
   });
 
-  it("renders instrumentation providers with registry installation", () => {
+  it("renders hand-authored connection setup without generated variant headings", () => {
+    const shopify = getIntegration("shopify");
+    expect(shopify).toBeDefined();
+
+    const markdown = integrationMarkdown(shopify!);
+    expect(markdown).toContain('process.env.EVE_DEV === "1"');
+    expect(markdown).toContain("SHOPIFY_STORE_DOMAIN");
+    expect(markdown).not.toContain("### MCP ·");
+  });
+
+  it("renders instrumentation integrations with registry installation", () => {
     const braintrust = getIntegration("braintrust");
     expect(braintrust).toBeDefined();
 
     const markdown = integrationMarkdown(braintrust!);
     expect(markdown).toContain("eve add instrumentation/braintrust");
-    expect(markdown).toContain("agent/instrumentation.ts");
+    expect(markdown).toContain("agent/instrumentation/braintrust.ts");
+    expect(markdown).toContain("braintrustEveInstrumentation");
+    expect(markdown).not.toContain("// agent/hooks/braintrust.ts");
     expect(markdown).toContain("BRAINTRUST_API_KEY");
 
     const posthog = getIntegration("posthog-instrumentation");

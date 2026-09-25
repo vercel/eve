@@ -2,38 +2,38 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { createHarnessDelegationToolDefinition } from "#execution/delegation-tool.js";
+import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
-import { UNSPECIFIED_INPUT_SCHEMA } from "#shared/tool-schema.js";
+import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import {
-  AGENT_TOOL_DESCRIPTION,
-  AGENT_TOOL_NAME,
-  isImplicitAgentToolAvailable,
-} from "#runtime/framework-tools/agent.js";
+import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
-
-import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
-import {
-  PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA,
-  SUBAGENT_TOOL_INPUT_SCHEMA,
-} from "#runtime/subagents/registry.js";
+import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
+import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { connectionToolReplayIdentity } from "#execution/tools/connection-search.js";
+import {
+  createPreparedWorkflowToolHarnessDefinition,
+  createWorkflowToolHarnessDefinition,
+} from "#execution/tools/workflow/background.js";
+import {
+  resolveWebSearchActivityLabel,
+  WEB_SEARCH_TOOL_NAME,
+} from "#harness/provider-tool-schemas.js";
 
 const log = createLogger("execution.node-step");
 
@@ -52,13 +52,12 @@ export type CreateRuntime = (config: {
  * Input for building a harness step for one resolved runtime node.
  */
 export interface CreateExecutionNodeStepInput {
+  readonly steeringSignal?: AbortSignal;
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
   /**
-   * Session-level capabilities propagated from the runtime. The
-   * harness passes this through to `buildToolSet` so `ask_question`
-   * registration and any other capability-gated behavior tracks the
-   * current run.
+   * Session-level capabilities propagated from the runtime, so
+   * capability-gated behavior tracks the current run.
    */
   readonly capabilities?: SessionCapabilities;
   /** Runs only a context clear and returns to the parked session. */
@@ -71,14 +70,16 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly prepareApprovalTurn?: (event: {
+    readonly sequence: number;
+    readonly turnId: string;
+  }) => Promise<void>;
+  readonly historyProjector?: HistoryViewProjector;
+  readonly historyView?: PreparedHistoryView;
+  readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
-  /**
-   * Effective `maxSubagents` cap configured by the experimental Workflow tool
-   * definition and materialized on the session at creation.
-   */
-  readonly workflowMaxSubagents?: number;
 }
 
 /**
@@ -93,23 +94,29 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
       : createRuntimeDynamicModelEventDispatcher(
           input.modelResolutionScope,
           input.node.turnAgent.dynamicModel,
+          input.abortSignal,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  const instrumentation = getInstrumentationRuntime();
+  const instrumentation = input.instrumentation;
+  const sessionInstrumentation = instrumentation?.prepareExecution();
   const step = createToolLoopHarness({
+    steeringSignal: input.steeringSignal,
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
-    workflow: input.node.agent.workflowTool !== undefined,
-    workflowMaxSubagents: input.workflowMaxSubagents,
-    webSearchProvider: input.node.agent.webSearchProvider,
     handleEvent: input.handleEvent,
-    instrumentation,
+    historyProjector: input.historyProjector,
+    historyView: input.historyView,
+    instrumentation: sessionInstrumentation,
     mode: input.mode,
-    onCompaction: preserveFrameworkStateOnCompaction,
-    persistentSubagentSessions:
-      input.node.agent.config?.experimental?.subagentPersistentSessions === true,
+    prepareApprovalTurn: input.prepareApprovalTurn,
+    toolReplayIdentity: connectionToolReplayIdentity,
+    resolveStepDynamicTools: (resolveInput) =>
+      preparePersistedStepDynamicToolMetadata({
+        ...resolveInput,
+        resolvers: input.node.agent.dynamicToolResolvers ?? [],
+      }),
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
@@ -120,7 +127,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     try {
       return await step(session, stepInput);
     } finally {
-      await instrumentation.forceFlush();
+      await instrumentation.flush();
     }
   };
 }
@@ -165,9 +172,11 @@ function createRuntimeModelResolver(
 function createRuntimeDynamicModelEventDispatcher(
   scope: RuntimeModelResolutionScope,
   dynamicModel: NonNullable<ResolvedRuntimeAgentNode["turnAgent"]["dynamicModel"]>,
+  abortSignal: AbortSignal | undefined,
 ): NonNullable<Parameters<typeof createToolLoopHarness>[0]["dispatchDynamicModelEvent"]> {
   return (input) =>
     dispatchDynamicModelEvent({
+      abortSignal,
       ctx: input.ctx,
       dynamicModel,
       event: input.event,
@@ -180,8 +189,7 @@ function createRuntimeDynamicModelEventDispatcher(
  * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
- * For subagent tools: surfaces runtime-owned subagent-call metadata and leaves
- * execution to the runtime layer.
+ * Prepared workflow-task tools share the workflow-tool harness path.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
@@ -200,28 +208,6 @@ export function createNodeHarnessTools(input: {
     }
   }
 
-  if (
-    isImplicitAgentToolAvailable({
-      disabledFrameworkTools: input.node.agent.disabledFrameworkTools,
-      hasAuthoredAgentTool: tools.has(AGENT_TOOL_NAME),
-      nodeId: input.node.nodeId,
-    })
-  ) {
-    tools.set(AGENT_TOOL_NAME, {
-      description: AGENT_TOOL_DESCRIPTION,
-      inputSchema:
-        input.node.agent.config?.experimental?.subagentPersistentSessions === true
-          ? PERSISTENT_SUBAGENT_TOOL_INPUT_SCHEMA
-          : SUBAGENT_TOOL_INPUT_SCHEMA,
-      name: AGENT_TOOL_NAME,
-      runtimeAction: {
-        kind: "subagent-call",
-        nodeId: input.node.nodeId,
-        subagentName: AGENT_TOOL_NAME,
-      },
-    });
-  }
-
   return tools;
 }
 
@@ -229,11 +215,23 @@ function resolveHarnessToolDefinition(input: {
   readonly node: ResolvedRuntimeAgentNode;
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
-  if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
-    return createHarnessDelegationToolDefinition(input.tool);
-  }
-
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
+
+  if (isPreparedRuntimeWorkflowTool(input.tool)) {
+    if (registeredTool === null) {
+      return createPreparedWorkflowToolHarnessDefinition(input.tool);
+    }
+    return createWorkflowToolHarnessDefinition({
+      executeInput: registeredTool.definition.executeInput,
+      definition: createRegisteredHarnessToolDefinition({
+        behavior: input.tool.behavior,
+        definition: registeredTool.definition,
+        rootOnly: input.tool.rootOnly,
+      }),
+      nodeId: input.tool.task.nodeId,
+      workflowId: input.tool.task.workflowId,
+    });
+  }
 
   if (registeredTool === null) {
     // Declared on the graph but absent from the registry (failed import, renamed export).
@@ -244,50 +242,84 @@ function resolveHarnessToolDefinition(input: {
     return null;
   }
 
-  const def = registeredTool.definition;
-  const isFrameworkTool = def.sourceId.startsWith("eve:");
+  return createRegisteredHarnessToolDefinition({
+    behavior: input.tool.behavior,
+    definition: registeredTool.definition,
+    rootOnly: input.tool.rootOnly,
+  });
+}
+
+type PreparedRuntimeWorkflowTool = PreparedRuntimeTool & {
+  readonly task: PreparedRuntimeWorkflowTask;
+};
+
+function isPreparedRuntimeWorkflowTool(
+  tool: PreparedRuntimeTool,
+): tool is PreparedRuntimeWorkflowTool {
+  return tool.task !== undefined;
+}
+
+function createRegisteredHarnessToolDefinition(input: {
+  readonly behavior?: HarnessToolDefinition["behavior"];
+  readonly definition: ResolvedToolDefinition;
+  readonly rootOnly?: boolean;
+}): HarnessToolDefinition {
+  const def = input.definition;
+  if (def.owner.kind === "framework") {
+    const taskDefinition = createTaskToolHarnessDefinitions().find(
+      (definition) => definition.name === def.name,
+    );
+    if (taskDefinition !== undefined) {
+      return { ...taskDefinition, behavior: input.behavior };
+    }
+  }
   const rawExecute = def.execute;
 
-  return {
+  const definition: HarnessToolDefinition = {
+    availableInSubagents: def.availableInSubagents,
+    label:
+      def.label ??
+      (def.owner.kind === "framework" && def.name === WEB_SEARCH_TOOL_NAME
+        ? { start: resolveWebSearchActivityLabel }
+        : undefined),
     approvalKey: def.approvalKey,
+    behavior: input.behavior,
     description: def.description,
+    execution: def.execution,
+    executeInput: def.executeInput,
     execute: resolveAuthoredExecute({
-      isFrameworkTool,
       rawExecute,
       scope: def.name,
     }),
     frameworkAction:
-      isFrameworkTool && def.name === LOAD_SKILL_TOOL_NAME ? "load-skill" : undefined,
+      def.owner.kind === "framework" && def.name === LOAD_SKILL_TOOL_NAME
+        ? "load-skill"
+        : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,
     outputSchema: def.outputSchema,
+    rootOnly: input.rootOnly,
     toModelOutput: def.toModelOutput,
   };
+  return definition;
 }
 
 /**
  * Selects the harness-facing `execute` for one authored tool.
  *
- * - Framework tools (`eve:` source) run their `execute` verbatim — they
- *   manage their own context and never receive an authored
- *   {@link ToolContext}.
- * - Authored tools are wrapped by {@link createToolExecuteWithAuth},
+ * - Source-backed tools are wrapped by {@link createToolExecuteWithAuth},
  *   which builds a token-aware context. Providers passed to
  *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
  */
 function resolveAuthoredExecute(input: {
-  readonly isFrameworkTool: boolean;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
-  const { isFrameworkTool, rawExecute, scope } = input;
+  const { rawExecute, scope } = input;
   if (rawExecute === undefined) {
     return undefined;
-  }
-  if (isFrameworkTool) {
-    return rawExecute;
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
   return createToolExecuteWithAuth({ execute: authored, scope });

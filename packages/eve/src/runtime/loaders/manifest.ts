@@ -1,4 +1,5 @@
 import { type CompiledAgentManifest, compiledAgentManifestSchema } from "#compiler/manifest.js";
+import { validateCompiledAgentManifest } from "#compiler/validate-artifact.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { formatValidationError } from "#runtime/validation.js";
 import { resolveRuntimeCompilerArtifactPaths } from "#runtime/loaders/artifact-paths.js";
@@ -77,6 +78,14 @@ function parseCompiledManifest(value: unknown, manifestPath: string): CompiledAg
     );
   }
 
+  try {
+    validateCompiledAgentManifest(parsed.data);
+  } catch (error) {
+    throw new LoadCompiledManifestError(
+      `Expected "${manifestPath}" to contain a semantically valid compiled eve agent manifest. ${formatLoadErrorMessage(error)}`,
+      manifestPath,
+    );
+  }
   return parsed.data;
 }
 

@@ -7,6 +7,10 @@ import {
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
 import type { SlackAttachment } from "#public/channels/slack/inbound.js";
+import {
+  resolveSlackTransportOptions,
+  type SlackTransportOptions,
+} from "#public/channels/slack/transport.js";
 import { DEFAULT_UPLOAD_POLICY, mergeUploadPolicy } from "#public/channels/upload-policy.js";
 
 const DISABLED_POLICY = mergeUploadPolicy("disabled");
@@ -191,17 +195,20 @@ describe("createSlackFetchFile", () => {
     });
   });
 
-  it("invokes a function-shaped bot token to support rotation", async () => {
+  it("resolves function-shaped bot tokens for the session's installation workspace", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(new Uint8Array([0]), { status: 200 }));
 
-    const tokenFn = vi.fn(async () => "xoxb-rotated-token");
+    const tokenFn = vi.fn(async (_context: { readonly teamId?: string }) => "xoxb-rotated-token");
     const fetchFile = createSlackFetchFile({ botToken: tokenFn });
 
-    await fetchFile("https://files.slack.com/x");
+    await fetchFile("https://files.slack.com/x", {
+      state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
+    });
 
     expect(tokenFn).toHaveBeenCalledTimes(1);
+    expect(tokenFn).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
     const [, init] = fetchSpy.mock.calls[0]!;
     expect((init as RequestInit | undefined)?.headers).toEqual({
       authorization: "Bearer xoxb-rotated-token",
@@ -230,7 +237,9 @@ describe("createSlackFetchFile", () => {
 
     const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
 
-    await expect(fetchFile("https://files.slack.com/locked.csv")).rejects.toThrow("HTTP 403");
+    const result = fetchFile("https://files.slack.com/locked.csv?sig=PRIVATE");
+    await expect(result).rejects.toThrow("HTTP 403");
+    await expect(result).rejects.not.toThrow("PRIVATE");
   });
 
   it("rejects HTML returned for a private Slack file", async () => {
@@ -243,9 +252,89 @@ describe("createSlackFetchFile", () => {
 
     const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
 
-    await expect(fetchFile("https://files.slack.com/locked.png")).rejects.toThrow(
-      /files:read.*reinstall/is,
+    const result = fetchFile("https://files.slack.com/locked.png?sig=PRIVATE");
+    await expect(result).rejects.toThrow(/files:read.*reinstall/is);
+    await expect(result).rejects.not.toThrow("PRIVATE");
+  });
+
+  const fetchFileFor = (api?: SlackTransportOptions) =>
+    createSlackFetchFile({ api: resolveSlackTransportOptions(api), botToken: "xoxb-test-token" });
+  const pngFetch = () =>
+    vi.fn<typeof fetch>(
+      async () => new Response(new Uint8Array([7]), { headers: { "content-type": "image/png" } }),
     );
+
+  it("downloads a file under the configured file base with api.fetch", async () => {
+    const globalSpy = vi.spyOn(globalThis, "fetch");
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({
+      apiBaseUrl: "http://localhost:3000/api/slack",
+      fetch: apiFetch,
+      fileBaseUrl: "http://localhost:3000/files",
+    })("http://localhost:3000/files/F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(apiFetch).toHaveBeenCalledWith("http://localhost:3000/files/F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    expect(globalSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls the download base back to apiBaseUrl, and widens it by path prefix only", async () => {
+    const apiFetch = pngFetch();
+    const underApiBase = fetchFileFor({
+      apiBaseUrl: "http://localhost:3000/api/slack",
+      fetch: apiFetch,
+    });
+
+    const result = await underApiBase("http://localhost:3000/api/slack/files/F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(await underApiBase("http://localhost:3000/files/F01/cat.png")).toBeNull();
+    expect(await fetchFileFor()("http://localhost:3000/files/F01/cat.png")).toBeNull();
+    // `https://slack.com/api/` is the default base: it must not turn every
+    // `https://slack.com/…` link into a bot-token-authenticated download.
+    expect(
+      await fetchFileFor({ apiBaseUrl: "https://slack.com/api/" })(
+        "https://slack.com/files/secret.png",
+      ),
+    ).toBeNull();
+  });
+
+  it("downloads from Slack's own file host on the global fetch, past a stand-in's api.fetch", async () => {
+    const globalFetch = pngFetch();
+    vi.stubGlobal("fetch", globalFetch);
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({
+      apiBaseUrl: "http://localhost:3000/api/slack",
+      fetch: apiFetch,
+    })("https://files.slack.com/files-pri/T01-F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(globalFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    // A stand-in's api.fetch attaches that stand-in's credentials, and this URL
+    // arrives in an inbound payload.
+    expect(apiFetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("downloads from Slack's own file host on api.fetch when no base is configured", async () => {
+    const globalSpy = vi.spyOn(globalThis, "fetch");
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({ fetch: apiFetch })(
+      "https://files.slack.com/files-pri/T01-F01/cat.png",
+    );
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(apiFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    expect(globalSpy).not.toHaveBeenCalled();
   });
 });
 

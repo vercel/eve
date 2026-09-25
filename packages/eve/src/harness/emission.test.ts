@@ -9,6 +9,12 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
+import {
+  getTurnClientContextState,
+  setTurnClientContextState,
+} from "#harness/turn-client-context.js";
+import { markFrameworkStepInput } from "#harness/messages.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
@@ -125,9 +131,66 @@ describe("setHarnessEmissionState", () => {
 
     expect(retrieved).toEqual(state);
   });
+
+  it("clears client context when the emission state moves between turns", () => {
+    const turnId = "turn_5";
+    const session = setTurnClientContextState(createSession(), {
+      insertionIndex: 0,
+      messages: ["current page"],
+      turnId,
+    });
+
+    const updated = setHarnessEmissionState(session, {
+      sequence: 6,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "",
+    });
+
+    expect(getTurnClientContextState(updated.state, turnId)).toBeUndefined();
+  });
 });
 
 describe("emitTurnPreamble", () => {
+  it("marks framework-authored task input as non-participant stream activity", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      markFrameworkStepInput(
+        { message: "Framework-authored task state" },
+        "execution.background_task",
+      ),
+      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+      [],
+    );
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: "turn.started" }),
+      expect.objectContaining({
+        data: expect.objectContaining({ kind: "execution.background_task" }),
+        type: "message.received",
+      }),
+    ]);
+  });
+
+  it("keeps participant messages visible", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      { message: "Start background work" },
+      { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+      [],
+    );
+
+    expect(events.map((event) => event.type)).toEqual(["turn.started", "message.received"]);
+  });
+
   it("attaches one trace context to the session and turn start events", async () => {
     const events: Array<Parameters<HarnessEmitFn>[0]> = [];
     const trace = {
@@ -142,6 +205,7 @@ describe("emitTurnPreamble", () => {
       },
       { message: "hello" },
       { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      [{ role: "user", content: "hello" }],
       undefined,
       trace,
     );
@@ -191,7 +255,9 @@ describe("emitStreamContent empty delivery", () => {
     expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
       1, 64, 64, 64, 64, 64, 47,
     ]);
-    expect(appended.at(-1)?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    expect(appended.reduce((total, event) => total + event.data.messageDelta.length, 0)).toBe(
+      deltaCount,
+    );
     expect(events.at(-1)?.type).toBe("message.completed");
   });
 
@@ -250,7 +316,117 @@ describe("emitStreamContent empty delivery", () => {
     );
   });
 
-  it("skips delivery when the sentinel appears anywhere in the final message", async () => {
+  it.each([EMPTY_DELIVERY_SENTINEL, "&lt;eve-empty-delivery/&gt;"])(
+    "delivers explanations that quote %s across streamed deltas",
+    async (sentinel) => {
+      const emit = createEmitStub();
+      const deltas = ["The pending-task instruction requires `", sentinel, "` and no other text."];
+      const message = deltas.join("");
+
+      await emitStreamContent(
+        emit,
+        EMISSION_STATE,
+        streamOf([
+          ...deltas.map((text) => ({ id: "text-1", text, type: "text-delta" })),
+          { finishReason: "stop", type: "finish-step" },
+        ] as TextStreamPart<ToolSet>[]),
+      );
+
+      const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+      expect(events.at(-1)).toEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ message }),
+          type: "message.completed",
+        }),
+      );
+    },
+  );
+});
+
+describe("emitStreamContent action requests", () => {
+  it("streams a visible action input lifecycle before the completed request", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "render",
+        {
+          description: "Render a JSON document.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "render",
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "call-render", toolName: "render", type: "tool-input-start" },
+        { delta: '{"title":"Hel', id: "call-render", type: "tool-input-delta" },
+        { delta: 'lo"}', id: "call-render", type: "tool-input-delta" },
+        { id: "call-render", type: "tool-input-end" },
+        {
+          input: { title: "Hello" },
+          toolCallId: "call-render",
+          toolName: "render",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "action.input.appended",
+      "action.input.appended",
+      "actions.requested",
+    ]);
+    const inputEvents = events.filter((event) => event.type === "action.input.appended");
+    expect(inputEvents.map((event) => event.data)).toEqual([
+      {
+        callId: "call-render",
+        inputTextDelta: '{"title":"Hel',
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
+      },
+      {
+        callId: "call-render",
+        inputTextDelta: 'lo"}',
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
+      },
+    ]);
+  });
+
+  it("does not expose streamed input for excluded actions", async () => {
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        { id: "call-hidden", toolName: "hidden", type: "tool-input-start" },
+        { delta: '{"secret":true}', id: "call-hidden", type: "tool-input-delta" },
+        { id: "call-hidden", type: "tool-input-end" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(["hidden"]),
+        tools: new Map(),
+      },
+    );
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("does not expose streamed input for provider-executed actions", async () => {
     const emit = createEmitStub();
 
     await emitStreamContent(
@@ -258,25 +434,20 @@ describe("emitStreamContent empty delivery", () => {
       EMISSION_STATE,
       streamOf([
         {
-          id: "text-1",
-          text: `Internal preamble ${EMPTY_DELIVERY_SENTINEL} trailing text`,
-          type: "text-delta",
+          id: "call-provider",
+          providerExecuted: true,
+          toolName: "web_search",
+          type: "tool-input-start",
         },
-        { finishReason: "stop", type: "finish-step" },
+        { delta: '{"query":"eve"}', id: "call-provider", type: "tool-input-delta" },
+        { id: "call-provider", type: "tool-input-end" },
       ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools: new Map() },
     );
 
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ message: null }),
-        type: "message.completed",
-      }),
-    );
+    expect(emit).not.toHaveBeenCalled();
   });
-});
 
-describe("emitStreamContent action requests", () => {
   it("cancels a pending provider action batch when the stream aborts", async () => {
     vi.useFakeTimers();
     const emit = createEmitStub();
@@ -304,6 +475,46 @@ describe("emitStreamContent action requests", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("emits tool labels for provider-executed calls", async () => {
+    const emitted: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      emitted.push(event);
+    };
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { action: { queries: ["eve framework"] } },
+          providerExecuted: true,
+          toolCallId: "search-1",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map([
+          [
+            "web_search",
+            {
+              label: { start: resolveWebSearchActivityLabel },
+              description: "Search the web.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "web_search",
+            },
+          ],
+        ]),
+      },
+    );
+
+    expect(emitted.find((event) => event.type === "actions.requested")?.data.presentation).toEqual({
+      "search-1": { label: "Search eve framework" },
+    });
   });
 
   it("emits a provider action batch before any provider result arrives", async () => {
@@ -368,11 +579,8 @@ describe("emitStreamContent action requests", () => {
           description: "Delegate work to a subagent.",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
-          runtimeAction: {
-            kind: "subagent-call",
-            nodeId: "subagents/researcher",
-            subagentName: "researcher",
-          },
+          nodeId: "subagents/researcher",
+          workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],
     ]);
@@ -382,6 +590,9 @@ describe("emitStreamContent action requests", () => {
       EMISSION_STATE,
       streamOf([
         { id: "message-1", text: "Checking the release notes.", type: "text-delta" },
+        { id: "call-delegate", toolName: "delegate", type: "tool-input-start" },
+        { delta: '{"task":"research the release"}', id: "call-delegate", type: "tool-input-delta" },
+        { id: "call-delegate", type: "tool-input-end" },
         {
           input: { task: "research the release" },
           toolCallId: "call-delegate",
@@ -400,6 +611,7 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
+      "action.input.appended",
       "actions.requested",
     ]);
     expect(events[1]).toMatchObject({
@@ -413,6 +625,12 @@ describe("emitStreamContent action requests", () => {
       [
         "web_search",
         {
+          label: {
+            complete: (_input, output) =>
+              `Found ${(output as { results: unknown[] }).results.length}\u0000 final results`,
+            delta: (_input, partial) =>
+              `Found ${(partial as { results: unknown[] }).results.length}\u0000 results`,
+          },
           description: "Search the web.",
           execute: async () => ({ results: [] }),
           inputSchema: jsonSchema({ type: "object" }),
@@ -480,9 +698,15 @@ describe("emitStreamContent action requests", () => {
       data: { result: { output: { results: ["partial"] } } },
       type: "action.partial",
     });
+    expect(localEvents[3]).toMatchObject({
+      data: { presentation: { "call-1": { label: "Found 1 results" } } },
+    });
     expect(localEvents[4]).toMatchObject({
       data: { result: { output: { results: ["eve"] } } },
       type: "action.result",
+    });
+    expect(localEvents[4]).toMatchObject({
+      data: { presentation: { "call-1": { label: "Found 1 final results" } } },
     });
     expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
@@ -492,6 +716,112 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
+  });
+
+  it("returns a background receipt without announcing subagent completion", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "delegate",
+        {
+          description: "Delegate work to a subagent.",
+          execution: "background",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "delegate",
+          nodeId: "subagents/researcher",
+          workflowId: "workflow//./agent/subagents/researcher//execute",
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { message: "research the release" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+        {
+          output: { status: "working", taskId: "task-1" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-result",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual(["actions.requested", "action.result"]);
+    expect(events[1]).toMatchObject({
+      data: {
+        result: { callId: "call-delegate", output: { status: "working", taskId: "task-1" } },
+      },
+      type: "action.result",
+    });
+  });
+
+  it("does not fail tool streaming when label projections throw", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "build_report",
+        {
+          label: {
+            complete: () => {
+              throw new Error("result projection failed");
+            },
+            delta: () => {
+              throw new Error("update projection failed");
+            },
+          },
+          description: "Build a report.",
+          execute: async () => ({ phase: "complete" }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "build_report",
+        },
+      ],
+    ]);
+    const emit = createEmitStub();
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: {},
+          toolCallId: "call-1",
+          toolName: "build_report",
+          type: "tool-call",
+        },
+        {
+          output: { phase: "collecting" },
+          preliminary: true,
+          toolCallId: "call-1",
+          toolName: "build_report",
+          type: "tool-result",
+        },
+        {
+          output: { phase: "complete" },
+          toolCallId: "call-1",
+          toolName: "build_report",
+          type: "tool-result",
+        },
+        { finishReason: "stop", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+
+    expect(vi.mocked(emit).mock.calls.map(([event]) => event.type)).toEqual([
+      "actions.requested",
+      "action.partial",
+      "action.result",
+    ]);
+    expect(vi.mocked(emit).mock.calls[1]?.[0]).not.toHaveProperty("data.presentation");
+    expect(vi.mocked(emit).mock.calls[2]?.[0]).not.toHaveProperty("data.presentation");
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {

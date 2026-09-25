@@ -1,10 +1,14 @@
+import { localGatewayModel } from "#internal/model-auth/transport.js";
 import type { LanguageModel } from "ai";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ContextAccessor } from "#context/key.js";
 import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { normalizeCatalogModelId } from "#internal/model-catalog.js";
-import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
+import {
+  formatLanguageModelGatewayId,
+  isRuntimeLanguageModel,
+  isAgentReasoningDefinition,
+} from "#internal/runtime-model.js";
 import type {
   RuntimeDynamicModelReference,
   RuntimeModelReference,
@@ -67,7 +71,7 @@ export async function resolveRuntimeModelReference(
     return await loadSourceBackedRuntimeModelReference(reference, scope);
   }
 
-  return reference.id;
+  return localGatewayModel(reference.id) ?? reference.id;
 }
 
 async function loadSourceBackedRuntimeModelReference(
@@ -166,7 +170,7 @@ export async function resolveRuntimeModelSelection(input: {
   if (typeof selectedModel === "string") {
     const id = formatLanguageModelGatewayId(selectedModel);
     const metadata = await resolveSelectionMetadata({
-      cacheKey: `gateway:${normalizeCatalogModelId(id)}`,
+      cacheKey: `gateway:${id}`,
       catalog,
       contextWindowTokens: selection.modelContextWindowTokens,
       load: (catalog) => catalog.getByGatewayId(id),
@@ -179,6 +183,7 @@ export async function resolveRuntimeModelSelection(input: {
         contextWindowTokens: metadata.contextWindowTokens,
         maxOutputTokens: metadata.maxOutputTokens,
         providerOptions,
+        reasoning: selection.reasoning,
       },
     };
   }
@@ -195,8 +200,8 @@ export async function resolveRuntimeModelSelection(input: {
   const metadata = await resolveSelectionMetadata({
     cacheKey:
       topLevelProvider === "gateway"
-        ? `gateway:${normalizeCatalogModelId(selectedModel.modelId)}`
-        : `provider:${selectedModel.provider}:${normalizeCatalogModelId(selectedModel.modelId)}`,
+        ? `gateway:${selectedModel.modelId}`
+        : `provider:${selectedModel.provider}:${selectedModel.modelId}`,
     catalog,
     contextWindowTokens: selection.modelContextWindowTokens,
     load: (catalog) =>
@@ -214,6 +219,7 @@ export async function resolveRuntimeModelSelection(input: {
       contextWindowTokens: metadata.contextWindowTokens,
       maxOutputTokens: metadata.maxOutputTokens,
       providerOptions,
+      reasoning: selection.reasoning,
     },
   };
 }
@@ -272,7 +278,12 @@ async function resolveSelectionMetadata(input: {
   return entry;
 }
 
-const DYNAMIC_MODEL_SELECTION_KEYS = new Set(["model", "modelContextWindowTokens", "modelOptions"]);
+const DYNAMIC_MODEL_SELECTION_KEYS = new Set([
+  "model",
+  "modelContextWindowTokens",
+  "modelOptions",
+  "reasoning",
+]);
 
 function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefinition): void {
   const unknownKeys = Object.keys(selection).filter(
@@ -280,7 +291,13 @@ function validateDynamicModelSelection(selection: PublicAgentModelSelectionDefin
   );
   if (unknownKeys.length > 0) {
     throw new Error(
-      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, modelContextWindowTokens?, modelOptions? }.`,
+      `Dynamic model resolver returned a selection with unknown key(s): ${unknownKeys.join(", ")}. Expected { model, reasoning?, modelContextWindowTokens?, modelOptions? }.`,
+    );
+  }
+
+  if (selection.reasoning !== undefined && !isAgentReasoningDefinition(selection.reasoning)) {
+    throw new Error(
+      "Dynamic model resolver returned an invalid reasoning effort. Expected provider-default, none, minimal, low, medium, high, or xhigh.",
     );
   }
 
@@ -324,30 +341,6 @@ function validateRuntimeLanguageModel(model: unknown): asserts model is Language
       "Dynamic model resolver returned an invalid model. Return an AI Gateway model id string, an AI SDK language model, or { model, modelContextWindowTokens?, modelOptions? }.",
     );
   }
-}
-
-export function isRuntimeLanguageModel(value: unknown): value is LanguageModel {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const model = value as {
-    specificationVersion?: unknown;
-    provider?: unknown;
-    modelId?: unknown;
-    doGenerate?: unknown;
-    doStream?: unknown;
-  };
-
-  return (
-    (model.specificationVersion === "v2" ||
-      model.specificationVersion === "v3" ||
-      model.specificationVersion === "v4") &&
-    typeof model.provider === "string" &&
-    typeof model.modelId === "string" &&
-    typeof model.doGenerate === "function" &&
-    typeof model.doStream === "function"
-  );
 }
 
 function parseProviderOptionsRecord(

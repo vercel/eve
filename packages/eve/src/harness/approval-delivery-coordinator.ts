@@ -28,18 +28,21 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
-const TEXT_APPROVAL_FEEDBACK =
-  "Please use the Approve or Cancel buttons to respond to this approval.";
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
 const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
 export interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
-  readonly kind: "continue" | "continue-coordination" | "authorization-required" | "park";
+  readonly kind:
+    | "continue"
+    | "continue-coordination"
+    | "authorization-required"
+    | "responses-completed"
+    | "park";
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }
@@ -62,57 +65,27 @@ export interface ApprovalDeliveryResult {
  * creation commit before long-running policy execution. Candidate results also
  * commit before lifecycle events are projected by the next stack layer.
  */
-/** Returns whether this invocation should prepare tools for persisted policy work. */
-export function shouldPrepareApprovalPolicyTools(input: {
-  readonly now?: number;
-  readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
-}): boolean {
-  const batches = getPendingInputBatches(input.session.state);
-  const responses = [
-    ...(input.stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
-    ...(input.stepInput?.inputResponses ?? []),
-  ];
-  if (
-    batches.some((batch) =>
-      batch.requests.some(
-        (request) =>
-          isApprovalRequest(request) &&
-          responses.some((response) => response.requestId === request.requestId),
-      ),
-    )
-  ) {
-    return false;
-  }
-
-  const now = input.now ?? Date.now();
-  return getApprovalAuditState(input.session.state).activeCandidates.some(
-    (candidate) =>
-      candidate.expiresAt > now &&
-      (candidate.status === "pending" ||
-        (candidate.authorizationChallenges?.some(
-          (challenge) => getAuthorizationResult(challenge.name) !== undefined,
-        ) ??
-          false)),
-  );
-}
-
 export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
   readonly tools: HarnessToolMap;
+  readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolMap>;
 }): Promise<ApprovalDeliveryResult> {
   const now = input.now ?? Date.now();
-  const expiredChallengeNames = getApprovalAuditState(input.session.state)
-    .activeCandidates.filter((candidate) => candidate.expiresAt <= now)
-    .flatMap(
-      (candidate) => candidate.authorizationChallenges?.map((challenge) => challenge.name) ?? [],
-    );
+  const expiredCandidates = getApprovalAuditState(input.session.state).activeCandidates.filter(
+    (candidate) => candidate.expiresAt <= now,
+  );
+  const expiredChallengeIds = expiredCandidates.flatMap(
+    (candidate) =>
+      candidate.authorizationChallenges?.map(
+        (challenge) => challenge.attemptId ?? challenge.candidateId ?? challenge.name,
+      ) ?? [],
+  );
   const expiredState = expireApprovalCandidates({ now, state: input.session.state });
   let session: HarnessSession = {
     ...input.session,
-    state: clearPendingAuthorization(expiredState, expiredChallengeNames),
+    state: clearPendingAuthorization(expiredState, expiredChallengeIds),
   };
   const audit = getApprovalAuditState(session.state);
   const batches = getPendingInputBatches(session.state);
@@ -123,9 +96,16 @@ export async function coordinateApprovalDelivery(input: {
     pendingRequestIds.has(settlement.requestId),
   );
   const settledRequestIds = new Set(audit.settlements.map((settlement) => settlement.requestId));
-  const discardedDuplicate = hasResponseForRequest(input.stepInput, settledRequestIds);
+  // A direct response settles its individual request before the whole batch
+  // resolves. Keep that response while its request is still pending so a
+  // later response can complete the batch; only discard responses for requests
+  // that have left pending input entirely.
+  const deduplicableSettledRequestIds = new Set(
+    [...settledRequestIds].filter((requestId) => !pendingRequestIds.has(requestId)),
+  );
+  const discardedDuplicate = hasResponseForRequest(input.stepInput, deduplicableSettledRequestIds);
   const deduplicatedInput = discardedDuplicate
-    ? removeConsumedResponses(input.stepInput, settledRequestIds)
+    ? removeConsumedResponses(input.stepInput, deduplicableSettledRequestIds)
     : input.stepInput;
   if (
     discardedDuplicate &&
@@ -142,21 +122,6 @@ export async function coordinateApprovalDelivery(input: {
   );
   const allRequests = batches.flatMap((batch) => batch.requests);
   const requests = new Map(allRequests.map((request) => [request.requestId, request]));
-  if (
-    stepInput?.message !== undefined &&
-    (stepInput.attributedInputResponses?.length ?? 0) === 0 &&
-    (stepInput.inputResponses?.length ?? 0) === 0 &&
-    audit.activeCandidates.length === 0 &&
-    authorizationRequiredRequestIds.size > 0
-  ) {
-    return deliveryResult(
-      session,
-      { ...stepInput, message: undefined, messageAuth: undefined },
-      "park",
-      [],
-      [TEXT_APPROVAL_FEEDBACK],
-    );
-  }
   const challenges: AuthorizationChallenge[] = [];
   const feedback: string[] = [];
   const consumed = new Set<string>();
@@ -285,7 +250,7 @@ export async function coordinateApprovalDelivery(input: {
       request,
       responder: candidate.responder,
       session,
-      tools: input.tools,
+      tools: (await input.prepareTools?.(request)) ?? input.tools,
     });
     session = processed.session;
     didCommit ||= processed.didCommit;
@@ -297,6 +262,14 @@ export async function coordinateApprovalDelivery(input: {
   }
 
   const resumedStepInput = appendSettledResponses(remainingStepInput, pendingSettlements);
+  // Only a terminal candidate pass completes response processing. Ingestion must
+  // still commit before policy work, and live candidates still own their park.
+  if (
+    (didCommit || expiredCandidates.length > 0) &&
+    getApprovalAuditState(session.state).activeCandidates.length === 0
+  ) {
+    return deliveryResult(session, resumedStepInput, "responses-completed");
+  }
   if (pendingSettlements.length > 0) {
     return deliveryResult(session, resumedStepInput, "continue");
   }
@@ -479,11 +452,19 @@ function appendSettledResponses(
   settlements: readonly ApprovalSettlementAuditRecord[],
 ): StepInput | undefined {
   if (settlements.length === 0) return stepInput;
+  const existingRequestIds = new Set([
+    ...(stepInput?.inputResponses ?? []).map((response) => response.requestId),
+    ...(stepInput?.attributedInputResponses ?? []).map(({ response }) => response.requestId),
+  ]);
+  const missingSettlements = settlements.filter(
+    (settlement) => !existingRequestIds.has(settlement.requestId),
+  );
+  if (missingSettlements.length === 0) return stepInput;
   return {
     ...stepInput,
     inputResponses: [
       ...(stepInput?.inputResponses ?? []),
-      ...settlements.map((settlement) => ({
+      ...missingSettlements.map((settlement) => ({
         optionId: settlement.outcome === "allowed" ? "approve" : "cancel",
         requestId: settlement.requestId,
       })),

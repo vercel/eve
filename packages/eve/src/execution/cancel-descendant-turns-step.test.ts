@@ -1,3 +1,4 @@
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { deserializeContext } from "#context/serialize.js";
@@ -7,10 +8,12 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
-} from "#execution/remote-agent-dispatch.js";
+} from "#subagents/remote-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#harness/handles/store.js";
+import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
+
+vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 
 vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(),
@@ -20,7 +23,7 @@ vi.mock("./workflow-runtime.js", () => ({
   requestWorkflowTurnCancellation: vi.fn(),
 }));
 
-vi.mock("./remote-agent-dispatch.js", () => ({
+vi.mock("../subagents/remote-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
   isRetryableRemoteAgentCancelError: vi.fn(),
   resolveRemoteAgentForAction: vi.fn(),
@@ -114,6 +117,56 @@ describe("cancelDescendantTurnsStep", () => {
     });
   });
 
+  it("signals owned children while their workflow is still unwinding", async () => {
+    const settlement = Promise.withResolvers<void>();
+    vi.mocked(cancelWorkflowToolRun).mockReturnValueOnce(settlement.promise);
+    vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
+      status: "accepted",
+      sessionId: "local-child",
+    });
+    const cancellation = cancelDescendantTurnsStep({
+      serializedContext: {},
+      sessionState: createDurableSessionState({
+        session: createSession({
+          "eve.harness.emission": {
+            turnId: "turn_0",
+            stepIndex: 0,
+            sequence: 0,
+            sessionStarted: true,
+          },
+          "eve.workflowTool": {
+            version: 3,
+            runs: [
+              {
+                lifetime: "turn",
+                callId: "call",
+                toolName: "research",
+                origin: { turnId: "turn_0", stepIndex: 0 },
+                address: { runId: "workflow", hookToken: "hook" },
+              },
+            ],
+          },
+          [AGENT_HANDLES_STATE_KEY]: {
+            handles: [
+              {
+                phase: "claimed",
+                ownerId: "workflow",
+                operationId: "op",
+                identity: LOCAL_RUNNING_HANDLE.identity,
+                address: LOCAL_RUNNING_HANDLE.address,
+              },
+            ],
+          },
+        }),
+      }),
+    });
+    await Promise.resolve();
+    expect(cancelWorkflowToolRun).toHaveBeenCalled();
+    expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({ sessionId: "local-child" });
+    settlement.resolve();
+    await cancellation;
+  });
+
   it("does not deserialize remote context for local-only descendants", async () => {
     vi.mocked(requestWorkflowTurnCancellation).mockResolvedValue({
       sessionId: "local-child",
@@ -167,7 +220,6 @@ describe("cancelDescendantTurnsStep", () => {
   });
 
   it("skips parked handles: an idle child has no turn to cancel", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const session = createSession({
       [AGENT_HANDLES_STATE_KEY]: {
         handles: [
@@ -188,10 +240,6 @@ describe("cancelDescendantTurnsStep", () => {
 
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.cancel-descendant-turns] no running agent handles found while cancelling descendants; nothing to cancel",
-      expect.objectContaining({ sessionId: expect.any(String) }),
-    );
   });
 
   it("retries no-active-turn responses during the child adoption window", async () => {
@@ -271,8 +319,6 @@ describe("cancelDescendantTurnsStep", () => {
   });
 
   it("treats sessions without a handle store as having no descendants", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-
     await cancelDescendantTurnsStep({
       serializedContext: {},
       sessionState: createDurableSessionState({ session: createSession() }),
@@ -281,11 +327,6 @@ describe("cancelDescendantTurnsStep", () => {
     expect(requestWorkflowTurnCancellation).not.toHaveBeenCalled();
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
     expect(deserializeContext).not.toHaveBeenCalled();
-    // The skipped cancellation is observable, not silent.
-    expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.cancel-descendant-turns] no running agent handles found while cancelling descendants; nothing to cancel",
-      expect.objectContaining({ sessionId: expect.any(String) }),
-    );
   });
 });
 

@@ -22,6 +22,7 @@ const NEXT_EVE_MIDDLEWARE_DESCRIPTOR = {
   ...NEXT_EVE_PROXY_DESCRIPTOR,
   files: {
     ...NEXT_EVE_PROXY_DESCRIPTOR.files,
+    "next.config.mjs": `import { withEve } from "eve/next";\n\nexport default withEve({}, { eveBuildCommand: "pnpm exec eve build --skip-sandbox-prewarm" });\n`,
     ".vercel/project.json": `${JSON.stringify(
       {
         orgId: "team_eve_scenario",
@@ -88,6 +89,7 @@ Triage the support queue.
     "next.config.mjs": `import { withEve } from "eve/next";
 
 export default withEve({}, {
+  eveBuildCommand: "pnpm exec eve build --skip-sandbox-prewarm",
   agents: {
     billing: "./agents/billing",
     support: "./agents/support",
@@ -127,14 +129,22 @@ async function readVercelOutputRoutes(outputRoot: string): Promise<readonly unkn
   return config.routes;
 }
 
+async function runVercelBuild(appRoot: string): Promise<void> {
+  await runPnpmCommand({
+    args: ["exec", "./node_modules/.bin/vercel", "build", "--yes"],
+    cwd: appRoot,
+    env: {
+      ...process.env,
+      NPM_CONFIG_AUDIT: "false",
+      NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+    },
+  });
+}
+
 describe("framework-next build", () => {
   it("builds the Next.js framework fixture against the workspace eve dist", async () => {
-    // Runs `build:next` rather than the fixture's `build` script: `build`
-    // regenerates the shared workspace `dist/`, which would corrupt scenario
-    // files running in parallel workers. The scenario globalSetup already
-    // rebuilt `dist/` before any worker forked.
     await runPnpmCommand({
-      args: ["--filter", "framework-next", "build:next"],
+      args: ["--filter", "framework-next", "build"],
       cwd: REPO_ROOT,
     });
   }, 180_000);
@@ -142,10 +152,7 @@ describe("framework-next build", () => {
   it("preserves Next middleware when Vercel assembles the generated eve service", async () => {
     const app = await scenarioApp(NEXT_EVE_MIDDLEWARE_DESCRIPTOR);
 
-    await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
-      cwd: app.appRoot,
-    });
+    await runVercelBuild(app.appRoot);
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const routes = await readVercelOutputRoutes(outputRoot);
@@ -175,10 +182,7 @@ describe("framework-next build", () => {
   it("publishes named eve schedules into the assembled host output", async () => {
     const app = await scenarioApp(NEXT_EVE_NAMED_SCHEDULES_DESCRIPTOR);
 
-    await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
-      cwd: app.appRoot,
-    });
+    await runVercelBuild(app.appRoot);
 
     const outputRoot = join(app.appRoot, ".vercel", "output");
     const config = await readVercelOutputConfig(outputRoot);
@@ -187,11 +191,11 @@ describe("framework-next build", () => {
       expect.arrayContaining([
         { path: "/api/user-cleanup", schedule: "0 0 * * *" },
         {
-          path: expect.stringMatching(/^\/eve\/agents\/billing\/eve\/v1\/cron\/[A-Za-z0-9_-]+$/),
+          path: expect.stringMatching(/^\/eve\/billing\/v1\/cron\/[A-Za-z0-9_-]+$/),
           schedule: "*/10 * * * *",
         },
         {
-          path: expect.stringMatching(/^\/eve\/agents\/support\/eve\/v1\/cron\/[A-Za-z0-9_-]+$/),
+          path: expect.stringMatching(/^\/eve\/support\/v1\/cron\/[A-Za-z0-9_-]+$/),
           schedule: "*/5 * * * *",
         },
       ]),

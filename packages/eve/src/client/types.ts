@@ -6,9 +6,10 @@ import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
-import type { TurnPolicy } from "#channel/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+export type { HealthResult } from "#client/health-schema.js";
 
 export type {
   AgentInfoChannelEntry,
@@ -16,12 +17,12 @@ export type {
   AgentInfoConnectionEntry,
   AgentInfoDynamicResolverEntry,
   AgentInfoEntry,
-  AgentInfoFrameworkChannelEntry,
-  AgentInfoFrameworkToolEntry,
   AgentInfoHookEntry,
   AgentInfoInstructions,
   AgentInfoInstructionsEntry,
+  AgentInfoMemoryEntry,
   AgentInfoResult,
+  AgentInfoRemoteAgentEntry,
   AgentInfoSandboxEntry,
   AgentInfoScheduleEntry,
   AgentInfoSkillEntry,
@@ -107,18 +108,29 @@ export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutpu
   readonly message: string | UserContent;
 }
 
+/** Request options for creating a conversation session before its first turn. */
+export interface CreateSessionOptions {
+  /** Abort signal for cancelling the creation request. */
+  readonly signal?: AbortSignal;
+  /** Additional headers for this request only. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
 /** Options shared by message sends and HITL responses on a client session. */
 export interface SendTurnOptions<TOutput = unknown> {
   /** Policy for a message sent while the fixed session has an active turn. */
   readonly turnPolicy?: TurnPolicy;
+  /** Updates the session’s background task reporting policy. Omit to preserve it. */
+  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 
   /**
-   * Ephemeral client/page context for the next model call only.
+   * Ephemeral client/page context for the current turn.
    *
    * Strings are rendered as user-role model context messages. Objects are
    * JSON-serialized into one user-role model context message. Client context
    * rides along with a message or HITL response; it does not dispatch a turn by
-   * itself and is never persisted to durable session history.
+   * itself, remains available to every model call in the turn, and is never
+   * persisted to durable session history or exposed to later turns.
    */
   readonly clientContext?: string | readonly string[] | JsonObject;
 
@@ -151,7 +163,10 @@ export interface SendTurnOptions<TOutput = unknown> {
 }
 
 /** Options for answering pending HITL input requests on a client session. */
-export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
+export type RespondTurnOptions<TOutput = unknown> = Omit<
+  SendTurnOptions<TOutput>,
+  "taskDeliveryPolicy"
+>;
 
 /** @internal Transport envelope used by stores and command adapters. */
 export type SendTurnPayload<TOutput = unknown> =
@@ -308,12 +323,6 @@ export interface MessageResult<TOutput = unknown> {
 /**
  * Response from the health endpoint.
  */
-export interface HealthResult {
-  readonly ok: true;
-  readonly status: "ready";
-  readonly workflowId: string;
-}
-
 /**
  * Serializable cursor for one fixed, ID-addressed client session.
  */

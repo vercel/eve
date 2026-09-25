@@ -31,6 +31,16 @@ describe("AltScreen", () => {
     expect(screen.active).toBe(false);
   });
 
+  it("can leave the cursor visible without claiming mouse input", () => {
+    const { writes, output } = collectingOutput();
+    const screen = new AltScreen(output);
+
+    screen.enter({ cursor: "visible", mouse: false });
+    screen.exit();
+
+    expect(writes.join("")).toBe("\x1b[?1049h\x1b[?25h\x1b[?25h\x1b[?1049l");
+  });
+
   it("paints frames with absolute row positions, clipped to the height", () => {
     const { writes, output } = collectingOutput();
     const screen = new AltScreen(output);

@@ -1,0 +1,9 @@
+{
+  "name": "@eve-internal/mock-imessage-setup",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "mock-imessage-setup": "./cli.mjs"
+  },
+  "type": "module"
+}

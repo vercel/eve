@@ -8,7 +8,7 @@ import { formatValidationError } from "#runtime/validation.js";
 export const EXTENSION_COMPATIBILITY_MANIFEST_KIND = "eve-extension";
 
 /** Current compatibility-manifest JSON format. */
-export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 1;
+export const EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION = 2;
 
 /** Filename emitted at the root of an extension's agent-shaped dist tree. */
 export const EXTENSION_COMPATIBILITY_MANIFEST_FILENAME = "_manifest.json";
@@ -21,16 +21,132 @@ interface ExtensionCapabilityContract {
 
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
-  tool: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
-  dynamicTool: {
-    current: 16,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-    dropped: {},
+  tool: {
+    current: 57,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 57],
+    dropped: {
+      14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      15: "TaskExec replaces stageEffect with send",
+      16: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      17: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      18: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      19: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      20: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      21: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      22: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      26: "Background tools now use task yield descriptors",
+      27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      28: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      33: "ctx.agent now accepts the subagent name as its first argument, derives invocation identity internally, and infers structured output types",
+      36: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      37: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      38: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      39: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
+      40: "runWorkflowProgram was made internal; use the workflow factory from eve/tools/workflow",
+      41: "workflow no longer accepts agents and its options argument is optional; use workflow() or workflow({ maxSubagents })",
+      42: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      43: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      44: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      45: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      46: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      47: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
+      48: "eve/experimental/evaluate was removed; import evaluate from eve/ai",
+      49: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      50: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      51: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      52: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+    },
   },
-  connection: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
+  dynamicTool: {
+    current: 54,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
+    ],
+    dropped: {
+      21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      23: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      24: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      25: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      26: "Background tools now use task yield descriptors",
+      27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
+      28: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      29: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      30: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      34: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      35: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      36: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      37: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      38: "workflowMaxSubagents was removed with experimental_workflow; configure generated-program limits with the workflow factory",
+      39: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      40: "Legacy session history migration was removed; user-role messages require current provenance kinds.",
+      41: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      42: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      43: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      44: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      45: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      46: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      47: "autoModel and eve/experimental/evaluate were removed; import auto from eve/models",
+      48: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      49: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      50: "Background dynamic tools were removed; use a static defineWorkflowTool for durable background work.",
+      51: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      53: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+    },
+  },
+  channel: {
+    current: 31,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31],
+    dropped: {
+      12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      20: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      21: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      22: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
+      23: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
+      24: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
+      25: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
+      26: "Task views no longer expose executor bindings; background work is owned by workflow runs.",
+      27: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      30: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+    },
+  },
+  schedule: {
+    current: 15,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    dropped: {
+      5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
+  },
+  subagent: {
+    current: 19,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19],
+    dropped: {
+      1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
+      2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
+      5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
+      18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
+    },
+  },
+  connection: {
+    current: 26,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26],
+    dropped: {
+      9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
+      10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      23: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      25: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+    },
+  },
   hook: {
-    current: 12,
-    supported: [10, 11, 12],
+    current: 27,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -41,18 +157,36 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       7: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      24: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      26: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
     },
   },
-  skill: { current: 1, supported: [1], dropped: {} },
-  dynamicSkill: { current: 10, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dropped: {} },
+  skill: { current: 2, supported: [1, 2], dropped: {} },
+  dynamicSkill: {
+    current: 21,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21],
+    dropped: {
+      13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
+  },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 11,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-    dropped: {},
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22],
+    dropped: {
+      14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
   },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 3, supported: [1, 2, 3], dropped: {} },
+  state: {
+    current: 9,
+    supported: [1, 2, 3, 4, 5, 7, 9],
+    dropped: {
+      6: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      8: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+    },
+  },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */
@@ -92,10 +226,13 @@ export type ExtensionCapabilitySupport = Readonly<Record<string, readonly number
 /** Compatibility-only metadata emitted by `eve extension build`. */
 export interface ExtensionCompatibilityManifest {
   readonly kind: typeof EXTENSION_COMPATIBILITY_MANIFEST_KIND;
-  readonly formatVersion: typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
+  readonly formatVersion: 1 | typeof EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION;
   /** Diagnostic producer version; capability requirements decide compatibility. */
   readonly builtWithEve: string;
   readonly requires: Readonly<Record<string, number>>;
+  readonly build?: {
+    readonly externalDependencies: readonly string[];
+  };
 }
 
 /** One requirement the consuming eve cannot satisfy. */
@@ -105,14 +242,27 @@ export interface UnsupportedExtensionCapability {
   readonly supportedVersions: readonly number[];
 }
 
-const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z
+const extensionCompatibilityManifestV1Schema = z
   .object({
     kind: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_KIND),
-    formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
+    formatVersion: z.literal(1),
     builtWithEve: z.string().min(1),
     requires: z.record(z.string(), z.number().int().positive()),
   })
   .strict();
+const extensionCompatibilityManifestV2Schema = extensionCompatibilityManifestV1Schema.extend({
+  formatVersion: z.literal(EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION),
+  build: z
+    .object({
+      externalDependencies: z.array(z.string().min(1)).readonly(),
+    })
+    .strict()
+    .optional(),
+});
+const extensionCompatibilityManifestSchema: z.ZodType<ExtensionCompatibilityManifest> = z.union([
+  extensionCompatibilityManifestV1Schema,
+  extensionCompatibilityManifestV2Schema,
+]);
 
 /** Serializes a compatibility manifest deterministically. */
 export function serializeExtensionCompatibilityManifest(

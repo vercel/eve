@@ -8,7 +8,7 @@ import {
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
 } from "#internal/application/dev-environment.js";
-import { resolveApplicationRoot } from "#internal/application/paths.js";
+import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
 import { createEvalClient } from "#evals/cli/eval-client.js";
 import { filterEvalsByTags } from "#evals/cli/filter.js";
@@ -54,10 +54,9 @@ export async function runEvalCommand(
   evalIds: readonly string[],
   options: EvalCliOptions,
   logger: EvalCliLogger,
+  appRoot: string = process.cwd(),
 ): Promise<void> {
-  const appRoot = resolveApplicationRoot();
-
-  loadDevelopmentEnvironmentFiles(appRoot);
+  await loadDevelopmentEnvironmentFiles(appRoot);
 
   const requestedEvalIds = evalIds.length > 0 ? evalIds : undefined;
   const discovered = await discoverAndImportEvals(appRoot, requestedEvalIds);
@@ -132,8 +131,11 @@ export async function runEvalCommand(
   let devServer: DevelopmentServer | undefined;
   let target: EveEvalTargetHandle;
   let client: Awaited<ReturnType<typeof createEvalClient>>;
+  let setupContext: unknown;
 
   try {
+    setupContext = await config.setup?.();
+
     if (options.url) {
       client = await createEvalClient(
         { kind: "remote", url: options.url },
@@ -150,7 +152,11 @@ export async function runEvalCommand(
       // once at startup and never again.
       process.env[EVE_EVALUATION_ENV_FLAG] = "1";
       process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
-      devServer = createDevelopmentServer(appRoot, { host: "127.0.0.1", port: 0 });
+      devServer = createDevelopmentServer(appRoot, {
+        developmentExtensions: noDevelopmentExtensions(),
+        host: "127.0.0.1",
+        port: 0,
+      });
       const started = await devServer.start();
       client = await createEvalClient({ kind: "local", url: started.url });
       target = await resolveEvalTargetHandle({
@@ -169,6 +175,7 @@ export async function runEvalCommand(
     const summary = await runEvals({
       evaluations,
       config,
+      setupContext,
       target,
       client,
       appRoot,
@@ -195,16 +202,50 @@ export async function runEvalCommand(
       process.exitCode = 1;
     }
   } finally {
-    if (devServer) {
-      await devServer.close();
-      await shutdownActiveSandboxHandles({
-        log: (message) => logger.error(message),
-      });
+    for (const cleanup of [
+      () => devServer?.close(),
+      () => devServer && shutdownActiveSandboxHandles({ log: (message) => logger.error(message) }),
+      () => config.teardown?.(setupContext),
+    ]) {
+      try {
+        await cleanup();
+      } catch (error) {
+        logger.error(
+          `Eval cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
     }
   }
 
   const exitCode = typeof process.exitCode === "number" ? process.exitCode : 0;
+  await flushStandardStreams();
   process.exit(exitCode);
+}
+
+async function flushStandardStreams(): Promise<void> {
+  await Promise.all([flushStream(process.stdout), flushStream(process.stderr)]);
+}
+
+async function flushStream(stream: NodeJS.WriteStream): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      setImmediate(() => {
+        stream.off("error", settle);
+        resolve();
+      });
+    };
+
+    stream.once("error", settle);
+    try {
+      stream.write("", settle);
+    } catch {
+      settle();
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

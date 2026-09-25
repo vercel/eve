@@ -109,6 +109,8 @@ export interface GitHubEventContext extends GitHubChannelContext, ChannelContinu
 export type GitHubInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /**
@@ -324,6 +326,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "issues" && config.onIssue !== undefined) {
             waitUntil(
               dispatchIssue({
+                botName,
                 config,
                 event,
                 handler: config.onIssue,
@@ -336,6 +339,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "pull_request" && config.onPullRequest !== undefined) {
             waitUntil(
               dispatchPullRequest({
+                botName,
                 config,
                 event,
                 handler: config.onPullRequest,
@@ -348,6 +352,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "check_suite" && config.onCheckSuite !== undefined) {
             waitUntil(
               dispatchCheckSuite({
+                botName,
                 config,
                 event,
                 handler: config.onCheckSuite,
@@ -360,6 +365,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "check_run" && config.onCheckRun !== undefined) {
             waitUntil(
               dispatchCheckRun({
+                botName,
                 config,
                 event,
                 handler: config.onCheckRun,
@@ -372,6 +378,7 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
           if (event.kind === "workflow_run" && config.onWorkflowRun !== undefined) {
             waitUntil(
               dispatchWorkflowRun({
+                botName,
                 config,
                 event,
                 handler: config.onWorkflowRun,

@@ -1,7 +1,9 @@
 import { rm } from "node:fs/promises";
 
+import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { materializeAuthoredModules } from "#internal/materialized-authored-modules.js";
+import { prepareAuthoredRuntimeModules } from "#internal/authored-runtime-modules.js";
+import { writeMaterializedAuthoredModules } from "#internal/materialized-authored-modules.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
@@ -11,7 +13,10 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts.js";
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
+  readonly authoredWorkflowModules?: AuthoredWorkflowModules;
   readonly fingerprint: string;
+  /** Identity of the authored sources the workflow driver and step registrations are built from. */
+  readonly workflowSourceFingerprint?: string;
 }
 
 interface DevelopmentGenerationPruneState {
@@ -24,17 +29,46 @@ const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPr
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentGeneration> {
-  const snapshot = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
+  // Drain both operations before discarding a failed candidate's snapshot.
+  const [preparation, staging] = await Promise.allSettled([
+    prepareAuthoredRuntimeModules({
+      appRoot: compileResult.project.appRoot,
+      manifest: compileResult.manifest,
+      moduleMapPath: compileResult.paths.moduleMapPath,
+    }),
+    stageDevelopmentRuntimeArtifactsSnapshot(compileResult),
+  ]);
+  if (staging.status === "rejected") {
+    if (preparation.status === "rejected") {
+      throw new AggregateError(
+        [preparation.reason, staging.reason],
+        "Failed to stage development generation.",
+      );
+    }
+    throw staging.reason;
+  }
+  const snapshot = staging.value;
 
   try {
-    const materialized = await materializeAuthoredModules({
+    if (preparation.status === "rejected") throw preparation.reason;
+    const prepared = preparation.value;
+    const materialized = await writeMaterializedAuthoredModules({
+      prepared,
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
 
-    return {
-      ...snapshot,
-      fingerprint: materialized.fingerprint,
-    };
+    return prepared.workflowSourceFingerprint === undefined
+      ? {
+          ...snapshot,
+          authoredWorkflowModules: prepared.authoredWorkflowModules,
+          fingerprint: materialized.fingerprint,
+        }
+      : {
+          ...snapshot,
+          authoredWorkflowModules: prepared.authoredWorkflowModules,
+          fingerprint: materialized.fingerprint,
+          workflowSourceFingerprint: prepared.workflowSourceFingerprint,
+        };
   } catch (error) {
     try {
       await rm(snapshot.snapshotRoot, { force: true, recursive: true });

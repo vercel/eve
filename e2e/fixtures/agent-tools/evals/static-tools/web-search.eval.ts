@@ -61,10 +61,5 @@ export default defineEval({
       (events) => providerRequestsPrecedeResults(events),
     );
     t.messageIncludes(/New York Knicks/iu);
-    t.judge.autoevals
-      .factuality("The New York Knicks won the 2026 NBA Finals.", {
-        on: turn.message,
-      })
-      .atLeast(0.5);
   },
 });

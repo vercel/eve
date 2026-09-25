@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { once } from "#public/tools/approval/approval-helpers.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import { once } from "#tools/approval/policies.js";
+import type { InputRequest } from "#shared/input.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   clearPendingSessionLimitPrompt,
@@ -34,7 +34,7 @@ function createHarnessSession(): HarnessSession {
       threshold: 0.8,
     },
     continuationToken: "test",
-    history: [{ content: "previous", role: "user" }],
+    history: [{ content: "previous", kind: "user", role: "user" }],
     sessionId: "sess-test",
   };
 }
@@ -120,144 +120,6 @@ describe("createRuntimeToolCallActionFromToolCall", () => {
 });
 
 describe("resolvePendingInput", () => {
-  it("keeps approvals pending when another request is answered first", () => {
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "question-call",
-            input: { prompt: "Pick one." },
-            kind: "tool-call",
-            toolName: "ask_question",
-          },
-          display: "select",
-          kind: "question",
-          prompt: "Pick one.",
-          requestId: "question-call",
-        },
-        {
-          action: {
-            callId: "approval-call",
-            input: { command: "rm -rf /tmp/demo" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Yes" },
-            { id: "cancel", label: "No" },
-          ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            { text: "Need input.", type: "text" },
-            {
-              input: { prompt: "Pick one." },
-              toolCallId: "question-call",
-              toolName: "ask_question",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        } satisfies ModelMessage,
-      ],
-      session: createHarnessSession(),
-    });
-
-    const result = resolvePendingInput({
-      stepInput: {
-        inputResponses: [
-          {
-            requestId: "question-call",
-            optionId: "yes",
-          },
-        ],
-      },
-      session,
-    });
-
-    expect(result.outcome).toBe("unresolved");
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
-    expect(hasDeferredStepInput(result.session)).toBe(true);
-
-    const deferred = consumeDeferredStepInput({ session: result.session });
-    expect(deferred.input).toEqual({
-      inputResponses: [
-        {
-          requestId: "question-call",
-          optionId: "yes",
-        },
-      ],
-    });
-  });
-
-  it("resolves freeform question input from a follow-up message", () => {
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "question-call",
-            input: { prompt: "Pick one." },
-            kind: "tool-call",
-            toolName: "ask_question",
-          },
-          display: "text",
-          kind: "question",
-          prompt: "Pick one.",
-          requestId: "question-call",
-        } satisfies InputRequest,
-      ],
-      responseMessages: [
-        {
-          content: [
-            { text: "Need input.", type: "text" },
-            {
-              input: { prompt: "Pick one." },
-              toolCallId: "question-call",
-              toolName: "ask_question",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        } satisfies ModelMessage,
-      ],
-      session: createHarnessSession(),
-    });
-
-    const result = resolvePendingInput({
-      stepInput: {
-        message: "Ignore that and continue.",
-      },
-      session,
-    });
-
-    expect(result.outcome).toBe("resolved");
-    expect(result.messages.at(-1)).toEqual({
-      content: [
-        {
-          output: {
-            type: "json",
-            value: {
-              optionId: undefined,
-              text: "Ignore that and continue.",
-              status: "answered",
-            },
-          },
-          toolCallId: "question-call",
-          toolName: "ask_question",
-          type: "tool-result",
-        },
-      ],
-      role: "tool",
-    });
-  });
-
   it("defers a follow-up message until after tool approvals are resolved", () => {
     const session = appendPendingInputBatch({
       requests: [
@@ -789,7 +651,7 @@ describe("resolvePendingInput", () => {
     // The message runs as an ordinary turn; the approval stays answerable.
     expect(result.outcome).toBe("continue");
     expect(result.rejectedActions).toBeUndefined();
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(false);
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
@@ -997,25 +859,6 @@ describe("pending input batch collection", () => {
     };
   }
 
-  function questionRequest(requestId: string, callId: string): InputRequest {
-    return {
-      action: {
-        callId,
-        input: { prompt: "Pick one." },
-        kind: "tool-call",
-        toolName: "ask_question",
-      },
-      display: "select",
-      kind: "question",
-      options: [
-        { id: "red", label: "Red" },
-        { id: "blue", label: "Blue" },
-      ],
-      prompt: "Pick one.",
-      requestId,
-    };
-  }
-
   function batchOutput(callId: string, toolName: string): ModelMessage {
     return {
       content: [{ input: {}, toolCallId: callId, toolName, type: "tool-call" }],
@@ -1037,13 +880,13 @@ describe("pending input batch collection", () => {
     expect(getPendingInputRequestIds(legacySession.state)).toEqual(new Set(["approval-1"]));
 
     const appended = appendPendingInputBatch({
-      requests: [questionRequest("question-1", "call-2")],
-      responseMessages: [batchOutput("call-2", "ask_question")],
+      requests: [approvalRequest("approval-2", "call-2")],
+      responseMessages: [batchOutput("call-2", "bash")],
       session: legacySession,
     });
     expect(appended.state?.["eve.runtime.pendingInputBatch"]).toBeUndefined();
     expect(getPendingInputRequestIds(appended.state)).toEqual(
-      new Set(["approval-1", "question-1"]),
+      new Set(["approval-1", "approval-2"]),
     );
 
     const result = resolvePendingInput({
@@ -1053,52 +896,6 @@ describe("pending input batch collection", () => {
     expect(result.outcome).toBe("resolved");
     expect(result.session.state?.["eve.runtime.pendingInputBatch"]).toBeUndefined();
     expect(hasPendingInputBatch(result.session.state)).toBe(false);
-  });
-
-  it("keeps earlier batches open while a later batch resolves", () => {
-    let session = appendPendingInputBatch({
-      requests: [approvalRequest("approval-1", "call-1")],
-      responseMessages: [batchOutput("call-1", "bash")],
-      session: createHarnessSession(),
-    });
-    session = appendPendingInputBatch({
-      requests: [questionRequest("question-1", "call-2")],
-      responseMessages: [batchOutput("call-2", "ask_question")],
-      session,
-    });
-
-    const answered = resolvePendingInput({
-      session,
-      stepInput: { inputResponses: [{ requestId: "question-1", optionId: "red" }] },
-    });
-    expect(answered.outcome).toBe("resolved");
-    expect(getPendingInputRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
-    // Only the answered batch's withheld output is restored.
-    expect(answered.messages).toEqual([
-      { content: "previous", role: "user" },
-      batchOutput("call-2", "ask_question"),
-      {
-        content: [
-          {
-            output: {
-              type: "json",
-              value: { optionId: "red", text: undefined, status: "answered" },
-            },
-            toolCallId: "call-2",
-            toolName: "ask_question",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-    ]);
-
-    const approved = resolvePendingInput({
-      session: answered.session,
-      stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
-    });
-    expect(approved.outcome).toBe("resolved");
-    expect(hasPendingInputBatch(approved.session.state)).toBe(false);
   });
 
   it("resolves only the first approval-bearing batch and defers later responses", () => {
@@ -1125,7 +922,7 @@ describe("pending input batch collection", () => {
 
     expect(first.outcome).toBe("resolved");
     expect(first.messages).toEqual([
-      { content: "previous", role: "user" },
+      { content: "previous", kind: "user", role: "user" },
       batchOutput("call-1", "bash"),
       {
         content: [
@@ -1155,6 +952,99 @@ describe("pending input batch collection", () => {
     expect(hasPendingInputBatch(second.session.state)).toBe(false);
   });
 
+  it("does not apply an approval grant to already-pending calls with the same key", () => {
+    let session = createHarnessSession();
+    for (const index of [1, 2, 3]) {
+      session = appendPendingInputBatch({
+        requests: [approvalRequest(`approval-${index}`, `call-${index}`)],
+        responseMessages: [batchOutput(`call-${index}`, "bash")],
+        session,
+      });
+    }
+
+    const first = resolvePendingInput({
+      session,
+      stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
+    });
+
+    expect(first.outcome).toBe("resolved");
+    expect(getApprovedTools(first.session)).toEqual(new Set());
+    expect(getPendingInputRequestIds(first.session.state)).toEqual(
+      new Set(["approval-2", "approval-3"]),
+    );
+
+    const second = resolvePendingInput({
+      session: first.session,
+      stepInput: { inputResponses: [{ requestId: "approval-2", optionId: "cancel" }] },
+    });
+    expect(getApprovedTools(second.session)).toEqual(new Set());
+    expect(getPendingInputRequestIds(second.session.state)).toEqual(new Set(["approval-3"]));
+
+    const third = resolvePendingInput({
+      session: second.session,
+      stepInput: { inputResponses: [{ requestId: "approval-3", optionId: "cancel" }] },
+    });
+    expect(getApprovedTools(third.session)).toEqual(new Set(["bash"]));
+    expect(hasPendingInputBatch(third.session.state)).toBe(false);
+  });
+
+  it("keeps approval grants independent across compound keys", () => {
+    const scopedApproval = (
+      requestId: string,
+      callId: string,
+      workspace: string,
+    ): InputRequest => ({
+      ...approvalRequest(requestId, callId),
+      action: {
+        callId,
+        input: { workspace },
+        kind: "tool-call",
+        toolName: "notion__notion-update-page",
+      },
+    });
+    const resolveApprovalKey = (request: InputRequest) =>
+      `${request.action.toolName}:${String(request.action.input.workspace)}`;
+    let session = appendPendingInputBatch({
+      requests: [scopedApproval("approval-1", "call-1", "workspace-a")],
+      responseMessages: [batchOutput("call-1", "notion__notion-update-page")],
+      session: createHarnessSession(),
+    });
+    session = appendPendingInputBatch({
+      requests: [scopedApproval("approval-2", "call-2", "workspace-b")],
+      responseMessages: [batchOutput("call-2", "notion__notion-update-page")],
+      session,
+    });
+    session = appendPendingInputBatch({
+      requests: [scopedApproval("approval-3", "call-3", "workspace-a")],
+      responseMessages: [batchOutput("call-3", "notion__notion-update-page")],
+      session,
+    });
+
+    const first = resolvePendingInput({
+      resolveApprovalKey,
+      session,
+      stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
+    });
+
+    // approval-3 shares the workspace-a key, so the grant stays masked; the
+    // bare tool name would not mask it, which is what makes the resolver matter.
+    expect(getApprovedTools(first.session, resolveApprovalKey)).toEqual(new Set());
+    expect(getPendingInputRequestIds(first.session.state)).toEqual(
+      new Set(["approval-2", "approval-3"]),
+    );
+
+    const second = resolvePendingInput({
+      resolveApprovalKey,
+      session: first.session,
+      stepInput: { inputResponses: [{ requestId: "approval-3", optionId: "cancel" }] },
+    });
+
+    expect(getApprovedTools(second.session, resolveApprovalKey)).toEqual(
+      new Set(["notion__notion-update-page:workspace-a"]),
+    );
+    expect(getPendingInputRequestIds(second.session.state)).toEqual(new Set(["approval-2"]));
+  });
+
   it("leaves every batch open when a message arrives with several batches pending", () => {
     let session = appendPendingInputBatch({
       requests: [approvalRequest("approval-1", "call-1")],
@@ -1162,19 +1052,47 @@ describe("pending input batch collection", () => {
       session: createHarnessSession(),
     });
     session = appendPendingInputBatch({
-      requests: [questionRequest("question-1", "call-2")],
-      responseMessages: [batchOutput("call-2", "ask_question")],
+      requests: [approvalRequest("approval-2", "call-2")],
+      responseMessages: [batchOutput("call-2", "bash")],
       session,
     });
 
     const result = resolvePendingInput({ session, stepInput: { message: "keep going" } });
 
     expect(result.outcome).toBe("continue");
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(false);
     expect(getPendingInputRequestIds(result.session.state)).toEqual(
-      new Set(["approval-1", "question-1"]),
+      new Set(["approval-1", "approval-2"]),
     );
+  });
+
+  it("continues an internal step past HITL emitted by an older turn", () => {
+    const session = appendPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
+      requests: [approvalRequest("approval-1", "call-1")],
+      responseMessages: [batchOutput("call-1", "bash")],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({ activeTurnId: "turn_1", internalStep: true, session });
+
+    expect(result.outcome).toBe("continue");
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+  });
+
+  it("parks when the current turn emitted the pending HITL", () => {
+    const session = appendPendingInputBatch({
+      event: { sequence: 5, stepIndex: 1, turnId: "turn_1" },
+      requests: [approvalRequest("approval-1", "call-1")],
+      responseMessages: [batchOutput("call-1", "bash")],
+      session: createHarnessSession(),
+    });
+
+    const result = resolvePendingInput({ activeTurnId: "turn_1", internalStep: true, session });
+
+    expect(result.outcome).toBe("unresolved");
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 });
 
@@ -1237,7 +1155,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.limitContinuation).toEqual({ granted: true });
     // The prompt is harness-authored — no tool call exists in model history,
     // so resolution must not append a tool message.
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
   });
 
   it("resolves a stop answer as not granted", () => {
@@ -1250,7 +1168,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(result.limitContinuation).toEqual({ granted: false });
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
   });
 
   it("keeps the prompt pending and queues a plain follow-up message", () => {
@@ -1261,7 +1179,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 
     expect(result.outcome).toBe("unresolved");
     expect(result.limitContinuation).toBeUndefined();
-    expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
+    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
     expect(hasDeferredStepInput(result.session)).toBe(true);
 
     const deferred = consumeDeferredStepInput({ session: result.session });

@@ -1,8 +1,13 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type { FetchFileResult } from "#channel/adapter.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
-import type { TeamsAttachment } from "#public/channels/teams/api.js";
+import {
+  resolveTeamsAccessToken,
+  type TeamsApiOptions,
+  type TeamsAttachment,
+} from "#public/channels/teams/api.js";
 import {
   evaluateFilePart,
   formatUploadPolicyViolation,
@@ -14,6 +19,15 @@ import type { UploadPolicy } from "#public/channels/upload-policy.js";
 import { isObject } from "#shared/guards.js";
 
 const log = createLogger("teams.attachments");
+
+const BOT_CONNECTOR_HOSTS = new Set([
+  "smba.trafficmanager.net",
+  "smba.infra.gcc.teams.microsoft.com",
+  "smba.infra.gov.teams.microsoft.us",
+  "smba.infra.dod.teams.microsoft.us",
+]);
+const MAX_FILE_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /** File handling options for the native Teams channel. */
 export interface TeamsFilesConfig {
@@ -86,18 +100,70 @@ export function buildTeamsTurnMessage(
  */
 export function createTeamsFetchFile(
   policy: TeamsFilesPolicy,
+  api: TeamsApiOptions = {},
 ): (url: string) => Promise<FetchFileResult | null> {
   return async (url) => {
     if (!policy.enabled || !isAllowedUrl(url, policy.allowedHosts)) return null;
-    const response = await fetch(url);
+    const { response, finalUrl } = await fetchTeamsFile(url, policy.allowedHosts, api);
     if (!response.ok) {
-      throw new Error(`Teams file fetch returned HTTP ${response.status} for ${url}.`);
+      throw attachmentError(
+        `Teams file fetch returned HTTP ${response.status} for host ${finalUrl.hostname}.`,
+      );
     }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),
       mediaType: response.headers.get("content-type") ?? undefined,
     };
   };
+}
+
+async function fetchTeamsFile(
+  url: string,
+  allowedHosts: readonly string[] | "*",
+  api: TeamsApiOptions,
+): Promise<{ readonly finalUrl: URL; readonly response: Response }> {
+  const apiFetch = api.fetch ?? fetch;
+  let currentUrl = new URL(url);
+  let connectorToken: string | undefined;
+
+  for (let redirectCount = 0; redirectCount <= MAX_FILE_REDIRECTS; redirectCount += 1) {
+    const isBotConnectorUrl =
+      currentUrl.port === "" && BOT_CONNECTOR_HOSTS.has(currentUrl.hostname);
+    const headers = new Headers();
+    if (isBotConnectorUrl) {
+      connectorToken ??= await resolveTeamsAccessToken(api);
+      headers.set("authorization", `Bearer ${connectorToken}`);
+    }
+    const response = await apiFetch(currentUrl, {
+      headers,
+      redirect: "manual",
+    });
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      return { finalUrl: currentUrl, response };
+    }
+    if (redirectCount === MAX_FILE_REDIRECTS) {
+      throw attachmentError(`Teams file fetch exceeded ${MAX_FILE_REDIRECTS} redirects.`);
+    }
+    const location = response.headers.get("location");
+    if (location === null) {
+      throw attachmentError(
+        `Teams file fetch redirect from host ${currentUrl.hostname} had no location.`,
+      );
+    }
+    const nextUrl = new URL(location, currentUrl);
+    if (!isAllowedUrl(nextUrl.href, allowedHosts)) {
+      throw attachmentError(
+        `Teams file fetch redirect to host ${nextUrl.hostname} is not allowed.`,
+      );
+    }
+    currentUrl = nextUrl;
+  }
+
+  throw attachmentError(`Teams file fetch exceeded ${MAX_FILE_REDIRECTS} redirects.`);
+}
+
+function attachmentError(message: string): EveAttachmentError {
+  return new EveAttachmentError({ adapterKind: "teams", kind: "resolver-threw", message });
 }
 
 function toTeamsFilePart(
@@ -145,12 +211,15 @@ function inferMediaType(attachment: TeamsAttachment): string {
 }
 
 function isAllowedUrl(url: string, allowedHosts: readonly string[] | "*"): boolean {
-  if (allowedHosts === "*") return true;
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     return false;
   }
-  return allowedHosts.some((host) => parsed.host === host || parsed.hostname === host);
+  if (parsed.protocol !== "https:") return false;
+  if (allowedHosts === "*") return true;
+  return allowedHosts.some((host) =>
+    host.includes(":") ? parsed.host === host : parsed.port === "" && parsed.hostname === host,
+  );
 }

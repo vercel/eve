@@ -15,8 +15,7 @@ const INLINE_FILE_BASE64 = `${"A".repeat(400)}${CONTENT_OUTPUT_PAYLOAD_CANARY}${
 
 export default defineTool({
   description:
-    "Compaction regression tool. Emits text, a large inline file, and trailing text the " +
-    "checkpoint must preserve.",
+    "Collect Alice's review note, its attachment, and the closing note for Bob's reading-list handoff.",
   inputSchema: z.object({}),
   async execute() {
     return { completed: true };
@@ -26,7 +25,7 @@ export default defineTool({
       // The lead marker is spelled ONLY here — never in the tail's preserve
       // instructions — so it can reach the checkpoint solely through this
       // part's own rendering.
-      toolOutputPart.text(`Work log (preserve this marker): ${CONTENT_OUTPUT_LEAD_MARKER}`),
+      toolOutputPart.text(`Alice's completed review note: ${CONTENT_OUTPUT_LEAD_MARKER}`),
       toolOutputPart.file(INLINE_FILE_BASE64, {
         filename: CONTENT_OUTPUT_FILENAME,
         mediaType: "application/octet-stream",
@@ -34,9 +33,9 @@ export default defineTool({
       // "The attachment's filename" is deliberately not spelled out: the
       // checkpoint can only carry it by reading the rendered stub.
       toolOutputPart.text(
-        "Completed content-output work. Preserve every CONTENT_OUTPUT_TEXT_* marker visible " +
-          "in this conversation and the attachment's exact filename. " +
-          `Preserve this exact marker: ${CONTENT_OUTPUT_TAIL_MARKER}`,
+        "Bob's handoff uses the note references labelled CONTENT_OUTPUT_TEXT_* " +
+          "and the attachment's filename. " +
+          `The closing note reference is ${CONTENT_OUTPUT_TAIL_MARKER}`,
       ),
     ]);
   },

@@ -8,10 +8,14 @@ export default defineEval({
   description: "A rejected responder leaves the approval open for an authorized retry.",
   async test(t) {
     const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
-    const approval = t.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
+    const conversation = parked.session;
+    const approval = conversation.requireInputRequest({
+      display: "confirmation",
+      toolName: TOOL_NAME,
+    });
     parked.calledTool(TOOL_NAME, { status: "pending", count: 1 });
 
-    const rejectedTurn = await t.startRespond(
+    const rejectedTurn = await conversation.startRespond(
       [{ optionId: "approve", requestId: approval.requestId }],
       { headers: { "x-eve-fixture-user": "unauthorized-responder" } },
     );
@@ -19,9 +23,12 @@ export default defineEval({
       data: { outcome: "rejected", requestId: approval.requestId },
     });
 
-    const approved = await rejectedTurn.session.respond([
-      { optionId: "approve", requestId: approval.requestId },
-    ]);
+    // Finish consuming the refusal boundary before opening the next response reader.
+    (await rejectedTurn.result()).expectOk();
+    const approved = await rejectedTurn.session.respond(
+      [{ optionId: "approve", requestId: approval.requestId }],
+      { headers: { "x-eve-fixture-user": "e2e-approval-responder" } },
+    );
     approved.expectOk();
     approved.event("approval.settled", {
       count: 1,

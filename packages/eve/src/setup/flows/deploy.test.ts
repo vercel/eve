@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
@@ -26,8 +27,8 @@ function createDeployProjectDeps(probe: DeploymentInfo = DEPLOYED) {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => probe),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
@@ -89,6 +90,31 @@ function createLoginFlow(result: LoginFlowResult = { kind: "already" }) {
 }
 
 describe("runDeployFlow", () => {
+  it("blocks a local ChatGPT subscription model before Vercel effects", async () => {
+    const fake = createFakePrompter({});
+    const detectDeployment = vi.fn(async () => LINKED);
+
+    await expect(
+      runDeployFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        interactive: true,
+        deps: {
+          detectDeployment,
+          inspectApplication: vi.fn(async () => ({
+            compiledState: {
+              manifest: {
+                config: { model: { routing: { kind: "external", provider: "codex" } } },
+              },
+            },
+          })) as never,
+        },
+      }),
+    ).resolves.toEqual({ kind: "local-model" });
+
+    expect(detectDeployment).not.toHaveBeenCalled();
+  });
+
   it("deploys an already-linked project without asking anything", async () => {
     const fake = createFakePrompter({});
     const deployDeps = createDeployProjectDeps();
@@ -106,7 +132,7 @@ describe("runDeployFlow", () => {
     });
 
     expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
-    expect(login).not.toHaveBeenCalled();
+    expect(login).toHaveBeenCalledOnce();
     expect(fake.selectMessages).toEqual([]);
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
       ["deploy", "--prod", "--yes"],
@@ -150,6 +176,7 @@ describe("runDeployFlow", () => {
     const result = await runDeployFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
+      traceSampling: false,
       interactive: true,
       deps: {
         detectDeployment: vi.fn(async () => UNLINKED),
@@ -171,6 +198,13 @@ describe("runDeployFlow", () => {
       provisioningDeps.pickTeam.mock.invocationCallOrder[0]!,
     );
     expect(linkDeps.linkProject).toHaveBeenCalled();
+    expect(linkDeps.linkProject).toHaveBeenCalledWith(
+      fake.prompter,
+      APP_ROOT,
+      { kind: "new", project: "my-agent", team: "acme" },
+      expect.anything(),
+      { signal: undefined, traceSampling: false },
+    );
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
       ["deploy", "--prod", "--yes"],
       expect.objectContaining({ cwd: APP_ROOT }),
@@ -225,4 +259,46 @@ describe("runDeployFlow", () => {
       expect.objectContaining({ cwd: APP_ROOT, nonInteractive: true }),
     );
   });
+});
+
+it("installs the missing CLI and logs in before deploying an already-linked project", async () => {
+  const login = createLoginFlow();
+  login.mockResolvedValueOnce({ kind: "cli-missing" }).mockResolvedValueOnce({ kind: "logged-in" });
+  const install = vi.fn(async () => ({ kind: "installed" as const }));
+  const deploy = createDeployProjectDeps();
+  await expect(
+    runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: createFakePrompter().prompter,
+      interactive: true,
+      deps: {
+        detectDeployment: async () => LINKED,
+        runLoginFlow: login,
+        runInstallVercelCliFlow: install,
+        deployProject: deploy,
+      },
+    }),
+  ).resolves.toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
+  expect(install).toHaveBeenCalledOnce();
+  expect(login).toHaveBeenCalledTimes(2);
+  expect(deploy.runVercel.mock.invocationCallOrder[0]).toBeGreaterThan(
+    login.mock.invocationCallOrder[1]!,
+  );
+});
+
+it.each(["failed", "unavailable"] as const)("does not deploy when login is %s", async (kind) => {
+  const deploy = createDeployProjectDeps();
+  await expect(
+    runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: createFakePrompter().prompter,
+      interactive: true,
+      deps: {
+        detectDeployment: async () => LINKED,
+        runLoginFlow: createLoginFlow({ kind }),
+        deployProject: deploy,
+      },
+    }),
+  ).rejects.toThrow(/retry/i);
+  expect(deploy.runVercel).not.toHaveBeenCalled();
 });

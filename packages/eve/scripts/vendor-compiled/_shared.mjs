@@ -10,6 +10,7 @@
  * ```
  * {
  *   packageName: string,           // npm package to resolve via require
+ *   packageJsonName?: string,      // original npm name when packageName is an alias
  *   compiledPath: string,          // subdir under compiledRoot to write into
  *
  *   // Declaration emission (pick one)
@@ -33,13 +34,17 @@
  *   banner?: string,               // standalone bundle prelude
  *   chunkGroup?: string,                  // default "node"
  *   typeOnly?: boolean,                   // skips JS bundling entirely
+ *   sharedSpecifiers?: Record<string, string>, // specifier → entry outputPath other bundles import instead of bundling their own copy
+ *   privateCopies?: string[],             // shared packages this bundle may still bundle privately (a different major)
+ *   fingerprintFiles?: string[],          // package-relative files included in the stamp
  * }
  * ```
  */
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join, parse, posix, relative } from "node:path";
+import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
@@ -409,16 +414,27 @@ export function createOptionalNativeStubPlugin(packageNames) {
  *   these files changes the cached stamp is invalidated and vendoring re-runs.
  *   Pass everything that influences the output: the orchestrator entry script,
  *   the `_shared.mjs` library, per-package configs, and `.d.ts` declarations.
+ * @param {Record<string, string>} [options.toolVersions]
+ *   Resolved versions of build tools whose output contributes to vendored files.
  */
-export async function runVendor({ packageRoot, compiledRoot, modules, scriptFiles }) {
+export async function runVendor({
+  packageRoot,
+  compiledRoot,
+  modules,
+  scriptFiles,
+  toolVersions = {},
+}) {
   const stampPath = join(compiledRoot, ".vendor-stamp.json");
   const lockPath = join(compiledRoot, ".vendor-lock");
 
   await mkdir(compiledRoot, { recursive: true });
 
-  const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot });
+  const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot, toolVersions });
 
-  if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+  if (
+    stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+    (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
+  ) {
     console.log("Compiled vendor modules are already up to date.");
     return;
   }
@@ -426,10 +442,18 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
   await acquireLock(lockPath);
   try {
     // A peer process may have completed while we waited for the lock.
-    if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+    if (
+      stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+      (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
+    ) {
       console.log("Compiled vendor modules are already up to date.");
       return;
     }
+
+    // A matching stamp must not survive a repair attempt. Otherwise another
+    // process could accept directories created by an incomplete build as a
+    // valid cache hit while this process is writing, or after it fails.
+    await rm(stampPath, { force: true });
 
     const bundledModules = modules.filter((module) => module.typeOnly !== true);
     const typeOnlyModules = modules.filter((module) => module.typeOnly === true);
@@ -450,6 +474,21 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
   } finally {
     await releaseLock(lockPath);
   }
+}
+
+async function compiledModuleEntrypointsExist({ compiledRoot, modules }) {
+  const paths = modules.flatMap((module) =>
+    (module.entries ?? [{ outputPath: "index" }]).map((entry) =>
+      join(compiledRoot, module.compiledPath, `${entry.outputPath}.js`),
+    ),
+  );
+  const entries = await Promise.all(
+    paths.map(async (path) => {
+      const stats = await stat(path).catch(() => null);
+      return stats?.isFile() ?? false;
+    }),
+  );
+  return entries.every(Boolean);
 }
 
 /**
@@ -513,7 +552,7 @@ async function pathExists(path) {
   }
 }
 
-async function findPackageJson(packageName, packageRoot) {
+async function findPackageJson(packageName, packageRoot, packageJsonName = packageName) {
   let currentPath;
   try {
     currentPath = dirname(require.resolve(packageName, { paths: [packageRoot] }));
@@ -527,7 +566,7 @@ async function findPackageJson(packageName, packageRoot) {
 
     if (await pathExists(packageJsonPath)) {
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-      if (packageJson.name === packageName) {
+      if (packageJson.name === packageJsonName) {
         return {
           packageJson,
           packageJsonPath,
@@ -542,7 +581,7 @@ async function findPackageJson(packageName, packageRoot) {
     const packageJsonPath = join(currentPath, "package.json");
     if (await pathExists(packageJsonPath)) {
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-      if (packageJson.name === packageName) {
+      if (packageJson.name === packageJsonName) {
         return {
           packageJson,
           packageJsonPath,
@@ -567,7 +606,11 @@ async function copyLicense(sourceRoot, destinationRoot) {
 
 async function prepareCompiledModule({ module, compiledRoot, packageRoot }) {
   const destinationRoot = join(compiledRoot, module.compiledPath);
-  const packageInfo = await findPackageJson(module.packageName, packageRoot);
+  const packageInfo = await findPackageJson(
+    module.packageName,
+    packageRoot,
+    module.packageJsonName,
+  );
 
   await rm(destinationRoot, { recursive: true, force: true });
   await mkdir(destinationRoot, { recursive: true });
@@ -619,19 +662,17 @@ function getModulePlatform(module) {
   return module.platform ?? "node";
 }
 
-function getDefaultResolve(platform) {
-  return platform === "neutral"
-    ? {
-        conditionNames: ["import", "default"],
-        mainFields: ["module", "main"],
-      }
-    : {
-        conditionNames: ["node", "import", "default"],
-        mainFields: ["module", "main"],
-      };
+function getDefaultResolve() {
+  return { mainFields: ["module", "main"] };
 }
 
-async function bundleStandaloneModule({ destinationRoot, module, packageInfo, packageRoot }) {
+async function bundleStandaloneModule({
+  destinationRoot,
+  module,
+  packageInfo,
+  packageRoot,
+  sharedSpecifiers,
+}) {
   const warningFilter = createVendoredDependencyWarningFilter();
   const entries = getModuleEntries(module, packageInfo);
   const platform = getModulePlatform(module);
@@ -648,8 +689,8 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
     external: module.external ?? [],
     moduleTypes: module.loader ?? {},
     platform,
-    plugins: module.plugins ?? [],
-    resolve: module.resolve ?? getDefaultResolve(platform),
+    plugins: [...(module.plugins ?? []), createSharedSpecifierPlugin(sharedSpecifiers, [module])],
+    resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
       banner: module.banner ?? "/* oxlint-disable */",
@@ -670,6 +711,7 @@ async function bundleModuleGroup({
   preparedModules,
   packageRoot,
   compiledRoot,
+  sharedSpecifiers,
 }) {
   const warningFilter = createVendoredDependencyWarningFilter();
   const entrypoints = Object.fromEntries(
@@ -692,7 +734,13 @@ async function bundleModuleGroup({
     {},
     ...preparedModules.map(({ module }) => module.loader ?? {}),
   );
-  const plugins = preparedModules.flatMap(({ module }) => module.plugins ?? []);
+  const plugins = [
+    ...preparedModules.flatMap(({ module }) => module.plugins ?? []),
+    createSharedSpecifierPlugin(
+      sharedSpecifiers,
+      preparedModules.map(({ module }) => module),
+    ),
+  ];
 
   await buildWithNitroRolldown({
     cwd: packageRoot,
@@ -727,6 +775,7 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
 
   await rm(join(compiledRoot, "_chunks"), { recursive: true, force: true });
 
+  const sharedSpecifiers = collectSharedSpecifiers(preparedModules);
   const standalone = preparedModules.filter(({ module }) => module.bundling === "standalone");
   const shared = preparedModules.filter(({ module }) => module.bundling !== "standalone");
   const groups = Map.groupBy(
@@ -734,7 +783,9 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
     ({ module }) => `${module.chunkGroup ?? "node"}\0${getModulePlatform(module)}`,
   );
 
-  await Promise.all(standalone.map((entry) => bundleStandaloneModule({ ...entry, packageRoot })));
+  await Promise.all(
+    standalone.map((entry) => bundleStandaloneModule({ ...entry, packageRoot, sharedSpecifiers })),
+  );
 
   await Promise.all(
     [...groups].map(([groupKey, groupModules]) => {
@@ -745,6 +796,7 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
         preparedModules: groupModules,
         packageRoot,
         compiledRoot,
+        sharedSpecifiers,
       });
     }),
   );
@@ -765,6 +817,105 @@ async function bundleModules({ modules, packageRoot, compiledRoot }) {
     if (typeof module.copyDeclarations !== "function") continue;
     await module.copyDeclarations({ destinationRoot, packageInfo });
   }
+}
+
+/**
+ * A vendored package that declares `sharedSpecifiers` ships exactly once.
+ * Every other vendored bundle imports those specifiers from the owner's
+ * `#compiled/*` entries instead of bundling its own copy. eve's imports map
+ * resolves them within the same tree (`.generated` under `eve-source`,
+ * `dist` otherwise), just like eve's own `#compiled/*` imports.
+ *
+ * Zod needs this: its schema objects only work with the copy that built
+ * them, so eve must not carry several copies that could exchange schemas.
+ */
+function collectSharedSpecifiers(preparedModules) {
+  const shared = new Map();
+  for (const { module, packageInfo } of preparedModules) {
+    for (const [specifier, outputPath] of Object.entries(module.sharedSpecifiers ?? {})) {
+      shared.set(specifier, {
+        importSpecifier: `#compiled/${module.compiledPath}/${outputPath}.js`,
+        module,
+        packageRoot: realpathSync(packageInfo.packageRoot),
+      });
+    }
+  }
+  return shared;
+}
+
+const SHARED_FACADE_PREFIX = "\0eve-shared-facade:";
+
+function createSharedSpecifierPlugin(sharedSpecifiers, bundledModules) {
+  const owners = new Map(
+    [...sharedSpecifiers.values()].map((entry) => [entry.module.packageName, entry]),
+  );
+  const privateCopies = new Set(bundledModules.flatMap((module) => module.privateCopies ?? []));
+  return {
+    name: "eve:shared-vendored-modules",
+    async resolveId(source, importer, options) {
+      if (importer?.startsWith(SHARED_FACADE_PREFIX)) return { id: source, external: true };
+      const owner = owners.get(packageNameOf(source));
+      // Modules bundled together already share one copy through chunking.
+      if (
+        owner === undefined ||
+        bundledModules.includes(owner.module) ||
+        privateCopies.has(owner.module.packageName)
+      ) {
+        return null;
+      }
+
+      const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+      if (resolved === null || resolved.external) return null;
+      if (!isInsideDirectory(resolved.id, owner.packageRoot)) {
+        throw new Error(
+          `Vendor: ${importer ?? "a vendored module"} resolves "${source}" to ${resolved.id}, a ` +
+            `different install than the vendored "${owner.module.packageName}" at ` +
+            `${owner.packageRoot}. eve ships a single copy of "${owner.module.packageName}"; align ` +
+            `the dependency on one version (for example with a pnpm override). Only a different ` +
+            `major whose objects never reach the shared copy may be listed in the vendored ` +
+            `module's privateCopies.`,
+        );
+      }
+
+      const target = sharedSpecifiers.get(source);
+      if (target === undefined) {
+        throw new Error(
+          `Vendor: ${importer ?? "a vendored module"} imports "${source}", which the vendored ` +
+            `"${owner.module.packageName}" module does not share. Add "${source}" to its ` +
+            `sharedSpecifiers so eve keeps a single copy of "${owner.module.packageName}".`,
+        );
+      }
+      // A CommonJS `require()` of an external stays a runtime `require()`
+      // that app bundlers cannot follow, so route it through an ESM facade
+      // that keeps a static import.
+      if (options.kind === "require-call")
+        return `${SHARED_FACADE_PREFIX}${target.importSpecifier}`;
+      return { id: target.importSpecifier, external: true };
+    },
+    load(id) {
+      if (!id.startsWith(SHARED_FACADE_PREFIX)) return null;
+      return `export * from ${JSON.stringify(id.slice(SHARED_FACADE_PREFIX.length))};`;
+    },
+  };
+}
+
+function packageNameOf(specifier) {
+  if (specifier.startsWith(".") || specifier.startsWith("/") || specifier.includes(":")) {
+    return undefined;
+  }
+  const segments = specifier.split("/");
+  return specifier.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0];
+}
+
+function isInsideDirectory(file, directory) {
+  let resolvedFile;
+  try {
+    resolvedFile = realpathSync(file);
+  } catch {
+    return false;
+  }
+  const offset = relative(directory, resolvedFile);
+  return offset !== "" && !offset.startsWith("..") && !isAbsolute(offset);
 }
 
 async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
@@ -795,7 +946,7 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
  * a no-op, which makes `build:compiled` safe to invoke concurrently from
  * sibling Turbo tasks without racing on shared destination directories.
  */
-async function computeStamp({ scriptFiles, modules, packageRoot }) {
+async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions }) {
   const scriptHash = createHash("sha256");
   // Hash file contents in a deterministic order so identical inputs always
   // produce identical stamps.
@@ -807,15 +958,36 @@ async function computeStamp({ scriptFiles, modules, packageRoot }) {
     scriptHash.update("\0");
   }
 
+  const moduleFingerprints = {};
   const moduleVersions = {};
   for (const module of modules) {
-    const { packageJson } = await findPackageJson(module.packageName, packageRoot);
-    moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
+    const packageInfo = await findPackageJson(
+      module.packageName,
+      packageRoot,
+      module.packageJsonName,
+    );
+    moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
+
+    if (module.fingerprintFiles !== undefined) {
+      const moduleHash = createHash("sha256");
+      for (const file of [...module.fingerprintFiles].sort()) {
+        const content = await readFile(join(packageInfo.packageRoot, file), "utf8");
+        moduleHash.update(file);
+        moduleHash.update("\0");
+        moduleHash.update(content);
+        moduleHash.update("\0");
+      }
+      moduleFingerprints[module.packageName] = moduleHash.digest("hex");
+    }
   }
 
   return {
+    moduleFingerprints,
     moduleVersions,
     scriptHash: scriptHash.digest("hex"),
+    toolVersions: Object.fromEntries(
+      Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
+    ),
   };
 }
 
@@ -839,7 +1011,7 @@ function stampMatches(a, b) {
  * directory lets us recover from stale locks left behind by crashed
  * processes.
  */
-async function acquireLock(lockPath, timeoutMs = 120_000) {
+export async function acquireLock(lockPath, timeoutMs = 120_000) {
   const start = Date.now();
 
   while (true) {
@@ -867,6 +1039,6 @@ async function acquireLock(lockPath, timeoutMs = 120_000) {
   }
 }
 
-async function releaseLock(lockPath) {
+export async function releaseLock(lockPath) {
   await rm(lockPath, { recursive: true, force: true });
 }

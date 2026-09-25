@@ -1,6 +1,9 @@
 import { createPromptCommandOutput, withPhase, type ChannelSetupLog } from "#setup/cli/index.js";
 import { detectPackageManager } from "#setup/package-manager.js";
-import { runPackageManagerInstall } from "#setup/primitives/pm/run.js";
+import {
+  packageManagerInstallSucceeded,
+  runPackageManagerInstall,
+} from "#setup/primitives/pm/run.js";
 
 /** Effects used to install dependencies added by an integration scaffold. */
 export interface IntegrationScaffoldDeps {
@@ -22,18 +25,18 @@ export async function installScaffoldDependencies(input: {
   if (!input.changed || input.skip) return;
   const deps = input.deps ?? defaultDeps;
   const packageManager = await deps.detectPackageManager(input.projectPath);
-  const installed = await withPhase(
+  const installResult = await withPhase(
     input.log,
-    `Installing channel dependencies (${packageManager.kind} install)...`,
+    `Installing integration dependencies (${packageManager.kind} install)...`,
     () =>
       deps.runPackageManagerInstall(packageManager.kind, input.projectPath, {
         onOutput: createPromptCommandOutput(input.log),
         signal: input.signal,
       }),
   );
-  if (installed) return;
+  if (packageManagerInstallSucceeded(installResult)) return;
   input.log.warning(
-    `Dependency installation failed. The new channel stays unloadable until \`${packageManager.kind} install\` or a deploy succeeds.`,
+    `Dependency installation failed. The integration stays unloadable until \`${packageManager.kind} install\` or a deploy succeeds.`,
   );
 }
 

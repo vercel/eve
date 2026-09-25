@@ -4,6 +4,7 @@ import { HumanActionRequiredError } from "#setup/human-action.js";
 import type { DeploymentInfo } from "#setup/project-resolution.js";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 
 import type { Prompter } from "../prompter.js";
 import { createDefaultSetupState, type SetupState } from "../state.js";
@@ -30,8 +31,8 @@ function createDeps() {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
@@ -271,7 +272,7 @@ describe("deployProject box", () => {
 
   it("surfaces failed dependency installation before any deploy", async () => {
     const deps = createDeps();
-    deps.runPackageManagerInstall.mockResolvedValue(false);
+    deps.runPackageManagerInstall.mockResolvedValue(packageInstallResult(1));
     const box = headlessBox({ deps });
 
     await expect(runHeadless([box], pendingState(), silentSink)).rejects.toThrow(

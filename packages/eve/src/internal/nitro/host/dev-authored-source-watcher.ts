@@ -5,7 +5,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { resolveTsConfigDependencyPaths } from "#internal/application/tsconfig-dependencies.js";
 import { resolveDevelopmentSourceSnapshotWatchPaths } from "#internal/nitro/dev-runtime-source-snapshot.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
-import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
+import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import { getDevelopmentEnvironmentFilePaths } from "#cli/dev/environment.js";
 import {
@@ -45,8 +45,8 @@ export interface AuthoredSourceWatcherHandle {
   close(): Promise<void>;
   flush(): Promise<void>;
   rebuild(): Promise<void>;
-  suspend(): Promise<void>;
-  resume(options?: { silent?: boolean }): Promise<void>;
+  suspend(leaseId: string): Promise<void>;
+  resume(leaseId: string, options?: { silent?: boolean }): Promise<void>;
 }
 
 /**
@@ -64,7 +64,7 @@ export async function startAuthoredSourceWatcher(input: {
   let queue: Promise<void> = Promise.resolve();
   let debounceTimer: NodeJS.Timeout | undefined;
   let isWatcherReady = false;
-  let suspensionCount = 0;
+  const suspensionLeases = new Set<string>();
   const pendingEvents = new Map<string, WatcherChangeEvent>();
   const pendingChangedPaths = new Set<string>();
   const initialWatchPaths = await resolveAuthoredWatchPaths(currentHost);
@@ -81,7 +81,7 @@ export async function startAuthoredSourceWatcher(input: {
   const watcherReady = waitForWatcherReady(watcher);
 
   const rebuild = async (force: boolean, silent = false) => {
-    if (closed || suspensionCount > 0) {
+    if (closed || suspensionLeases.size > 0) {
       return;
     }
 
@@ -178,18 +178,18 @@ export async function startAuthoredSourceWatcher(input: {
     },
     flush,
     rebuild: forceRebuild,
-    async suspend() {
-      suspensionCount += 1;
+    async suspend(leaseId) {
+      if (suspensionLeases.has(leaseId)) return;
+      suspensionLeases.add(leaseId);
       if (debounceTimer !== undefined) {
         clearTimeout(debounceTimer);
         debounceTimer = undefined;
       }
       await queue;
     },
-    async resume(options) {
-      if (suspensionCount === 0) return;
-      suspensionCount -= 1;
-      if (suspensionCount === 0) await forceRebuild(options?.silent);
+    async resume(leaseId, options) {
+      if (!suspensionLeases.delete(leaseId)) return;
+      if (suspensionLeases.size === 0) await forceRebuild(options?.silent);
     },
   };
 }
@@ -219,7 +219,9 @@ async function resolveAuthoredWatchPaths(
     join(host.appRoot, TS_CONFIG_GLOB_NAME),
   ]);
   const tsconfigPaths = await resolveTsConfigWatchPaths(host.appRoot);
-  const sourceSnapshotWatchPaths = await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot);
+  const sourceSnapshotWatchPaths =
+    host.generation.sourceWatchPaths ??
+    (await resolveDevelopmentSourceSnapshotWatchPaths(host.appRoot));
 
   for (const extension of host.workspaceExtensions) {
     watchPaths.add(extension.config.sourceRoot);
@@ -329,9 +331,10 @@ async function resolveTsConfigWatchPaths(appRoot: string): Promise<string[]> {
 
 function shouldIgnoreWatcherPath(
   path: string,
-  workspaceExtensions: readonly DevelopmentWorkspaceExtension[],
+  workspaceExtensions: readonly WorkspaceExtension[],
 ): boolean {
-  const pathParts = normalize(path).split(sep).filter(Boolean);
+  const normalizedPath = normalize(path);
+  const pathParts = normalizedPath.split(sep).filter(Boolean);
 
   return (
     pathParts.some((part) => WATCHER_IGNORED_DIRECTORY_NAMES.has(part)) ||

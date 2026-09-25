@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
@@ -85,6 +85,7 @@ const buildNitroMock = vi.fn(async (nitro: Nitro) => {
 const copyPublicAssetsMock = vi.fn(async () => undefined);
 const createProductionApplicationNitroMock = vi.fn();
 const prepareProductionApplicationHostMock = vi.fn();
+const refreshProductionCompiledArtifactsMock = vi.fn(async () => undefined);
 const prepareMock = vi.fn(async () => undefined);
 const prerenderMock = vi.fn(async () => undefined);
 const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
@@ -92,6 +93,7 @@ const resolveDiscoveryProjectMock = vi.fn(async (appRoot: string) => ({
   appRoot,
   layout: "nested" as const,
 }));
+const prewarmAppSandboxesMock = vi.fn(async () => undefined);
 const runVercelBuildPrewarmMock = vi.fn(async () => undefined);
 
 vi.mock("nitro/builder", () => ({
@@ -107,6 +109,7 @@ vi.mock("./create-application-nitro.js", () => ({
 
 vi.mock("./prepare-application-host.js", () => ({
   prepareProductionApplicationHost: prepareProductionApplicationHostMock,
+  refreshProductionCompiledArtifacts: refreshProductionCompiledArtifactsMock,
 }));
 
 vi.mock("#discover/project.js", () => ({
@@ -117,18 +120,20 @@ vi.mock("./vercel-build-prewarm.js", () => ({
   runVercelBuildPrewarm: runVercelBuildPrewarmMock,
 }));
 
-const createScratchDirectory = useTemporaryDirectories();
-const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
+vi.mock("#execution/sandbox/prewarm.js", () => ({
+  prewarmAppSandboxes: prewarmAppSandboxesMock,
+}));
 
-function createPreparedHost(appRoot: string): PreparedApplicationHost {
+const createScratchDirectory = useTemporaryDirectories();
+const DEPLOYABLE_BUILD_OPTIONS = { skipSandboxPrewarm: false } as const;
+
+async function createPreparedHost(appRoot: string): Promise<PreparedApplicationHost> {
   const agentRoot = join(appRoot, "agent");
-  const manifest = createCompiledAgentManifest({
+  const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot,
-    config: {
-      model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
-      name: "scenario-test-agent",
-    },
+    model: "openai/gpt-5.4",
+    name: "scenario-test-agent",
   });
   return {
     appRoot,
@@ -181,7 +186,7 @@ async function prepareHostBuildWorkspace(
   workspace: ApplicationBuildWorkspace,
 ): Promise<PreparedApplicationHost> {
   await mkdir(join(workspace.compiler.artifactsDir, "compile"), { recursive: true });
-  return createPreparedHost(workspace.appRoot);
+  return await createPreparedHost(workspace.appRoot);
 }
 
 describe("buildApplication", () => {
@@ -234,6 +239,21 @@ describe("buildApplication", () => {
       )}\n`,
     );
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    expect(prewarmAppSandboxesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot,
+        compiledArtifactsSource: expect.objectContaining({
+          kind: "disk",
+          sandboxAppRoot: appRoot,
+        }),
+      }),
+    );
+    expect(prewarmAppSandboxesMock.mock.invocationCallOrder[0]).toBeLessThan(
+      refreshProductionCompiledArtifactsMock.mock.invocationCallOrder[0]!,
+    );
+    expect(refreshProductionCompiledArtifactsMock.mock.invocationCallOrder[0]).toBeLessThan(
+      buildNitroMock.mock.invocationCallOrder[0]!,
+    );
     await expect(
       readFile(join(appRoot, ".eve", "compile", "compiled-agent-manifest.json"), "utf8"),
     ).rejects.toThrow();
@@ -260,7 +280,7 @@ describe("buildApplication", () => {
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
     await buildApplication(appRoot, {
       profileOutputPath: profilePath,
-      skipVercelSandboxPrewarm: false,
+      skipSandboxPrewarm: false,
     });
 
     const profile = JSON.parse(await readFile(profilePath, "utf8")) as ApplicationBuildProfile;
@@ -307,7 +327,7 @@ describe("buildApplication", () => {
       const { buildApplication } = await import("#internal/nitro/host/build-application.js");
       const outputDir = await buildApplication(appRoot, {
         profileOutputPath: profilePath,
-        skipVercelSandboxPrewarm: false,
+        skipSandboxPrewarm: false,
       });
 
       expect(outputDir).toBe(join(appRoot, ".output"));
@@ -338,7 +358,7 @@ describe("buildApplication", () => {
       const { buildApplication } = await import("#internal/nitro/host/build-application.js");
       const outputDir = await buildApplication(appRoot, {
         profileOutputPath: profilePath,
-        skipVercelSandboxPrewarm: false,
+        skipSandboxPrewarm: false,
       });
 
       expect(outputDir).toBe(join(appRoot, ".output"));
@@ -442,6 +462,7 @@ describe("buildApplication", () => {
       {
         buildDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
         outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
+        publicRoutePrefix: "/_eve_internal/eve",
       },
     );
     const nestedFunctionStats = await lstat(
@@ -529,7 +550,7 @@ describe("buildApplication", () => {
     expect((summary.agent as { name: string }).name).toBe("scenario-test-agent");
   });
 
-  it("skips Vercel sandbox prewarm only when the build opts out", async () => {
+  it("skips sandbox preparation when the build opts out", async () => {
     vi.stubEnv("VERCEL", "1");
     const appRoot = await createScratchDirectory("eve-build-application-skip-prewarm-");
 
@@ -541,11 +562,12 @@ describe("buildApplication", () => {
 
     const { buildApplication } = await import("#internal/nitro/host/build-application.js");
     const outputDir = await buildApplication(appRoot, {
-      skipVercelSandboxPrewarm: true,
+      skipSandboxPrewarm: true,
     });
 
     expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
     expect(runVercelBuildPrewarmMock).not.toHaveBeenCalled();
+    expect(prewarmAppSandboxesMock).not.toHaveBeenCalled();
     expect(buildNitroMock).toHaveBeenCalledTimes(1);
   });
 
@@ -633,7 +655,7 @@ describe("buildApplication", () => {
               framework: "eve",
               name: "eve-support",
               root: ".",
-              routePrefix: "/eve/agents/support",
+              routePrefix: "/eve/support",
             },
           ],
         },
@@ -692,7 +714,7 @@ describe("buildApplication", () => {
             "eve-support": {
               framework: "eve",
               root: "agents/support",
-              routePrefix: "/eve/agents/support",
+              routePrefix: "/eve/support",
             },
           },
           version: 3,
@@ -716,51 +738,63 @@ describe("buildApplication", () => {
     });
   });
 
-  it("normalizes eve function output from legacy root service config", async () => {
-    vi.stubEnv("VERCEL", "1");
-    const appRoot = await createScratchDirectory("eve-build-application-vercel-root-config-");
+  it.each([
+    { routePrefix: "/_eve_internal/eve", publicRoutePrefix: "/_eve_internal/eve" },
+    { routePrefix: "/eve/v1", publicRoutePrefix: undefined },
+    { routePrefix: "/eve/v1/", publicRoutePrefix: undefined },
+  ])(
+    "normalizes legacy service $routePrefix without duplicating protocol routes",
+    async ({ routePrefix, publicRoutePrefix }) => {
+      vi.stubEnv("VERCEL", "1");
+      const appRoot = await createScratchDirectory("eve-build-application-vercel-root-config-");
 
-    prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
-    createProductionApplicationNitroMock.mockImplementation(
-      async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
-        createNitroStub(options.outputDir),
-    );
-    await writeFile(
-      join(appRoot, "vercel.json"),
-      `${JSON.stringify(
-        {
-          experimentalServices: {
-            eve: {
-              entrypoint: ".",
-              framework: "eve",
-              routePrefix: "/_eve_internal/eve",
-            },
-            web: {
-              entrypoint: ".",
-              framework: "nextjs",
-              routePrefix: "/",
+      prepareProductionApplicationHostMock.mockImplementationOnce(prepareHostBuildWorkspace);
+      createProductionApplicationNitroMock.mockImplementation(
+        async (_preparedHost: PreparedApplicationHost, options: { outputDir: string }) =>
+          createNitroStub(options.outputDir),
+      );
+      await writeFile(
+        join(appRoot, "vercel.json"),
+        `${JSON.stringify(
+          {
+            experimentalServices: {
+              eve: {
+                entrypoint: ".",
+                framework: "eve",
+                routePrefix,
+              },
+              web: {
+                entrypoint: ".",
+                framework: "nextjs",
+                routePrefix: "/",
+              },
             },
           },
-        },
-        null,
-        2,
-      )}\n`,
-    );
+          null,
+          2,
+        )}\n`,
+      );
 
-    const { buildApplication } = await import("#internal/nitro/host/build-application.js");
-    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+      const { buildApplication } = await import("#internal/nitro/host/build-application.js");
+      const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
 
-    expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
-    const vercelConfig = JSON.parse(
-      await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
-    ) as {
-      routes: unknown[];
-    };
-    expect(vercelConfig.routes).toContainEqual({
-      dest: "/eve/__server",
-      src: "/eve/v1/health",
-    });
-  });
+      expect(createProductionApplicationNitroMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ publicRoutePrefix }),
+      );
+
+      expect(outputDir).toBe(join(appRoot, ".vercel", "output"));
+      const vercelConfig = JSON.parse(
+        await readFile(join(appRoot, ".vercel", "output", "config.json"), "utf8"),
+      ) as {
+        routes: unknown[];
+      };
+      expect(vercelConfig.routes).toContainEqual({
+        dest: "/eve/__server",
+        src: "/eve/v1/health",
+      });
+    },
+  );
 
   it("leaves standalone Vercel Nitro output routable at the root", async () => {
     vi.stubEnv("VERCEL", "1");

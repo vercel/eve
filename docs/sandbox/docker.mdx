@@ -1,0 +1,29 @@
+---
+title: "Docker Sandbox"
+description: "Create local persistent containers from an image or Dockerfile."
+---
+
+Docker environments can use eve's default image, an existing OCI image, or `agent/sandbox/Dockerfile`.
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { DockerSandbox } from "eve/sandbox/docker";
+
+export const environment = DockerSandbox.image("ghcr.io/acme/agent@sha256:...");
+
+export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" }));
+```
+
+Use `DockerSandbox.environment()` for the default image or `DockerSandbox.dockerfile()` for the colocated Dockerfile convention.
+
+## Environment options
+
+Image, pull policy, environment variables, and `prepare` belong to the reusable environment. During preparation, eve starts a temporary container, hydrates managed resources, runs authored preparation, and commits the result as the recorded template image.
+
+## Live container options
+
+Pass `networkPolicy` to `open()`. Docker supports only `"allow-all"` and `"deny-all"`. The policy applies to the live container, not the prepared image.
+
+A session-owned container keeps writable `/workspace` state in its container filesystem. A stopped container restarts with that state.
+
+See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

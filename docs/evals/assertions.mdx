@@ -50,15 +50,15 @@ attached.messageIncludes("Sunny");
 
 ## Value assertions with `t.check`
 
-`t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be `t.reply`, a turn's `.message`, parsed JSON, or any local you computed:
+`t.check(value, assertion)` grades an explicit value against a builder from `eve/evals/expect`. The value can be a turn’s `.message`, parsed JSON, or any local you computed:
 
 ```ts
 import { includes, equals, matches, satisfies, similarity } from "eve/evals/expect";
 
-t.check(t.reply, includes(/sunny/i)); // substring or RegExp (gate)
+t.check(turn.message, includes(/sunny/i)); // substring or RegExp (gate)
 t.check(parsed, equals({ city: "Brooklyn" })); // deep structural equality (gate)
 t.check(parsed, matches(WeatherSchema)); // Standard Schema, e.g. Zod (gate)
-t.check(t.reply, similarity("Sunny, 72F")); // fuzzy 0–1 Levenshtein (soft)
+t.check(turn.message, similarity("Sunny, 72F")); // fuzzy 0–1 Levenshtein (soft)
 t.check(
   latencyMs,
   satisfies((value) => value < 1_000, "latency under one second"),
@@ -83,7 +83,11 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks use the shared task status values: `"working"`, `"input_required"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+
+A background subagent that has only returned a working task receipt remains `working`; use `t.calledSubagent(name, { status: "working" })` to assert that delegation. Both blocking and background calls become `completed` when their actual successful result is observed through `subagent.completed`, even when the child session stays available for another call. A rejected dispatch is `failed`; an explicit cancelled child outcome is `cancelled`.
+
+The runner derives these values from captured events. It does not read stored task state, and the current stream does not expose every task transition. A proxied input request alone does not update the subagent call to `input_required`; assert that request with `requireInputRequest`. Check task notifications for background failure and cancellation when no child outcome event is present.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
@@ -107,14 +111,14 @@ t.calledSubagent("weather", {
 
 ```ts
 const request = session.requireInputRequest({
-  toolName: "ask_question",
-  optionIds: ["red", "blue"],
+  toolName: "confirm_deploy",
+  optionIds: ["approve", "cancel"],
 });
 ```
 
 ## Run state and derived facts
 
-Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.
+Beyond the raw `session.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.
 
 Typed event matching covers presence, absence, numeric or predicate counts, partial event data, and ordering:
 
@@ -162,12 +166,12 @@ Every assertion returns a chainable handle. Severity rides on the assertion, so 
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
 - `.label(name)` adds a stable name when an eval records several assertions from the same family.
 
-The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge.*` assertion are soft. Annotate only when you deviate:
+The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge(...)` assertion are soft. Annotate only when you deviate:
 
 ```ts
 t.calledTool("get_weather").soft(); // record the tool call as a metric, don't gate
-t.check(t.reply, similarity("Sunny")).label("forecast wording").atLeast(0.8);
-t.check(t.reply, includes("error")).soft(); // track without failing the build
+t.check(turn.message, similarity("Sunny")).label("forecast wording").atLeast(0.8);
+t.check(turn.message, includes("error")).soft(); // track without failing the build
 ```
 
 ## What to read next

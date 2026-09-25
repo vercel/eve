@@ -24,7 +24,9 @@ export interface PackageManagerConfigurationOptions {
 }
 
 export interface PackageManagerInstallOptions {
-  /** Disables the manager's minimum-release-age cooldown for this run when supported. */
+  /** Automatically accepts package-manager prompts during setup-owned installs. */
+  readonly autoApprove?: boolean;
+  /** Disables inherited minimum package release-age policies for this install. */
   readonly bypassMinimumReleaseAge?: boolean;
   /** Resolves the project standalone even when an ancestor workspace exists. */
   readonly ignoreWorkspace?: boolean;

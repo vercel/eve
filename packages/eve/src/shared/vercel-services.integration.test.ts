@@ -50,6 +50,7 @@ describe("ensureEveVercelServicesConfig", () => {
           buildCommand:
             "cd '../../..' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='.eve/vercel-services/eve/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='.vercel/output' && node 'node_modules/eve/bin/eve.js' build",
           framework: "eve",
+          outputDirectory: ".vercel/output",
           routes: [
             {
               src: "^/eve/v1/(.*)$",
@@ -123,6 +124,32 @@ describe("ensureEveVercelServicesConfig", () => {
       `${JSON.stringify({
         services: {
           web: { root: "apps/web", framework: "nuxtjs" },
+          eve: { root: "agent", framework: "eve" },
+        },
+      })}\n`,
+    );
+
+    const result = await ensureEveVercelServicesConfig({
+      appRoot: hostRoot,
+      frameworkName: "Test",
+      hostRoot: hostRoot,
+    });
+
+    expect(result).toEqual({ mode: "root" });
+  });
+
+  it("prefers the host root vercel.json services over the linked project root's", async () => {
+    const projectRoot = await createTempHostRoot();
+    const hostRoot = join(projectRoot, "apps", "web");
+    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
+    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
+    await mkdir(hostRoot, { recursive: true });
+    await writeFile(join(projectRoot, "vercel.json"), `${JSON.stringify({})}\n`);
+    await writeFile(
+      join(hostRoot, "vercel.json"),
+      `${JSON.stringify({
+        services: {
+          web: { root: ".", framework: "nuxtjs" },
           eve: { root: "agent", framework: "eve" },
         },
       })}\n`,

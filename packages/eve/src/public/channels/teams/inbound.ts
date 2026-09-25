@@ -97,9 +97,11 @@ let turndownService: TurndownService | null = null;
 /** Inbound context rendered into the model-visible `<teams_context>` block. */
 export interface TeamsInboundContext {
   readonly activityId: string;
+  readonly botId?: string;
   readonly channelId?: string;
   readonly conversationId: string;
   readonly conversationType?: string;
+  readonly isMentioned?: boolean;
   readonly scope: TeamsConversationScope;
   readonly teamId?: string;
   readonly tenantId?: string;
@@ -139,6 +141,8 @@ export function formatTeamsContextBlock(context: TeamsInboundContext): string {
     "<teams_context>",
     "response_medium: microsoft_teams",
     `response_instructions: ${TEAMS_RESPONSE_INSTRUCTIONS}`,
+    ...(context.botId ? [`bot_id: ${context.botId}`] : []),
+    ...(context.isMentioned !== undefined ? [`is_mentioned: ${context.isMentioned}`] : []),
     `user_id: ${context.userId}`,
     ...(context.userName ? [`user_name: ${context.userName}`] : []),
     `conversation_id: ${context.conversationId}`,

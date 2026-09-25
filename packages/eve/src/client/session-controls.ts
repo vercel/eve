@@ -26,14 +26,20 @@ interface SessionControlContext {
 
 export async function cancelClientSession(input: {
   readonly context: SessionControlContext;
-  readonly options?: { readonly turnId?: string };
+  readonly options?: {
+    readonly signal?: AbortSignal;
+    readonly tasks?: boolean;
+    readonly turnId?: string;
+  };
   readonly sessionId: string;
 }): Promise<CancelSessionResult> {
+  const { signal, ...body } = input.options ?? {};
   const { payload, response } = await postJson({
-    body: input.options,
+    body,
     context: input.context,
     operation: "Cancel",
     path: createEveSessionCancelRoutePath(input.sessionId),
+    signal,
   });
   const result = CancelTurnResponseSchema.safeParse(payload);
   if (
@@ -91,14 +97,16 @@ export async function compactClientSession(input: {
 
 export async function resetClientSession(input: {
   readonly context: SessionControlContext;
-  readonly options?: { readonly reason?: string };
+  readonly options?: { readonly reason?: string; readonly signal?: AbortSignal };
   readonly sessionId: string;
 }): Promise<ResetResult> {
+  const { signal, ...body } = input.options ?? {};
   const { payload } = await postJson({
-    body: input.options,
+    body,
     context: input.context,
     operation: "Reset",
     path: createEveSessionResetRoutePath(input.sessionId),
+    signal,
   });
   const result = ResetResponseSchema.safeParse(payload);
   if (
@@ -117,6 +125,7 @@ async function postJson(input: {
   readonly context: SessionControlContext;
   readonly operation: string;
   readonly path: string;
+  readonly signal?: AbortSignal;
 }): Promise<{ readonly payload: unknown; readonly response: Response }> {
   const headers = await input.context.resolveHeaders();
   headers.set("content-type", "application/json");
@@ -127,6 +136,7 @@ async function postJson(input: {
         body: input.body === undefined ? undefined : JSON.stringify(input.body),
         headers,
         method: "POST",
+        signal: input.signal,
       },
       input.context.redirect,
     ),

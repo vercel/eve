@@ -1,24 +1,31 @@
 /**
  * Scope-parameterized authorization flow shared by MCP connections and
- * authored tools that declare `auth`.
+ * authored tools and workflow steps using inline providers.
  *
- * A *scope* is the stable identifier the per-step token cache and the
- * framework-owned callback URL are keyed by — a connection name for an
- * MCP connection, a tool name for tool-hosted auth. Everything else
+ * A *scope* names the framework-owned callback URL — a connection name for
+ * an MCP connection, a tool name for tool-hosted auth. Connection-hosted
+ * authorization also carries an opaque instance ID that keys its token cache
+ * and pins callback completion to the exact resolved connection. Everything else
  * (principal resolution, the park/resume webhook dance, the loop guard)
  * is identical across both, so it lives here once instead of being
  * duplicated per caller.
  */
 
 import { type AlsContext, contextStorage, loadContext } from "#context/container.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import {
+  type ConnectionAuthorizationChallenge,
+  ConnectionAuthorizationFailedError,
+  ConnectionAuthorizationRequiredError,
+  isConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
+import { isAsyncIterable } from "#shared/async-iterable.js";
 import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
   createAuthorizationAttempt,
   requestAuthorization,
 } from "#harness/authorization.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { JsonValue } from "#shared/json.js";
 import {
   evictCachedToken,
   readCachedToken,
@@ -36,7 +43,7 @@ import {
   type InteractiveAuthorizationDefinition,
   supportsInteractiveAuthorization,
   type TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 
 const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]"]);
 
@@ -48,18 +55,156 @@ const LOCAL_HTTP_VERCEL_CONNECT_HOSTNAMES: ReadonlySet<string> = new Set(["127.0
  */
 export interface ScopedAuthorization {
   readonly boundResponder?: SessionAuthContext;
+  /** Opaque resolved instance identity for connection-hosted authorization. */
+  readonly instanceId?: string;
   readonly scope: string;
   readonly authorization: Readonly<AuthorizationDefinition>;
   readonly connection: ConnectionAuthorizationContext;
+}
+
+/** One execution's token capability and authorization interruption boundary. */
+export function createAuthorizationExecution(
+  options: {
+    readonly completeAuthorization?: typeof completeScopedAuthorization;
+  } = {},
+) {
+  const justAuthorized = new Set<string>();
+
+  async function complete(scoped: ScopedAuthorization): Promise<void> {
+    const key = scoped.instanceId ?? scoped.scope;
+    if (
+      !justAuthorized.has(key) &&
+      (await (options.completeAuthorization ?? completeScopedAuthorization)(scoped))
+    ) {
+      justAuthorized.add(key);
+    }
+  }
+
+  function requireAuth(scoped: ScopedAuthorization, cause?: unknown): never {
+    throw new ScopedAuthorizationRequiredError(
+      scoped,
+      justAuthorized.has(scoped.instanceId ?? scoped.scope),
+      cause,
+    );
+  }
+
+  return {
+    complete,
+    async getToken(scoped: ScopedAuthorization): Promise<TokenResult> {
+      await complete(scoped);
+      try {
+        return await resolveScopedToken(scoped);
+      } catch (error) {
+        if (!isConnectionAuthorizationRequiredError(error)) {
+          throw error;
+        }
+        return requireAuth(scoped, error);
+      }
+    },
+    requireAuth,
+    async handleError(error: unknown, scoped?: ScopedAuthorization): Promise<AuthorizationSignal> {
+      if (scoped !== undefined && isConnectionAuthorizationRequiredError(error)) {
+        return await handleAuthorizationError(
+          new ScopedAuthorizationRequiredError(
+            scoped,
+            justAuthorized.has(scoped.instanceId ?? scoped.scope),
+            error,
+          ),
+          // Connection transports evict refused bearers when classifying their errors.
+          { evictToken: false },
+        );
+      }
+      return await handleAuthorizationError(error);
+    },
+    run: executeWithAuthorization,
+  };
+}
+
+class ScopedAuthorizationRequiredError extends Error {
+  readonly scoped: ScopedAuthorization;
+  readonly justAuthorized: boolean;
+
+  constructor(scoped: ScopedAuthorization, justAuthorized: boolean, cause?: unknown) {
+    super("Authorization required.", { cause });
+    this.name = "ScopedAuthorizationRequiredError";
+    this.scoped = scoped;
+    this.justAuthorized = justAuthorized;
+  }
+}
+
+function isScopedAuthorizationRequiredError(
+  error: unknown,
+): error is ScopedAuthorizationRequiredError {
+  return error instanceof Error && error.name === "ScopedAuthorizationRequiredError";
+}
+
+/** Produces the shared challenge; the caller owns parking and resumption. */
+export async function handleAuthorizationError(
+  error: unknown,
+  options: { readonly evictToken: boolean } = { evictToken: true },
+): Promise<AuthorizationSignal> {
+  if (!isScopedAuthorizationRequiredError(error)) {
+    throw error;
+  }
+  const { scoped } = error;
+  if (error.justAuthorized) {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Authorization for "${scoped.scope}" failed: the service rejected the token immediately after authorization.`,
+      reason: "token_rejected_after_authorization",
+      retryable: false,
+    });
+  }
+
+  if (options.evictToken) {
+    await evictScopedToken(scoped);
+  }
+  const signal = await startScopedAuthorization(scoped);
+  if (signal !== undefined) {
+    return signal;
+  }
+
+  if (supportsInteractiveAuthorization(scoped.authorization)) {
+    throw new ConnectionAuthorizationFailedError(scoped.scope, {
+      message: `Authorization for "${scoped.scope}" requires sign-in, but no authorization callback URL could be minted for this run (missing session context).`,
+      reason: "authorization_callback_unavailable",
+      retryable: false,
+    });
+  }
+  throw error.cause ?? new ConnectionAuthorizationRequiredError(scoped.scope);
+}
+
+function executeWithAuthorization(
+  execute: () => unknown,
+): Promise<unknown> | AsyncIterable<unknown> {
+  // Keep generator results as iterables, including errors raised during iteration.
+  try {
+    const output = execute();
+    return isAsyncIterable(output)
+      ? handleIterable(output)
+      : Promise.resolve(output).catch(handleAuthorizationError);
+  } catch (error) {
+    return handleAuthorizationError(error);
+  }
+}
+
+async function* handleIterable(output: AsyncIterable<unknown>): AsyncIterable<unknown> {
+  try {
+    for await (const value of output) {
+      yield value;
+    }
+  } catch (error) {
+    yield await handleAuthorizationError(error);
+  }
 }
 
 /**
  * Resolves a bearer token for one scope, consulting the per-step token
  * cache before invoking the authored `getToken`.
  *
- * The cache is keyed by `(scope, principalKey(principal))` so concurrent
- * users on one session never alias onto each other's bearer. Outside a
- * runtime scope the cache is unavailable, but `getToken` still runs with
+ * The cache is keyed by `(instanceId ?? scope, principalKey(principal))` so
+ * concurrent users and resolved connection instances never alias onto each
+ * other's bearer. Outside a runtime scope the cache is unavailable, but
+ * `getToken` still runs with
  * a framework-resolved principal so ad-hoc `"app"`-scoped use keeps
  * working; `"user"`-scoped strategies without a context fail fast inside
  * {@link resolveConnectionPrincipal}.
@@ -69,6 +214,7 @@ export interface ScopedAuthorization {
  */
 export async function resolveScopedToken(input: ScopedAuthorization): Promise<TokenResult> {
   const { scope, authorization, connection } = input;
+  const cacheScope = input.instanceId ?? scope;
 
   // Reading `contextStorage.getStore()` directly keeps this the only
   // place that tolerates a missing context; authored code uses
@@ -81,11 +227,11 @@ export async function resolveScopedToken(input: ScopedAuthorization): Promise<To
   }
 
   const key = principalKey(principal);
-  const cached = readCachedToken(ctx, scope, key);
+  const cached = readCachedToken(ctx, cacheScope, key);
   if (cached !== undefined) return cached;
 
   const result = await authorization.getToken({ connection, principal });
-  writeCachedToken(ctx, scope, key, result);
+  writeCachedToken(ctx, cacheScope, key, result);
   return result;
 }
 
@@ -108,12 +254,13 @@ export async function resolveScopedToken(input: ScopedAuthorization): Promise<To
  */
 export async function evictScopedToken(input: ScopedAuthorization): Promise<void> {
   const { scope, authorization, connection } = input;
+  const cacheScope = input.instanceId ?? scope;
   const ctx = contextStorage.getStore();
   if (ctx === undefined) return;
   let principal;
   try {
     principal = resolveScopedPrincipal(input, ctx);
-    evictCachedToken(ctx, scope, principalKey(principal));
+    evictCachedToken(ctx, cacheScope, principalKey(principal));
   } catch {
     // Eviction is best-effort; without a principal we can drop neither
     // cache layer, so bail rather than mask the authorization error.
@@ -142,7 +289,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return false;
 
-  const result = consumeAuthorizationResult(scope);
+  const result = consumeAuthorizationResult(scope, input.instanceId);
   if (result === undefined) return false;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
@@ -155,7 +302,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
     resume: result.resume,
     callback: result.callback,
   });
-  writeCachedToken(ctx, scope, principalKey(principal), token);
+  writeCachedToken(ctx, input.instanceId ?? scope, principalKey(principal), token);
   return true;
 }
 
@@ -192,6 +339,7 @@ export async function startScopedAuthorization(
       attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
       hookUrl: callbackUrl,
+      instanceId: input.instanceId,
       name: scope,
       principal,
       resume,

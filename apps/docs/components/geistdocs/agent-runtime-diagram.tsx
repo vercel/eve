@@ -103,7 +103,7 @@ export function AgentRuntimeDiagram(): JSX.Element {
           paths={[
             "agent/tools/**",
             "agent/hooks/**",
-            "agent/instrumentation.ts",
+            "agent/instrumentation/**",
             "agent/connections/**",
           ]}
         />

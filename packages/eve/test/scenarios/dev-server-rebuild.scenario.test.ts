@@ -1,16 +1,21 @@
+import { createFakeVercelOidcToken } from "../../src/internal/testing/vercel-oidc-token.js";
 import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { writeProviderSelection } from "../../src/setup/provider-settings.js";
 import { EVE_HEALTH_ROUTE_PATH } from "../../src/protocol/routes.js";
 import {
   readDevelopmentRuntimeArtifactsSnapshotRoot,
   resolveDevelopmentRuntimeArtifactsPointerPath,
 } from "../../src/internal/nitro/dev-runtime-artifacts.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "../../src/internal/nitro/host/dev-watcher-log.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import {
+  type ScenarioAppDescriptor,
+  useScenarioApp,
+} from "../../src/internal/testing/scenario-app.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 import {
@@ -18,7 +23,7 @@ import {
   DEV_SERVER_SCENARIO_TIMEOUT_MS,
   TRANSACTIONAL_REBUILD_DESCRIPTOR,
   createInstrumentationSource,
-  createOverlappingChannelSource,
+  createTransactionalRouteSource,
   createTransactionalChannelSource,
 } from "./dev-server-descriptors.js";
 import {
@@ -33,6 +38,37 @@ import {
 
 const scenarioApp = useScenarioApp();
 
+const LOCAL_DEV_CAPABILITY_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...DEV_SERVER_AGENT_DESCRIPTOR,
+  files: {
+    ...DEV_SERVER_AGENT_DESCRIPTOR.files,
+    "agent/channels/local-dev-capability.ts": [
+      'import { writeFile } from "node:fs/promises";',
+      'import { join } from "node:path";',
+      'import { defineChannel, GET } from "eve/channels";',
+      'import { getLocalDevCapability } from "eve/local-dev";',
+      "",
+      "export default defineChannel({",
+      "  routes: [",
+      '    GET("/local-dev-capability", async () => {',
+      "      const capability = getLocalDevCapability();",
+      "      if (capability === undefined) return Response.json({ available: false });",
+      "      return await capability.withSuspendedSource(async () => {",
+      '        await writeFile(join(capability.appRoot, "local-dev-capability.marker"), "updated\\n");',
+      "        return Response.json({",
+      "          appRoot: capability.appRoot,",
+      "          available: true,",
+      "          interactiveClient: capability.interactiveClient,",
+      "        });",
+      "      });",
+      "    }),",
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+  },
+};
+
 function createCandidateChannelSource(): string {
   return createTransactionalChannelSource([
     '    GET("/candidate-only", () => new Response("candidate")),',
@@ -40,6 +76,80 @@ function createCandidateChannelSource(): string {
 }
 
 describe("eve dev server rebuild transactions", () => {
+  it(
+    "switches Gateway credentials through the host without rebuilding or replacing the worker",
+    async () => {
+      const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
+      await writeProviderSelection(app.appRoot, "ai-gateway-key", undefined, "environment");
+      const oidcToken = createFakeVercelOidcToken({ exp: Math.floor(Date.now() / 1000) + 3600 });
+      const server = await startEveDev(app.appRoot, {
+        env: {
+          AI_GATEWAY_API_KEY: "fixture-gateway-key",
+          VERCEL_OIDC_TOKEN: oidcToken,
+        },
+      });
+      try {
+        const revision = await readDevelopmentRevision(server.url);
+        const worker = await fetchText(server.url, "/worker-id");
+        expect((await fetchAgentInfo(server.url)).agent.model.endpoint).toMatchObject({
+          connected: true,
+          credential: "api-key",
+        });
+        await writeProviderSelection(app.appRoot, "ai-gateway-project");
+        expect((await fetchAgentInfo(server.url)).agent.model.endpoint).toMatchObject({
+          connected: true,
+          credential: "oidc",
+        });
+        // Let an accidental provider-file watch reach its rebuild debounce.
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        expect(await readDevelopmentRevision(server.url)).toBe(revision);
+        expect(await fetchText(server.url, "/worker-id")).toBe(worker);
+        expect(server.stdout()).not.toContain("provider.json");
+        expect(server.stdout() + server.stderr()).not.toContain("fixture-gateway-key");
+        expect(server.stdout() + server.stderr()).not.toContain(oidcToken);
+        const unauthorized = await fetch(
+          new URL("/eve/v1/dev/internal/model-credential?provider=gateway", server.url),
+        );
+        expect(unauthorized.status).toBe(401);
+        expect(await unauthorized.text()).not.toContain(oidcToken);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "scopes a local-dev capability through the host and releases its watcher lease",
+    async () => {
+      const app = await scenarioApp(LOCAL_DEV_CAPABILITY_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const initialRevision = await readDevelopmentRevision(server.url);
+        const response = await fetch(new URL("/local-dev-capability", server.url), {
+          headers: { "x-eve-dev-interactive-client": "1" },
+        });
+
+        await expect(response.json()).resolves.toEqual({
+          appRoot: await realpath(app.appRoot),
+          available: true,
+          interactiveClient: true,
+        });
+        expect(existsSync(join(app.appRoot, "local-dev-capability.marker"))).toBe(true);
+
+        await writeFile(join(app.appRoot, "agent", "instructions.md"), "Still watching.\n");
+        await waitForCondition(
+          async () => (await readDevelopmentRevision(server.url)) !== initialRevision,
+          `Timed out waiting for the released watcher.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
   it(
     "publishes authored tool removals without replacing the active host",
     async () => {
@@ -49,9 +159,9 @@ describe("eve dev server rebuild transactions", () => {
       try {
         const initialRevision = await readDevelopmentRevision(server.url);
         const initialWorkerId = await fetchText(server.url, "/worker-id");
-        expect(
-          (await fetchAgentInfo(server.url)).tools.authored.map((tool) => tool.name),
-        ).toContain("get_weather");
+        expect((await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name)).toContain(
+          "get_weather",
+        );
 
         await rm(join(app.appRoot, "agent", "tools", "get_weather.ts"));
         await forceDevelopmentRebuild(server.url);
@@ -59,7 +169,7 @@ describe("eve dev server rebuild transactions", () => {
         await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
         await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
         expect(
-          (await fetchAgentInfo(server.url)).tools.authored.map((tool) => tool.name),
+          (await fetchAgentInfo(server.url)).tools.static.map((tool) => tool.name),
         ).not.toContain("get_weather");
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
@@ -70,7 +180,7 @@ describe("eve dev server rebuild transactions", () => {
   );
 
   it(
-    "replaces the worker for instrumentation changes and preserves Nitro's selected route",
+    "replaces the worker for instrumentation changes and preserves compiled routes",
     async () => {
       const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -84,7 +194,7 @@ describe("eve dev server rebuild transactions", () => {
         await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -117,8 +227,8 @@ describe("eve dev server rebuild transactions", () => {
         await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
-          'throw new Error("stage 4 rejected candidate");\nexport default {};\n',
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
+          'throw new Error("stage 4 rejected candidate");\n',
         );
         await writeFile(
           join(app.appRoot, "agent", "channels", "dev-generation.ts"),
@@ -139,7 +249,7 @@ describe("eve dev server rebuild transactions", () => {
         expect(candidateRoute.status).toBe(404);
 
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("two"),
         );
         await forceDevelopmentRebuild(server.url);
@@ -149,10 +259,10 @@ describe("eve dev server rebuild transactions", () => {
 
         await writeFile(
           join(app.appRoot, "agent", "channels", "dev-generation.ts"),
-          createOverlappingChannelSource(),
+          createTransactionalRouteSource(),
         );
         await writeFile(
-          join(app.appRoot, "agent", "instrumentation.ts"),
+          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
           createInstrumentationSource("one"),
         );
         await forceDevelopmentRebuild(server.url);

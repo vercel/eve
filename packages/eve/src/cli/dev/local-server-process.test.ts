@@ -32,15 +32,37 @@ describe("createDevelopmentServer", () => {
   beforeEach(() => {
     child = new FakeChild();
     mocks.fork.mockReturnValue(child);
+    mocks.loadEnv.mockResolvedValue(undefined);
   });
 
   it("finishes the close escalation inside the CLI forced-exit backstop", () => {
     expect(DEV_SERVER_CLOSE_BUDGET_MS).toBeLessThan(FORCED_EXIT_BACKSTOP_MS);
   });
 
+  it("passes development extension selection to the child", async () => {
+    const developmentExtensions = { enabled: [] as const };
+    const server = createDevelopmentServer("/tmp/app", { developmentExtensions });
+    const started = server.start();
+    await vi.waitFor(() => expect(mocks.fork).toHaveBeenCalled());
+    expect(mocks.fork).toHaveBeenCalledWith(
+      expect.any(String),
+      [JSON.stringify({ developmentExtensions })],
+      expect.any(Object),
+    );
+    child.emit("message", {
+      type: "started",
+      handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },
+    });
+    await started;
+    const closing = server.close();
+    child.emit("exit", 0, null);
+    await closing;
+  });
+
   it("starts and hands cleanup to the child", async () => {
     const server = createDevelopmentServer("/tmp/app", { port: 2000 });
     const started = server.start();
+    await vi.waitFor(() => expect(mocks.fork).toHaveBeenCalled());
     child.emit("message", {
       type: "started",
       handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },
@@ -61,6 +83,7 @@ describe("createDevelopmentServer", () => {
     try {
       const server = createDevelopmentServer("/tmp/app", { output: "stderr" });
       const started = server.start();
+      await vi.waitFor(() => expect(mocks.fork).toHaveBeenCalled());
       child.stdout.write("server output");
       child.emit("message", {
         type: "started",
@@ -85,6 +108,7 @@ describe("createDevelopmentServer", () => {
     try {
       const server = createDevelopmentServer("/tmp/app");
       const started = server.start();
+      await vi.advanceTimersByTimeAsync(0);
       child.emit("message", {
         type: "started",
         handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },
@@ -118,6 +142,7 @@ describe("createDevelopmentServer", () => {
     try {
       const server = createDevelopmentServer("/tmp/app");
       const started = server.start();
+      await vi.advanceTimersByTimeAsync(0);
       child.emit("message", {
         type: "started",
         handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },

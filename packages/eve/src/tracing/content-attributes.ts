@@ -16,15 +16,17 @@
 /** Prompts, instructions, tool arguments — what went in. */
 const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "agent.channel.delivery.input",
+  "agent.session.title",
+  "agent.approval.request",
   "ai.documents",
   "ai.prompt",
-  "ai.prompt.messages",
   "ai.prompt.system",
   "ai.prompt.toolChoice",
   "ai.prompt.tools",
   "ai.value",
   "ai.values",
   "gen_ai.input.messages",
+  "gen_ai.memory.records",
   "gen_ai.system_instructions",
   "gen_ai.tool.call.arguments",
   "gen_ai.tool.definitions",
@@ -37,6 +39,7 @@ const INPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
  * `recordOutputs`; matching that is what keeps one destination's view coherent.
  */
 const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
+  "agent.approval.response",
   "ai.embedding",
   "ai.embeddings",
   "ai.ranking",
@@ -53,6 +56,9 @@ const OUTPUT_CONTENT_ATTRIBUTES: ReadonlySet<string> = new Set([
   "gen_ai.tool.call.result",
 ]);
 
+const INPUT_POLICY_ATTRIBUTE = "agent.trace.content.input";
+const OUTPUT_POLICY_ATTRIBUTE = "agent.trace.content.output";
+
 /** What one destination is willing to receive. */
 export interface ResolvedContentOptions {
   readonly recordInputs: boolean;
@@ -62,6 +68,26 @@ export interface ResolvedContentOptions {
 function isDeclined(key: string, content: ResolvedContentOptions): boolean {
   if (!content.recordInputs && INPUT_CONTENT_ATTRIBUTES.has(key)) return true;
   return !content.recordOutputs && OUTPUT_CONTENT_ATTRIBUTES.has(key);
+}
+
+function narrowsContentPolicy(
+  attributes: Readonly<Record<string, unknown>>,
+  content: ResolvedContentOptions,
+): boolean {
+  return (
+    (!content.recordInputs && attributes[INPUT_POLICY_ATTRIBUTE] === true) ||
+    (!content.recordOutputs && attributes[OUTPUT_POLICY_ATTRIBUTE] === true)
+  );
+}
+
+function exportedAttributeValue(
+  key: string,
+  value: unknown,
+  content: ResolvedContentOptions,
+): unknown {
+  if (key === INPUT_POLICY_ATTRIBUTE && value === true && !content.recordInputs) return false;
+  if (key === OUTPUT_POLICY_ATTRIBUTE && value === true && !content.recordOutputs) return false;
+  return value;
 }
 
 /**
@@ -77,11 +103,15 @@ export function withoutDeclinedContent(
   content: ResolvedContentOptions,
 ): Record<string, unknown> | undefined {
   const keys = Object.keys(attributes);
-  if (!keys.some((key) => isDeclined(key, content))) return undefined;
+  if (!keys.some((key) => isDeclined(key, content)) && !narrowsContentPolicy(attributes, content)) {
+    return undefined;
+  }
 
   const kept: Record<string, unknown> = {};
   for (const key of keys) {
-    if (!isDeclined(key, content)) kept[key] = attributes[key];
+    if (!isDeclined(key, content)) {
+      kept[key] = exportedAttributeValue(key, attributes[key], content);
+    }
   }
   return kept;
 }

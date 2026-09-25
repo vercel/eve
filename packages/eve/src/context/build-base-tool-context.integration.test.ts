@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildBaseToolContext } from "#context/build-base-tool-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { VercelSandbox } from "#public/sandbox/vercel.js";
 
 describe("buildBaseToolContext – getSandbox abort binding", () => {
   it("returns a session bound to the turn abort signal", async () => {
@@ -13,7 +14,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const controller = new AbortController();
 
     await runtime.runAsSession({ sandbox }, async () => {
@@ -33,6 +34,20 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
     expect(observed?.aborted).toBe(true);
   });
 
+  it("forwards the configured environment", async () => {
+    const environment = VercelSandbox.environment();
+    const sandbox = mockSandbox();
+    const runtime = await createTestRuntime();
+
+    await runtime.runAsSession({ sandboxAccess: { ...sandbox.access, environment } }, async () => {
+      const ctx = buildBaseToolContext({
+        options: { toolCallId: "call_1" },
+        toolName: "shell",
+      });
+      await expect(ctx.getSandbox(environment)).resolves.toBeDefined();
+    });
+  });
+
   it("binds the inert fallback signal when no turn signal exists", async () => {
     let observed: AbortSignal | undefined;
     const sandbox = mockSandbox({
@@ -41,7 +56,7 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     await runtime.runAsSession({ sandbox }, async () => {
       const ctx = buildBaseToolContext({

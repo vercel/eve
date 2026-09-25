@@ -7,9 +7,23 @@ import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 import { formatModelSummary } from "#shared/model-summary.js";
 
+export interface DevBuildStatus {
+  readonly phase: "building" | "complete";
+  readonly summary: string;
+}
+
+function formatDevBuildStatus(status: DevBuildStatus, theme: Theme): string {
+  const complete = status.phase === "complete";
+  const glyph = complete ? theme.glyph.success : theme.glyph.validating;
+  const summary = complete
+    ? status.summary.replace(/ changed$/u, " updated")
+    : `${status.summary.replace(/ (?:added|changed|removed)$/u, "")} updating…`;
+  return `${glyph} ${summary}`;
+}
+
 export interface StatusLineInput {
-  /** Port of the connected local development server; omitted for remote sessions. */
-  serverPort?: string;
+  /** Transient authored-source build state, independent of the server log filter. */
+  devBuild?: DevBuildStatus;
   /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */
   model?: string;
   /** Authored reasoning effort, rendered bold after the model id, e.g. `(xhigh)`. */
@@ -52,85 +66,71 @@ function renderModel(
   return c.dim(formatModelSummary(summary));
 }
 
-function renderServerPort(
-  input: Pick<StatusLineInput, "remote" | "serverPort" | "theme">,
-): string | undefined {
-  if (input.remote !== undefined || input.serverPort === undefined) return undefined;
-  const c = input.theme.colors;
-  return c.inverse(c.gray(` :${input.serverPort} `));
-}
-
 /** Provider slugs whose display name differs from the AI SDK's identifier. */
 const EXTERNAL_PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
-  // `experimental_chatgpt` wraps the Codex backend; what the user connected
-  // is their ChatGPT subscription, so the bar names that, not the transport.
+  // `chatgpt()` wraps the Codex backend; what the user connected is their
+  // ChatGPT subscription, so the bar names that, not the transport.
   codex: "chatgpt-sub",
 };
 
-/**
- * The endpoint reads as the model's routing clause (`via ai-gateway(oidc:…)`),
- * so it fuses onto the model segment with a plain space instead of standing
- * behind a `·` separator. Only the disconnected warning stands alone. The
- * clause is keyed strictly off the credential the AI SDK will actually use —
- * an `api-key` never shows the linked project, because the link is not what
- * authenticates the call.
- */
 function renderEndpoint(
   input: Pick<StatusLineInput, "endpoint" | "remote" | "theme" | "vercel">,
-): { readonly text: string; readonly standalone: boolean } | undefined {
+): string | undefined {
   if (input.remote !== undefined || input.endpoint === undefined) return undefined;
 
   const c = input.theme.colors;
   const g = input.theme.glyph;
-  // Only the gateway stands at the terminal's DEFAULT foreground — plain,
-  // not bold — while `via` and the credential scope stay dim around it;
-  // external providers render fully quiet. Explicit bright-white (SGR 97)
-  // would vanish on light themes.
-  const clause = (name: string, suffix: string) => `${c.dim("via ")}${name}${c.dim(suffix)}`;
+  const clause = (name: string, suffix: string) => `${name}${c.dim(suffix)}`;
   if (input.endpoint.kind === "external") {
     const provider =
       EXTERNAL_PROVIDER_DISPLAY_NAMES[input.endpoint.provider] ?? input.endpoint.provider;
     // The `⌝` mark stays at the terminal's default foreground — full
     // intensity on any theme — while the clause around it is dim.
-    return { text: `${c.dim(`via ${provider}`)}${g.external}`, standalone: false };
+    return `${c.dim(provider)}${g.external}`;
+  }
+  if (input.endpoint.kind === "chatgpt") {
+    switch (input.endpoint.state) {
+      case "ready":
+        return `${c.dim("chatgpt-sub")}${g.external}`;
+      case "checking":
+        return c.dim("chatgpt-sub checking…");
+      case "signed-out":
+      case "reauth-required":
+        return c.yellow(`${g.warning} chatgpt-sub login · /login`);
+      case "unavailable":
+        return c.yellow(`${g.warning} chatgpt-sub unavailable`);
+    }
   }
   if (!input.endpoint.connected) {
-    return { text: c.yellow(`${g.warning} ai-gateway`), standalone: true };
+    return c.yellow(`${g.warning} ai-gateway`);
   }
   if (input.endpoint.credential === "api-key") {
-    return { text: clause("ai-gateway", "(api-key)"), standalone: false };
+    return clause("ai-gateway", "(api-key)");
+  }
+  if (input.endpoint.credential === "oauth") {
+    const slug = input.vercel?.modelTeamSlug;
+    return c.dim(slug ? `Vercel · ${slug}` : "Vercel");
   }
   const projectName = input.vercel?.identity?.projectName;
   const scope = projectName === undefined ? "oidc" : `oidc:${projectName}`;
-  return { text: clause("ai-gateway", `(${scope})`), standalone: false };
+  return clause("ai-gateway", `(${scope})`);
 }
 
-/**
- * Builds a leading local `:port` or remote badge followed by the model (with
- * its reasoning level and Fast mode marker), and endpoint
- * segments. Both badges are the final narrow-width fallback. Remote sessions
- * omit endpoint state. Returns undefined when every segment is empty.
- */
+/** Builds model and connection segments, preserving the remote badge at narrow widths. */
 export function buildStatusLine(input: StatusLineInput): string | undefined {
   const { theme, width } = input;
   const c = theme.colors;
 
+  const devBuild =
+    input.devBuild === undefined ? undefined : formatDevBuildStatus(input.devBuild, theme);
   const logLevel = input.logLevel === undefined ? undefined : c.cyan(`logs: ${input.logLevel}`);
-  const serverPort = renderServerPort(input);
   const model = renderModel(input);
   const remote = input.remote === undefined ? undefined : formatRemoteStatus(input.remote, theme);
   const endpoint = renderEndpoint(input);
-  const leading = remote?.full ?? serverPort;
-  const badge = remote?.badge ?? serverPort;
+  const leading = remote?.full;
+  const badge = remote?.badge;
 
-  // A routing clause rides the model segment itself; the disconnected
-  // warning (or a clause with no model to attach to) stays its own segment.
-  const fused = endpoint !== undefined && !endpoint.standalone && model !== undefined;
-  const modelSegment = fused ? `${model} ${endpoint.text}` : model;
-  const endpointSegment = endpoint === undefined || fused ? undefined : endpoint.text;
-
-  // Whitespace separators: the dim segments read as columns without bullets.
-  const separator = "  ";
+  const separator = c.dim(" · ");
   const compose = (
     target: string | undefined,
     segments: ReadonlyArray<string | undefined>,
@@ -140,24 +140,31 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
     return `${target} ${body}`;
   };
 
-  // Descending fidelity; the first variant that fits wins. The server badge
-  // leads every variant and gets the final stand-alone fallback. Without one,
-  // the logs hint retains its previous priority.
-  const variants = [
-    compose(leading, [logLevel, modelSegment, endpointSegment]),
+  const leftVariants = [
+    compose(leading, [logLevel, model, endpoint]),
     compose(leading, [logLevel, model]),
-    compose(leading, [logLevel]),
     compose(leading, [logLevel]),
     compose(badge, [logLevel]),
     compose(badge, []),
   ];
 
-  if (variants[0]!.length === 0) return undefined;
-  for (const variant of variants) {
+  if (devBuild !== undefined) {
+    for (const left of leftVariants) {
+      const leftWidth = visibleLength(left);
+      const rightWidth = visibleLength(devBuild);
+      const gap = leftWidth > 0 ? 2 : 0;
+      if (leftWidth + gap + rightWidth > width) continue;
+      return `${left}${" ".repeat(width - leftWidth - rightWidth)}${devBuild}`;
+    }
+    return clipVisible(devBuild, width);
+  }
+
+  if (leftVariants[0]!.length === 0) return undefined;
+  for (const variant of leftVariants) {
     if (variant.length > 0 && visibleLength(variant) <= width) return variant;
   }
   // Later variants can be empty, for example when a badge-only line has no hint.
-  const narrowest = variants.findLast((variant) => variant.length > 0)!;
+  const narrowest = leftVariants.findLast((variant) => variant.length > 0)!;
   return clipVisible(narrowest, width);
 }
 

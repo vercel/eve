@@ -104,19 +104,26 @@ describe("docsRedirects", () => {
   it.each([
     ["/docs/channels", "/docs/channels/overview"],
     ["/docs/guides/deployment.md", "/docs/guides/deployment/overview.md"],
+    ["/docs/guides/frontend/add-a-web-app", "/docs/guides/frontend/nextjs"],
+    ["/docs/guides/frontend/add-a-web-app.mdx", "/docs/guides/frontend/nextjs.mdx"],
     ["/docs/introduction.md", "/docs/getting-started.md"],
     ["/docs/installation", "/docs/getting-started"],
     ["/docs/installation.md", "/docs/getting-started.md"],
-    ["/docs/project-structure", "/docs/getting-started"],
-    ["/docs/project-structure.md", "/docs/getting-started.md"],
+    ["/docs/project-structure", "/docs/concepts/project-structure"],
+    ["/docs/project-structure.md", "/docs/concepts/project-structure.md"],
+    ["/docs/getting-started/multiple-root-agents", "/docs/concepts/project-structure"],
+    ["/docs/multi-agent-projects", "/docs/concepts/project-structure"],
+    ["/docs/multi-agent-projects.mdx", "/docs/concepts/project-structure.mdx"],
     ["/docs/reference/http-api", "/docs/channels/eve"],
     ["/docs/project-layout", "/docs/getting-started"],
     ["/docs/reference/project-layout", "/docs/getting-started"],
     ["/docs/reference/project-layout.md", "/docs/getting-started.md"],
     ["/docs/dynamic-capabilities", "/docs/guides/dynamic-capabilities"],
     ["/docs/guides/state", "/docs/concepts/state"],
-    ["/docs/dynamic-workflows", "/docs/subagents/workflow-tool"],
-    ["/docs/guides/dynamic-workflows", "/docs/subagents/workflow-tool"],
+    ["/docs/dynamic-workflows", "/docs/concepts/built-in-tools"],
+    ["/docs/guides/dynamic-workflows", "/docs/concepts/built-in-tools"],
+    ["/docs/subagents/workflow-tool", "/docs/concepts/built-in-tools"],
+    ["/docs/subagents/workflow-tool.md", "/docs/concepts/built-in-tools.md"],
     ["/docs/sessions", "/docs/concepts/sessions-runs-and-streaming"],
     ["/docs/agent", "/docs/agent-config"],
     ["/docs/guides/acp", "/docs/protocols/acp"],
@@ -129,11 +136,23 @@ describe("docsRedirects", () => {
   });
 });
 
+describe("project structure redirects", () => {
+  it.each(["", ".md", ".mdx"])("preserves the %s representation at both old paths", (extension) => {
+    for (const prefix of ["/docs", "/en/docs"]) {
+      expect(docsRedirects).toContainEqual({
+        source: `${prefix}/getting-started/project-structure${extension}`,
+        destination: `/docs/concepts/project-structure${extension}`,
+        permanent: true,
+      });
+    }
+  });
+});
+
 describe("rootMarkdownRedirects", () => {
   it.each([
     ["/getting-started.mdx", "/docs/getting-started.mdx"],
     ["/installation.md", "/docs/getting-started.md"],
-    ["/project-structure.mdx", "/docs/getting-started.mdx"],
+    ["/project-structure.mdx", "/docs/concepts/project-structure.mdx"],
     ["/tools/overview.md", "/docs/tools.md"],
     ["/channels/eve.mdx", "/docs/channels/eve.mdx"],
   ])("redirects observed root Markdown alias %s to %s", (source, destination) => {
@@ -146,6 +165,32 @@ describe("rootMarkdownRedirects", () => {
         ({ source }) => !source.endsWith(".md") && !source.endsWith(".mdx"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("compatibilityRedirects", () => {
+  it("redirects the previous benchmark route", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/evals",
+      destination: "/benchmarks",
+      permanent: true,
+    });
+  });
+
+  it("redirects the Arcana extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/arcana.json",
+      destination: "/r/memory/arcana.json",
+      permanent: true,
+    });
+  });
+
+  it("redirects the Upstash AgentKit extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/upstash-agentkit.json",
+      destination: "/r/memory/upstash-agentkit.json",
+      permanent: true,
+    });
   });
 });
 

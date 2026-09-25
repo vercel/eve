@@ -1,20 +1,25 @@
-import type { InputOption, InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputOption, InputResponse } from "#shared/input.js";
+
+/** The request fields plain text is resolved against. */
+export interface TextResolvableRequest {
+  readonly allowFreeform?: boolean;
+  readonly options?: readonly InputOption[];
+  readonly requestId: string;
+}
 
 /**
  * Maps freeform text to an {@link InputResponse} for a single request.
- *
- * Emitters import this utility to resolve text-based user input against
- * pending request options. The harness and runtime do not call it.
  *
  * Resolution order:
  * 1. Exact option ID (case-insensitive)
  * 2. Exact option label (case-insensitive)
  * 3. 1-based numeric index into the options array
- * 4. Freeform text if {@link InputRequest.allowFreeform} is not `false`
+ * 4. Freeform text when {@link InputRequest.allowFreeform} is `true` or the
+ *    request has no options
  */
 export function resolveTextToResponse(
   text: string,
-  request: InputRequest,
+  request: TextResolvableRequest,
 ): InputResponse | undefined {
   const trimmed = text.trim();
   if (trimmed.length === 0) {
@@ -33,7 +38,7 @@ export function resolveTextToResponse(
   const acceptsFreeform =
     request.allowFreeform === true || request.options === undefined || request.options.length === 0;
 
-  if (acceptsFreeform && trimmed.length > 0) {
+  if (acceptsFreeform) {
     return { requestId: request.requestId, text: trimmed };
   }
 
@@ -46,7 +51,7 @@ export function resolveTextToResponse(
  */
 export function resolveTextToResponses(
   text: string,
-  requests: readonly InputRequest[],
+  requests: readonly TextResolvableRequest[],
 ): readonly InputResponse[] {
   const responses: InputResponse[] = [];
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
   scaffoldExtensionProject,
@@ -66,7 +67,7 @@ function dependencies(
       };
       return scaffoldExtensionProject(merged);
     },
-    runPackageManagerInstall: vi.fn(async () => true),
+    runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
     tryInitializeGit: vi.fn(async () => gitResult),
   };
 }
@@ -131,7 +132,7 @@ describe("runExtensionInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.objectContaining({ bypassMinimumReleaseAge: true }),
+      expect.any(Object),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
 

@@ -12,7 +12,7 @@ export { mockModel } from "#evals/mock-model.js";
 // ---------------------------------------------------------------------------
 
 export type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
-export type { InputRequest } from "#runtime/input/types.js";
+export type { InputRequest } from "#shared/input.js";
 export type { CancelSessionResult } from "#client/types.js";
 
 export type {
@@ -31,7 +31,6 @@ export type {
   AssertionHandle,
   AssertionResult,
   AssertionSeverity,
-  AutoevalsJudges,
   EveEvalActionStatus,
   EveEvalAssertions,
   EveEvalContext,
@@ -45,6 +44,7 @@ export type {
   EveEval,
   EveEvalConfig,
   EveEvalConfigInput,
+  EveEvalConfigContext,
   EveEvalDefinition,
   EveEvalInput,
   EveEvalLiveTurn,
@@ -59,6 +59,9 @@ export type {
   EveEvalStreamEvent,
   EveEvalWaitForEventOptions,
   EveEvalVerdict,
+  JudgeBatch,
+  JudgeInput,
+  JudgeQuestion,
   JudgeContext,
   JudgeOpts,
 } from "#evals/types.js";

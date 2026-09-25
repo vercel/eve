@@ -12,6 +12,18 @@ describe("setupSelectionIntent", () => {
     expect(setupSelectionIntent({ type: "down" })).toEqual({ kind: "move", direction: "down" });
     expect(setupSelectionIntent({ type: "ctrl-p" })).toEqual({ kind: "move", direction: "up" });
     expect(setupSelectionIntent({ type: "ctrl-n" })).toEqual({ kind: "move", direction: "down" });
+    expect(
+      setupSelectionIntent(
+        { type: "text", value: "k", framing: "unframed" },
+        { textNavigation: true },
+      ),
+    ).toEqual({ kind: "move", direction: "up" });
+    expect(
+      setupSelectionIntent(
+        { type: "text", value: "j", framing: "unframed" },
+        { textNavigation: true },
+      ),
+    ).toEqual({ kind: "move", direction: "down" });
     expect(setupSelectionIntent({ type: "ctrl-r" })).toEqual({ kind: "repaint" });
     expect(setupSelectionIntent({ type: "enter" })).toEqual({ kind: "submit" });
   });
@@ -60,6 +72,65 @@ describe("setupSelectionIntent", () => {
     ).toEqual({ kind: "error", message: "Select at least one option, then submit." });
   });
 
+  it("uses j/k navigation only for non-searchable selections", () => {
+    const options = [
+      { value: "first", label: "First" },
+      { value: "second", label: "Second" },
+    ];
+    const initial = initialSelectState({ options });
+    const moved = reduceSetupSelectInput({
+      key: { type: "text", value: "j", framing: "unframed" },
+      kind: "single",
+      options,
+      select: initial,
+    });
+    expect(moved).toMatchObject({ kind: "update", select: { cursor: 1 } });
+    if (moved.kind !== "update") return;
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "text", value: "k", framing: "unframed" },
+        kind: "single",
+        options,
+        select: moved.select,
+      }),
+    ).toMatchObject({ kind: "update", select: { cursor: 0 } });
+
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "text", value: "j", framing: "unframed" },
+        kind: "search",
+        options,
+        select: initial,
+      }),
+    ).toMatchObject({ kind: "update", select: { filter: "j" } });
+  });
+
+  it("uses Enter to toggle a planner checklist", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
+    const toggled = reduceSetupSelectInput({
+      key: { type: "enter" },
+      kind: "searchable-multi",
+      options,
+      select: initialSelectState({ options }),
+      required: false,
+      plannerNavigation: true,
+    });
+    expect(toggled).toMatchObject({ kind: "update", select: { selected: new Set(["web"]) } });
+  });
+
+  it("also uses Space to toggle a planner checklist", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
+    const toggled = reduceSetupSelectInput({
+      key: { type: "text", value: " ", framing: "unframed" },
+      kind: "searchable-multi",
+      options,
+      select: initialSelectState({ options }),
+      required: false,
+      plannerNavigation: true,
+    });
+    expect(toggled).toMatchObject({ kind: "update", select: { selected: new Set(["web"]) } });
+  });
+
   it("applies filter text and submits the visible match", () => {
     const options = [
       { value: "web", label: "Web Chat" },
@@ -83,6 +154,28 @@ describe("setupSelectionIntent", () => {
         select: filtered.select,
       }),
     ).toEqual({ kind: "submit", values: ["slack"] });
+  });
+
+  it("deletes the previous word from searchable filters", () => {
+    const options = [{ value: "claude", label: "Claude Sonnet" }];
+    const searched = initialSelectState({ options, filter: "claude sonnet" });
+
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "alt-backspace" },
+        kind: "search",
+        options,
+        select: searched,
+      }),
+    ).toMatchObject({ kind: "update", select: { filter: "claude " } });
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "alt-backspace" },
+        kind: "single",
+        options,
+        select: searched,
+      }),
+    ).toEqual({ kind: "ignore" });
   });
 
   it("clears a searchable filter with escape before cancelling the panel", () => {
@@ -125,6 +218,22 @@ describe("setupSelectionIntent", () => {
     expect(result.kind).toBe("update");
     if (result.kind !== "update") return;
     expect(result.select.filter).toBe("Boston");
+  });
+
+  it("does not turn pasted j/k into navigation", () => {
+    const options = [
+      { value: "first", label: "First" },
+      { value: "second", label: "Second" },
+    ];
+
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "text", value: "j", framing: "bracketed-paste" },
+        kind: "single",
+        options,
+        select: initialSelectState({ options }),
+      }),
+    ).toEqual({ kind: "ignore" });
   });
 
   it("does not turn a pasted space into a multi-select toggle", () => {

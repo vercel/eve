@@ -4,7 +4,9 @@
   "pages": [
     "overview",
     "eve",
+    "mcp",
     "slack",
+    "linq",
     "photon",
     "discord",
     "teams",

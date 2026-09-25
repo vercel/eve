@@ -7,9 +7,14 @@ export default defineEval({
   tags: ["real-model"],
   description: "A message runs while candidate OAuth stays open, then OAuth settles the approval.",
   async test(t) {
-    const parked = await t.send(`Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`);
-    const approval = t.requireInputRequest({ display: "confirmation", toolName: TOOL_NAME });
-    const approvalTurn = await t.startRespond(
+    const { session: conversation } = await t.send(
+      `Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`,
+    );
+    const approval = conversation.requireInputRequest({
+      display: "confirmation",
+      toolName: TOOL_NAME,
+    });
+    const approvalTurn = await conversation.startRespond(
       [{ optionId: "approve", requestId: approval.requestId }],
       { headers: { "x-eve-fixture-user": "oauth-nonblocking-responder" } },
     );
@@ -33,7 +38,7 @@ export default defineEval({
     }
     const callbackUrl = new URL(required.data.authorization.url);
     const callbackTurn = t.target.watchTurn(approvalTurn.sessionId, {
-      startIndex: t.state?.streamIndex,
+      startIndex: conversation.state?.streamIndex,
     });
     await new Promise((resolve) => setTimeout(resolve, 250));
     const callback = await fetch(callbackUrl);

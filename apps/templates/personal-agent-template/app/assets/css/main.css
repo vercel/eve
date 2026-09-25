@@ -1,0 +1,78 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+@theme {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+}
+
+:root {
+  --ui-primary: black;
+  --ui-container: var(--container-3xl);
+  --ui-radius: 0.15rem;
+  overscroll-behavior-y: none;
+}
+
+.dark {
+  --ui-primary: white;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(25% 0 0 / 0.5) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: oklch(25% 0 0 / 0.5);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: oklch(35% 0 0 / 0.6);
+}
+
+.dark {
+  --ui-bg: oklch(14.5% 0 0);
+  --ui-bg-muted: oklch(17.5% 0 0);
+  --ui-bg-elevated: oklch(20.5% 0 0);
+  --ui-bg-accented: oklch(26.9% 0 0);
+  --ui-border: oklch(26.9% 0 0);
+  --ui-border-muted: oklch(23% 0 0);
+  --ui-border-accented: oklch(30% 0 0);
+}
+
+@layer base {
+  body {
+    @apply antialiased;
+  }
+}
+
+.hero-glow {
+  background: radial-gradient(
+    ellipse 90% 60% at 50% -15%,
+    color-mix(in oklab, var(--ui-text-toned) 14%, transparent),
+    transparent 72%
+  );
+}
+
+html.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}

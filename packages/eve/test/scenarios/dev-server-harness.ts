@@ -32,6 +32,7 @@ export interface RunningEveDev {
 }
 
 export interface StartEveDevOptions {
+  readonly defaultExtensions?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Runtime executing the CLI. Defaults to the current Node executable. */
   readonly runtime?: "bun" | "node";
@@ -220,12 +221,15 @@ function spawnEveDev(
   const eveBinPath = join(appRoot, "node_modules", "eve", "bin", "eve.js");
   const command = options.runtime === "bun" ? "bun" : process.execPath;
 
-  return spawn(command, [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"], {
+  const args = [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"];
+  if (options.defaultExtensions === false) args.push("--no-default-extensions");
+
+  return spawn(command, args, {
     cwd: appRoot,
     env: {
       ...process.env,
-      ...options.env,
       NODE_ENV: "test",
+      ...options.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -351,9 +355,16 @@ export async function fetchAgentInfo(serverUrl: string): Promise<AgentInfoRespon
   return (await response.json()) as AgentInfoResponse;
 }
 
-export async function forceDevelopmentRebuild(serverUrl: string): Promise<void> {
+export async function forceDevelopmentRebuild(serverUrl: string, agent?: Agent): Promise<void> {
   const rebuildUrl = new URL(EVE_DEV_RUNTIME_ARTIFACTS_REBUILD_ROUTE_PATH, serverUrl);
   rebuildUrl.searchParams.set("force", "1");
+  if (agent !== undefined) {
+    const response = await requestWithAgent(rebuildUrl.href, agent);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw new Error(`Development rebuild failed with status ${String(response.statusCode)}.`);
+    }
+    return;
+  }
   const response = await fetch(rebuildUrl);
   if (!response.ok) {
     throw new Error(`Development rebuild failed with status ${String(response.status)}.`);
@@ -494,7 +505,11 @@ async function waitForServerUrl(input: {
 export async function requestWithAgent(
   url: string,
   agent: Agent,
-): Promise<{ readonly body: string; readonly localPort: number | undefined }> {
+): Promise<{
+  readonly body: string;
+  readonly localPort: number | undefined;
+  readonly statusCode: number;
+}> {
   return await new Promise((resolve, reject) => {
     const target = new URL(url);
     const request = requestHttp(
@@ -507,9 +522,10 @@ export async function requestWithAgent(
       (response) => {
         const chunks: Buffer[] = [];
         const localPort = response.socket.localPort;
+        const statusCode = response.statusCode ?? 0;
         response.on("data", (chunk: Buffer) => chunks.push(chunk));
         response.on("end", () => {
-          resolve({ body: Buffer.concat(chunks).toString("utf8"), localPort });
+          resolve({ body: Buffer.concat(chunks).toString("utf8"), localPort, statusCode });
         });
       },
     );

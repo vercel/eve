@@ -47,7 +47,6 @@ export type BlockKind =
   | "log"
   | "turn-stats"
   | "session-boundary"
-  | "todo-list"
   | "agent-header";
 
 /**
@@ -71,12 +70,7 @@ export interface Block {
   subtitle?: string;
   /** Main multi-line content (markdown for prose, plain for logs). */
   body?: string;
-  /**
-   * User blocks only: how a mid-turn message reached the transcript. A
-   * steered message (Esc pop, displacing the running turn) marks itself
-   * with the accent arrow above its bar; a queued one (drained at the turn
-   * boundary) carries the arrow below. Absent for ordinary typed prompts.
-   */
+  /** User blocks only: steered messages use a yellow gutter. */
   promptOrigin?: "steer" | "queue";
   /** Reasoning trace shown above `body` (subagent steps). */
   reasoning?: string;
@@ -90,7 +84,7 @@ export interface Block {
   /** Structured remediation shown between an error's body and its detail. */
   hint?: string;
 
-  /** Tool, connection, or synthetic command lifecycle status. */
+  /** Tool, connection, or completed command lifecycle status. */
   status?: ToolStatus;
   /** When true, treat `body` as pre-styled and only wrap + indent it. */
   preformatted?: boolean;
@@ -154,6 +148,12 @@ export interface ToolGroupItem {
 export interface RenderBlockContext {
   /** Current shared square-pulse frame for live activity blocks. */
   activityPulse: string;
+  /** An open setup panel owns the pulse, so a running command's gutter holds still. */
+  setupFlowOpen?: boolean;
+  /** A transient panel keeps its command echo live without a progress glyph. */
+  transientPanelOpen?: boolean;
+  /** Whether prose responses are parsed and styled as Markdown. */
+  renderMarkdown?: boolean;
   /**
    * Kind and title of the block rendered immediately above this one. Lets a
    * sandbox block detect that it continues a run (label suppressed, lines
@@ -220,7 +220,7 @@ function renderBody(
       return renderUser(block, width, theme);
     case "assistant":
     case "subagent-step":
-      return renderProse(block, width, theme);
+      return renderProse(block, width, theme, context);
     case "reasoning":
       return renderReasoning(block, width, theme);
     case "tool":
@@ -237,7 +237,7 @@ function renderBody(
     case "flow":
       return renderFlow(block, width, theme);
     case "command":
-      return renderCommand(block, theme);
+      return renderCommand(block, theme, context);
     case "question":
     case "connection-auth":
       return renderPreformatted(block, width, theme);
@@ -259,7 +259,6 @@ function renderBody(
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
-    case "todo-list":
     case "agent-header":
       // Rows arrive fully styled and width-fit from their builders.
       return (block.body ?? "").split("\n");
@@ -267,19 +266,18 @@ function renderBody(
 }
 
 function renderUser(block: Block, width: number, theme: Theme): string[] {
-  const bar = theme.colors.cyan(theme.glyph.user);
+  const bar =
+    block.promptOrigin === "steer" ? theme.colors.yellow(theme.glyph.user) : theme.glyph.user;
   const lines = wrap(block.body ?? "", width - 2);
-  const rows = lines.map((line) => `${bar} ${line}`);
-  // Mid-turn provenance rides the gutter in the bar's own accent: a steered
-  // message pushed itself ahead of the running turn (arrow above), a queued
-  // one waited for the boundary (arrow below).
-  const arrow = theme.colors.cyan(theme.glyph.arrowUp);
-  if (block.promptOrigin === "steer") return [arrow, ...rows];
-  if (block.promptOrigin === "queue") return [...rows, arrow];
-  return rows;
+  return lines.map((line) => `${bar} ${theme.colors.bold(line)}`);
 }
 
-function renderProse(block: Block, width: number, theme: Theme): string[] {
+function renderProse(
+  block: Block,
+  width: number,
+  theme: Theme,
+  context: RenderBlockContext,
+): string[] {
   const rows: string[] = [];
   const isSubagent = block.kind === "subagent-step";
   // A collapsed child message is one activity row in its section — the
@@ -292,9 +290,9 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
     if (line === undefined) return [];
     return [theme.colors.dim(sliceVisible(line, Math.max(1, width)))];
   }
-  // Bold at the terminal's DEFAULT foreground: black on a light theme,
-  // white on a dark one. Explicit bright-white (SGR 97) would vanish on
-  // light backgrounds.
+  // The brand anchors every top-level response; Markdown styles the content
+  // following it, rather than replacing the response gutter.
+  const markdown = context.renderMarkdown ?? true;
   const glyph = isSubagent ? "" : `${theme.colors.bold(theme.glyph.brand)} `;
   const indent = isSubagent ? "" : "  ";
 
@@ -308,7 +306,7 @@ function renderProse(block: Block, width: number, theme: Theme): string[] {
   }
 
   if (body.length > 0) {
-    const rendered = renderMarkdown(body, width - indent.length)
+    const rendered = (markdown ? renderMarkdown(body, width - indent.length) : body)
       .split("\n")
       .flatMap((line) => wrapVisibleLine(line, width - indent.length));
     rendered.forEach((line, index) => {
@@ -436,36 +434,32 @@ function paintCommands(line: string, theme: Theme): string {
 }
 
 /**
- * A slash command invocation under the user gutter. Automatic commands use
- * the same row so their result can follow it. The `❯`/`›` glyphs remain
- * exclusive to live input because the TUI tests use `›` (the empty prompt's
- * quiet mark) to detect a ready prompt.
+ * A slash command invocation. While it runs, its gutter pulses — or holds a
+ * still `▪` beside an open setup panel, which pulses itself. It then carries
+ * a settled `*`. A settled summary replaces the invocation, dimmed as a
+ * record. The `❯` glyph remains exclusive to live input because the TUI tests
+ * use `❯` to detect a ready prompt.
  */
-function renderCommand(block: Block, theme: Theme): string[] {
+function renderCommand(block: Block, theme: Theme, context: RenderBlockContext): string[] {
   const c = theme.colors;
-  const status = block.status === "error" ? `${c.red(theme.glyph.error)} ` : "";
-  return [`${c.cyan(theme.glyph.user)} ${status}${c.blue(block.body ?? "")}`];
+  const gutter =
+    block.live !== true
+      ? block.status === "done"
+        ? c.gray("*")
+        : theme.glyph.user
+      : context.transientPanelOpen === true
+        ? theme.glyph.user
+        : context.setupFlowOpen === true
+          ? c.gray(theme.glyph.square)
+          : c.gray(context.activityPulse);
+  return [`${gutter} ${block.result === undefined ? (block.body ?? "") : c.dim(block.result)}`];
 }
 
-/**
- * One persistent setup-flow line: progress the user must keep (the Slack
- * Connect URL, a written env file). The tone travels in `title`; info dims,
- * the other tones keep the body at full intensity behind their glyph.
- */
+/** One persistent setup-flow line retained after a panel closes. */
 function renderFlow(block: Block, width: number, theme: Theme): string[] {
-  const c = theme.colors;
-  const tone = block.title ?? "info";
-  const glyph =
-    tone === "success"
-      ? c.green(theme.glyph.success)
-      : tone === "warning"
-        ? c.yellow(theme.glyph.warning)
-        : tone === "error"
-          ? c.red(theme.glyph.error)
-          : c.dim(theme.glyph.dot);
   const lines = wrap(block.body ?? "", width - 2);
-  const paint = (line: string): string => (tone === "info" ? c.dim(line) : line);
-  return lines.map((line, index) => `${index === 0 ? glyph : " "} ${paint(line)}`);
+  const marker = theme.colors.dim("*");
+  return lines.map((line, index) => `${index === 0 ? marker : " "} ${line}`);
 }
 
 /**
@@ -475,19 +469,6 @@ function renderFlow(block: Block, width: number, theme: Theme): string[] {
  */
 function renderResult(block: Block, width: number, theme: Theme): string[] {
   const lines = wrap(block.body ?? "", width - 7);
-  if (block.status === "done") {
-    const elbow = theme.colors.dim(theme.glyph.elbow);
-    const success = theme.colors.green(theme.glyph.success);
-    const rule = theme.colors.dim(theme.glyph.rule);
-    const corner = theme.colors.dim(theme.glyph.corner);
-    if (lines.length === 0) return [`   ${elbow}  ${success}`];
-    return lines.map((line, index) => {
-      if (index === 0) return `   ${elbow}  ${success} ${line}`;
-      const marker = index === lines.length - 1 ? corner : rule;
-      return `      ${marker} ${line}`;
-    });
-  }
-
   const marker = theme.colors.dim(theme.glyph.elbow);
   if (lines.length === 0) return [`   ${marker}`];
   // SGR 22 closes bold and dim together, so a result that bolds a span (the

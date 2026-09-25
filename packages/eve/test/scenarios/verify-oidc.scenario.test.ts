@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 
-import { authenticateOidcStrategy } from "../../src/runtime/governance/auth/oidc.js";
+import { authenticateOidcStrategy } from "../../src/channel/auth/oidc.js";
 
 /**
  * Scenario-tier coverage for the OIDC verifier's runtime-principal branch.

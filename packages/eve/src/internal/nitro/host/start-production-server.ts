@@ -1,12 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createServer } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { prewarmBuiltAppSandboxes } from "#execution/sandbox/prewarm.js";
-import { EVE_HEALTH_ROUTE_PATH } from "#protocol/routes.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
@@ -19,14 +17,6 @@ const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+
 // cut short by SIGKILL.
 const TERMINATE_GRACE_MS = 20_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isAddressInUseError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
-}
 
 function resolveOutputServerEntry(appRoot: string): string {
   return join(resolve(appRoot), ".output", "server", "index.mjs");
@@ -115,42 +105,19 @@ function parseServerUrlFromOutput(output: string): string | undefined {
   return normalizeServerClientUrl(match[0]);
 }
 
-async function waitForHealth(input: {
-  child: ChildProcess;
-  getStartError(): unknown;
-  url: string;
-}): Promise<string> {
-  const { child, url } = input;
-  const healthUrl = new URL(EVE_HEALTH_ROUTE_PATH, url).toString();
-  const deadline = Date.now() + HEALTH_TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    const startError = input.getStartError();
-    if (startError !== undefined) {
-      throw startError;
-    }
-
-    if (child.exitCode !== null || child.signalCode !== null) {
-      throw new Error(
-        `Built server process exited (code=${String(child.exitCode)}, signal=${String(child.signalCode)}) before becoming healthy.`,
-      );
-    }
-
-    try {
-      const response = await fetch(healthUrl, { signal: AbortSignal.timeout(2_000) });
-      if (response.ok) return new URL(url).toString();
-    } catch (error) {
-      if (isAddressInUseError(error)) {
-        throw error;
-      }
-    }
-
-    await sleep(HEALTH_POLL_INTERVAL_MS);
-  }
-
-  throw new Error(
-    `Built server did not become healthy within ${HEALTH_TIMEOUT_MS / 1000}s at ${healthUrl}.`,
-  );
+async function isListening(url: string): Promise<boolean> {
+  const target = new URL(url);
+  const port = Number(target.port || (target.protocol === "https:" ? 443 : 80));
+  return await new Promise((resolveReady) => {
+    const socket = createConnection({ host: target.hostname, port });
+    const finish = (ready: boolean) => {
+      socket.destroy();
+      resolveReady(ready);
+    };
+    socket.setTimeout(2_000, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
 }
 
 async function waitForReady(input: {
@@ -170,12 +137,8 @@ async function waitForReady(input: {
     const parsedUrl = parseServerUrlFromOutput(input.getOutput());
     const url = parsedUrl ?? input.knownUrl;
 
-    if (url !== undefined) {
-      return await waitForHealth({
-        child: input.child,
-        getStartError: input.getStartError,
-        url,
-      });
+    if (url !== undefined && (parsedUrl !== undefined || (await isListening(url)))) {
+      return new URL(url).toString();
     }
 
     if (input.child.exitCode !== null || input.child.signalCode !== null) {
@@ -240,11 +203,7 @@ export async function startProductionServer(
     );
   }
 
-  loadDevelopmentEnvironmentFiles(appRoot);
-  await prewarmBuiltAppSandboxes({
-    appRoot,
-    log: (message) => console.log(message),
-  });
+  await loadDevelopmentEnvironmentFiles(appRoot);
 
   const host = options.host ?? DEFAULT_PRODUCTION_SERVER_HOST;
   const port = await resolveListenPort({
@@ -325,7 +284,7 @@ export async function startProductionServer(
     closing = true;
     await terminate(child);
 
-    if (isRecord(error) && error.name === "AbortError") {
+    if (error instanceof Error && error.name === "AbortError") {
       throw new Error("Timed out waiting for built eve server to respond.", { cause: error });
     }
 

@@ -18,6 +18,17 @@ describe("ClientError", () => {
     expect(error.status).toBe(401);
   });
 
+  it("summarizes HTML responses without exposing the document", () => {
+    const error = new ClientError(404, "<!doctype html><title>Not Found</title>", {
+      "content-type": "text/html; charset=utf-8",
+    });
+
+    expect(error.message).toBe(
+      "Server returned 404 with an HTML response. Check the eve route and development server configuration.",
+    );
+    expect(error.body).toBe("<!doctype html><title>Not Found</title>");
+  });
+
   it("falls back to the raw body for non-JSON errors", () => {
     const error = new ClientError(500, "Internal Server Error");
 

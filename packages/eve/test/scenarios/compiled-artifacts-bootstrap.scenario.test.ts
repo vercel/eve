@@ -17,6 +17,15 @@ import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-a
 
 const createAppRoot = useTemporaryAppRoots();
 
+const traceContext = (audience: "public" | "private" | "unknown") => ({
+  agentName: "weather",
+  audience,
+  channel: { kind: "http" as const },
+  environment: "production" as const,
+  mode: "conversation" as const,
+  principalType: "anonymous",
+});
+
 describe("writeCompiledArtifactsFiles", () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__eveInstrumentationLoaded;
@@ -71,11 +80,15 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(
-      join(agentRoot, "instrumentation.ts"),
-      ['(globalThis as Record<string, unknown>).__eveInstrumentationLoaded = "yes";', ""].join(
-        "\n",
-      ),
+      join(agentRoot, "instrumentation", "audit.ts"),
+      [
+        'import { defineInstrumentation } from "eve/instrumentation";',
+        '(globalThis as Record<string, unknown>).__eveInstrumentationLoaded = "yes";',
+        "export default defineInstrumentation({});",
+        "",
+      ].join("\n"),
     );
 
     const compileResult = await compileAgent({
@@ -99,12 +112,12 @@ describe("writeCompiledArtifactsFiles", () => {
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
 
     expect(instrumentationPluginSource).toContain(
-      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
+      join(outDir, "compiled-artifacts-instrumentation-audit.mjs").replaceAll("\\", "/"),
     );
-    expect(instrumentationPluginSource).toContain(
-      `import * as instrumentationModule from ${JSON.stringify(join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"))};`,
+    expect(instrumentationPluginSource).not.toContain(
+      join(agentRoot, "instrumentation", "audit.ts").replaceAll("\\", "/"),
     );
-    expect(instrumentationPluginSource).toContain("registerInstrumentationConfig");
+    expect(instrumentationPluginSource).toContain("registerInstrumentationProvider");
 
     const instrumentationPluginModule = (await import(
       pathToFileURL(instrumentationPluginPath).href
@@ -116,7 +129,7 @@ describe("writeCompiledArtifactsFiles", () => {
     expect(instrumentationPluginModule.default()).toBeUndefined();
   });
 
-  it("registers one provider per file when the instrumentationProviders flag is on", async () => {
+  it("registers one provider per file", async () => {
     const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-providers-", {
       packageName: "compiled-artifacts-providers-test-agent",
     });
@@ -127,13 +140,7 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "openai/gpt-5.4",',
-        "  experimental: { instrumentationProviders: true },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
@@ -146,6 +153,11 @@ describe("writeCompiledArtifactsFiles", () => {
           "const container = globalThis as Record<string, unknown>;",
           "",
           "export default defineInstrumentation({",
+          "  tracePolicy: ({ audience }) => ({",
+          "    emit: true,",
+          '    recordInputs: audience === "public",',
+          "    recordOutputs: false,",
+          "  }),",
           "  setup(context) {",
           "    container.__eveProviderSetups ??= [];",
           `    (container.__eveProviderSetups as string[]).push(\`${slot}:\${context.agentName}\`);`,
@@ -169,8 +181,8 @@ describe("writeCompiledArtifactsFiles", () => {
     }
 
     expect(generatedArtifacts.instrumentationSourcePaths).toEqual([
-      join(agentRoot, "instrumentation", "local.ts"),
-      join(agentRoot, "instrumentation", "otel.ts"),
+      join(outDir, "compiled-artifacts-instrumentation-local.mjs"),
+      join(outDir, "compiled-artifacts-instrumentation-otel.mjs"),
     ]);
 
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
@@ -197,14 +209,19 @@ describe("writeCompiledArtifactsFiles", () => {
     // The plugin resolves the registry by absolute path while the assertion
     // resolves it by package alias, so this also proves the globalThis rooting
     // survives two module instances.
-    const { getInstrumentationProviders } =
-      await import("../../src/harness/instrumentation/providers.js");
+    const { getInstrumentationProviders } = await import("../../src/instrumentation/providers.js");
 
     expect((globalThis as Record<string, unknown>).__eveProviderSetups).toEqual([
       "local:compiled-artifacts-providers-test-agent",
       "otel:compiled-artifacts-providers-test-agent",
     ]);
-    expect(getInstrumentationProviders().map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    const providers = getInstrumentationProviders();
+    expect(providers.map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    expect(providers[0]?.provider.tracePolicy?.(traceContext("public"))).toEqual({
+      emit: true,
+      recordInputs: true,
+      recordOutputs: false,
+    });
     expect(closeHandlers).toHaveLength(1);
     await closeHandlers[0]?.();
   });
@@ -219,13 +236,7 @@ describe("writeCompiledArtifactsFiles", () => {
     const outDir = join(appRoot, ".workflow-build");
     await writeFile(
       join(agentRoot, "agent.ts"),
-      [
-        "export default {",
-        '  model: "openai/gpt-5.4",',
-        "  experimental: { instrumentationProviders: true },",
-        "};",
-        "",
-      ].join("\n"),
+      ["export default {", '  model: "openai/gpt-5.4",', "};", ""].join("\n"),
     );
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
 
@@ -255,8 +266,9 @@ describe("writeCompiledArtifactsFiles", () => {
 
     await writeFile(join(agentRoot, "agent.ts"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
     await writeFile(
-      join(agentRoot, "instrumentation.ts"),
+      join(agentRoot, "instrumentation", "broken.ts"),
       'throw new Error("instrumentation boom");\n',
     );
 
@@ -318,6 +330,9 @@ describe("writeCompiledArtifactsFiles", () => {
 
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
 
+    expect(compileResult.manifest.skills).toContainEqual(
+      expect.objectContaining({ name: "research", sourceKind: "skill-package" }),
+    );
     expect(bootstrapSource).not.toContain("workspaceResources");
     expect(bootstrapSource).not.toContain("contentBase64");
     expect(bootstrapSource).not.toContain("Always confirm the source of truth.");

@@ -105,6 +105,8 @@ export type Question<T> = {
       search?: boolean;
       /** Placeholder for the filter line while it is empty. */
       placeholder?: string;
+      /** Render option hints inline or on a separate line in interactive TUI panels. */
+      hintLayout?: "stacked" | "inline";
     }
   | { kind: "confirm" }
   | {
@@ -343,6 +345,7 @@ async function renderQuestion<T>(prompter: Prompter, question: Question<T>): Pro
             ),
       search: question.search,
       placeholder: question.placeholder,
+      hintLayout: question.hintLayout,
     });
     return coerceAnswer(question, chosen);
   }

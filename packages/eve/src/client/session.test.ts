@@ -3,6 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  createSubagentCalledEvent,
+  type SubagentCalledStreamEvent,
+} from "#protocol/message.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -51,8 +57,20 @@ function createAcceptedResponse() {
     {
       ok: true,
       sessionId: "session_1",
+      deliveryId: "delivery_1",
     },
     { status: 202 },
+  );
+}
+
+function createSessionNotReadyResponse() {
+  return Response.json(
+    {
+      code: "session_not_ready",
+      error: "The session is not ready to accept messages yet.",
+      ok: false,
+    },
+    { status: 409 },
   );
 }
 
@@ -62,11 +80,18 @@ function createStreamResponse(events: readonly unknown[]) {
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const event of events) {
-          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({ ...(event as object), meta: { deliveryIds: ["delivery_1"] } })}\n`,
+            ),
+          );
         }
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -117,6 +142,25 @@ describe("ClientSession", () => {
     expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/session_1/cancel");
     expect(requests[1]!.method).toBe("POST");
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
+  });
+
+  it("sends tasks in the cancel body and uses signal only for fetch", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json({ ok: true, sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      );
+    const session = createSession();
+
+    await expect(
+      session.cancel({ signal: controller.signal, tasks: true, turnId: "turn_1" }),
+    ).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.signal).toBe(controller.signal);
+    expect(JSON.parse(String(init?.body))).toEqual({ tasks: true, turnId: "turn_1" });
   });
 
   it("snapshots the session from the start through one pinned durable tail", async () => {
@@ -257,27 +301,132 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
-  it("exposes a typed session_not_active conflict", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json(
-        {
-          code: "session_not_active",
-          error: "The session is no longer active.",
-          ok: false,
-        },
-        { status: 409 },
-      ),
+  it("retries session_not_ready beyond three seconds with current headers", async () => {
+    let headerResolution = 0;
+    const observedHeaders: string[] = [];
+    const observedPaths: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      observedPaths.push(new URL(String(request)).pathname);
+      observedHeaders.push(new Headers(init?.headers).get("x-attempt") ?? "");
+      return fetchMock.mock.calls.length <= 4
+        ? createSessionNotReadyResponse()
+        : createAcceptedResponse();
+    });
+    const session = createSession(
+      { sessionId: "session_1", streamIndex: 0 },
+      {
+        resolveHeaders: async () => new Headers({ "x-attempt": String((headerResolution += 1)) }),
+      },
     );
+
+    vi.useFakeTimers();
+    try {
+      const sent = session.send("ready soon");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(249);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(499);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(sent).resolves.toMatchObject({ sessionId: "session_1" });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(observedHeaders).toEqual(["1", "2", "3", "4", "5"]);
+    expect(new Set(observedPaths)).toEqual(new Set(["/eve/v1/session/session_1"]));
+  });
+
+  it("exposes the typed session_not_ready conflict after the readiness deadline", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createSessionNotReadyResponse());
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
-    const error = await session.send("too late").catch((cause: unknown) => cause);
+    vi.useFakeTimers();
+    let error: unknown;
+    try {
+      const sent = session.send("too late").catch((cause: unknown) => cause);
+      await vi.runAllTimersAsync();
+      error = await sent;
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(error).toBeInstanceOf(ClientError);
     expect(error).toMatchObject({
-      code: "session_not_active",
-      message: "The session is no longer active.",
+      code: "session_not_ready",
+      message: "The session is not ready to accept messages yet.",
       status: 409,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(14);
+  });
+
+  it.each(["session_not_active", "another_conflict"])(
+    "does not retry %s from send",
+    async (code) => {
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          Response.json({ code, error: "The request conflicts.", ok: false }, { status: 409 }),
+        );
+      const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+      await expect(session.send("conflict")).rejects.toMatchObject({
+        code,
+        status: 409,
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not retry session_not_ready from respond", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createSessionNotReadyResponse());
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(
+      session.respond([{ requestId: "approval_1", optionId: "approve" }]),
+    ).rejects.toMatchObject({ code: "session_not_ready", status: 409 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("stops session_not_ready backoff when send is aborted", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createSessionNotReadyResponse());
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+    const controller = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      const sent = session.send("stop", { signal: controller.signal });
+      const assertion = expect(sent).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(new DOMException("Aborted", "AbortError"));
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("queues a context clear without clearing the local session cursor", async () => {
@@ -340,7 +489,13 @@ describe("ClientSession", () => {
 
   it("resets the exact session while keeping the handle pinned to its ID", async () => {
     let headerResolution = 0;
-    const requests: Array<{ headers: Headers; method: string; url: string; body?: string }> = [];
+    const requests: Array<{
+      body?: string;
+      headers: Headers;
+      method: string;
+      signal?: AbortSignal | null;
+      url: string;
+    }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
@@ -348,6 +503,7 @@ describe("ClientSession", () => {
         body: typeof init?.body === "string" ? init.body : undefined,
         headers: new Headers(init?.headers),
         method: init?.method ?? "GET",
+        signal: init?.signal,
         url,
       });
       return Response.json({
@@ -367,7 +523,8 @@ describe("ClientSession", () => {
       },
     );
 
-    await expect(session.reset()).resolves.toEqual({
+    const signal = AbortSignal.timeout(1_000);
+    await expect(session.reset({ signal })).resolves.toEqual({
       previousSessionId: "session_1",
       status: "reset",
     });
@@ -377,6 +534,7 @@ describe("ClientSession", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/reset");
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers.get("authorization")).toBe("Bearer token-1");
+    expect(requests[0]!.signal).toBe(signal);
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
@@ -419,6 +577,19 @@ describe("ClientSession", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       message: "Wait your turn",
       turnPolicy: "queue",
+    });
+  });
+
+  it("serializes taskDeliveryPolicy with a fixed-session message", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
+    const session = createSession();
+
+    await session.send("Wait your turn", { taskDeliveryPolicy: "cohort" });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: "Wait your turn",
+      taskDeliveryPolicy: "cohort",
     });
   });
 
@@ -502,6 +673,7 @@ describe("ClientSession", () => {
           encoder.encode(
             `${JSON.stringify({
               type: "session.waiting",
+              meta: { deliveryIds: ["delivery_1"] },
               data: { continuationToken: "session-id", wait: "next-user-message" },
             })}\n`,
           ),
@@ -516,7 +688,9 @@ describe("ClientSession", () => {
         return createAcceptedResponse();
       }
 
-      return new Response(stream);
+      return new Response(stream, {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
     });
     const session = createSession();
 
@@ -592,6 +766,23 @@ describe("ClientSession", () => {
     expect(result.inputRequests.map((request) => request.requestId)).toEqual(["approval_1"]);
   });
 
+  it("does not rewind the shared cursor when a historical reader stops early", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      createStreamResponse([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]),
+    );
+    const session = createSession({ sessionId: "session_1", streamIndex: 7 });
+    for await (const _event of session.stream({ startIndex: 0 })) {
+      expect(session.state.streamIndex).toBe(7);
+      break;
+    }
+    expect(session.state.streamIndex).toBe(7);
+  });
+
   it("opens a one-shot tail-relative stream without advancing the absolute cursor", async () => {
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
@@ -649,6 +840,9 @@ describe("ClientSession", () => {
             controller.error(new Error("socket disconnected"));
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
@@ -687,11 +881,13 @@ describe("ClientSession", () => {
     const session = createSession();
 
     const eventTypes: string[] = [];
-    for await (const event of await session.send("first", {
-      streamReconnectPolicy: { reconnect: false },
-    })) {
-      eventTypes.push(event.type);
-    }
+    await expect(async () => {
+      for await (const event of await session.send("first", {
+        streamReconnectPolicy: { reconnect: false },
+      })) {
+        eventTypes.push(event.type);
+      }
+    }).rejects.toThrow("before the accepted message");
 
     expect(eventTypes).toEqual(["turn.started"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -739,6 +935,107 @@ describe("ClientSession", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not reconnect after an invalid stream event raises a TypeError", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        createStreamResponse([{ type: "message.appended", data: { messageDelta: 42 } }]),
+      );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(async () => {
+      for await (const _event of session.stream()) {
+        // Invalid events fail before delivery.
+      }
+    }).rejects.toThrow("Invalid message append delta for stream version 25.");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(["Load failed", "network error"])(
+    "does not retry an unrecognized TypeError while opening a stream: %s",
+    async (message) => {
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError(message));
+      const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+      await expect(async () => {
+        for await (const _event of session.stream({
+          streamReconnectPolicy: {
+            streamOpenReconnectPolicy: { baseDelayMs: 1, maxAttempts: 2 },
+          },
+        })) {
+          // The stream fails before producing an event.
+        }
+      }).rejects.toThrow(message);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["Load failed", "network error"])(
+    "reconnects after a mid-stream TypeError regardless of its message: %s",
+    async (message) => {
+      const encoder = new TextEncoder();
+      const streamUrls: string[] = [];
+      let streamRequest = 0;
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+        if ((init?.method ?? "GET") === "POST") {
+          return createAcceptedResponse();
+        }
+
+        const url =
+          typeof request === "string"
+            ? request
+            : request instanceof URL
+              ? request.href
+              : request.url;
+        streamUrls.push(url);
+        streamRequest += 1;
+
+        if (streamRequest === 1) {
+          let emitted = false;
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                if (!emitted) {
+                  emitted = true;
+                  controller.enqueue(
+                    encoder.encode(
+                      `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+                    ),
+                  );
+                  return;
+                }
+                controller.error(new TypeError(message));
+              },
+            }),
+            { headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION } },
+          );
+        }
+
+        return createStreamResponse([
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ]);
+      });
+      const session = createSession();
+
+      vi.useFakeTimers();
+      try {
+        const eventTypes = await collectEventTypes(await session.send("first"));
+        expect(eventTypes).toEqual(["turn.started", "session.waiting"]);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(streamUrls.map((url) => new URL(url).searchParams.get("startIndex"))).toEqual([
+        null,
+        "1",
+      ]);
+    },
+  );
+
   it("retries a transient fetch failure while reopening an active turn stream", async () => {
     const encoder = new TextEncoder();
     const streamUrls: string[] = [];
@@ -761,13 +1058,18 @@ describe("ClientSession", () => {
               if (!emitted) {
                 emitted = true;
                 controller.enqueue(
-                  encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+                  encoder.encode(
+                    `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+                  ),
                 );
                 return;
               }
               controller.error(new Error("socket disconnected"));
             },
           }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         );
       }
 
@@ -800,6 +1102,110 @@ describe("ClientSession", () => {
     ]);
   });
 
+  it("keeps following an active turn across an authorization parking boundary", async () => {
+    let streamRequest = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      streamRequest += 1;
+      if (streamRequest === 1) {
+        return createStreamResponse([
+          {
+            type: "authorization.required",
+            data: { name: "linear", webhookUrl: "https://agent.example.com/auth/linear" },
+          },
+          {
+            type: "session.waiting",
+            data: { continuationToken: "session-id", wait: "next-user-message" },
+          },
+        ]);
+      }
+      if (streamRequest <= 7) {
+        return createStreamResponse([]);
+      }
+      return createStreamResponse([
+        { type: "authorization.completed", data: { name: "linear", outcome: "authorized" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    try {
+      const eventTypes = await collectEventTypes(await session.send("first"));
+      expect(eventTypes).toEqual([
+        "authorization.required",
+        "session.waiting",
+        "authorization.completed",
+        "session.waiting",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(9);
+    expect(session.state.streamIndex).toBe(4);
+  });
+
+  it("stops at a non-blocking authorization parking boundary", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createAcceptedResponse();
+      }
+
+      return createStreamResponse([
+        { type: "authorization.required", data: { name: "linear" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    let eventTypes: string[];
+    try {
+      eventTypes = await collectEventTypes(await session.send("first"));
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(eventTypes).toEqual(["authorization.required", "session.waiting"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(session.state.streamIndex).toBe(2);
+  });
+
+  it("honors an explicit idle reconnect limit for an active turn", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      return (init?.method ?? "GET") === "POST"
+        ? createAcceptedResponse()
+        : createStreamResponse([]);
+    });
+    const session = createSession();
+
+    vi.useFakeTimers();
+    try {
+      const response = await session.send("first", {
+        streamReconnectPolicy: {
+          streamIdleReconnectPolicy: { baseDelayMs: 10, maxAttempts: 2 },
+        },
+      });
+      const assertion = expect(response.result()).rejects.toThrow("before the accepted message");
+      await vi.runAllTimersAsync();
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("preserves the session cursor when a turn stream is aborted mid-flight", async () => {
     const encoder = new TextEncoder();
     const abortController = new AbortController();
@@ -813,13 +1219,18 @@ describe("ClientSession", () => {
         new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(
-              encoder.encode(`${JSON.stringify({ type: "turn.started", data: {} })}\n`),
+              encoder.encode(
+                `${JSON.stringify({ type: "turn.started", data: {}, meta: { deliveryIds: ["delivery_1"] } })}\n`,
+              ),
             );
             signal?.addEventListener("abort", () => {
               controller.error(new DOMException("The operation was aborted.", "AbortError"));
             });
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
     const session = createSession();
@@ -884,5 +1295,160 @@ describe("ClientSession", () => {
       sessionId: "session_1",
       streamIndex: 2,
     });
+  });
+
+  it("hands the cursor from an aborted idle follow to the next send", async () => {
+    const streamStartIndices: Array<string | null> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      if ((init?.method ?? "GET") === "POST") return createAcceptedResponse();
+      const url =
+        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      streamStartIndices.push(new URL(url).searchParams.get("startIndex"));
+      return createStreamResponse([
+        { type: "turn.started", data: {} },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "eve:test", wait: "next-user-message" },
+        },
+      ]);
+    });
+    const session = createSession({
+      sessionId: "session_1",
+      streamIndex: 0,
+    });
+    const idleAbort = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      for await (const event of session.stream({ signal: idleAbort.signal })) {
+        if (event.type === "session.waiting") idleAbort.abort();
+      }
+
+      expect(session.state.streamIndex).toBe(2);
+      expect(await collectEventTypes(await session.send("follow up"))).toEqual([
+        "turn.started",
+        "session.waiting",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(streamStartIndices).toEqual([null, "2"]);
+  });
+});
+
+describe("ClientSession.streamSubagent", () => {
+  function calledEvent(
+    input: { readonly remote?: boolean; readonly sessionId?: string } = {},
+  ): SubagentCalledStreamEvent {
+    return createSubagentCalledEvent({
+      callId: "call_1",
+      childSessionId: "child_1",
+      name: "research",
+      remote:
+        input.remote === false
+          ? undefined
+          : { resolverId: "subagents/research", url: "https://remote.test" },
+      sequence: 1,
+      sessionId: input.sessionId ?? "session_1",
+      toolName: "research",
+      turnId: "turn_1",
+      workflowId: "workflow_1",
+    });
+  }
+
+  const childEvents = [
+    { type: "turn.started", data: { turnId: "child_turn_1" } },
+    { type: "turn.completed", data: { turnId: "child_turn_1" } },
+  ];
+
+  it("follows a remote child through the parent proxy with this session's credentials", async () => {
+    const requests: { readonly url: URL; readonly authorization: string | null }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("authorization"),
+        url: new URL(String(request)),
+      });
+      return createBoundedStreamResponse(childEvents);
+    });
+    const parentState = { sessionId: "session_1", streamIndex: 4 };
+    const session = createSession(parentState, {
+      resolveHeaders: async () => new Headers({ authorization: "Bearer parent" }),
+    });
+
+    const types: string[] = [];
+    for await (const event of session.streamSubagent(calledEvent(), { follow: false })) {
+      types.push(event.type);
+    }
+
+    expect(types).toEqual(["turn.started", "turn.completed"]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url.origin).toBe("https://eve.test");
+    expect(requests[0]!.url.pathname).toBe(
+      "/eve/v1/session/session_1/subagents/call_1/child_1/stream",
+    );
+    expect(requests[0]!.url.searchParams.get("startIndex")).toBeNull();
+    expect(requests[0]!.authorization).toBe("Bearer parent");
+    expect(session.state).toBe(parentState);
+  });
+
+  it("resumes a child from its own cursor without touching the parent cursor", async () => {
+    const urls: URL[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      urls.push(new URL(String(request)));
+      return createStreamResponse(childEvents.slice(1));
+    });
+    const parentState = { sessionId: "session_1", streamIndex: 9 };
+    const session = createSession(parentState);
+
+    const types: string[] = [];
+    for await (const event of session.streamSubagent(calledEvent(), {
+      startIndex: 1,
+      streamReconnectPolicy: { reconnect: false },
+    })) {
+      types.push(event.type);
+    }
+
+    expect(types).toEqual(["turn.completed"]);
+    expect(urls[0]!.searchParams.get("startIndex")).toBe("1");
+    expect(session.state).toBe(parentState);
+  });
+
+  it("follows a local child through its own session stream route", async () => {
+    const urls: URL[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      urls.push(new URL(String(request)));
+      return createBoundedStreamResponse(childEvents);
+    });
+    const session = createSession();
+
+    for await (const _event of session.streamSubagent(calledEvent({ remote: false }), {
+      follow: false,
+    })) {
+      // Drain the bounded child stream.
+    }
+
+    expect(urls[0]!.pathname).toBe("/eve/v1/session/child_1/stream");
+  });
+
+  it("rejects a subagent event from a different parent session", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+
+    expect(() => session.streamSubagent(calledEvent({ sessionId: "session_2" }))).toThrow(
+      "streamSubagent() requires a subagent.called event from session session_1, but it came from session session_2.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a subagent event recorded before childStreamPath existed", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+    const { childStreamPath: _, ...legacyData } = calledEvent().data;
+    const legacy = { ...calledEvent(), data: legacyData } as SubagentCalledStreamEvent;
+
+    expect(() => session.streamSubagent(legacy)).toThrow(
+      "streamSubagent() requires a subagent.called event with childStreamPath, but call call_1 has none. The event was recorded by an older eve version.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

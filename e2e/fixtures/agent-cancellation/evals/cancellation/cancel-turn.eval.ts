@@ -17,7 +17,8 @@ export default defineEval({
   timeoutMs: 240_000,
 
   async test(t) {
-    const live = await t.start("Please wait for cancellation.");
+    const session = await t.session();
+    const live = await session.start("Please wait for cancellation.");
     await live.waitForEvent("actions.requested", {
       data: {
         actions: (actions) =>
@@ -43,14 +44,14 @@ export default defineEval({
     cancelledTurn.notEvent("step.failed");
     cancelledTurn.notEvent("session.failed");
 
-    const followUp = await t.send("Reply with exactly CANCELLATION-FOLLOW-UP-OK.");
+    const followUp = await session.send("Reply with exactly CANCELLATION-FOLLOW-UP-OK.");
     followUp.expectOk();
     followUp.notEvent("turn.cancelled");
     followUp.notEvent("turn.failed");
     followUp.notEvent("session.failed");
     followUp.messageIncludes(/CANCELLATION-FOLLOW-UP-OK/i);
 
-    const late = await t.cancel();
+    const late = await session.cancel();
     await t.require(
       late,
       satisfies(
@@ -59,7 +60,7 @@ export default defineEval({
       ),
     );
 
-    const afterLateCancel = await t.send("Reply with exactly CANCELLATION-LATE-NOOP-OK.");
+    const afterLateCancel = await session.send("Reply with exactly CANCELLATION-LATE-NOOP-OK.");
     afterLateCancel.expectOk();
     afterLateCancel.notEvent("turn.cancelled");
     afterLateCancel.notEvent("turn.failed");

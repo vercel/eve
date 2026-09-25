@@ -1,4 +1,8 @@
 import type { ChannelAdapter, ChannelInstrumentationMetadata } from "#channel/adapter.js";
+import {
+  createMetadataAudienceProjector,
+  type ChannelAudienceProjector,
+} from "#channel/audience.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import {
   CHANNEL_SENTINEL,
@@ -17,7 +21,7 @@ import type {
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -33,8 +37,17 @@ export type {
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
+  TaskDeliveryPolicy,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
+export type { ChannelAudience } from "#shared/channel-audience.js";
+export type {
+  AudienceCaller,
+  AudienceContext,
+  AudienceInput,
+  AudiencePrincipal,
+  ConversationEnvironment,
+} from "#shared/conversation-context.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
 export type {
   ChannelFrom,
@@ -45,7 +58,7 @@ export type {
   ChannelSource,
 };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
-export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
+export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, WS } from "#channel/routes.js";
 export type {
   AttachSessionFn,
   HttpRouteDefinition,
@@ -65,7 +78,7 @@ export type {
  * is a webhook. Override only when authoring a non-webhook route such as a
  * long-poll endpoint or an event-stream reader.
  */
-export type ChannelMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
 /**
  * Method-like discriminator used by compiled channel route entries.
@@ -154,7 +167,7 @@ type EventData<T extends UnstampedMessageStreamEvent["type"]> =
 export interface ChannelContinuationOps {
   readonly continuation?: {
     readonly token: string;
-    rekey(token: string): void;
+    alias(token: string): void;
   };
 }
 
@@ -250,6 +263,7 @@ export interface Channel<
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /**
@@ -282,6 +296,7 @@ export function defineChannel<
     adapter,
     cors,
     receive: definition.receive,
+    turnPolicy: definition.turnPolicy,
   };
 
   return compiled;
@@ -324,10 +339,14 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   const hasFetchFile = definition.fetchFile !== undefined;
   const metadata = definition.metadata;
   const hasMetadata = metadata !== undefined;
+  const audience = definition.audience;
   const hasBehavior = hasState || hasContext || hasMetadata;
 
   const eventHandlers: Record<string, unknown> = {};
   let hasEventHandlers = false;
+  const legacyAudienceSource = {
+    kind: definition.kindHint ?? "defineChannel",
+  };
 
   const events = definition.events;
   for (const eventType of eventTypes) {
@@ -343,7 +362,7 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
               ? undefined
               : {
                   token: session.continuation.token,
-                  rekey: (token: string) => session.continuation?.rekey(token),
+                  alias: (token: string) => session.continuation?.alias(token),
                 },
         };
         if (eventType === "session.failed") {
@@ -361,7 +380,16 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
   }
 
   if (!hasBehavior && !hasEventHandlers && !hasFetchFile) {
-    return { kind: definition.kindHint ?? HTTP_ADAPTER_KIND } as ChannelAdapter<any>;
+    return {
+      kind: definition.kindHint ?? HTTP_ADAPTER_KIND,
+      ...(audience === undefined
+        ? undefined
+        : {
+            instrumentation: {
+              audience: audience as ChannelAudienceProjector,
+            },
+          }),
+    } as ChannelAdapter<any>;
   }
 
   const adapter: ChannelAdapter<any> = {
@@ -369,12 +397,31 @@ function buildAdapter<TState, TCtx, TReceiveTarget, TMetadata extends Record<str
     state: hasState ? { ...(definition.state as Record<string, unknown>) } : {},
     fetchFile: definition.fetchFile,
     instrumentation:
-      metadata === undefined
+      metadata === undefined && audience === undefined
         ? undefined
         : {
-            metadata(state): ChannelInstrumentationMetadata {
-              return metadata(state as NonNullable<TState>);
-            },
+            ...(metadata === undefined
+              ? undefined
+              : {
+                  metadata(state): ChannelInstrumentationMetadata {
+                    const projected = metadata(state as NonNullable<TState>) as Record<
+                      string,
+                      unknown
+                    >;
+                    const { audience: _ignoredAudience, ...customMetadata } = projected;
+                    return customMetadata;
+                  },
+                }),
+            ...(audience === undefined
+              ? metadata !== undefined
+                ? {
+                    audience: createMetadataAudienceProjector(
+                      legacyAudienceSource,
+                      metadata as (state: Record<string, unknown> | undefined) => unknown,
+                    ),
+                  }
+                : undefined
+              : { audience: audience as ChannelAudienceProjector }),
           },
 
     createAdapterContext(base): any {

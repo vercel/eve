@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import { LiveRegion } from "#cli/ui/live-region.js";
@@ -28,6 +28,9 @@ interface CliLiveRowOutput {
 interface CliLiveRowOptions {
   readonly output?: CliLiveRowOutput;
   readonly pulseSequence?: string;
+  readonly animate?: boolean;
+  readonly elapsed?: boolean;
+  readonly logPhases?: boolean;
 }
 
 function validatePulseSequence(sequence: string): void {
@@ -76,7 +79,7 @@ function renderProgressRow(
   return `${pc.green(glyph)}${prefix.slice(glyph.length)}${styledDetail}`;
 }
 
-/** Starts one transient CLI row, or logs its first message when repainting is unavailable. */
+/** Starts one transient row, falling back to phase logs when repainting is unavailable. */
 export function startCliLiveRow(
   logger: CliLiveRowLogger,
   options: CliLiveRowOptions = {},
@@ -84,9 +87,8 @@ export function startCliLiveRow(
   const output = options.output ?? process.stdout;
   const pulseSequence = options.pulseSequence ?? PROGRESS_PULSE_SEQUENCE;
   validatePulseSequence(pulseSequence);
-  const animate = output.isTTY === true && !isLogLevelEnabled("debug");
+  const animate = options.animate !== false && output.isTTY === true && !isLogLevelEnabled("debug");
 
-  // Single-row live region; only the animating path repaints, non-TTY logs once.
   const live = animate
     ? new LiveRegion({
         write: (chunk) => {
@@ -101,6 +103,9 @@ export function startCliLiveRow(
   let current: { detail: string; message: string } | undefined;
   let painted = false;
   let logged = false;
+  let lastLoggedMessage: string | undefined;
+  let phaseStartedAt = Date.now();
+  let elapsedSeconds = 0;
   let stopped = false;
   let pulseTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -109,7 +114,9 @@ export function startCliLiveRow(
     const row = renderProgressRow(
       pulseVisible ? PROGRESS_PULSE_GLYPH : " ",
       current.message,
-      current.detail,
+      options.elapsed
+        ? [current.detail, `${elapsedSeconds}s`].filter(Boolean).join(" · ")
+        : current.detail,
       output.columns,
     );
     live.update([row]);
@@ -122,8 +129,13 @@ export function startCliLiveRow(
         if (stopped) return;
         pulseStepIndex = (pulseStepIndex + 1) % pulseSequence.length;
         const nextPulseVisible = pulseSequence[pulseStepIndex] === "1";
-        if (nextPulseVisible !== pulseVisible) {
+        const nextElapsedSeconds = Math.floor((Date.now() - phaseStartedAt) / 1_000);
+        if (
+          nextPulseVisible !== pulseVisible ||
+          (options.elapsed && nextElapsedSeconds !== elapsedSeconds)
+        ) {
           pulseVisible = nextPulseVisible;
+          elapsedSeconds = nextElapsedSeconds;
           paint();
         }
         schedulePulseStep();
@@ -136,14 +148,20 @@ export function startCliLiveRow(
   return {
     update(message, detail = "") {
       if (stopped) return;
+      const nextMessage = sanitizeProgressText(message);
+      if (current?.message !== nextMessage) {
+        phaseStartedAt = Date.now();
+        elapsedSeconds = 0;
+      }
       current = {
         detail: sanitizeProgressText(detail),
-        message: sanitizeProgressText(message),
+        message: nextMessage,
       };
       if (!animate) {
-        if (!logged) {
+        if (!logged || (options.logPhases && lastLoggedMessage !== current.message)) {
           logger.log(`${current.message}...`);
           logged = true;
+          lastLoggedMessage = current.message;
         }
         return;
       }

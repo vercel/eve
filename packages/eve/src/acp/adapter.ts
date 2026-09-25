@@ -18,8 +18,8 @@ import {
 import { Client, ClientError } from "#client/index.js";
 import type { ClientOptions, SendTurnInput, SendTurnPayload } from "#client/types.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const ANSWER_FIELD = "answer";
 const ERROR_CODE_BUSY = -32_001;
@@ -491,7 +491,7 @@ function promptContent(params: PromptRequest): Array<{ type: "text"; text: strin
 
 function toolCallForAction(action: RuntimeActionRequest): ToolCall {
   const title =
-    action.kind === "tool-call"
+    action.kind === "tool-call" || action.kind === "workflow-tool-call"
       ? action.toolName
       : action.kind === "load-skill"
         ? "Load skill"

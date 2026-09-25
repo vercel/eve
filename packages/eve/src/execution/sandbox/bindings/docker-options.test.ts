@@ -5,13 +5,14 @@ import {
   DEFAULT_DOCKER_SANDBOX_IMAGE,
   resolveDockerSandboxOptions,
 } from "#execution/sandbox/bindings/docker-options.js";
+import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 
 describe("resolveDockerSandboxOptions", () => {
-  it("defaults to eve's published sandbox runtime image with permissive networking", () => {
+  it("defaults to eve's published sandbox runtime image", () => {
+    expect(DEFAULT_DOCKER_SANDBOX_IMAGE).toBe(DEFAULT_EVE_SANDBOX_IMAGE);
     expect(resolveDockerSandboxOptions()).toEqual({
       env: {},
       image: DEFAULT_DOCKER_SANDBOX_IMAGE,
-      networkPolicy: "allow-all",
       pullPolicy: "if-not-present",
     });
   });
@@ -21,13 +22,11 @@ describe("resolveDockerSandboxOptions", () => {
       resolveDockerSandboxOptions({
         env: { FOO: "bar" },
         image: "ubuntu:26.04",
-        networkPolicy: "deny-all",
         pullPolicy: "never",
       }),
     ).toEqual({
       env: { FOO: "bar" },
       image: "ubuntu:26.04",
-      networkPolicy: "deny-all",
       pullPolicy: "never",
     });
   });
@@ -37,21 +36,18 @@ describe("resolveDockerSandboxOptions", () => {
       resolveDockerSandboxOptions({
         env: { B: "2", A: "1" },
         image: "ubuntu:26.04",
-        networkPolicy: "allow-all",
       }),
     );
     const second = createDockerSandboxOptionsHash(
       resolveDockerSandboxOptions({
         env: { A: "1", B: "2" },
         image: "ubuntu:26.04",
-        networkPolicy: "allow-all",
       }),
     );
     const changed = createDockerSandboxOptionsHash(
       resolveDockerSandboxOptions({
         env: { A: "changed", B: "2" },
         image: "ubuntu:26.04",
-        networkPolicy: "allow-all",
       }),
     );
 

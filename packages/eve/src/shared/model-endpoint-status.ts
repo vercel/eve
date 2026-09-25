@@ -14,7 +14,19 @@
  *   gateway API key nor an OIDC token. This is the "no provider connected" state
  *   that gates the "provider required" setup prompt.
  */
+export type ChatGptEndpointState =
+  | "checking"
+  | "ready"
+  | "signed-out"
+  | "reauth-required"
+  | "unavailable";
+
 export type ModelEndpointStatus =
   | { kind: "external"; provider: string }
-  | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" }
+  | {
+      kind: "chatgpt";
+      state: ChatGptEndpointState;
+      accountLabel?: string;
+    }
+  | { kind: "gateway"; connected: true; credential: "api-key" | "oidc" | "oauth"; team?: string }
   | { kind: "gateway"; connected: false };

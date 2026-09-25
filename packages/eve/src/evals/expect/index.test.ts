@@ -87,6 +87,20 @@ describe("expect builders", () => {
     expect(await assertion.score("hello")).toBe(1);
   });
 
+  it.each([
+    ["", "", 1],
+    ["", "abc", 0],
+    ["abc", "", 0],
+    ["kitten", "sitting", 1 - 3 / 7],
+    ["abc", "xyz", 0],
+    ["😀", "😃", 0.5],
+    ["é", "e", 0],
+    [null, "", 1],
+    [42, "42", 1],
+  ])("preserves Levenshtein similarity for %j and %j", async (actual, expected, score) => {
+    expect(await similarity(String(expected)).score(actual)).toBe(score);
+  });
+
   it("chaining overrides severity and threshold without mutating the original", () => {
     const base = includes("x");
 

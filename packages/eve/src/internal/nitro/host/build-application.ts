@@ -34,13 +34,23 @@ import { emitVercelAgentSummary } from "#internal/nitro/host/build-vercel-agent-
 import { tryReadExtensionBuildConfig } from "#internal/nitro/host/build-extension.js";
 import { copyHostMiddlewareFunctions } from "#internal/nitro/host/copy-host-middleware.js";
 import { normalizeVercelServiceCrons } from "#internal/nitro/host/normalize-vercel-service-crons.js";
-import { prepareProductionApplicationHost } from "#internal/nitro/host/prepare-application-host.js";
+import {
+  prepareProductionApplicationHost,
+  refreshProductionCompiledArtifacts,
+} from "#internal/nitro/host/prepare-application-host.js";
+import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { runVercelBuildPrewarm } from "#internal/nitro/host/vercel-build-prewarm.js";
+import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
 import { findClosestVercelOutputDirectory } from "#shared/vercel-output-directory.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
+import { resolveEveServicePrefixByRoot } from "#internal/vercel/vercel-service-config-operations.js";
+import { parseVercelServicesConfig } from "#internal/vercel/vercel-services-config.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { isObject } from "#shared/guards.js";
+import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { normalizePublicRoutePrefix } from "#shared/public-route-prefix.js";
 
 function trimTrailingSlash(path: string): string {
   return path.replace(/[\\/]+$/, "");
@@ -97,112 +107,7 @@ async function writeOptionalApplicationBuildProfile(input: {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeEntrypoint(rootDir: string, entrypoint: unknown): string | null {
-  if (typeof entrypoint !== "string" || entrypoint.trim().length === 0) {
-    return null;
-  }
-
-  return resolve(rootDir, entrypoint);
-}
-
-function normalizeServiceRoot(rootDir: string, service: Record<string, unknown>): string | null {
-  if (typeof service.root === "string" && service.root.trim().length > 0) {
-    return resolve(rootDir, service.root);
-  }
-
-  return normalizeEntrypoint(rootDir, service.entrypoint);
-}
-
-function normalizeServicePrefix(service: Record<string, unknown>): string {
-  if (typeof service.routePrefix === "string") {
-    return service.routePrefix.trim();
-  }
-
-  if (typeof service.mount === "string") {
-    return service.mount.trim();
-  }
-
-  if (
-    isRecord(service.mount) &&
-    typeof service.mount.path === "string" &&
-    service.mount.path.trim().length > 0
-  ) {
-    return service.mount.path.trim();
-  }
-
-  return "";
-}
-
-function normalizeServiceCollection(
-  value: unknown,
-): readonly Record<string, unknown>[] | undefined {
-  if (isRecord(value)) {
-    return Object.values(value).filter(isRecord);
-  }
-
-  if (Array.isArray(value)) {
-    return value.filter(isRecord);
-  }
-
-  return undefined;
-}
-
-/**
- * Resolve the route prefix an eve service is mounted under when it is
- * co-deployed behind a host web service (Next.js, Nuxt, SvelteKit etc.).
- *
- * Any service whose framework is not `eve` is treated as a host that proxies
- * eve's transport routes behind a prefix. A standalone eve deployment (no host
- * service) returns `undefined` so its output stays routable at the root.
- */
-function resolveCoDeployedEveServicePrefix(input: {
-  appRoots: readonly string[];
-  configRoot: string;
-  config: unknown;
-}): string | undefined {
-  if (!isRecord(input.config)) {
-    return undefined;
-  }
-
-  const services =
-    normalizeServiceCollection(input.config.experimentalServices) ??
-    normalizeServiceCollection(input.config.experimentalServicesV2) ??
-    normalizeServiceCollection(input.config.services);
-
-  if (services === undefined) {
-    return undefined;
-  }
-
-  let hasHostService = false;
-  let servicePrefix: string | undefined;
-
-  for (const service of services) {
-    if (service.framework !== "eve") {
-      hasHostService = true;
-      continue;
-    }
-
-    const eveEntrypoint = normalizeServiceRoot(input.configRoot, service);
-    const routePrefix = normalizeServicePrefix(service);
-
-    if (
-      eveEntrypoint !== null &&
-      input.appRoots.includes(eveEntrypoint) &&
-      routePrefix.length > 0 &&
-      routePrefix !== "/"
-    ) {
-      servicePrefix = routePrefix;
-    }
-  }
-
-  return hasHostService ? servicePrefix : undefined;
-}
-
-async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
+async function resolveEveServicePrefixForVercelFunctionOutput(
   appRoot: string,
   agentRoot: string,
 ): Promise<string | undefined> {
@@ -211,10 +116,12 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
 
   if (outputDirectory !== undefined) {
     try {
-      const config = JSON.parse(
-        await readFile(join(outputDirectory, "config.json"), "utf8"),
-      ) as unknown;
-      const servicePrefix = resolveCoDeployedEveServicePrefix({
+      const configPath = join(outputDirectory, "config.json");
+      const config = parseVercelServicesConfig(
+        JSON.parse(await readFile(configPath, "utf8")) as unknown,
+        configPath,
+      );
+      const servicePrefix = resolveEveServicePrefixByRoot({
         appRoots,
         configRoot: await resolveVercelOutputConfigRoot(outputDirectory),
         config,
@@ -238,12 +145,15 @@ async function resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
       join(currentDir, ".vercel", "output", "config.json"),
     ]) {
       try {
-        const config = JSON.parse(await readFile(configPath, "utf8")) as unknown;
+        const config = parseVercelServicesConfig(
+          JSON.parse(await readFile(configPath, "utf8")) as unknown,
+          configPath,
+        );
         const configRoot = configPath.endsWith("vercel.json")
           ? currentDir
           : await resolveVercelOutputConfigRoot(dirname(configPath));
 
-        const servicePrefix = resolveCoDeployedEveServicePrefix({
+        const servicePrefix = resolveEveServicePrefixByRoot({
           appRoots,
           configRoot,
           config,
@@ -276,13 +186,11 @@ async function resolveVercelOutputConfigRoot(outputDirectory: string): Promise<s
       await readFile(join(projectRoot, ".vercel", "project.json"), "utf8"),
     ) as unknown;
 
-    if (
-      isRecord(projectConfig) &&
-      isRecord(projectConfig.settings) &&
-      typeof projectConfig.settings.rootDirectory === "string" &&
-      projectConfig.settings.rootDirectory.trim().length > 0
-    ) {
-      return resolve(projectRoot, projectConfig.settings.rootDirectory);
+    if (isObject(projectConfig) && isObject(projectConfig.settings)) {
+      const rootDirectory = projectConfig.settings.rootDirectory;
+      if (typeof rootDirectory === "string" && rootDirectory.trim().length > 0) {
+        return resolve(projectRoot, rootDirectory);
+      }
     }
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
@@ -387,41 +295,65 @@ async function buildApplicationInWorkspace(
 
   const servicePrefix = isVercelBuild
     ? await measureBuildPhase(profiler, "vercel.service-prefix.resolve", () =>
-        resolveCoDeployedEveServicePrefixForVercelFunctionOutput(
+        resolveEveServicePrefixForVercelFunctionOutput(
           preparedHost.appRoot,
           preparedHost.compileResult.project.agentRoot,
         ),
       )
     : undefined;
+  // A service routed at the protocol path has no additional public mount.
+  // Keep servicePrefix intact for function-output routing below.
+  const normalizedServicePrefix = normalizePublicRoutePrefix(servicePrefix);
+  const inferredPublicRoutePrefix =
+    normalizedServicePrefix === EVE_ROUTE_PREFIX ? undefined : normalizedServicePrefix;
+  if (
+    options.publicRoutePrefix !== undefined &&
+    inferredPublicRoutePrefix !== undefined &&
+    options.publicRoutePrefix !== inferredPublicRoutePrefix
+  ) {
+    throw new Error(
+      `EVE_PUBLIC_ROUTE_PREFIX ${JSON.stringify(options.publicRoutePrefix)} conflicts with the configured Vercel service prefix ${JSON.stringify(servicePrefix)}.`,
+    );
+  }
+  const publicRoutePrefix = options.publicRoutePrefix ?? inferredPublicRoutePrefix;
+  const sandboxScope = createProductionNitroArtifactsConfig(workspace.appRoot).sandboxScope;
   const nitro = await measureBuildPhase(profiler, "nitro.create", () =>
     createProductionApplicationNitro(preparedHost, {
       buildDir: workspace.nitro.buildDir,
       outputDir: workspace.publication.output.stagedDir,
-      publicRoutePrefix: options.publicRoutePrefix,
+      publicRoutePrefix,
+      workspaceMember: options.workspaceMember,
     }),
   );
 
   try {
-    // Run sandbox prewarm before bundling so a prewarm failure aborts the
-    // build before we spend time producing output we would never deploy.
-    if (isVercelBuild && !options.skipVercelSandboxPrewarm) {
-      await measureBuildPhase(profiler, "sandbox.prewarm", () =>
-        runVercelBuildPrewarm({
-          appRoot: preparedHost.appRoot,
-          compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
-            workspace.compiler.rootDir,
-            {
-              moduleMapLoaderPath: resolvePackageSourceFilePath(
-                "src/internal/authored-module-map-loader.ts",
-              ),
-              sandboxAppRoot: preparedHost.appRoot,
-            },
-          ),
-          log(message) {
-            console.log(message);
+    // Complete sandbox preparation before bundling so runtime never needs to
+    // mutate or repair the prepared artifacts embedded in production output.
+    if (!options.skipSandboxPrewarm) {
+      const prewarmInput = {
+        appRoot: preparedHost.appRoot,
+        compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(
+          workspace.compiler.rootDir,
+          {
+            moduleMapLoaderPath: resolvePackageSourceFilePath(
+              "src/internal/authored-module-map-loader.ts",
+            ),
+            sandboxAppRoot: preparedHost.appRoot,
+            sandboxScope,
           },
-        }),
-      );
+        ),
+        log(message: string) {
+          console.log(message);
+        },
+      };
+      await measureBuildPhase(profiler, "sandbox.prewarm", async () => {
+        if (isVercelBuild) {
+          await runVercelBuildPrewarm(prewarmInput);
+        } else {
+          await prewarmAppSandboxes(prewarmInput);
+        }
+      });
+      await refreshProductionCompiledArtifacts(preparedHost, workspace.host.artifactsDir);
     }
     await buildNitroOutput(nitro, profiler, "nitro");
     if (isVercelBuild) {
@@ -440,7 +372,7 @@ async function buildApplicationInWorkspace(
     if (vercelServiceOutput !== undefined) {
       await measureBuildPhase(profiler, "vercel.service-crons.normalize", () =>
         normalizeVercelServiceCrons({
-          publicRoutePrefix: options.publicRoutePrefix,
+          publicRoutePrefix,
           serviceOutputDirectory: workspace.publication.output.stagedDir,
         }),
       );

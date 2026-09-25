@@ -17,7 +17,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 /**
  * Result returned by {@link createSessionStep}.
  *
- * Exposes the projected {@link DurableSessionState} the driver needs to
+ * Exposes the projected {@link DurableSessionState} the owner needs to
  * drive the turn loop.
  */
 export interface CreateSessionStepResult {
@@ -39,7 +39,7 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-  readonly subagentDepth?: number;
+  readonly taskId?: string;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -72,13 +72,16 @@ export async function createSessionStep(input: {
         configured: effectiveAgent.limits?.maxOutputTokensPerSession,
         inherited: input.inheritedLimits?.maxOutputTokensPerSession,
       }),
+      maxTokenCostUsdPerSession: resolveInheritedTokenLimit({
+        configured: effectiveAgent.limits?.maxTokenCostUsdPerSession,
+        inherited: input.inheritedLimits?.maxTokenCostUsdPerSession,
+      }),
     },
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
-    subagentDepth: input.subagentDepth,
+    taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
-    workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });
 
   return { state: createDurableSessionState({ session }) };

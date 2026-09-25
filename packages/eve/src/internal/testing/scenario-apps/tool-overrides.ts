@@ -2,7 +2,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 
 /**
  * Scenario-tier descriptor exercising every framework-tool override pattern:
- * wrap (`bash`), replace (`todo`), and disable (`agent`, `web_fetch`, `web_search`).
+ * wrap (`bash`), replace (`write_file`), and disable (`agent`, `web_fetch`, `web_search`).
  * The compile pipeline must preserve the override semantics end-to-end.
  */
 export const TOOL_OVERRIDES_DESCRIPTOR: ScenarioAppDescriptor = {
@@ -27,7 +27,7 @@ export default disableTool();
 `,
     "agent/tools/bash.ts": `import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
-import { bash } from "eve/tools/defaults";
+import { bash } from "eve/tools/bash";
 
 // Wraps the framework \`bash\` tool: spread the default and replace \`execute\`
 // with a thin pre-hook that delegates to the original. The framework's
@@ -41,7 +41,7 @@ export default defineTool({
   },
 });
 `,
-    "agent/tools/todo.ts": `import { defineState } from "eve/context";
+    "agent/tools/write_file.ts": `import { defineState } from "eve/context";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 

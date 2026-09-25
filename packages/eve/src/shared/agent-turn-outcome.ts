@@ -1,7 +1,11 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { JsonValue } from "#shared/json.js";
-import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
+import {
+  tokenUsageSchema,
+  tokenUsageWithCostSchema,
+  type TokenUsage,
+} from "#shared/token-usage.js";
 
 /**
  * What one delegated child turn produced, independent of whether the child
@@ -82,3 +86,20 @@ export const agentTurnOutcomeSchema: z.ZodType<AgentTurnOutcome> = z.discriminat
     usageDelta: tokenUsageSchema,
   }),
 ]);
+
+/** Current outcome schema, including optional model token cost. */
+export const agentTurnOutcomeWithCostSchema: z.ZodType<AgentTurnOutcome> = z.discriminatedUnion(
+  "kind",
+  [
+    z.strictObject({
+      kind: z.literal("parked"),
+      result: agentTurnResultSchema,
+      usageDelta: tokenUsageWithCostSchema,
+    }),
+    z.strictObject({
+      kind: z.literal("terminal"),
+      result: agentTurnResultSchema,
+      usageDelta: tokenUsageWithCostSchema,
+    }),
+  ],
+);

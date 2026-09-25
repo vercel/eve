@@ -25,7 +25,7 @@ describe("eve traces", () => {
       TRACE_ONE,
       span("a", "agent.turn", 10, 20, undefined, {
         "agent.name": "weather",
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     await writeSegment(
@@ -33,7 +33,7 @@ describe("eve traces", () => {
       TRACE_TWO,
       span("b", "agent.turn", 30, 40, undefined, {
         "agent.name": "research",
-        "agent.session.id": "session-two",
+        "gen_ai.conversation.id": "session-two",
       }),
     );
     await writeFile(
@@ -48,7 +48,7 @@ describe("eve traces", () => {
     const traces = await listLocalTraces(root);
 
     expect(traces.map((trace) => trace.traceId)).toEqual([TRACE_TWO, TRACE_ONE]);
-    expect(traces[0]).toMatchObject({ agentName: "research", sessionId: "session-two" });
+    expect(traces[0]).toMatchObject({ agentName: "research", conversationId: "session-two" });
   });
 
   it("resolves trace ids, session ids, and unambiguous prefixes", async () => {
@@ -57,14 +57,14 @@ describe("eve traces", () => {
       root,
       TRACE_ONE,
       span("a", "agent.turn", 10, 20, undefined, {
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     await writeSegment(
       root,
       TRACE_TWO,
       span("b", "agent.turn", 20, 30, undefined, {
-        "agent.session.id": "session-two",
+        "gen_ai.conversation.id": "session-two",
       }),
     );
     const traces = await listLocalTraces(root);
@@ -76,27 +76,24 @@ describe("eve traces", () => {
     expect(() => resolveLocalTraces(traces, "missing")).toThrow(/No local trace matches/u);
   });
 
-  it("resolves a windowed session to every window, oldest first", async () => {
+  it("resolves a session with multiple traces oldest first", async () => {
     const root = await createRoot();
     await writeSegment(
       root,
       TRACE_TWO,
       span("b", "agent.session", 100, 100, undefined, {
-        "agent.session.id": "session-one",
-        "agent.session.window": 1,
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
       span("a", "agent.session", 10, 10, undefined, {
-        "agent.session.id": "session-one",
-        "agent.session.window": 0,
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     const traces = await listLocalTraces(root);
 
-    expect(traces.map((trace) => trace.window)).toEqual([1, 0]);
     expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE, TRACE_TWO]);
 
     const output = collectingLogger();
@@ -105,34 +102,30 @@ describe("eve traces", () => {
     expect(output.out[0]).toContain(TRACE_ONE);
     expect(output.out[0]).toContain(TRACE_TWO);
     expect(output.out[0]!.indexOf(TRACE_ONE)).toBeLessThan(output.out[0]!.indexOf(TRACE_TWO));
-    expect(output.out[0]).toContain("Window");
   });
 
-  it("resolves a subagent child to the parent window it recorded into", async () => {
+  it("resolves a subagent child to the parent trace it recorded into", async () => {
     const root = await createRoot();
-    const window = "a".repeat(16);
+    const session = "a".repeat(16);
     const child = "b".repeat(16);
     await writeSegment(
       root,
       TRACE_ONE,
-      span(window, "agent.session", 10, 10, undefined, {
-        "agent.root.session.id": "session-one",
-        "agent.session.id": "session-one",
-        "agent.session.window": 0,
+      span(session, "agent.session", 10, 10, undefined, {
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
-      span(child, "agent.turn", 20, 30, window, {
-        "agent.root.session.id": "session-one",
-        "agent.session.id": "child-one",
+      span(child, "agent.turn", 20, 30, session, {
+        "gen_ai.conversation.id": "child-one",
       }),
     );
     const traces = await listLocalTraces(root);
 
     // The opener still names the trace, so `eve trace ls` reads unchanged.
-    expect(traces[0]!.sessionId).toBe("session-one");
+    expect(traces[0]!.conversationId).toBe("session-one");
     expect(ids(resolveLocalTraces(traces, "child-one"))).toEqual([TRACE_ONE]);
     expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE]);
   });
@@ -145,17 +138,18 @@ describe("eve traces", () => {
     await writeSegment(
       root,
       TRACE_ONE,
-      span(turn, "agent.turn", 10, 100, undefined, {
+      span(turn, "invoke_agent weather", 10, 100, undefined, {
         "agent.name": "weather",
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
         "agent.turn.id": "turn-1",
+        "gen_ai.operation.name": "invoke_agent",
       }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
       span(step, "agent.step", 20, 90, turn, {
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
         "agent.step.attempt": 0,
         "agent.step.index": 0,
       }),
@@ -166,7 +160,7 @@ describe("eve traces", () => {
       span(action, "agent.action", 30, 80, step, {
         "agent.action.kind": "tool-call",
         "agent.action.name": "\u001B[31mweather\u001B[0m",
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     await writeSegment(root, TRACE_ONE, {
@@ -177,7 +171,7 @@ describe("eve traces", () => {
 
     await runTraceShowCommand(output.logger, root, "session-one");
 
-    expect(output.out[0]).toContain("agent.turn [turn-1]");
+    expect(output.out[0]).toContain("invoke_agent weather [turn-1]");
     expect(output.out[0]).toContain("└─ agent.step [step 0, attempt 0]");
     expect(output.out[0]).toContain("└─ agent.action [tool-call: weather]");
     expect(output.out[0]).toContain("failed  10ms ERROR");
@@ -194,24 +188,24 @@ describe("eve traces", () => {
       root,
       TRACE_ONE,
       span(session, "agent.session", 10, 10, undefined, {
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
-      span(turn, "agent.turn", 10, 95, session, { "agent.session.id": "session-one" }),
+      span(turn, "agent.turn", 10, 95, session, { "gen_ai.conversation.id": "session-one" }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
-      span(step, "agent.step", 20, 90, turn, { "agent.session.id": "session-one" }),
+      span(step, "agent.step", 20, 90, turn, { "gen_ai.conversation.id": "session-one" }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
       span(orphanMarker, "user.marker", 95, 95, turn, {
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     const output = collectingLogger();
@@ -232,7 +226,7 @@ describe("eve traces", () => {
       TRACE_ONE,
       span("a", "agent.step", 10, 80, undefined, {
         "agent.model.id": "gpt-5",
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
         "agent.step.attempt": 0,
         "agent.step.index": 0,
         "agent.usage.input_tokens": 1400,
@@ -267,7 +261,7 @@ describe("eve traces", () => {
     await writeSegment(root, TRACE_ONE, {
       ...span("a", "agent.step", 10, 80, undefined, {
         "agent.model.id": "gpt-5",
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
         "agent.step.index": 0,
       }),
       events: [
@@ -308,7 +302,7 @@ describe("eve traces", () => {
     await writeSegment(root, TRACE_ONE, {
       ...span("a", "agent.step", 10, 80, undefined, {
         "agent.model.id": "gpt-5",
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
       events: [{ name: "step.started", timeUnixNano: "10000000" }],
     });
@@ -353,7 +347,7 @@ describe("eve traces", () => {
       root,
       TRACE_ONE,
       span("a", "agent.turn", 10, 20, undefined, {
-        "agent.session.id": "session-one",
+        "gen_ai.conversation.id": "session-one",
       }),
     );
     const latest = collectingLogger();
@@ -362,7 +356,7 @@ describe("eve traces", () => {
     const json = collectingLogger();
     await runTraceListCommand(json.logger, root, { json: true });
     expect(JSON.parse(json.out[0]!)).toEqual([
-      expect.objectContaining({ sessionId: "session-one", spanCount: 1, traceId: TRACE_ONE }),
+      expect.objectContaining({ conversationId: "session-one", spanCount: 1, traceId: TRACE_ONE }),
     ]);
   });
 

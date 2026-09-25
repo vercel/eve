@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import {
+  createStepStartedEvent,
+  createTurnStartedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { stampTestEvent } from "#internal/testing/events.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { ContextContainer, contextStorage } from "./container.js";
 import { dispatchStreamEventHooks } from "./hook-lifecycle.js";
 import {
@@ -11,7 +16,7 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { ContinuationTokenKey, SessionIdKey, SessionKey } from "./keys.js";
+import { ContinuationTokenKey, SandboxKey, SessionIdKey, SessionKey } from "./keys.js";
 
 function createMockBundle(): CompiledBundle {
   return {
@@ -108,5 +113,71 @@ describe("dispatchStreamEventHooks", () => {
         }),
       ),
     ).rejects.toThrow(/event hook boom/);
+  });
+
+  it.each(["turn.started", "step.started"] as const)(
+    "identifies an authored %s rejection for turn recovery",
+    async (type) => {
+      const cause = new Error("admission denied");
+      const registry = createRuntimeHookRegistry([
+        hook("admission", {
+          events: {
+            "*": async () => {
+              throw cause;
+            },
+          },
+        }),
+      ]);
+      const ctx = buildCtx();
+      await expect(
+        contextStorage.run(ctx, () =>
+          dispatchStreamEventHooks({
+            ctx,
+            registry,
+            event: stampTestEvent(
+              type === "turn.started"
+                ? createTurnStartedEvent({ sequence: 0, turnId: "turn_0" })
+                : createStepStartedEvent({
+                    sequence: 0,
+                    turnId: "turn_0",
+                    stepIndex: 0,
+                    modelId: "test",
+                  }),
+            ),
+          }),
+        ),
+      ).rejects.toMatchObject({ name: "BoundaryHookError", cause, message: "admission denied" });
+    },
+  );
+
+  it("can delete the runtime sandbox from a session.completed hook", async () => {
+    let deletions = 0;
+    const sandbox = mockSandbox({
+      delete: () => {
+        deletions += 1;
+      },
+    });
+    const registry = createRuntimeHookRegistry([
+      hook("cleanup", {
+        events: {
+          "session.completed": async (_event, hookContext) => {
+            const live = await hookContext.getSandbox();
+            await live.delete();
+          },
+        },
+      }),
+    ]);
+    const ctx = buildCtx();
+    ctx.set(SandboxKey, sandbox.access);
+
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({
+        ctx,
+        registry,
+        event: stampTestEvent({ type: "session.completed" }),
+      }),
+    );
+
+    expect(deletions).toBe(1);
   });
 });

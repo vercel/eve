@@ -42,6 +42,7 @@ Use support evidence to identify the reader's problem, not to establish product 
 - Prefer TypeScript examples. Include imports and language labels, and verify examples against current exports.
 - Show only supported commands and flags. Check CLI help or the command implementation before documenting them.
 - Link to related pages with descriptive text. Include the critical fact locally because retrieved sections may be read without their links.
+- Leave no page orphaned. Every page needs at least one descriptive inbound body link from a related hub or overview page; a `meta.json` sidebar entry or a routing-table cell alone is not enough. When adding a page, add the inbound link from the page that owns the topic in the same change, and keep every page reachable by following body links from `getting-started`.
 - Do not document proposed behavior as shipped. Describe unsupported boundaries directly when they affect a user task.
 
 ## Write for the task
@@ -71,6 +72,7 @@ Use support evidence to identify the reader's problem, not to establish product 
 1. Re-read every changed page in full.
 2. Verify each new technical claim against its source.
 3. Search for contradictory statements and affected cross-links.
-4. Run the review workflow.
-5. Check changed prose against the prose-quality reference when wording changed materially.
-6. Run `pnpm docs:check` when preparing to push, unless the user requests earlier validation.
+4. Confirm added or moved pages have an inbound body link from a related page, so no page is orphaned.
+5. Run the review workflow.
+6. Check changed prose against the prose-quality reference when wording changed materially.
+7. Run `pnpm docs:check` when preparing to push, unless the user requests earlier validation.

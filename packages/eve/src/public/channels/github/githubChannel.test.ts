@@ -211,6 +211,7 @@ describe("githubChannel", () => {
     const channel = githubChannel({
       botName: "testbot",
       credentials: { webhookSecret: SECRET },
+      onComment: (ctx) => ({ auth: defaultGitHubAuth(ctx), title: "GitHub run" }),
     });
     const { send } = await firePost(
       channel,
@@ -233,6 +234,8 @@ describe("githubChannel", () => {
     const [continuationToken, input] = send.mock.calls[0]!;
     expect(input.message).toBe("help me");
     expect(input.context).toEqual([expect.stringContaining("<github_context>")]);
+    expect(input.context[0]).toContain("bot_name: testbot");
+    expect(input.context[0]).toContain("is_mentioned: true");
     expect(input.inputResponses).toBeUndefined();
     expect(continuationToken).toBe("repo:123:issue:5");
     expect(input).toMatchObject({
@@ -254,7 +257,35 @@ describe("githubChannel", () => {
         repo: "eve",
         triggeringCommentId: 10,
       },
+      title: "GitHub run",
     });
+  });
+
+  it("marks an accepted unmentioned issue comment as not mentioned", async () => {
+    const channel = githubChannel({
+      botName: "testbot",
+      credentials: { webhookSecret: SECRET },
+      onComment: () => ({ auth: null }),
+    });
+    const { send } = await firePost(
+      channel,
+      signedRequest(
+        "issue_comment",
+        basePayload({
+          action: "created",
+          comment: {
+            body: "Could you investigate?",
+            id: 10,
+            user: { id: 1, login: "octocat", type: "User" },
+          },
+          issue: { number: 5 },
+        }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]![1].context[0]).toContain("bot_name: testbot");
+    expect(send.mock.calls[0]![1].context[0]).toContain("is_mentioned: false");
   });
 
   it("resolves a lazy botName on first dispatch and caches it", async () => {

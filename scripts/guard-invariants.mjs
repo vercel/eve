@@ -50,8 +50,8 @@
  *             return shapes must carry only what the harness consumes;
  *             durable state belongs on `ctx.eve`.
  *   rule 28 — Imports under `packages/eve/src/setup/scaffold/**` stay within
- *             their layer: node:* builtins, relative siblings, and the shared
- *             `@eve/catalog` data package. The scaffold stays free of
+ *             their layer: node:* builtins, relative siblings, and eve's
+ *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
  *   rule 29 — Changeset package keys must match workspace package names.
@@ -92,20 +92,35 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *
- *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
- *             `harness/instrumentation/lifecycle.ts` must not import from
- *             `ai`: its event payloads are eve's published shape, so deriving
- *             them from the model SDK's callback types would make an SDK
- *             upgrade a breaking change for every provider. Map at the bridge.
+ *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
+ *             harness. The lifecycle contract must not import from `ai`, harness
+ *             code may import only runtime facade types, and execution may use
+ *             only runtime entrypoints and cancellation-state preservation.
+ *   rule 38 — Workspace build scripts must not launch a nested
+ *             `pnpm --filter eve build`. Turbo owns workspace dependency
+ *             ordering; nested builds race on eve's clean-and-publish dist
+ *             directory and let consumers observe a partial package.
+ *   rule 42 — The shared subagent workflow body is framework-authored
+ *             userspace. It must not import task, harness, or context
+ *             internals or recover private state through `Symbol.for`.
+ *             Privileged dispatch belongs in ordinary step-backed APIs that
+ *             the workflow body consumes through a public contract.
+ *   rule 43 — Reusable session plumbing stays independent of the subagent
+ *             executor. The generic inbox and state cursor must not
+ *             import subagent modules; session/turn composition roots may
+ *             compose built-in executors directly.
+ *   rule 44 — Every concrete built-in sandbox provider is defined through
+ *             `defineSandboxProvider()` and does not import sandbox runtime
+ *             orchestration, registries, key derivation, or session state.
+ *             Built-ins and authored providers must share one contract.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
-import { readFile, readdir, lstat } from "node:fs/promises";
+import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
@@ -193,6 +208,9 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
+ *   rule42: Violation[];
+ *   rule43: Violation[];
+ *   rule44: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -222,7 +240,103 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
+    checkRule42(posix, lines, state.rule42);
+    checkRule43(posix, lines, state.rule43);
+    checkRule44(posix, lines, state.rule44);
   }
+}
+
+// ---------- Rule 42: userspace subagent workflow ----------
+
+const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
+const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
+  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
+// The shared body owns its invocation id, so it consumes the framework-internal
+// entry rather than the public `agent()`; that import is the one exception.
+const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule42(posix, lines, violations) {
+  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
+
+  lines.forEach((line, idx) => {
+    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
+    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
+    violations.push({
+      rule: 42,
+      file: posix,
+      line: idx + 1,
+      message:
+        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
+    });
+  });
+}
+
+// ---------- Rule 43: executor-neutral session plumbing ----------
+
+// Matches both `#` alias specifiers and relative paths into the executor trees.
+const SUBAGENT_IMPORT_RE =
+  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+
+const RULE43_GENERIC_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session-hook-claims.ts",
+  "packages/eve/src/execution/session-inbox/inbox.ts",
+  "packages/eve/src/execution/session-input-ledger.ts",
+  "packages/eve/src/execution/session-input-queue.ts",
+  "packages/eve/src/execution/session-state-cursor.ts",
+]);
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule43(posix, lines, violations) {
+  if (!RULE43_GENERIC_SESSION_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!SUBAGENT_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 43,
+      file: posix,
+      line: idx + 1,
+      message:
+        "generic session plumbing imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.",
+    });
+  });
+}
+
+// Legacy import is reachable only from workflow discovery and ingress.
+const LEGACY_INGRESS_FILES = new Set([
+  "packages/eve/src/execution/session-inbox/resume.ts",
+  "packages/eve/src/execution/connections/callback-route.ts",
+  "packages/eve/src/eve-channel/index.ts",
+]);
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule44(posix, lines, violations) {
+  if (
+    posix.includes("/execution/legacy-session/") ||
+    posix.includes("/internal/testing/") ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    LEGACY_INGRESS_FILES.has(posix)
+  )
+    return;
+  lines.forEach((line, index) => {
+    if (
+      /from ["'][^"']*legacy-session\//.test(line) ||
+      /import\(["'][^"']*legacy-session\//.test(line)
+    )
+      violations.push({
+        rule: 44,
+        file: posix,
+        line: index + 1,
+        message:
+          "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
+      });
+  });
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -292,6 +406,10 @@ const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queu
  * @param {Violation[]} violations
  */
 function checkRule33(posix, lines, violations) {
+  // The single-runtime-identity boundary is eve's own source. Application code
+  // (fixtures, templates) legitimately imports the public `workflow/api`
+  // surface, which eve's bundler resolves to its own runtime.
+  if (!posix.startsWith("packages/eve/src/")) return;
   lines.forEach((line, idx) => {
     const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
     const isRuntimeImport =
@@ -346,7 +464,23 @@ function checkRule35(posix, lines, violations) {
 
 // ---------- Rule 37: instrumentation lifecycle provider boundary ----------
 
-const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/instrumentation/lifecycle.ts";
+const HARNESS_RUNTIME_IMPORTS = new Map([
+  ["InstrumentationAttempt", "type"],
+  ["InstrumentationStepScope", "type"],
+  ["SessionInstrumentation", "type"],
+]);
+const EXECUTION_INSTRUMENTATION_IMPORTS = new Map([
+  [
+    "#instrumentation/runtime.js",
+    new Map([
+      ["bindSessionInstrumentation", "value"],
+      ["ExecutionInstrumentation", "type"],
+      ["initializeSessionInstrumentation", "value"],
+    ]),
+  ],
+  ["#instrumentation/state.js", new Map([["preserveSerializedInstrumentationState", "value"]])],
+]);
 
 /**
  * @param {string} posix
@@ -354,7 +488,15 @@ const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumenta
  * @param {Violation[]} violations
  */
 function checkRule37(posix, source, violations) {
-  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+  const productionHarness =
+    posix.startsWith("packages/eve/src/harness/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  const productionExecution =
+    posix.startsWith("packages/eve/src/execution/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT && !productionHarness && !productionExecution) {
+    return;
+  }
 
   const sourceFile = ts.createSourceFile(
     posix,
@@ -365,7 +507,11 @@ function checkRule37(posix, source, violations) {
   );
   const visit = (node) => {
     const specifier = importSpecifier(node);
-    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+    if (
+      posix === INSTRUMENTATION_LIFECYCLE_CONTRACT &&
+      specifier !== undefined &&
+      (specifier.text === "ai" || specifier.text.startsWith("ai/"))
+    ) {
       violations.push({
         rule: 37,
         file: posix,
@@ -373,9 +519,84 @@ function checkRule37(posix, source, violations) {
         message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
       });
     }
+    if (
+      productionHarness &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      specifier.text !== "#instrumentation/runtime.js"
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Harness code may consume instrumentation only through the bound SessionInstrumentation facade from "#instrumentation/runtime.js".`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#tracing/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Tracing implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionHarness &&
+      specifier?.text === "#instrumentation/runtime.js" &&
+      !hasOnlyAllowedNamedImports(node, HARNESS_RUNTIME_IMPORTS)
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation runtime bindings. Harness code may use only the SessionInstrumentation, InstrumentationStepScope, and InstrumentationAttempt types.`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#compiled/@opentelemetry/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports OpenTelemetry directly. OTel implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionExecution &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      !hasOnlyAllowedNamedImports(
+        node,
+        EXECUTION_INSTRUMENTATION_IMPORTS.get(specifier.text) ?? new Map(),
+      )
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation bindings from "${specifier.text}". Execution may use only session binding/initialization, the ExecutionInstrumentation type, and cancellation-state preservation.`,
+      });
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+function hasOnlyAllowedNamedImports(node, allowed) {
+  if (!ts.isImportDeclaration(node)) return false;
+  const clause = node.importClause;
+  if (
+    clause === undefined ||
+    clause.name !== undefined ||
+    clause.namedBindings === undefined ||
+    !ts.isNamedImports(clause.namedBindings) ||
+    clause.namedBindings.elements.length === 0
+  ) {
+    return false;
+  }
+  return clause.namedBindings.elements.every((element) => {
+    const imported = element.propertyName?.text ?? element.name.text;
+    const expectedKind = allowed.get(imported);
+    const actualKind = clause.isTypeOnly || element.isTypeOnly ? "type" : "value";
+    return expectedKind === actualKind;
+  });
 }
 
 function importSpecifier(node) {
@@ -594,15 +815,14 @@ function checkRule27(posix, lines, violations) {
 
 const SCAFFOLD_PREFIX = "packages/eve/src/setup/scaffold/";
 
-// The curated connection and channel catalogs (and any future surface
-// overlays) read canonical identity from `@eve/catalog`, a
-// dependency-free data package shared across the scaffolder and docs. It
-// carries no runtime, compiler, or provider-SDK weight, so the entire scaffold
-// layer may import it. The terminal UI adapters (which carry @clack/core and
-// picocolors) live outside the scaffold, in `packages/eve/src/setup/cli/`.
-const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@eve/catalog"]);
+// The curated connection and channel catalogs read canonical identity from
+// the private `@eve/catalog` workspace package through eve's vendored copy.
+// This keeps the published package self-contained without allowing the
+// scaffold layer to reach into runtime, compiler, or provider SDK modules.
+// Terminal UI adapters live outside the scaffold in `packages/eve/src/setup/cli/`.
+const SCAFFOLD_ALLOWED_PACKAGES = new Set([]);
 
-const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set([]);
+const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set(["#compiled/@eve/catalog/index.js"]);
 
 // Only match top-of-line `import` statements, not strings nested inside
 // template literals (e.g. the channel templates embed `from "react"` as
@@ -641,7 +861,7 @@ function checkRule28(posix, lines, violations) {
             rule: 28,
             file: posix,
             line: idx + 1,
-            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @eve/catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
+            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and #compiled/@eve/catalog/index.js. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
           });
         }
       }
@@ -969,6 +1189,33 @@ async function checkRule34PhaseBoundary() {
   return violations;
 }
 
+// ---------- Rule 38: one owner for the eve package build ----------
+
+const NESTED_EVE_BUILD_RE = /\bpnpm\s+(?:--filter(?:=|\s+)eve|-F\s+eve)\s+(?:run\s+)?build\b/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule38NoNestedEveBuild() {
+  /** @type {Violation[]} */
+  const violations = [];
+
+  for (const dir of await readPnpmWorkspacePackageDirs()) {
+    if (dir === "packages/eve") continue;
+    const packageJson = await readJsonIfExists(join(REPO_ROOT, dir, "package.json"));
+    for (const [scriptName, command] of Object.entries(packageJson?.scripts ?? {})) {
+      if (typeof command !== "string" || !NESTED_EVE_BUILD_RE.test(command)) continue;
+      violations.push({
+        rule: 38,
+        file: `${dir}/package.json`,
+        message: `script "${scriptName}" launches a nested eve package build. Declare eve as a workspace dependency and let Turbo's ^build edge produce it once; rebuilding eve inside a consumer races its destructive dist clean against other consumers.`,
+      });
+    }
+  }
+
+  return violations;
+}
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -996,6 +1243,11 @@ async function readPnpmWorkspacePackageDirs() {
     const excluded = rawPattern.startsWith("!");
     const pattern = excluded ? rawPattern.slice(1) : rawPattern;
     const dirs = await expandWorkspacePackagePattern(pattern);
+
+    if (!excluded && dirs.length === 0) {
+      throw new Error(`Workspace package pattern "${rawPattern}" matched no package.json files.`);
+    }
+
     const target = excluded ? excludeDirs : includeDirs;
 
     dirs.forEach((dir) => target.add(dir));
@@ -1047,31 +1299,16 @@ function stripYamlString(value) {
  * @returns {Promise<string[]>}
  */
 async function expandWorkspacePackagePattern(pattern) {
-  if (pattern.endsWith("/*")) {
-    const root = pattern.slice(0, -2);
-    let entries;
-    try {
-      entries = await readdir(join(REPO_ROOT, root), { withFileTypes: true });
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
+  const normalizedPattern = pattern.replace(/\/+$/, "");
+  const dirs = [];
 
-    const dirs = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const dir = `${root}/${entry.name}`;
-      if (await readJsonIfExists(join(REPO_ROOT, dir, "package.json"))) dirs.push(dir);
-    }
-    return dirs;
+  for await (const manifestPath of glob(`${normalizedPattern}/package.json`, {
+    cwd: REPO_ROOT,
+  })) {
+    dirs.push(toPosix(dirname(manifestPath)));
   }
 
-  if (await readJsonIfExists(join(REPO_ROOT, pattern, "package.json"))) {
-    return [pattern];
-  }
-  return [];
+  return dirs.sort();
 }
 
 /**
@@ -1121,6 +1358,43 @@ function diffCounts(current, baseline) {
 
 // ---------- Entry point ----------
 
+async function checkRule44SandboxProviders() {
+  const providerNames = ["docker", "just-bash", "microsandbox", "vercel"];
+  const forbidden = [
+    "#execution/sandbox/ensure.js",
+    "#execution/sandbox/prewarm.js",
+    "#runtime/sandbox/registry.js",
+    "#sandbox/state.js",
+  ];
+  const issues = [];
+  for (const name of providerNames) {
+    const file = `packages/eve/src/sandbox/providers/${name}.ts`;
+    const source = await readFile(join(REPO_ROOT, file), "utf8");
+    if (!source.includes("defineSandboxProvider")) {
+      issues.push({
+        file,
+        message: "Built-in sandbox providers must use defineSandboxProvider().",
+      });
+    }
+    if (source.includes("createSandboxEnvironment")) {
+      issues.push({
+        file,
+        message:
+          "Built-in sandbox providers must not bypass defineSandboxProvider() through createSandboxEnvironment().",
+      });
+    }
+    for (const specifier of forbidden) {
+      if (source.includes(specifier)) {
+        issues.push({
+          file,
+          message: `Built-in sandbox providers may not bypass the provider contract through ${specifier}.`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 async function main() {
   const baselineRaw = await readFile(BASELINE_PATH, "utf8");
   const baseline = JSON.parse(baselineRaw);
@@ -1148,6 +1422,9 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
+    rule42: /** @type {Violation[]} */ ([]),
+    rule43: /** @type {Violation[]} */ ([]),
+    rule44: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1246,6 +1523,21 @@ async function main() {
 
   // Rule 37
   violations.push(...state.rule37);
+
+  // Rule 38
+  violations.push(...(await checkRule38NoNestedEveBuild()));
+
+  // Rule 42
+  violations.push(...state.rule42);
+
+  // Rule 43
+  violations.push(...state.rule43);
+  violations.push(...state.rule44);
+
+  // Rule 44
+  for (const issue of await checkRule44SandboxProviders()) {
+    violations.push({ rule: 44, ...issue });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

@@ -43,22 +43,40 @@ describe("parsePromptCommand", () => {
   });
 
   it("parses the setup commands", () => {
-    expect(parsePromptCommand("/vc:install")).toEqual({
-      type: "extension",
-      name: "vc:install",
-      argument: "",
-    });
-    expect(parsePromptCommand("/vc:login")).toEqual({
-      type: "extension",
-      name: "vc:login",
-      argument: "",
-    });
+    expect(parsePromptCommand("/vc:install")).toBeNull();
+    expect(parsePromptCommand("/vc:login")).toBeNull();
     expect(parsePromptCommand("/deploy")).toEqual({
       type: "extension",
       name: "deploy",
       argument: "",
     });
     expect(parsePromptCommand("/add")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "",
+    });
+    expect(parsePromptCommand("/login vercel-api-key")).toEqual({
+      type: "extension",
+      name: "login",
+      argument: "vercel-api-key",
+    });
+  });
+
+  it("parses /add with a trimmed registry address", () => {
+    expect(parsePromptCommand("/add channel/slack")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "channel/slack",
+    });
+    expect(parsePromptCommand("/add  extension/agent-browser ")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "extension/agent-browser",
+    });
+  });
+
+  it("parses the typeahead's completed /add, which carries a trailing space", () => {
+    expect(parsePromptCommand("/add ")).toEqual({
       type: "extension",
       name: "add",
       argument: "",
@@ -74,8 +92,10 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("parses /help and rejects /help with an argument", () => {
+  it("parses /help and /info without arguments", () => {
     expect(parsePromptCommand("/help")).toEqual({ type: "help" });
+    expect(parsePromptCommand("/info")).toEqual({ type: "info" });
+    expect(parsePromptCommand("/info verbose")).toBeNull();
     expect(parsePromptCommand("/help model")).toBeNull();
   });
 
@@ -87,7 +107,11 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/models")).toBeNull();
     expect(parsePromptCommand("/vercel")).toBeNull();
     expect(parsePromptCommand("/vc")).toBeNull();
-    expect(parsePromptCommand("/login")).toBeNull();
+    expect(parsePromptCommand("/login")).toEqual({
+      type: "extension",
+      name: "login",
+      argument: "",
+    });
     expect(parsePromptCommand("/vc:auth")).toBeNull();
     expect(parsePromptCommand("/channels")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();
@@ -100,19 +124,22 @@ describe("parsePromptCommand", () => {
 describe("promptCommandsFor", () => {
   it("exposes project commands only for local sessions", () => {
     const names = promptCommandsFor("local").map((command) => command.name);
+    expect(names).toContain("info");
     expect(names).toContain("model");
     expect(names).toContain("add");
     expect(names).toContain("deploy");
-    expect(names).toContain("vc:install");
-    expect(names).toContain("vc:login");
+    expect(names).not.toContain("vc:install");
+    expect(names).not.toContain("vc:login");
     expect(names).not.toContain("vc:auth");
   });
 
-  it("exposes the Vercel CLI commands for remote sessions", () => {
+  it("leads remote sessions with help and hides local setup commands", () => {
     const names = promptCommandsFor("remote").map((command) => command.name);
-    expect(names).toContain("vc:install");
-    expect(names).toContain("vc:login");
+    expect(names[0]).toBe("help");
+    expect(names).not.toContain("vc:install");
+    expect(names).not.toContain("vc:login");
     expect(names).not.toContain("vc:auth");
+    expect(names).not.toContain("info");
     expect(names).not.toContain("model");
     expect(names).not.toContain("add");
     expect(names).not.toContain("deploy");
@@ -126,7 +153,7 @@ describe("promptCommandsFor", () => {
       name: "model",
       argument: "",
     });
-    expect(formatPromptCommandHelp(remote)).toContain("/vc:login");
+    expect(formatPromptCommandHelp(remote)).not.toContain("/vc:login");
     expect(formatPromptCommandHelp(remote)).not.toContain("/vc:auth");
     expect(formatPromptCommandHelp(remote)).not.toContain("/model");
   });
@@ -154,9 +181,9 @@ describe("PROMPT_COMMANDS registry", () => {
     }
   });
 
-  it("pairs an argument hint with takesArgument", () => {
+  it("only gives argument hints to commands that accept arguments", () => {
     for (const spec of PROMPT_COMMANDS) {
-      expect(spec.argumentHint !== undefined).toBe(spec.takesArgument);
+      if (spec.argumentHint !== undefined) expect(spec.takesArgument).toBe(true);
     }
   });
 
@@ -168,8 +195,8 @@ describe("PROMPT_COMMANDS registry", () => {
     }
   });
 
-  it("leads with /help so a bare slash defaults to the safest command", () => {
-    expect(PROMPT_COMMANDS[0]?.name).toBe("help");
+  it("leads with /model so a bare slash opens model selection", () => {
+    expect(PROMPT_COMMANDS[0]?.name).toBe("model");
   });
 });
 

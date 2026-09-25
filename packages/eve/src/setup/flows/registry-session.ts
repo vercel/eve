@@ -1,6 +1,5 @@
 import type { Prompter } from "#setup/prompter.js";
 import { detectDeployment } from "#setup/project-resolution.js";
-import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion, RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 
 import { runDeployFlow } from "./deploy.js";
@@ -10,94 +9,88 @@ export interface RegistrySessionDeps {
   runDeployFlow: typeof runDeployFlow;
 }
 
-export interface RegistrySessionItemResult {
-  address: string;
-  title: string;
-  facts: readonly RegistrySetupFact[];
-  output: readonly string[];
-}
+export type RegistrySessionOutcome =
+  | {
+      kind: "installed";
+      title: string;
+      facts: readonly RegistrySetupFact[];
+      output: readonly string[];
+    }
+  /** Files were added, but the item's setup was cancelled or skipped. */
+  | { kind: "incomplete"; title: string; resumeCommand: string }
+  /** User-facing installation error, including any actionable follow-up lines. */
+  | { kind: "failed"; title: string; message: string }
+  /** Stopped before anything was written. */
+  | { kind: "cancelled"; title: string };
 
 export interface RegistrySessionResult {
-  kind: "done";
-  addedItems: readonly string[];
-  items: readonly RegistrySessionItemResult[];
-  facts: readonly RegistrySetupFact[];
-  output: readonly string[];
+  /** Every item outcome in installation order. */
+  outcomes: readonly RegistrySessionOutcome[];
+  /** Setup stopped outside an individual item after preserving settled results. */
+  cancelled?: true;
   deployed?: "production";
 }
 
 export interface RegistrySession {
-  add(
-    item: string,
-    title: string,
-    output: readonly string[],
-    setup?: RegistrySetupCompletion,
-  ): void;
+  add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
+  addIncomplete(title: string, resumeCommand: string): void;
+  addFailure(title: string, message: string): void;
+  addCancellation(title: string): void;
   result(deployed?: "production"): RegistrySessionResult;
   continueAfterInstall(input: {
     appRoot: string;
     prompter: Prompter;
     signal?: AbortSignal;
-  }): Promise<"add-more" | RegistrySessionResult>;
+  }): Promise<RegistrySessionResult>;
 }
 
 /** Owns the accumulated output and deployment decision for one `/add` session. */
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
-  const addedItems: string[] = [];
-  const items: RegistrySessionItemResult[] = [];
-  const output: string[] = [];
-  let completion: RegistrySetupCompletion = { facts: [] };
-  let currentItem = "";
-  let currentFacts: readonly RegistrySetupFact[] = [];
+  const outcomes: RegistrySessionOutcome[] = [];
+  let deploymentRequired = false;
 
   function result(deployed?: "production"): RegistrySessionResult {
-    const session: RegistrySessionResult = {
-      kind: "done",
-      addedItems,
-      items,
-      facts: completion.facts,
-      output,
-    };
+    const session: RegistrySessionResult = { outcomes: [...outcomes] };
     if (deployed !== undefined) session.deployed = deployed;
     return session;
   }
 
   return {
-    add(item, title, itemOutput, setup = { facts: [] }) {
-      addedItems.push(item);
-      items.push({ address: item, title, facts: setup.facts, output: itemOutput });
-      output.push(...itemOutput);
-      currentItem = title;
-      currentFacts = setup.facts;
-      completion = mergeRegistrySetupCompletions(completion, setup);
+    add(title, itemOutput, setup = { facts: [] }) {
+      outcomes.push({ kind: "installed", title, facts: setup.facts, output: itemOutput });
+      deploymentRequired ||= setup.deploymentRequired === true;
+    },
+
+    addIncomplete(title, resumeCommand) {
+      outcomes.push({ kind: "incomplete", title, resumeCommand });
+    },
+
+    addFailure(title, message) {
+      outcomes.push({ kind: "failed", title, message });
+    },
+
+    addCancellation(title) {
+      outcomes.push({ kind: "cancelled", title });
     },
 
     result,
 
     async continueAfterInstall(input) {
-      if (completion.deploymentRequired !== true) return result();
+      if (!deploymentRequired) return result();
 
       const deployment = await deps.detectDeployment(input.appRoot, { signal: input.signal });
       const canDeploy = deployment.state === "linked" || deployment.state === "deployed";
-      input.prompter.replaceContent?.({
-        headline: `Added ${currentItem}`,
-        facts: currentFacts,
-      });
+      input.prompter.replaceContent?.();
       while (true) {
-        const action = await input.prompter.select<"deploy" | "add-more" | "finish">({
+        const action = await input.prompter.select<"deploy" | "finish">({
           message: "What would you like to do next?",
-          initialValue: "add-more",
+          initialValue: "finish",
           hintLayout: "inline",
           options: [
-            { value: "add-more", label: "Add more" },
             ...(canDeploy ? [{ value: "deploy" as const, label: "Deploy" }] : []),
-            { value: "finish", label: "Finish" },
+            { value: "finish", label: "Start chatting" },
           ],
         });
-        if (action === "add-more") {
-          input.prompter.replaceContent?.();
-          return "add-more";
-        }
         if (action === "finish") return result();
 
         const confirmed = await input.prompter.select<"yes" | "back">({

@@ -1,4 +1,4 @@
-export type PromptCommandExtensionName = "model" | "add" | "deploy" | "vc:install" | "vc:login";
+export type PromptCommandExtensionName = "login" | "model" | "add" | "deploy";
 
 type PromptCommandTarget = "local" | "remote";
 
@@ -10,6 +10,7 @@ export type PromptCommand =
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
+  | { type: "info" }
   | { type: "loglevel"; argument: string }
   | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
@@ -25,10 +26,14 @@ export interface PromptCommandSpec {
   readonly aliases: readonly string[];
   /** One-line discovery copy shown by the typeahead. */
   readonly description: string;
-  /** Argument shape shown dim after the name, e.g. "[provider/model]". */
+  /** Optional argument shape shown dim after the name, e.g. "[provider/model]". */
   readonly argumentHint?: string;
   /** Accepts a trailing argument (enables `/name <arg>` parsing). */
   readonly takesArgument: boolean;
+  /** Whether recalling this command would reopen a modal or take over prompt navigation. */
+  readonly history: "keep" | "omit";
+  /** Inline argument suggestions, when this command has a catalog-backed grammar. */
+  readonly typeahead?: { readonly maxArguments: number; readonly loadingLabel: string };
   /** Maps a recognized invocation to its parsed command. */
   readonly build: (argument: string) => PromptCommand;
 }
@@ -43,18 +48,20 @@ interface PromptCommandDefinition extends PromptCommandSpec {
  * transcript-echo suppression, and command discovery cannot drift apart.
  */
 const PROMPT_COMMAND_DEFINITIONS = [
-  // `help` leads so that the typeahead's default highlight — what a bare `/`
-  // plus Enter submits — is the safest command, not session-resetting `/reset`.
   {
-    name: "help",
+    name: "model",
+    history: "omit",
     aliases: [],
-    description: "Show available commands",
-    takesArgument: false,
-    build: () => ({ type: "help" }),
-    targets: ["local", "remote"],
+    description: "Choose a model, speed, and reasoning",
+    argumentHint: "[provider/model]",
+    takesArgument: true,
+    typeahead: { maxArguments: 2, loadingLabel: "models" },
+    build: (argument) => ({ type: "extension", name: "model", argument }),
+    targets: ["local"],
   },
   {
     name: "reset",
+    history: "keep",
     aliases: [],
     description: "Start a fresh session",
     takesArgument: false,
@@ -62,15 +69,8 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "cancel",
-    aliases: [],
-    description: "Cancel the running turn",
-    takesArgument: false,
-    build: () => ({ type: "cancel" }),
-    targets: ["local", "remote"],
-  },
-  {
     name: "clear",
+    history: "keep",
     aliases: ["new"],
     description: "Clear the current session context",
     takesArgument: false,
@@ -79,6 +79,7 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
   {
     name: "compact",
+    history: "keep",
     aliases: [],
     description: "Compact the current session context",
     takesArgument: false,
@@ -86,41 +87,47 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "vc:install",
+    name: "cancel",
+    history: "keep",
     aliases: [],
-    description: "Install the Vercel CLI",
+    description: "Cancel the running turn",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:install", argument: "" }),
+    build: () => ({ type: "cancel" }),
     targets: ["local", "remote"],
   },
   {
-    name: "vc:login",
+    name: "login",
+    history: "omit",
     aliases: [],
-    description: "Authenticate with Vercel",
-    takesArgument: false,
-    build: () => ({ type: "extension", name: "vc:login", argument: "" }),
-    targets: ["local", "remote"],
-  },
-  {
-    name: "model",
-    aliases: [],
-    description: "Configure the agent's model and provider",
-    argumentHint: "[provider/model]",
+    description: "Connect a model provider",
+    argumentHint: "[connection]",
     takesArgument: true,
-    build: (argument) => ({ type: "extension", name: "model", argument }),
+    typeahead: { maxArguments: 1, loadingLabel: "connections" },
+    build: (argument) => ({ type: "extension", name: "login", argument }),
     targets: ["local"],
   },
   {
-    name: "loglevel",
+    name: "add",
+    history: "omit",
     aliases: [],
-    description: "Show or hide captured stdout/stderr/sandbox logs",
-    argumentHint: "[all|stderr|sandbox|none]",
+    description: "Add an integration from the registry",
     takesArgument: true,
-    build: (argument) => ({ type: "loglevel", argument }),
-    targets: ["local", "remote"],
+    typeahead: { maxArguments: 1, loadingLabel: "registry" },
+    build: (argument) => ({ type: "extension", name: "add", argument }),
+    targets: ["local"],
+  },
+  {
+    name: "deploy",
+    history: "keep",
+    aliases: [],
+    description: "Deploy the agent to Vercel",
+    takesArgument: false,
+    build: () => ({ type: "extension", name: "deploy", argument: "" }),
+    targets: ["local"],
   },
   {
     name: "traces",
+    history: "omit",
     aliases: [],
     description: "Open the local trace viewer",
     argumentHint: "[trace]",
@@ -129,23 +136,37 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local"],
   },
   {
-    name: "add",
+    name: "loglevel",
+    history: "omit",
     aliases: [],
-    description: "Add an integration from the registry",
+    description: "Show or hide captured stdout/stderr/sandbox logs",
+    argumentHint: "[all|stderr|sandbox|none]",
+    takesArgument: true,
+    typeahead: { maxArguments: 1, loadingLabel: "log levels" },
+    build: (argument) => ({ type: "loglevel", argument }),
+    targets: ["local", "remote"],
+  },
+  {
+    name: "info",
+    history: "omit",
+    aliases: [],
+    description: "Show application and messaging information",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "add", argument: "" }),
+    build: () => ({ type: "info" }),
     targets: ["local"],
   },
   {
-    name: "deploy",
+    name: "help",
+    history: "omit",
     aliases: [],
-    description: "Deploy the agent to Vercel",
+    description: "Show available commands",
     takesArgument: false,
-    build: () => ({ type: "extension", name: "deploy", argument: "" }),
-    targets: ["local"],
+    build: () => ({ type: "help" }),
+    targets: ["local", "remote"],
   },
   {
     name: "exit",
+    history: "keep",
     aliases: ["quit"],
     description: "Quit the TUI",
     takesArgument: false,
@@ -154,12 +175,25 @@ const PROMPT_COMMAND_DEFINITIONS = [
   },
 ] satisfies readonly PromptCommandDefinition[];
 
+export type ArgumentTypeaheadCommand = Extract<
+  (typeof PROMPT_COMMAND_DEFINITIONS)[number],
+  { typeahead: object }
+>["name"];
+
 export const PROMPT_COMMANDS: readonly PromptCommandSpec[] = PROMPT_COMMAND_DEFINITIONS;
 
 export function promptCommandsFor(target: PromptCommandTarget): readonly PromptCommandSpec[] {
-  return PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
+  const commands = PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
     definition.targets.some((supportedTarget) => supportedTarget === target),
   );
+  // Remote sessions have no model picker, so keep bare `/` from defaulting to reset.
+  if (target === "remote") {
+    return [
+      ...commands.filter((command) => command.name === "help"),
+      ...commands.filter((command) => command.name !== "help"),
+    ];
+  }
+  return commands;
 }
 
 /** Whether a command runs against this target — the one authority dispatch shares with discovery. */
@@ -181,18 +215,26 @@ export function isPromptCommandAvailableFor(
  * message.
  */
 export function parsePromptCommand(prompt: string): PromptCommand | null {
+  const match = promptCommandSpec(prompt);
+  return match === undefined ? null : match.spec.build(match.argument);
+}
+
+/** Resolve an invocation and its history policy from the same command definition. */
+export function promptCommandSpec(
+  prompt: string,
+): { spec: PromptCommandSpec; argument: string } | undefined {
   const trimmed = prompt.trim();
-  if (!trimmed.startsWith("/")) return null;
+  if (!trimmed.startsWith("/")) return undefined;
   for (const spec of PROMPT_COMMANDS) {
     for (const alias of [spec.name, ...spec.aliases]) {
       const token = `/${alias}`;
-      if (trimmed === token) return spec.build("");
+      if (trimmed === token) return { spec, argument: "" };
       if (spec.takesArgument && trimmed.startsWith(`${token} `)) {
-        return spec.build(trimmed.slice(token.length).trim());
+        return { spec, argument: trimmed.slice(token.length).trim() };
       }
     }
   }
-  return null;
+  return undefined;
 }
 
 /** True for prompts that are commands, which never echo as user messages. */

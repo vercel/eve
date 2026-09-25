@@ -17,9 +17,90 @@ describe("renderBlockLines", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
 
-  it("marks the assistant with the brand triangle", () => {
+  it("keeps a transient command invocation visible without a progress glyph", () => {
+    const block = { kind: "command", body: "/help", live: true } as const;
+    expect(renderBlockLines(block, 60, theme, { ...ctx, transientPanelOpen: true })).toEqual([
+      "│ /help",
+    ]);
+    expect(renderBlockLines(block, 60, theme, ctx)).toEqual(["▪ /help"]);
+  });
+
+  it("marks rendered assistant Markdown with the brand triangle", () => {
     const lines = render({ kind: "assistant", body: "all done" });
-    expect(lines[0]).toBe("▲ all done");
+    expect(lines).toEqual(["▲ all done"]);
+  });
+
+  it("keeps an inline image on the preceding prose row", () => {
+    const lines = renderBlockLines(
+      {
+        kind: "assistant",
+        body: "Visit [eve](https://github.com/vercel-labs/eve) or view this image: ![eve logo](https://eve.dev/logo.png).",
+      },
+      80,
+      theme,
+      ctx,
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(stripAnsi(lines[0] ?? "")).toBe(
+      "▲ Visit eve or view this image:\u00a0▧\u00a0eve\u00a0logo.",
+    );
+
+    const wrapped = renderBlockLines(
+      {
+        kind: "assistant",
+        body: "Visit [eve](https://github.com/vercel-labs/eve) or view this image: ![eve logo](https://eve.dev/logo.png).",
+      },
+      35,
+      theme,
+      ctx,
+    ).map(stripAnsi);
+    expect(wrapped).toEqual(["▲ Visit eve or view this", "  image:\u00a0▧\u00a0eve\u00a0logo."]);
+  });
+
+  it("preserves prose Markdown when Markdown rendering is disabled", () => {
+    const lines = renderBlockLines({ kind: "assistant", body: "**bold**\n\n- item" }, 60, theme, {
+      ...ctx,
+      renderMarkdown: false,
+    }).map(stripAnsi);
+
+    expect(lines).toEqual(["▲ **bold**", "  ", "  - item"]);
+  });
+
+  it("keeps per-item status markers monochrome in a mixed command result", () => {
+    const colored = createTheme({ color: true, unicode: true });
+    const lines = renderBlockLines(
+      {
+        kind: "result",
+        body: "2 additions: 1 added, 1 failed\n\n  ✓ Web Chat\n    Installed.\n\n  ⨯ Slack\n    Installation failed.",
+      },
+      80,
+      colored,
+      ctx,
+    );
+
+    const output = lines.join("\n");
+    expect(output).toContain("2 additions: 1 added, 1 failed");
+    expect(output).not.toContain(colored.colors.gray("✓"));
+    expect(output).not.toContain(colored.colors.red("⨯"));
+    expect(output).not.toContain(colored.colors.green("✓"));
+  });
+
+  it("uses ASCII status markers when Unicode is unavailable", () => {
+    const ascii = createTheme({ color: false, unicode: false });
+    const lines = renderBlockLines(
+      {
+        kind: "result",
+        body: "3 additions: 1 added, 1 failed, 1 cancelled\n\n  ✓ Web Chat\n\n  ⨯ Slack\n\n  – Notion",
+      },
+      80,
+      ascii,
+      ctx,
+    );
+
+    expect(lines.join("\n")).toContain("✓ Web Chat");
+    expect(lines.join("\n")).toContain("⨯ Slack");
+    expect(lines.join("\n")).toContain("– Notion");
   });
 
   it("summarizes a completed tool with a result line", () => {
@@ -204,22 +285,22 @@ describe("renderBlockLines", () => {
     expect(lines).toEqual(["  ※ subagent(self:4)"]);
   });
 
-  it("marks steered and queued user messages with a gutter arrow", () => {
+  it("renders steered and queued messages without extra arrow rows", () => {
     const steered = render({
       kind: "user",
       body: "need to be\n\nsuper accurate",
       promptOrigin: "steer",
     });
-    expect(steered).toEqual(["↑", "│ need to be", "│ ", "│ super accurate"]);
+    expect(steered).toEqual(["│ need to be", "│ ", "│ super accurate"]);
 
     const queued = render({ kind: "user", body: "later then", promptOrigin: "queue" });
-    expect(queued).toEqual(["│ later then", "↑"]);
+    expect(queued).toEqual(["│ later then"]);
 
     // An ordinary typed prompt keeps its bare bar.
     expect(render({ kind: "user", body: "hello" })).toEqual(["│ hello"]);
   });
 
-  it("colors the provenance arrow with the user bar's accent", () => {
+  it("colors the steered message gutter yellow", () => {
     const colorTheme = createTheme({ color: true, unicode: true });
     const rows = renderBlockLines(
       { kind: "user", body: "go", promptOrigin: "steer" },
@@ -227,9 +308,15 @@ describe("renderBlockLines", () => {
       colorTheme,
       { activityPulse: "▪" },
     );
-    // Same cyan as the `│` gutter bar.
-    expect(rows[0]).toBe("\x1b[36m↑\x1b[39m");
-    expect(rows[1]).toContain("\x1b[36m│\x1b[39m");
+    expect(rows).toEqual(["\x1b[33m│\x1b[39m \x1b[1mgo\x1b[22m"]);
+  });
+
+  it("bolds a sent user message behind an uncolored gutter", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const rows = renderBlockLines({ kind: "user", body: "hello" }, 80, colorTheme, {
+      activityPulse: "▪",
+    });
+    expect(rows).toEqual(["│ \x1b[1mhello\x1b[22m"]);
   });
 
   it("pulses the in-progress subagent mark by intensity, with a quiet label", () => {
@@ -438,7 +525,7 @@ describe("error block coloring", () => {
       {
         kind: "error",
         title: "Error",
-        body: "HookConflictError: token in use\n╰▶ docs: https://workflow-sdk.dev/err/hook-conflict",
+        body: "HookConflictError: token in use\n╰› docs: https://workflow-sdk.dev/err/hook-conflict",
       },
       80,
       colorTheme,

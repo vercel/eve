@@ -1,9 +1,17 @@
+import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
+import {
+  applyMemoryRecallBatches,
+  createMemoryLock,
+  projectMemoryHistoryFromSessionState,
+  validateMemoryRecallResult,
+} from "#shared/memory-state.js";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -52,7 +60,8 @@ function createTestConfig(overrides?: Partial<ToolLoopHarnessConfig>): ToolLoopH
 }
 
 type MockAgentSettings = {
-  onStepFinish?: (step: unknown) => Promise<void> | void;
+  onStepStart?: (input: unknown) => Promise<void> | void;
+  onStepEnd?: (step: unknown) => Promise<void> | void;
   prepareStep?: (input: unknown) => Promise<unknown> | unknown;
 };
 
@@ -81,16 +90,17 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
     this: Record<string, unknown>,
     settings: MockAgentSettings,
   ) {
-    const { onStepFinish, prepareStep } = settings;
+    const { onStepEnd, onStepStart, prepareStep } = settings;
 
-    this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+    const generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
       const result = queue.shift();
       if (result === undefined) {
         throw new Error("No mock ToolLoopAgent result available.");
       }
 
+      let preparedMessages = options.messages;
       if (prepareStep) {
-        await prepareStep({
+        const prepared = await prepareStep({
           messages: options.messages,
           model: {},
           runtimeContext: {},
@@ -98,16 +108,36 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
           steps: [],
           toolsContext: {},
         });
+        if (
+          prepared !== null &&
+          typeof prepared === "object" &&
+          "messages" in prepared &&
+          Array.isArray(prepared.messages)
+        ) {
+          preparedMessages = prepared.messages;
+        }
       }
+      await onStepStart?.({ messages: preparedMessages });
 
-      if (onStepFinish) {
-        await onStepFinish(result);
+      if (onStepEnd) {
+        await onStepEnd(result);
       }
 
       return { ...result, responseMessages: getMockResponseMessages(result) };
     });
 
-    this.stream = vi.fn();
+    this.generate = generate;
+    this.stream = vi.fn(async (options: { messages: unknown[] }) => {
+      const result = await generate(options);
+      return {
+        fullStream: new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        responseMessages: Promise.resolve(result.responseMessages),
+      };
+    });
 
     return this as unknown as ToolLoopAgent;
   } as unknown as MockAgentConstructor);
@@ -122,6 +152,69 @@ function expectStepFn(value: StepNext): StepFn {
 }
 
 describe("tool-loop structured compaction accounting", () => {
+  it("keeps private memory out of the summary while retaining its attributed record", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: "ordinary summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "profile",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    const recalled = applyMemoryRecallBatches({
+      batches: [
+        {
+          lock: memoryLock,
+          messages: validateMemoryRecallResult(
+            { messages: [{ content: "PRIVATE_MEMORY_SENTINEL", id: "profile" }] },
+            "profile",
+          ),
+          operationId: "recall_1",
+        },
+      ],
+      history: [],
+      state: undefined,
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        historyProjector: projectMemoryHistoryFromSessionState,
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ provider: "test", modelId: "test-model" } as LanguageModel),
+      }),
+    );
+
+    const result = await runStep(
+      createTestSession({
+        compaction: { recentWindowSize: 0, threshold: 100 },
+        history: [
+          ...validateHarnessModelMessages(recalled.history),
+          { content: `ordinary ${"conversation ".repeat(100)}`, kind: "user", role: "user" },
+        ],
+        state: recalled.state,
+      }),
+      { message: "continue" },
+    );
+
+    expect(vi.mocked(generateText)).toHaveBeenCalledOnce();
+    const prompt = vi.mocked(generateText).mock.calls[0]?.[0].messages?.[0]?.content;
+    if (typeof prompt !== "string") throw new Error("Expected the compaction prompt text.");
+    expect(prompt).not.toContain("PRIVATE_MEMORY_SENTINEL");
+    expect(JSON.stringify(result.session.history)).toContain("PRIVATE_MEMORY_SENTINEL");
+    expect(JSON.stringify(result.session.history)).toContain("eve.memory");
+  });
+
   it("compacts before the continuation step when structured tool results were appended", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",
@@ -198,7 +291,9 @@ describe("tool-loop structured compaction accounting", () => {
 
     const runStep = createToolLoopHarness(
       createTestConfig({
-        resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model" } as LanguageModel),
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ provider: "test", modelId: "test-model" } as LanguageModel),
       }),
     );
 
@@ -223,6 +318,7 @@ describe("tool-loop structured compaction accounting", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
     expect(second.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
+      kind: "context.compaction",
       role: "user",
     });
     expect(second.session.history[1]).toEqual({
@@ -253,15 +349,20 @@ describe("tool-loop structured compaction accounting", () => {
       requests: [
         {
           action: {
-            callId: "question-call",
-            input: { prompt: "Pick one." },
+            callId: "call-1",
+            input: { command: "pwd" },
             kind: "tool-call",
-            toolName: "ask_question",
+            toolName: "bash",
           },
-          display: "select",
-          kind: "question",
-          prompt: "Pick one.",
-          requestId: "question-call",
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Yes" },
+            { id: "cancel", label: "No" },
+          ],
+          prompt: "Approve tool call: bash",
+          requestId: "approval-1",
         },
       ],
       responseMessages: [],
@@ -272,15 +373,15 @@ describe("tool-loop structured compaction accounting", () => {
           recentWindowSize: 10,
           threshold: 101,
         },
-        history: [{ content: "Previous exact prompt", role: "user" }],
+        history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),
     });
 
     const result = await runStep(session, {
       inputResponses: [
         {
-          optionId: "yes",
-          requestId: "question-call",
+          optionId: "approve",
+          requestId: "approval-1",
         },
       ],
     });
@@ -288,6 +389,7 @@ describe("tool-loop structured compaction accounting", () => {
     expect(vi.mocked(generateText)).toHaveBeenCalledTimes(1);
     expect(result.session.history[0]).toEqual({
       content: "Summary of our conversation so far:",
+      kind: "context.compaction",
       role: "user",
     });
     expect(result.session.history[1]).toEqual({
@@ -362,5 +464,141 @@ describe("tool-loop structured compaction accounting", () => {
         : undefined
       )?.output,
     ).toEqual(largeOutput);
+  });
+});
+
+it("compacts history when dynamic instructions grow the request envelope", async () => {
+  const { ContextContainer, contextStorage } = await import("#context/container.js");
+  const { SessionDynamicInstructionsKey } = await import("#context/keys.js");
+  vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
+    ReturnType<typeof generateText>
+  >);
+  setupMockAgentSequence([
+    {
+      finishReason: "stop",
+      response: { messages: [{ content: "Done.", role: "assistant" }] },
+      text: "Done.",
+      toolCalls: [],
+      toolResults: [],
+    },
+  ]);
+  const ctx = new ContextContainer();
+  const dynamicInstructions = "tenant business policy ".repeat(1000);
+  ctx.set(SessionDynamicInstructionsKey, {
+    tenant: [{ role: "system", content: dynamicInstructions }],
+  });
+  const runStep = createToolLoopHarness(createTestConfig());
+  await contextStorage.run(ctx, () =>
+    runStep(
+      createTestSession({
+        compaction: {
+          lastKnownInputTokens: 8000,
+          lastKnownPromptMessageCount: 1,
+          recentWindowSize: 0,
+          threshold: 10000,
+        },
+        history: [{ role: "user", kind: "user", content: "earlier conversation ".repeat(1000) }],
+      }),
+      { message: "continue" },
+    ),
+  );
+  expect(JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions)).toContain(
+    dynamicInstructions,
+  );
+  expect(generateText).toHaveBeenCalledOnce();
+});
+
+describe("final request envelope compaction", () => {
+  const completed = () => ({
+    finishReason: "stop",
+    response: { messages: [{ content: "Done.", role: "assistant" }] },
+    text: "Done.",
+    toolCalls: [],
+    toolResults: [],
+    usage: { inputTokens: 8_000 },
+  });
+
+  it("does not double-count stable instructions on later turns", async () => {
+    const { ContextContainer, contextStorage } = await import("#context/container.js");
+    const { SessionDynamicInstructionsKey } = await import("#context/keys.js");
+    const ctx = new ContextContainer();
+    ctx.set(SessionDynamicInstructionsKey, {
+      tenant: [{ role: "system", content: "tenant policy ".repeat(1_000) }],
+    });
+    setupMockAgentSequence([completed(), completed(), completed()]);
+    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
+      ReturnType<typeof generateText>
+    >);
+    const runStep = createToolLoopHarness(createTestConfig());
+    const first = await contextStorage.run(ctx, () =>
+      runStep(
+        createTestSession({
+          compaction: { recentWindowSize: 0, threshold: 10_000 },
+        }),
+        { message: "First" },
+      ),
+    );
+    expect(getRequestEnvelopeTokens(first.session)).toBeGreaterThan(3_000);
+    const second = await contextStorage.run(ctx, () =>
+      runStep(first.session, { message: "Second" }),
+    );
+    expect(generateText).not.toHaveBeenCalled();
+    expect(getRequestEnvelopeTokens(second.session)).toBe(getRequestEnvelopeTokens(first.session));
+    ctx.set(SessionDynamicInstructionsKey, {
+      tenant: [{ role: "system", content: "tenant policy ".repeat(2_000) }],
+    });
+    await contextStorage.run(ctx, () => runStep(second.session, { message: "Third" }));
+    expect(generateText).toHaveBeenCalledOnce();
+  });
+
+  it("counts dynamic schemas resolved by step.started before calling the model", async () => {
+    const { ContextContainer, contextStorage } = await import("#context/container.js");
+    const { SessionDynamicToolMetadataKey, SessionIdKey } = await import("#context/keys.js");
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const schemaDescription = "connector catalog field ".repeat(1_000);
+    const events: string[] = [];
+    setupMockAgentSequence([completed()]);
+    vi.mocked(generateText).mockResolvedValue({ text: "summary" } as Awaited<
+      ReturnType<typeof generateText>
+    >);
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ provider: "test", modelId: "test-model" } as LanguageModel),
+        handleEvent: async (event) => {
+          events.push(event.type);
+          if (event.type === "step.started")
+            ctx.set(SessionDynamicToolMetadataKey, [
+              {
+                name: "catalog",
+                resolverSlug: "connector",
+                entryKey: "catalog",
+                description: "Connector catalog",
+                inputSchema: { type: "object", description: schemaDescription },
+                callbacks: { execute: { closure: {} } },
+              },
+            ]);
+        },
+      }),
+    );
+    await contextStorage.run(ctx, () =>
+      runStep(
+        createTestSession({
+          compaction: {
+            lastKnownInputTokens: 8_000,
+            lastKnownPromptMessageCount: 1,
+            recentWindowSize: 0,
+            threshold: 10_000,
+          },
+          history: [{ role: "user", kind: "user", content: "earlier" }],
+        }),
+        { message: "continue" },
+      ),
+    );
+    expect(generateText).toHaveBeenCalledOnce();
+    expect(events.indexOf("compaction.requested")).toBeGreaterThan(events.indexOf("step.started"));
+    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools).toHaveProperty("catalog");
   });
 });

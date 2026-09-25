@@ -1,0 +1,165 @@
+---
+title: "Instrumentation"
+description: "Configure lifecycle instrumentation, handle runtime events, and control the content each destination receives."
+url: "/observability/instrumentation"
+---
+
+Add lifecycle instrumentation as files under `agent/instrumentation/`. Each
+file handles eve runtime events independently. Configure trace exporters and
+shared span settings with the [built-in OpenTelemetry APIs](./otel).
+
+The instrumentation directory replaces `agent/instrumentation.ts`. See
+[Migrate instrumentation](/docs/observability/instrumentation-migration) when
+upgrading from `eve < 0.62.0`.
+
+## Add instrumentation
+
+The filename identifies the instrumentation slot. A lifecycle-event file must
+default-export `defineInstrumentation(...)` or `disableInstrumentation()`.
+See [OpenTelemetry](./otel) for the supported OTel declarations.
+
+```text
+agent/instrumentation/
+  audit.ts  lifecycle instrumentation
+```
+
+This instrumentation records action timing and identity without receiving tool
+arguments or results:
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  events: {
+    "action.started": (event, ctx) => {
+      ctx.state.set({ name: event.name, startedAt: Date.now() });
+    },
+    "action.completed": (event, ctx) => {
+      const started = ctx.state.get() as { name: string; startedAt: number } | undefined;
+      if (started === undefined) return;
+
+      console.log({
+        action: started.name,
+        durationMs: Date.now() - started.startedAt,
+        outcome: event.outcome,
+      });
+    },
+  },
+});
+```
+
+`ctx.state` is JSON storage scoped to this file and operation. It survives
+durable suspension and is released after the terminal event.
+
+## Control inputs and outputs
+
+Each lifecycle file created with `defineInstrumentation(...)` has an
+independent `tracePolicy`. It decides whether that file receives a trace and
+whether its events include input or output content. OpenTelemetry destinations
+share the process-wide policy declared by `otel(...)`.
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  tracePolicy: ({ audience, environment }) => ({
+    emit: true,
+    recordInputs: audience === "public" || environment === "development",
+    recordOutputs: audience === "public" || environment === "development",
+  }),
+  events: {
+    "model.call.started": (event) => {
+      console.log("input", event.input);
+    },
+    "model.call.completed": (event) => {
+      console.log("output", event.content);
+    },
+  },
+});
+```
+
+The function receives `agentName`, `channel`, `audience`, `mode`,
+`environment`, and `principalType`. `audience` is `"public"`, `"private"`, or
+`"unknown"`; `environment` is `"development"`, `"preview"`, or
+`"production"`.
+
+Without a policy, or when it returns `true`, eve sends metadata for every
+trace. It includes input and output content in these cases:
+
+| Environment           | Audience               | Content            |
+| --------------------- | ---------------------- | ------------------ |
+| Development           | Any                    | Inputs and outputs |
+| Preview or production | `public`               | Inputs and outputs |
+| Preview or production | `private` or `unknown` | Metadata only      |
+
+Return `{ emit: false }` to not sample the trace for this file. Return
+`{ emit: true, recordInputs, recordOutputs }` to choose the two content
+directions explicitly. Inputs include model prompts, tool arguments, channel
+input, and user responses. Outputs include model responses, tool results,
+requests for user input, model provider metadata, and error details. Omitted
+content fields are unavailable to the handler.
+
+The channel assigns the audience once when it creates the session. It controls
+content capture, not access. See [Audience](../channels/overview#audience) for
+how the channel derives `public`, `private`, and `unknown`.
+
+## Redact fields
+
+Lifecycle events are immutable snapshots. Copy the fields you need into a
+destination-specific payload and redact that copy before sending it:
+
+```ts title="agent/instrumentation/audit.ts"
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  tracePolicy: () => ({
+    emit: true,
+    recordInputs: true,
+    recordOutputs: false,
+  }),
+  events: {
+    "action.started": async (event) => {
+      await sendAuditRecord({
+        id: event.idempotencyKey,
+        input: redactApiKey(event.input),
+        kind: event.kind,
+        name: event.name,
+      });
+    },
+  },
+});
+
+function redactApiKey(value: unknown): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return value;
+
+  const record = value as Record<string, unknown>;
+  return "apiKey" in record ? { ...record, apiKey: "[redacted]" } : record;
+}
+
+async function sendAuditRecord(record: unknown): Promise<void> {
+  // Send the sanitized record to your destination.
+  void record;
+}
+```
+
+Prefer `recordInputs: false` or `recordOutputs: false` when the destination does not need an entire content direction. Use field-level redaction only when the destination needs part of that content.
+
+## Lifecycle events
+
+Instrumentation can handle session, channel delivery, turn, model attempt,
+model call, action, input request, and tool call events. Start and terminal
+events share an `idempotencyKey`, which can serve as a destination row ID.
+
+An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
+
+Handlers from different files run concurrently and are failure-isolated. Do
+not depend on execution order. Use `flush` to drain buffered records and
+`shutdown` to release resources.
+
+## What to read next
+
+- [Migrate instrumentation](/docs/observability/instrumentation-migration): replace `agent/instrumentation.ts`.
+- [OpenTelemetry](/docs/observability/otel): configure process-wide settings and third-party destinations.
+- [Agent Runs](/docs/observability/agent-runs): configure Vercel's built-in trace destination.
+- [Local development](../guides/dev-tui): inspect local traces in the TUI
+- [Hooks](../guides/hooks): react to runtime events outside the instrumentation lifecycle

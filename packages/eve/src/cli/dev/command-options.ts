@@ -9,9 +9,12 @@ export interface DevelopmentCliOptions {
   assistantResponseStats?: AssistantResponseStatsMode;
   connectionAuth?: TerminalPartDisplayMode;
   contextSize?: number;
+  defaultExtensions?: boolean;
   header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
+  /** Internal fresh-agent handoff from `eve init`. */
+  onboard?: boolean;
   logs?: LogDisplayMode;
   name?: string;
   port?: number;

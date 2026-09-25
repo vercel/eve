@@ -1,15 +1,22 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
-import type { MessageResult } from "#client/types.js";
+import type { CancelSessionResult, MessageResult } from "#client/types.js";
 
 /**
  * Internal configuration passed to construct a {@link MessageResponse}.
  */
 interface MessageResponseInput {
-  readonly createStream: () => AsyncGenerator<MessageStreamEvent>;
+  readonly cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
+  readonly createStream: (
+    source?: AsyncIterable<MessageStreamEvent>,
+  ) => AsyncGenerator<MessageStreamEvent>;
+  readonly deliveryId?: string;
   readonly sessionId: string;
 }
+
+const consumeResponse = Symbol("consumeMessageResponse");
+const acceptedDeliveryId = Symbol("acceptedDeliveryId");
 
 /**
  * The response from {@link ClientSession.send}.
@@ -23,14 +30,41 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    * Session ID assigned by the server.
    */
   readonly sessionId: string;
+  readonly [acceptedDeliveryId]: string | undefined;
 
+  readonly #cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
+  #cancellation: Promise<CancelSessionResult> | undefined;
   #consumed = false;
-  readonly #createStream: () => AsyncGenerator<MessageStreamEvent>;
+  readonly #createStream: MessageResponseInput["createStream"];
+  #settled = false;
+  readonly #turnId = Promise.withResolvers<string | undefined>();
 
   /** @internal */
   constructor(input: MessageResponseInput) {
+    this.#cancelTurn = input.cancelTurn;
     this.sessionId = input.sessionId;
+    this[acceptedDeliveryId] = input.deliveryId;
     this.#createStream = input.createStream;
+  }
+
+  /**
+   * Requests cooperative cancellation of this exact turn.
+   *
+   * The request waits for the response stream to identify the turn when
+   * necessary. Continue consuming the stream to observe its durable boundary.
+   */
+  cancel(): Promise<CancelSessionResult> {
+    if (this.#settled) return Promise.resolve({ status: "no_active_turn" });
+    if (this.#cancellation !== undefined) return this.#cancellation;
+
+    const cancellation = this.#turnId.promise.then<CancelSessionResult>((turnId) =>
+      turnId === undefined ? { status: "no_active_turn" } : this.#cancelTurn(turnId),
+    );
+    this.#cancellation = cancellation;
+    void cancellation.catch(() => {
+      if (!this.#settled && this.#cancellation === cancellation) this.#cancellation = undefined;
+    });
+    return cancellation;
   }
 
   /**
@@ -61,11 +95,48 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    * Each response can only be consumed once.
    */
   [Symbol.asyncIterator](): AsyncIterator<MessageStreamEvent> {
+    return this[consumeResponse]();
+  }
+
+  [consumeResponse](
+    source?: AsyncIterable<MessageStreamEvent>,
+  ): AsyncGenerator<MessageStreamEvent> {
     if (this.#consumed) {
       throw new Error("MessageResponse has already been consumed.");
     }
     this.#consumed = true;
 
-    return this.#createStream();
+    return this.#observeStream(source);
   }
+
+  async *#observeStream(
+    source?: AsyncIterable<MessageStreamEvent>,
+  ): AsyncGenerator<MessageStreamEvent> {
+    try {
+      for await (const event of this.#createStream(source)) {
+        if (event.type === "turn.started") {
+          this.#turnId.resolve(event.data.turnId);
+        } else if (isCurrentTurnBoundaryEvent(event)) {
+          this.#settled = true;
+          this.#turnId.resolve(undefined);
+        }
+        yield event;
+      }
+    } finally {
+      this.#turnId.resolve(undefined);
+    }
+  }
+}
+
+/** @internal Returns the accepted message identity without consuming its response stream. */
+export function getMessageResponseDeliveryId(response: MessageResponse): string | undefined {
+  return response[acceptedDeliveryId];
+}
+
+/** @internal Observe a turn through the frontend's existing session stream. */
+export function consumeMessageResponse(
+  response: MessageResponse,
+  source: AsyncIterable<MessageStreamEvent>,
+): AsyncIterable<MessageStreamEvent> {
+  return response[consumeResponse](source);
 }

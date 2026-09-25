@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "../../src/channel/types.js";
-import { startRemoteAgentSession } from "../../src/execution/remote-agent-dispatch.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "../../src/runtime/actions/types.js";
+import { startRemoteAgentSession } from "../../src/subagents/remote-dispatch.js";
+import type { RuntimeRemoteAgentDispatchRequest } from "../../src/shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "../../src/runtime/types.js";
 import {
   type ScenarioAppDescriptor,
@@ -17,7 +17,8 @@ import { startEveDev } from "./dev-server-harness.js";
  * `trustedForwarders`. The receiver's `onMessage` asserts that the
  * forwarded principal — not the transport caller — became the effective
  * session caller, with the `eve:forwarded-by` audit attribute stamped from
- * the verified transport principal.
+ * the verified transport principal. The predicate also limits the router to
+ * Slack principals, so an assertion of any other identity type is refused.
  */
 
 const scenarioApp = useScenarioApp();
@@ -50,7 +51,11 @@ export default eveChannel({
       principalType: "service",
     };
   },
-  trustedForwarders: (caller) => caller.principalId === "router-app",
+  // The router may speak only for Slack users, never for other identity types.
+  trustedForwarders: (caller, assertion) =>
+    caller.principalId === "router-app" &&
+    assertion.principal?.current.authenticator === "slack-webhook" &&
+    assertion.principal.initiator.authenticator === "slack-webhook",
   onMessage(ctx) {
     const caller = ctx.eve.caller;
     if (
@@ -79,9 +84,16 @@ const FORWARDED_USER: SessionAuthContext = {
   subject: "U123",
 };
 
+const APP_PRINCIPAL: SessionAuthContext = {
+  attributes: {},
+  authenticator: "app",
+  principalId: "app",
+  principalType: "service",
+};
+
 describe("remote agent auth forwarding", () => {
   it(
-    "asserts the forwarded principal across the hop and rejects untrusted forwarders",
+    "asserts the forwarded principal across the hop and rejects untrusted forwarders and assertions",
     async () => {
       const receiverApp = await scenarioApp(RECEIVER_DESCRIPTOR);
       const receiver = await startEveDev(receiverApp.appRoot);
@@ -112,6 +124,19 @@ describe("remote agent auth forwarding", () => {
             session: createParentSession(),
           }),
         ).rejects.toThrow(/HTTP 403/);
+
+        // Over-reach: the trusted router asserts an identity type it may not
+        // speak for, so the receiver refuses what is asserted.
+        await expect(
+          startRemoteAgentSession({
+            action: createAction(),
+            auth: APP_PRINCIPAL,
+            callbackBaseUrl: "https://caller.example.com",
+            initiatorAuth: APP_PRINCIPAL,
+            remote: createRemote({ token: ROUTER_TOKEN, url: receiver.url }),
+            session: createParentSession(),
+          }),
+        ).rejects.toThrow(/HTTP 403/);
       } catch (error) {
         throw new Error(
           [`receiver stdout:\n${receiver.stdout()}`, `receiver stderr:\n${receiver.stderr()}`].join(
@@ -127,7 +152,7 @@ describe("remote agent auth forwarding", () => {
   );
 });
 
-function createAction(): RuntimeRemoteAgentCallActionRequest {
+function createAction(): RuntimeRemoteAgentDispatchRequest {
   return {
     callId: "call-forwarded",
     description: "Runtime action event description.",

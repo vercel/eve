@@ -1,46 +1,42 @@
-import { defaultBackend, defineSandbox } from "eve/sandbox";
-import { vercel } from "eve/sandbox/vercel";
+import { DefaultSandbox, defineSandbox, type SandboxSession } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
 
 /**
  * Sandbox lifecycle fixture exercising the surfaces an agent author relies
  * on. The matching evals live under `evals/sandbox/` and assert each piece
- * end-to-end through a real backend.
+ * end-to-end through a real provider.
  *
- * - `bootstrap` runs once per sandbox template. It writes a known marker
- *   file into the workspace AND installs a custom CLI (`eve-greet`) onto the
- *   PATH, the way an author would provision tooling every later session
- *   inherits. The CLI is a Python script, so it also proves the base image's
- *   real Python runtime executes bootstrap-authored code.
- * - `onSession` runs once per live session. It writes a per-session marker
- *   so an eval can prove session-scoped setup ran on top of the shared
- *   template.
+ * - `prepare()` runs once per sandbox environment generation. It writes a
+ *   marker and installs a custom CLI (`eve-greet`) that every later session
+ *   inherits. The CLI also proves the base image can execute Python.
+ * - The selector writes a marker and starts a loopback server once when the
+ *   durable session first opens its sandbox.
  *
- * Backend is left as the framework default so this fixture works both
- * locally (where `defaultBackend()` resolves to `docker()`) and on Vercel
- * deployments (where it resolves to `vercel()`). Both run the published
- * `ghcr.io/vercel/eve:latest` base image, which ships Python, Node, and git;
- * the bootstrap below assumes that real-binary environment and is not meant
- * to run against the dependency-free `just-bash` fallback.
+ * The default environment keeps this fixture portable between local providers
+ * and Vercel Sandbox. Both run the published eve
+ * base image: GHCR locally and VCR on Vercel. CI sets `EVE_SANDBOX_IMAGE_TAG`
+ * to `latest` so release PRs can run before their versioned image exists. The
+ * image ships Python, Node, and git; the preparation below assumes
+ * that real-binary environment and is not meant to run against the
+ * dependency-free `just-bash` fallback.
  *
- * `EVE_TEST_AUTHOR_SNAPSHOT_ID`, when set, overrides the backend with
- * `vercel({ source: { type: "snapshot", snapshotId } })` so the
- * sandbox-author-snapshot smoke test can verify that an author-supplied
- * snapshot is honored as the template base layer while bootstrap still
- * runs on top.
+ * `EVE_TEST_AUTHOR_SNAPSHOT_ID`, when set, overrides the provider with
+ * `VercelSandbox.environment({ prepare })` with a snapshot source so the author-snapshot
+ * smoke test can verify that an author-supplied snapshot remains the base
+ * layer while environment preparation runs on top.
  */
 export const SANDBOX_MARKER_PATH = "/workspace/smoke-marker.txt";
-export const SANDBOX_MARKER_TOKEN = "sandbox-bootstrap-ok-J3Q";
+export const SANDBOX_MARKER_TOKEN = "sandbox-preparation-ok-J3Q";
 
 /**
- * Custom CLI installed during bootstrap. `/usr/local/bin` is on the default
- * PATH in the base image and is writable by the sandbox user (it is the npm
- * global prefix bin, chowned to `vercel-sandbox`), so the same install works
- * whether bootstrap runs as root (Docker) or as `vercel-sandbox` (Vercel).
+ * Custom CLI installed during preparation. The base image puts the sandbox
+ * user's npm global prefix on PATH, so the same install works across providers.
  */
-export const SANDBOX_CLI_PATH = "/usr/local/bin/eve-greet";
+const SANDBOX_CLI_DIRECTORY_PATH = "/home/vercel-sandbox/.local/bin";
+export const SANDBOX_CLI_PATH = `${SANDBOX_CLI_DIRECTORY_PATH}/eve-greet`;
 export const SANDBOX_CLI_TOKEN = "eve-greet-cli-ok-R7M";
 
-/** Per-session marker written by `onSession` (live session, not the template). */
+/** Per-session marker written by the selector, not environment preparation. */
 export const SANDBOX_SESSION_MARKER_PATH = "/workspace/session-marker.txt";
 export const SANDBOX_SESSION_MARKER_TOKEN = "sandbox-onsession-ok-X5T";
 
@@ -133,52 +129,45 @@ const FANOUT_SERVER_SCRIPT = [
 ].join("\n");
 
 const authorSnapshotId = process.env.EVE_TEST_AUTHOR_SNAPSHOT_ID;
-const backend =
-  authorSnapshotId !== undefined
-    ? vercel({ source: { snapshotId: authorSnapshotId, type: "snapshot" } })
-    : defaultBackend();
+const prepareEnvironment = async (sandbox: SandboxSession) => {
+  await sandbox.writeTextFile({ path: SANDBOX_MARKER_PATH, content: SANDBOX_MARKER_TOKEN });
+  const mkdir = await sandbox.run({ command: `mkdir -p ${SANDBOX_CLI_DIRECTORY_PATH}` });
+  if (mkdir.exitCode !== 0)
+    throw new Error(`prepare: failed to create CLI directory: ${mkdir.stderr}`);
+  await sandbox.writeTextFile({ path: SANDBOX_CLI_PATH, content: CLI_SCRIPT });
+  const chmod = await sandbox.run({ command: `chmod +x ${SANDBOX_CLI_PATH}` });
+  if (chmod.exitCode !== 0) throw new Error(`prepare: chmod failed: ${chmod.stderr}`);
+};
 
-export default defineSandbox({
-  backend,
-  // Bump when the bootstrap output changes so the reusable template snapshot
-  // is rebuilt rather than served stale.
-  revalidationKey: () => "agent-tools-sandbox-bootstrap-v2",
-  async bootstrap({ use }) {
-    const sandbox = await use();
-    await sandbox.writeTextFile({
-      path: SANDBOX_MARKER_PATH,
-      content: SANDBOX_MARKER_TOKEN,
-    });
-    // Install a custom CLI onto the PATH and make it executable. Later
-    // sessions inherit it from the template without re-running bootstrap.
-    await sandbox.writeTextFile({ path: SANDBOX_CLI_PATH, content: CLI_SCRIPT });
-    const chmod = await sandbox.run({ command: `chmod +x ${SANDBOX_CLI_PATH}` });
-    if (chmod.exitCode !== 0) {
-      throw new Error(`bootstrap: chmod of ${SANDBOX_CLI_PATH} failed: ${chmod.stderr}`);
-    }
-  },
-  async onSession({ use }) {
-    const sandbox = await use();
-    await sandbox.writeTextFile({
-      path: SANDBOX_SESSION_MARKER_PATH,
-      content: SANDBOX_SESSION_MARKER_TOKEN,
-    });
-    await sandbox.writeTextFile({ path: FANOUT_SERVER_PATH, content: FANOUT_SERVER_SCRIPT });
-    const startServer = await sandbox.run({
-      command: [
-        `if ! curl -fsS http://127.0.0.1:${FANOUT_SERVER_PORT}/health >/dev/null; then`,
-        `  nohup python3 ${FANOUT_SERVER_PATH} >${FANOUT_SERVER_LOG_PATH} 2>&1 &`,
-        "fi",
-        "for attempt in $(seq 1 50); do",
-        `  if curl -fsS http://127.0.0.1:${FANOUT_SERVER_PORT}/health >/dev/null; then exit 0; fi`,
-        "  sleep 0.1",
-        "done",
-        `cat ${FANOUT_SERVER_LOG_PATH} >&2`,
-        "exit 1",
-      ].join("\n"),
-    });
-    if (startServer.exitCode !== 0) {
-      throw new Error(`Fanout server failed to start: ${startServer.stderr}`);
-    }
-  },
+export const environment =
+  authorSnapshotId === undefined
+    ? DefaultSandbox.environment({ prepare: prepareEnvironment })
+    : VercelSandbox.environment({
+        prepare: prepareEnvironment,
+        source: { snapshotId: authorSnapshotId, type: "snapshot" },
+      });
+
+export default defineSandbox(async () => {
+  const sandbox = await environment.open();
+  await sandbox.writeTextFile({
+    path: SANDBOX_SESSION_MARKER_PATH,
+    content: SANDBOX_SESSION_MARKER_TOKEN,
+  });
+  await sandbox.writeTextFile({ path: FANOUT_SERVER_PATH, content: FANOUT_SERVER_SCRIPT });
+  const startServer = await sandbox.run({
+    command: [
+      `if ! curl -fsS http://127.0.0.1:${FANOUT_SERVER_PORT}/health >/dev/null; then`,
+      `  nohup python3 ${FANOUT_SERVER_PATH} >${FANOUT_SERVER_LOG_PATH} 2>&1 &`,
+      "fi",
+      "for attempt in $(seq 1 50); do",
+      `  if curl -fsS http://127.0.0.1:${FANOUT_SERVER_PORT}/health >/dev/null; then exit 0; fi`,
+      "  sleep 0.1",
+      "done",
+      `cat ${FANOUT_SERVER_LOG_PATH} >&2`,
+      "exit 1",
+    ].join("\n"),
+  });
+  if (startServer.exitCode !== 0)
+    throw new Error(`Fanout server failed to start: ${startServer.stderr}`);
+  return sandbox;
 });

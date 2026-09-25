@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(() => true),
   loadDevelopmentEnvironmentFiles: vi.fn(),
-  prewarmBuiltAppSandboxes: vi.fn(async () => undefined),
   spawn: vi.fn(),
 }));
 
@@ -23,10 +22,6 @@ vi.mock("node:child_process", async (importOriginal) => ({
 
 vi.mock("#cli/dev/environment.js", () => ({
   loadDevelopmentEnvironmentFiles: mocks.loadDevelopmentEnvironmentFiles,
-}));
-
-vi.mock("#execution/sandbox/prewarm.js", () => ({
-  prewarmBuiltAppSandboxes: mocks.prewarmBuiltAppSandboxes,
 }));
 
 function createChildProcess(): ChildProcess {
@@ -88,6 +83,7 @@ describe("startProductionServer", () => {
   it("starts the built server with Nitro host and port environment", async () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
+    (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
     mocks.spawn.mockReturnValueOnce(child);
 
     const server = await startProductionServer("/tmp/app", {
@@ -97,10 +93,6 @@ describe("startProductionServer", () => {
 
     expect(server.url).toBe("http://127.0.0.1:4321/");
     expect(mocks.loadDevelopmentEnvironmentFiles).toHaveBeenCalledWith("/tmp/app");
-    expect(mocks.prewarmBuiltAppSandboxes).toHaveBeenCalledWith({
-      appRoot: "/tmp/app",
-      log: expect.any(Function),
-    });
     expect(mocks.spawn).toHaveBeenCalledWith(
       process.execPath,
       ["/tmp/app/.output/server/index.mjs"],
@@ -115,11 +107,6 @@ describe("startProductionServer", () => {
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:4321/eve/v1/health",
-      expect.any(Object),
-    );
-
     await server.close();
 
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -129,6 +116,7 @@ describe("startProductionServer", () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
     process.env.PORT = "4567";
+    (child.stdout as PassThrough).write("Listening on http://0.0.0.0:4567/\n");
     mocks.spawn.mockReturnValueOnce(child);
 
     const server = await startProductionServer("/tmp/app");
@@ -151,7 +139,11 @@ describe("startProductionServer", () => {
   it("resolves port 0 before spawning the built server", async () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
-    mocks.spawn.mockReturnValueOnce(child);
+    mocks.spawn.mockImplementationOnce((_command, _args, options) => {
+      const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+      (child.stdout as PassThrough).write(`Listening on http://127.0.0.1:${port}/\n`);
+      return child;
+    });
 
     const server = await startProductionServer("/tmp/app", {
       host: "127.0.0.1",
