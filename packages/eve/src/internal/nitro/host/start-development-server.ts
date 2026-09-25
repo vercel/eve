@@ -139,6 +139,7 @@ async function formatDevelopmentServerConnectCommand(
     ...eveDevArguments(packageManager).slice(0, -1),
     "remote",
     "connect",
+    "--url",
     serverUrl,
   ].join(" ");
 }
