@@ -122,10 +122,21 @@ describe("buildHomePageResponse", () => {
     expect(body).toContain('<meta name="robots" content="noindex">');
     expect(body).toContain('<meta name="referrer" content="no-referrer">');
     // No external fonts, scripts, or images — the deployment must not
-    // leak its origin to a third party just by being visited.
-    expect(body).not.toMatch(/<script[\s>]/i);
+    // leak its origin to a third party just by being visited. The only
+    // script is the inline copy-button handler, which has no `src`.
+    expect(body).not.toMatch(/<script[^>]+src=/i);
     expect(body).not.toMatch(/<img[\s>]/i);
     expect(body).not.toMatch(/<link[^>]+href=["']https?:/i);
     expect(body).not.toMatch(/@import|url\(https?:/i);
+  });
+
+  it("renders an inline copy button wired to the terminal command", async () => {
+    const body = await buildResponseForRequest("https://my-agent.example.com/").text();
+
+    expect(body).toContain('<button type="button" class="terminal-copy"');
+    expect(body).toContain("navigator.clipboard.writeText");
+    // The handler reads from the DOM rather than re-serializing the command,
+    // so the script carries no request-derived, unescaped value.
+    expect(body).toContain("command.textContent");
   });
 });

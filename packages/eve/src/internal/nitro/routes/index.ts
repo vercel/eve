@@ -17,6 +17,44 @@ const EVE_LOGO_SVG = `<svg aria-hidden="true" class="logo" fill="none" viewBox="
 const EVE_FAVICON_DATA_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 102 102'%3E%3Cpath fill='%23000' d='M0 0h102v102H0z'/%3E%3Cpath fill='%23fff' d='M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z'/%3E%3C/svg%3E";
 
+const COPY_ICON_SVG = `<svg aria-hidden="true" class="copy-icon" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+  </svg>`;
+
+const CHECK_ICON_SVG = `<svg aria-hidden="true" class="check-icon" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <polyline points="20 6 9 17 4 12"></polyline>
+  </svg>`;
+
+/**
+ * Inline copy-button behavior. Reads the command straight from the rendered
+ * `.terminal-cmd` node so we never re-serialize (and thus never risk
+ * double-escaping) the value into a script string. It touches no request
+ * state and loads nothing external, so it cannot leak the deployment origin.
+ */
+const COPY_SCRIPT = `<script>
+(function () {
+  var button = document.querySelector(".terminal-copy");
+  var command = document.querySelector(".terminal-cmd");
+  if (!button || !command || !navigator.clipboard) {
+    if (button) button.hidden = true;
+    return;
+  }
+  var reset;
+  button.addEventListener("click", function () {
+    navigator.clipboard.writeText(command.textContent || "").then(function () {
+      button.classList.add("copied");
+      button.setAttribute("aria-label", "Copied");
+      clearTimeout(reset);
+      reset = setTimeout(function () {
+        button.classList.remove("copied");
+        button.setAttribute("aria-label", "Copy command");
+      }, 1500);
+    });
+  });
+})();
+</script>`;
+
 /**
  * Barebones HTML served at `GET /`.
  *
@@ -25,9 +63,10 @@ const EVE_FAVICON_DATA_URL =
  * (model id, instructions, tools, skills, etc.) lives behind the resolved eve
  * channel auth policy at `/eve/v1/info`.
  *
- * The page also loads zero external assets — no fonts, no scripts, no
- * images, no analytics beacons — so it cannot leak the deployment's
- * origin to a third party simply by being visited.
+ * The page loads zero external assets — no fonts, no images, no
+ * analytics beacons, and no external scripts — so it cannot leak the
+ * deployment's origin to a third party simply by being visited. The only
+ * script is an inline copy-button handler that reads local DOM state.
  *
  * `{{DEPLOYMENT_URL}}` is the only request-time substitution: the page
  * echoes the visitor's own request origin back into the `$ eve dev …`
@@ -193,7 +232,45 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
     user-select: none;
     flex-shrink: 0;
   }
-  .terminal-cmd { color: var(--fg); }
+  .terminal-cmd {
+    color: var(--fg);
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+  }
+  .terminal-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin: -0.375rem -0.4375rem -0.375rem 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--faint);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .terminal-copy:hover {
+    color: var(--fg);
+    background: var(--border);
+  }
+  .terminal-copy:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .terminal-copy svg {
+    display: block;
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+  .terminal-copy .check-icon { display: none; }
+  .terminal-copy.copied { color: var(--accent); }
+  .terminal-copy.copied .copy-icon { display: none; }
+  .terminal-copy.copied .check-icon { display: block; }
 </style>
 </head>
 <body>
@@ -264,7 +341,9 @@ export function buildHomePageHtml(input: {
       : `<div class="terminal mono" role="group" aria-label="Send a message from your terminal">
       <span class="terminal-prompt" aria-hidden="true">$</span>
       <span class="terminal-cmd">${escapeHtml(input.terminalCommand)}</span>
-    </div>`;
+      <button type="button" class="terminal-copy" aria-label="Copy command">${COPY_ICON_SVG}${CHECK_ICON_SVG}</button>
+    </div>
+    ${COPY_SCRIPT}`;
 
   return HOME_PAGE_HTML_TEMPLATE.replace(AGENT_NAME_PLACEHOLDER, () => escapeHtml(input.name))
     .replace(STATUS_DETAIL_PLACEHOLDER, () => escapeHtml(input.statusDetail))
