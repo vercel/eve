@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { pruneDevelopmentRuntimeArtifactsSnapshots } from "#internal/nitro/dev-runtime-artifacts.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
@@ -11,6 +12,7 @@ import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
+  serializeDevelopmentWorldError,
 } from "#internal/workflow/development-world-codec.js";
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 import {
@@ -268,7 +270,7 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("reconciles after pruning, preserves retained runs, and unsubscribes on close", async () => {
+  it("reconciles explicitly after pruning, preserves retained runs, and skips cleanup after close", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-pruning-");
     await seedGeneration(appRoot, "old");
     await seedGeneration(appRoot, "retained");
@@ -313,6 +315,10 @@ describe("parent development Workflow World", () => {
         gracePeriodMs: 60_000,
         retainCount: 0,
       });
+      await expect(callWorld(world, "runs.get", [old])).resolves.toMatchObject({
+        status: "pending",
+      });
+      await world.reconcileExpiredRuns();
       for (const runId of [old, running]) {
         await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({
           status: "cancelled",
@@ -327,6 +333,7 @@ describe("parent development Workflow World", () => {
       await world.close();
       await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "retained"), { recursive: true });
       await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+      await world.reconcileExpiredRuns();
       await expect(callWorld(world, "runs.get", [retained])).resolves.toMatchObject({
         status: "pending",
       });
@@ -414,6 +421,66 @@ describe("parent development Workflow World", () => {
       });
     } finally {
       errorSpy.mockRestore();
+      await world.close();
+    }
+  });
+
+  it("acknowledges stale deliveries whose run no longer exists", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-missing-run-");
+    await seedGeneration(appRoot, "generation-a");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+    try {
+      await world.start();
+      const handled = vi.fn(async () => undefined);
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      for (const payload of [
+        { runId: RUN_ID },
+        { workflowRunId: RUN_ID },
+        { runId: RUN_ID, runInput: { deploymentId: "missing" } },
+      ]) {
+        const response = await handler(
+          new Request("http://localhost/.well-known/workflow/v1/flow", {
+            body: JSON.stringify(payload),
+            headers: deliveryHeaders({}),
+            method: "POST",
+          }),
+        );
+        expect(response.status, await response.text()).toBe(200);
+      }
+      expect(handled).not.toHaveBeenCalled();
+    } finally {
+      await world.close();
+    }
+  });
+
+  it.each([
+    { error: new RunExpiredError("run expired"), status: 200 },
+    { error: new EntityConflictError("storage conflict"), status: 500 },
+    { error: new Error("storage unavailable"), status: 500 },
+  ])("returns $status when delivery run lookup fails with $error", async ({ error, status }) => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-run-lookup-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(encodeDevelopmentWorldValue(serializeDevelopmentWorldError(error)), {
+          status: 500,
+        }),
+    );
+    try {
+      const handled = vi.fn(async () => undefined);
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      const response = await handler(
+        new Request("http://localhost/.well-known/workflow/v1/flow", {
+          body: JSON.stringify({ runId: RUN_ID }),
+          headers: deliveryHeaders({}),
+          method: "POST",
+        }),
+      );
+      expect(response.status).toBe(status);
+      expect(handled).not.toHaveBeenCalled();
+    } finally {
       await world.close();
     }
   });
