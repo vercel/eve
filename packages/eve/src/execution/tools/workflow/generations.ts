@@ -143,9 +143,12 @@ export function createGenerations(first: GenerationCall): Generations {
     if (cancelled && !replied) settle({ status: "cancelled" });
   };
 
+  // Only a receive() called after a cancel confirms it. One the body raced
+  // before the cancel and then abandoned must not take the next input: that
+  // would start the next generation under the cancelled work, whose late
+  // reply would then settle it. Sends stay queued until the body reads again.
   const pump = () => {
-    if (pending === undefined || queue.length === 0) return;
-    confirmCancel();
+    if (pending === undefined || (cancelled && !replied)) return;
     const next = queue.shift();
     if (next === undefined) return;
     if (replied) begin(next);
@@ -221,14 +224,16 @@ export function createGenerations(first: GenerationCall): Generations {
     receive() {
       if (ended !== undefined) return Promise.reject(new TaskEndedError(ended));
       confirmCancel();
-      if (pending !== undefined) return pending.promise;
-      let resolve!: (input: JsonObject) => void;
-      let reject!: (error: unknown) => void;
-      const promise = new Promise<JsonObject>((onResolve, onReject) => {
-        resolve = onResolve;
-        reject = onReject;
-      });
-      pending = { promise, reject, resolve };
+      if (pending === undefined) {
+        let resolve!: (input: JsonObject) => void;
+        let reject!: (error: unknown) => void;
+        const promise = new Promise<JsonObject>((onResolve, onReject) => {
+          resolve = onResolve;
+          reject = onReject;
+        });
+        pending = { promise, reject, resolve };
+      }
+      const { promise } = pending;
       pump();
       return promise;
     },

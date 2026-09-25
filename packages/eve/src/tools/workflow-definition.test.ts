@@ -259,6 +259,59 @@ describe("defineWorkflowTool", () => {
     ).toThrow('defineWorkflowTool: "resumable" must be true or false, received "yes".');
   });
 
+  it.each([
+    ["not an object", { items: { type: "string" }, type: "array" }, "must describe an object"],
+    [
+      "declaring taskId",
+      { properties: { taskId: { type: "number" } }, type: "object" },
+      'cannot declare "taskId"',
+    ],
+  ])("fails the build for a resumable tool whose input schema is %s", (_label, schema, error) => {
+    const execute = Object.assign(async () => undefined, {
+      workflowId: "workflow//release_notes//execute",
+    });
+    const definition = defineWorkflowTool({
+      description: "Draft release notes for Alice.",
+      execute,
+      inputSchema: schema,
+      resumable: true,
+    });
+    expect(() => normalizeToolDefinition(definition, 'Invalid tool "release_notes".')).toThrow(
+      `Invalid tool "release_notes". A resumable tool's inputSchema ${error}`,
+    );
+    // A tool that is not resumable keeps any schema.
+    const plain = defineWorkflowTool({ description: "Look up", execute, inputSchema: schema });
+    expect(normalizeToolDefinition(plain, "Invalid tool.")).toMatchObject({ kind: "tool" });
+  });
+
+  it("types a resumable generator body's yields as progress and its reply as the output", () => {
+    const definition = defineWorkflowTool({
+      description: "Draft release notes for Alice, with progress.",
+      inputSchema: z.object({ version: z.string() }),
+      outputSchema: z.object({ notes: z.string() }),
+      resumable: true,
+      async *execute(input, ctx) {
+        yield { stage: "drafting" };
+        ctx.reply({ notes: `notes(${input.version})` });
+        const next = await ctx.receive();
+        yield "revising";
+        return { notes: `notes(${next.version})` };
+      },
+    });
+    expect(definition.resumable).toBe(true);
+    // After its reply, a body ends with a bare return.
+    defineWorkflowTool({
+      description: "Draft release notes for Bob.",
+      inputSchema: z.object({ version: z.string() }),
+      outputSchema: z.object({ notes: z.string() }),
+      resumable: true,
+      async *execute(input, ctx) {
+        yield { stage: "drafting" };
+        ctx.reply({ notes: input.version });
+      },
+    });
+  });
+
   it("rejects resumable on a tool that is not a workflow tool", () => {
     const definition = { description: "Ordinary", execute: async () => 1, resumable: true };
 

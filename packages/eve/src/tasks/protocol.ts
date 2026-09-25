@@ -80,8 +80,9 @@ export type TaskMessage =
       /** The child's address, on a task's first generation; later ones run on the same child. */
       readonly child?: ChildAddress;
       /**
-       * The send that started this generation, which the owner already
-       * attributed from its sends: a consistency check.
+       * The send a workflow run started this generation for. The owner
+       * attributes generations from its own sends and checks them against
+       * this; on a mismatch, it adopts the run's.
        */
       readonly send?: number;
     }

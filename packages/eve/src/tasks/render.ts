@@ -61,6 +61,10 @@ export const TASK_ENDED_BEFORE_READ_MESSAGE = "The task ended before it read thi
 /** Result of a generation still working when its task ended. */
 export const TASK_ENDED_BEFORE_REPLY_MESSAGE = "The task ended before it replied.";
 
+/** Result of a generation whose run replied and moved on, when the reply never arrived. */
+export const TASK_RESULT_LOST_MESSAGE =
+  "The task finished this work, but its result never reached this session.";
+
 /** Tool result for an attached call that a new message ended. */
 export function renderInterruptedCall(waitedMs: number): string {
   return `Stopped after ${formatDuration(waitedMs)} because a new message arrived.`;
@@ -171,7 +175,7 @@ export function renderTasksNote(records: readonly TaskRecord[]): string | undefi
   const lines = [TASKS_NOTE_LABEL, "<tasks>"];
   for (const task of tasks) {
     lines.push(
-      `<task id="${escapeAttribute(task.id)}" name="${escapeAttribute(task.name)}" status="${task.status}" started="${formatMinute(task.startedAt)}"/>`,
+      `<task id="${escapeAttribute(task.id)}" tool="${escapeAttribute(task.name)}" status="${task.status}" started="${formatMinute(task.startedAt)}"/>`,
     );
   }
   lines.push("</tasks>", "<idle>");
@@ -285,6 +289,18 @@ export function renderTaskBusy(
       return `Task "${taskId}" is working for a workflow tool call and can't take input until it answers. Start a new one by calling ${toolName} without taskId.`;
   }
 }
+
+/** `TASK_BUSY` error message for a send to a task that holds the most unread input it may. */
+export function renderTooManyUnreadSends(taskId: string, toolName: string, limit: number): string {
+  return `Task "${taskId}" already has ${limit} inputs it has not read, so it can't take more yet. Wait for its next result with task_wait, then call ${toolName} with its taskId again.`;
+}
+
+/**
+ * `TASK_NOT_WORKING` error a workflow body's `ctx.agent` call gets when its
+ * own call no longer owns work: it was cancelled, timed out, or replied.
+ */
+export const WORKFLOW_CALL_NOT_WORKING_MESSAGE =
+  "The workflow tool call that made this agent call is no longer working: it was cancelled, timed out, or already replied, so it can't start an agent.";
 
 /**
  * `TASK_UNREACHABLE` error message for a send the task's child could not

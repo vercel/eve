@@ -103,7 +103,11 @@ export async function executeWorkflowBody(
         generations?.noteReport();
         next = await iterator.next();
       }
-      output = (next.value as JsonValue | undefined) ?? last ?? null;
+      // A resumable body's yields are progress; only its reply or return is a result.
+      output =
+        (next.value as JsonValue | undefined) ??
+        (generations === undefined ? last : undefined) ??
+        null;
     }
     return { outcome: { output, status: "completed" }, reportCount };
   } catch (error) {

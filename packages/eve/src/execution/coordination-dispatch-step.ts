@@ -78,7 +78,7 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
       });
       nextSession = sent.session;
       events.push(...sent.events);
-      results.push(sent.result);
+      results.push(...sent.results);
       continue;
     }
     startedResumable ||= request.resumable === true;
@@ -144,12 +144,14 @@ export async function dispatchCoordinationStep(input: CoordinationDispatchStepIn
   if (commands.length > 0) await runCommands(commands, ctx);
   // New resumable tasks are one way idle tasks accumulate.
   if (startedResumable) {
-    nextSession = await retireIdleTaskChildren({
+    const retired = await retireIdleTaskChildren({
       caller: prepared.auth,
       ctx,
       now,
       session: nextSession,
     });
+    nextSession = retired.session;
+    events.push(...retired.events);
   }
 
   return {

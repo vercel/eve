@@ -113,8 +113,8 @@ The model learns which tasks are still out from the `[Tasks]` note. It is a fram
 ```text
 [Tasks]
 <tasks>
-<task id="writer-7k2m9q" name="writer" status="working" started="2026-09-24T14:02Z"/>
-<task id="remind-q4x1ze" name="remind" status="completed" started="2026-09-24T14:05Z"/>
+<task id="writer-7k2m9q" tool="writer" status="working" started="2026-09-24T14:02Z"/>
+<task id="remind-q4x1ze" tool="remind" status="completed" started="2026-09-24T14:05Z"/>
 </tasks>
 <idle_agents>
 <agent id="researcher-2b0c1a" name="researcher">Found three sources on the Orbit launch.</agent>

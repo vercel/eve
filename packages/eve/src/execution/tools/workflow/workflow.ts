@@ -33,6 +33,7 @@ import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import {
   logIgnoredWorkflowResultStep,
+  logUndeliveredGenerationStep,
   logUndeliveredWorkflowOutcomeStep,
 } from "#execution/tools/workflow/undelivered-outcome-step.js";
 
@@ -40,10 +41,10 @@ import {
  * Owns command intake, body execution, and settlement for one workflow tool
  * call. A resumable run stays alive between generations: its command hook
  * carries sends as well as cancels, it reports each generation, and it ends
- * with the task. The run returns the outcome it reported, so the owner's
- * deadline for a call with a time limit can read it once if the report never
- * arrived, including a report whose delivery failed for good; a duplicate
- * start returns nothing.
+ * with the task. The run returns the outcome it reported (a resumable run,
+ * its last reply), so the owner's deadline for a call with a time limit can
+ * read it once if the report never arrived, including a report whose
+ * delivery failed for good; a duplicate start returns nothing.
  */
 export async function workflowToolRunWorkflow(
   input: WorkflowToolRunInput,
@@ -70,11 +71,26 @@ export async function workflowToolRunWorkflow(
   let bodyResult: WorkflowBodyResult | undefined;
   let cleanupDeadline: Promise<"cancel"> | undefined;
   let outcome: WorkflowToolRunOutcome | undefined;
+  let lastReply: Extract<GenerationEvent, { readonly kind: "reply" }> | undefined;
+  // A lifecycle message that cannot be delivered is logged, not thrown: failing
+  // the run would lose the task's end too, which settles whatever the owner
+  // still thinks is working.
+  const deliverGeneration = async (message: WorkflowToolRunGenerationMessage): Promise<void> => {
+    try {
+      await owner.handleMessage(message);
+    } catch (error) {
+      await logUndeliveredGenerationStep({ error: normalizeSerializableError(error), message });
+    }
+  };
+  const relay = async (event: GenerationEvent): Promise<void> => {
+    if (event.kind === "reply") lastReply = event;
+    await deliverGeneration(generationMessage(base, event));
+  };
   // A reply waits until the progress reports the body sent before it reach the owner.
   const relayGenerations = async (): Promise<void> => {
     let event = generations?.next(consumedReports);
     while (event !== undefined) {
-      await owner.handleMessage(generationMessage(base, event));
+      await relay(event);
       event = generations?.next(consumedReports);
     }
   };
@@ -202,7 +218,8 @@ export async function workflowToolRunWorkflow(
    * The body finished, which ends a resumable task: its last generation
    * settles, then the run reports the sends the body never read. A value
    * returned, or an error thrown, after a reply would be a second result, so
-   * it is logged and dropped.
+   * it is logged and dropped. The run returns its last reply, the result the
+   * owner's deadline read settles if the owner never got it.
    */
   async function endGenerations(
     ended: WorkflowToolRunOutcomeMessage,
@@ -210,10 +227,10 @@ export async function workflowToolRunWorkflow(
   ): Promise<WorkflowToolRunOutcomeMessage> {
     const finished = state.finish(ended.result);
     for (let event = state.next(Infinity); event !== undefined; event = state.next(Infinity)) {
-      await owner.handleMessage(generationMessage(base, event));
+      await relay(event);
     }
     const from = { ...base, ...generationFrom(state.call), generation: state.generation };
-    await owner.handleMessage({ from, kind: "ended", unread: finished.unread });
+    await deliverGeneration({ from, kind: "ended", unread: finished.unread });
     const ignored = finished.ignored;
     if (
       ignored !== undefined &&
@@ -222,7 +239,11 @@ export async function workflowToolRunWorkflow(
     ) {
       await logIgnoredWorkflowResultStep({ from, result: ignored });
     }
-    return { from, result: ended.result };
+    if (lastReply === undefined) return { from, result: ended.result };
+    return {
+      from: { ...base, ...generationFrom(lastReply.call), generation: lastReply.generation },
+      result: lastReply.result,
+    };
   }
 }
 

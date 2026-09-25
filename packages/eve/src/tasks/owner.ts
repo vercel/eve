@@ -38,7 +38,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { renderUnknownSendTask } from "#tasks/render.js";
 import { sendReceiptResult, startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
-import { deliverSends, flushHeldCommands, retireIdleTaskChildren } from "#tasks/send.js";
+import { deliverSend, flushHeldCommands, retireIdleTaskChildren } from "#tasks/send.js";
 import { resolveAgentTaskTimeout } from "#tasks/timeout.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import {
@@ -332,18 +332,12 @@ export async function startAgentTasks(input: {
       }
       if (!sent.started) {
         // A working agent takes the input now; one still starting gets it once it reports.
-        const failure = await deliverSends({
-          callbackAlias,
-          ctx,
-          effects: commandEffects(sent.effects),
-          ownerSessionId: session.sessionId,
-        });
-        if (failure !== undefined) {
-          fail(call, action, failure.output);
-          continue;
-        }
-        session = setTaskTable(session, sent.table);
-        receipt(false);
+        const delivered = await deliverSend({ callbackAlias, ctx, now: input.now, sent, session });
+        ({ session } = delivered);
+        events.push(...delivered.events);
+        results.push(...delivered.results);
+        if (delivered.failure === undefined) receipt(false);
+        else fail(call, action, delivered.failure.output);
         continue;
       }
       ({ record, table } = sent);
@@ -470,12 +464,14 @@ export async function startAgentTasks(input: {
     );
   }
 
-  session = await retireIdleTaskChildren({
+  const retired = await retireIdleTaskChildren({
     caller: prepared.auth,
     ctx,
     now: input.now,
     session,
   });
+  ({ session } = retired);
+  events.push(...retired.events);
 
   return {
     events,

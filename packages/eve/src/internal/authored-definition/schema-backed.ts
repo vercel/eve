@@ -25,6 +25,7 @@ import {
   serializeOutputSchema,
   type ToolSchemaSource,
 } from "#tools/schema.js";
+import { resumableInputSchemaError } from "#tools/task-id-schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
 import {
@@ -148,6 +149,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record.inputSchema === undefined
       ? null
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  const resumableSchemaError =
+    resumable === true && inputSchema !== null ? resumableInputSchemaError(inputSchema) : undefined;
+  if (resumableSchemaError !== undefined) throw new Error(`${message} ${resumableSchemaError}`);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);

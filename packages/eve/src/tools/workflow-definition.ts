@@ -122,7 +122,10 @@ export type ResumableWorkflowToolContext<TInput, TOutput> = WorkflowToolContext 
    * Racing it against the current work takes a correction into that work;
    * after `reply`, it waits while the task is idle, and the input starts the
    * next generation. Input the body does not read is returned by its next
-   * `receive()`. Rejects once the task has ended.
+   * `receive()`. After `abortSignal` aborts, input waits for a `receive()`
+   * called after the abort, which settles the stopped generation as
+   * cancelled; a pending one the body started before the abort takes none
+   * until then. Rejects once the task has ended.
    */
   receive(): Promise<TInput>;
   /**
@@ -130,7 +133,7 @@ export type ResumableWorkflowToolContext<TInput, TOutput> = WorkflowToolContext 
    * tool's output; `toModelOutput` applies. A second reply before the next
    * input throws. Replying ends the generation, so eve first cancels the tasks
    * it still owns, such as an un-awaited `ctx.agent` call, and `ctx.agent`
-   * throws until the body reads again.
+   * and `ctx.ask` throw until the body reads again.
    */
   reply(output: TOutput): void;
 };
@@ -218,7 +221,11 @@ type Definition<TInput, TReturn> = Omit<
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
   resumable?: false;
 };
-/** A resumable body replies to each generation; after a reply, it ends with a bare `return`. */
+/**
+ * A resumable body replies to each generation; after a reply, it ends with a
+ * bare `return`. A generator body's yields are progress for the current
+ * generation, never a result.
+ */
 type ResumableDefinition<TInput, TOutput> = Omit<
   WorkflowToolDefinition<TInput, TOutput>,
   typeof WORKFLOW_TOOL_BRAND | "attached" | "execute" | "resumable"
@@ -228,7 +235,7 @@ type ResumableDefinition<TInput, TOutput> = Omit<
   execute(
     input: TInput,
     ctx: ResumableWorkflowToolContext<TInput, TOutput>,
-  ): Promise<TOutput | undefined>;
+  ): Promise<TOutput | undefined> | AsyncGenerator<unknown, TOutput | void>;
 };
 
 export function defineWorkflowTool<

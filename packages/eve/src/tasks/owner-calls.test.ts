@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import { createTaskRecord, taskTable } from "#internal/testing/task-records.js";
 import { checkSend, MAX_RETAINED_IDLE_TASKS, retireIdleTasks } from "#tasks/owner-calls.js";
-import { MAX_WORKING_TASKS } from "#tasks/table.js";
+import { findTask, MAX_UNREAD_SENDS, MAX_WORKING_TASKS, pruneTaskTable } from "#tasks/table.js";
 import { encodeTaskCreator } from "#tasks/results.js";
 
 const NOW = "2026-09-24T14:02:00.000Z";
@@ -40,7 +40,7 @@ describe("retireIdleTasks", () => {
       startedAt: NOW,
       status: "completed",
     });
-    const { retired } = retireIdleTasks(taskTable([notes, ...agents]), null);
+    const { retired } = retireIdleTasks(taskTable([notes, ...agents]), null, NOW);
     expect(retired.map((record) => record.id)).toEqual([notes.id]);
   });
 
@@ -48,11 +48,19 @@ describe("retireIdleTasks", () => {
     const agents = Array.from({ length: MAX_RETAINED_IDLE_TASKS + 2 }, (_, index) => idle(index));
     const working = createTaskRecord({ id: "research-working", startedAt: NOW });
 
-    const { retired, table } = retireIdleTasks(taskTable([...agents, working]), null);
+    const { effects, retired, table } = retireIdleTasks(taskTable([...agents, working]), null, NOW);
 
     expect(retired.map((record) => record.id)).toEqual([agents[0]!.id, agents[1]!.id]);
-    expect(table.records).toHaveLength(MAX_RETAINED_IDLE_TASKS + 1);
-    expect(table.records).toContainEqual(working);
+    // Each retired task ends like any other, keeping its child only for the owner to stop.
+    expect(retired[0]!.child).toBeDefined();
+    expect(effects).toEqual([
+      { kind: "ended", record: expect.objectContaining({ ended: true, id: agents[0]!.id }) },
+      { kind: "ended", record: expect.objectContaining({ ended: true, id: agents[1]!.id }) },
+    ]);
+    expect(findTask(table, agents[0]!.id)?.child).toBeUndefined();
+    const kept = pruneTaskTable(table).records;
+    expect(kept).toHaveLength(MAX_RETAINED_IDLE_TASKS + 1);
+    expect(kept).toContainEqual(working);
   });
 
   it("retires the calling principal's own idle agents before anyone else's", () => {
@@ -63,7 +71,7 @@ describe("retireIdleTasks", () => {
       idle(index, index < 10 ? bob : alice),
     );
 
-    const { retired } = retireIdleTasks(taskTable(agents), alice);
+    const { retired } = retireIdleTasks(taskTable(agents), alice, NOW);
 
     expect(retired.map((record) => record.id)).toEqual([agents[10]!.id]);
   });
@@ -74,14 +82,14 @@ describe("retireIdleTasks", () => {
       idle(index, principal("bob")),
     );
 
-    const { retired } = retireIdleTasks(taskTable(agents), alice);
+    const { retired } = retireIdleTasks(taskTable(agents), alice, NOW);
 
     expect(retired.map((record) => record.id)).toEqual([agents[0]!.id]);
   });
 
   it("leaves a table within the limit untouched", () => {
     const table = taskTable([idle(0), idle(1)]);
-    expect(retireIdleTasks(table, null)).toEqual({ retired: [], table });
+    expect(retireIdleTasks(table, null, NOW)).toEqual({ effects: [], retired: [], table });
   });
 });
 
@@ -133,6 +141,28 @@ describe("checkSend", () => {
     expect(check([agent], { caller: principal("bob") })).toMatchObject({
       code: "TASK_OTHER_PRINCIPAL",
     });
+    // Another principal does not learn which tool the task belongs to.
+    expect(check([agent], { caller: principal("bob"), toolName: "reviewer" })).toMatchObject({
+      code: "TASK_OTHER_PRINCIPAL",
+    });
+  });
+
+  it("refuses a send to a task that already holds the most unread input it may", () => {
+    const sends = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        callId: `send-${String(index)}`,
+        seq: index + 1,
+        turnId: "turn-1",
+      }));
+    const working = { ...agent, status: "working" as const };
+    expect(check([{ ...working, sends: sends(MAX_UNREAD_SENDS - 1) }])).toBeUndefined();
+    expect(check([{ ...working, sends: sends(MAX_UNREAD_SENDS) }])).toEqual({
+      code: "TASK_BUSY",
+      message: `Task "research-7k2m9q" already has ${MAX_UNREAD_SENDS} inputs it has not read, so it can't take more yet. Wait for its next result with task_wait, then call research with its taskId again.`,
+    });
+    // Sends held for an agent still starting count the same, so its held commands stay bounded.
+    const starting = { ...working, child: undefined, sends: sends(MAX_UNREAD_SENDS) };
+    expect(check([starting])).toMatchObject({ code: "TASK_BUSY" });
   });
 
   it("refuses work a workflow body awaits, and a body's send to a working agent", () => {

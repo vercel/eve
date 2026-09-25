@@ -57,12 +57,21 @@ export function readWorkflowToolRunAgentContext(ctx: ToolContext): WorkflowToolR
   return readWorkflowToolRunContext(ctx, "agent");
 }
 
-/** Returns an answer which may be awaited or raced with another workflow operation. */
+/**
+ * Returns an answer which may be awaited or raced with another workflow
+ * operation. A resumable body that replied has no generation to ask for
+ * until it reads again, as for `ctx.agent`.
+ */
 export function ask(
   ctx: ToolContext,
   request: ToolInputRequest,
 ): Hook<ToolInputResponse> | Promise<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
+  if (context.replied === true) {
+    throw new Error(
+      "ctx.ask() was called after ctx.reply(). The generation that replied has ended, so no one waits for its questions; call ctx.receive() first, or ask before replying.",
+    );
+  }
   if (context.canRequestInput === false) return Promise.resolve({ status: "unavailable" });
   const answer = createHook<ToolInputResponse>();
   void resumeHookStep(context.owner.inbox, {

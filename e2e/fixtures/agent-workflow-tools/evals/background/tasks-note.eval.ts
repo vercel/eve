@@ -25,7 +25,7 @@ export default defineEval({
         "the reminder started as a detached task with one receipt",
       ),
     );
-    const listed = new RegExp(`<task id="${taskId}" name="remind_later" status="working"`, "u");
+    const listed = new RegExp(`<task id="${taskId}" tool="remind_later" status="working"`, "u");
 
     const followUp = await first.session.send("Alice is checking on her reminders. BG-NOTE-CHECK");
     followUp.expectOk();

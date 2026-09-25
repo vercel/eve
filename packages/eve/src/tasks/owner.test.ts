@@ -1041,7 +1041,7 @@ describe("sends to a working agent", () => {
   });
 
   it("returns TASK_UNREACHABLE instead of a receipt when the input does not arrive", async () => {
-    dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
+    dispatchSession.mockResolvedValueOnce({ retryable: true, status: "session_not_active" });
 
     const update = await start([modelCall({ taskId: working.id })], [working]);
 
@@ -1051,7 +1051,43 @@ describe("sends to a working agent", () => {
         output: expect.objectContaining({ code: "TASK_UNREACHABLE" }),
       }),
     ]);
-    expect(records(update.sessionState)).toEqual([working]);
+    // The send is taken back, but its number is spent, so a retry is a new message.
+    expect(records(update.sessionState)).toEqual([{ ...working, lastSeq: 1 }]);
+    const retried = await start(
+      [modelCall({ callId: "call-2", taskId: working.id })],
+      records(update.sessionState),
+    );
+    expect(dispatchSession).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ operationId: `${working.id}:2` }),
+      }),
+    );
+    expect(records(retried.sessionState)[0]?.sends).toEqual([
+      { callId: "call-2", seq: 2, turnId: "turn-1" },
+    ]);
+  });
+
+  it("ends a working agent whose session is gone for good", async () => {
+    dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
+
+    const update = await start([modelCall({ taskId: working.id })], [working]);
+
+    expect(update.results).toEqual([
+      expect.objectContaining({
+        isError: true,
+        output: expect.objectContaining({
+          code: "TASK_UNREACHABLE",
+          message: expect.stringContaining("its agent session ended"),
+        }),
+      }),
+    ]);
+    expect(update.events.map((event) => event.type)).toEqual(["task.settled"]);
+    expect(records(update.sessionState)).toEqual([
+      expect.objectContaining({ ended: true, generation: 1, status: "failed" }),
+    ]);
+    expect(readPendingTaskResults(readDurableSession(update.sessionState).state)).toEqual([
+      expect.objectContaining({ generation: 1, taskId: working.id }),
+    ]);
   });
 
   it("lets only the principal that started the agent's work send to it", async () => {

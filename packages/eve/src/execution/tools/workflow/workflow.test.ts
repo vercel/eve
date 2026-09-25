@@ -1,5 +1,6 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Generations } from "#execution/tools/workflow/generations.js";
 import type {
   WorkflowToolRunControlMessage,
   WorkflowToolRunMessage,
@@ -11,12 +12,16 @@ const mocks = vi.hoisted(() => ({
   control: vi.fn(),
   deliver: vi.fn(),
   executeWorkflowBody: vi.fn(),
+  logIgnored: vi.fn(),
   logUndelivered: vi.fn(),
+  logUndeliveredGeneration: vi.fn(),
   openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({ sleep: mocks.sleep }));
 vi.mock("#execution/tools/workflow/undelivered-outcome-step.js", () => ({
+  logIgnoredWorkflowResultStep: mocks.logIgnored,
+  logUndeliveredGenerationStep: mocks.logUndeliveredGeneration,
   logUndeliveredWorkflowOutcomeStep: mocks.logUndelivered,
 }));
 
@@ -43,6 +48,17 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
     turnId: input.session.turn.id,
   }),
   executeWorkflowBody: mocks.executeWorkflowBody,
+  firstGenerationCall: (input: {
+    callId: string;
+    input: object;
+    session: { turn: { id: string; sequence: number } };
+    stepIndex: number;
+  }) => ({
+    callId: input.callId,
+    input: input.input,
+    stepIndex: input.stepIndex,
+    turn: input.session.turn,
+  }),
 }));
 vi.mock("#execution/tools/workflow/owner.js", () => ({
   openWorkflowToolRunOwnerInbox: mocks.openWorkflowToolRunOwnerInbox,
@@ -434,4 +450,55 @@ it("stays quiet when a cancelled run's owner session already ended", async () =>
 
   expect(mocks.deliver).toHaveBeenCalledOnce();
   expect(mocks.logUndelivered).not.toHaveBeenCalled();
+});
+
+describe("a resumable run", () => {
+  const idleInbox = () => ({
+    owner: { inbox: "owner" },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<WorkflowToolRunMessage>>(() => {}),
+      }),
+    }),
+  });
+
+  beforeEach(() => {
+    mocks.openWorkflowToolRunOwnerInbox.mockReturnValue(idleInbox());
+    // The body replies, then ends the task with a bare return.
+    mocks.executeWorkflowBody.mockImplementation(
+      async (_input: unknown, _signal: AbortSignal, generations: Generations) => {
+        generations.reply("draft");
+        return { outcome: { output: null, status: "completed" }, reportCount: 0 };
+      },
+    );
+  });
+
+  it("logs a lifecycle message it could not deliver and still reports the task's end", async () => {
+    mocks.deliver.mockImplementation(async (_token: string, message: WorkflowToolRunMessage) => {
+      if (message.kind === "reply") throw new Error("delivery failed");
+      return true;
+    });
+
+    await workflowToolRunWorkflow({ ...input, resumable: true });
+
+    expect(mocks.logUndeliveredGeneration).toHaveBeenCalledExactlyOnceWith({
+      error: expect.objectContaining({ message: "delivery failed" }),
+      message: expect.objectContaining({ kind: "reply" }),
+    });
+    expect(mocks.deliver).toHaveBeenLastCalledWith(
+      "parent",
+      expect.objectContaining({ kind: "ended", unread: [] }),
+      expect.anything(),
+    );
+  });
+
+  it("returns its last reply for the owner's deadline to read, not its bare return", async () => {
+    const returned = await workflowToolRunWorkflow({ ...input, resumable: true });
+
+    expect(returned).toEqual({
+      from: expect.objectContaining({ callId: "call-1", generation: 1 }),
+      result: { output: "draft", status: "completed" },
+    });
+    expect(mocks.logIgnored).not.toHaveBeenCalled();
+  });
 });

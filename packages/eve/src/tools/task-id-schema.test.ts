@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SEND_INPUT_SCHEMA_HINT, TASK_ID_SEND_PARAMETER_DESCRIPTION } from "#tasks/render.js";
 import { defineJsonSchema, serializeInputSchema, type ToolSchema } from "#tools/schema.js";
-import { withTaskIdParameter } from "#tools/task-id-schema.js";
+import { resumableInputSchemaError, withTaskIdParameter } from "#tools/task-id-schema.js";
 
 const NOTES = defineJsonSchema({
   additionalProperties: false,
@@ -12,7 +12,7 @@ const NOTES = defineJsonSchema({
 });
 
 function wrapped(schema: ToolSchema = NOTES): ToolSchema {
-  return withTaskIdParameter(schema) as ToolSchema;
+  return withTaskIdParameter(schema);
 }
 
 async function validate(schema: ToolSchema, value: unknown) {
@@ -60,19 +60,38 @@ describe("withTaskIdParameter", () => {
     expect(result.issues?.length).toBeGreaterThan(1);
   });
 
-  it("refuses a schema that is not an object or already declares taskId", () => {
-    for (const schema of [
-      defineJsonSchema({ type: "string" }),
-      defineJsonSchema({ properties: { taskId: { type: "number" } }, type: "object" }),
-    ]) {
-      expect(() => serializeInputSchema(wrapped(schema))).toThrow(
-        'A resumable tool needs an object input schema without its own "taskId" property.',
-      );
-    }
+  it("still refuses a schema that is not an object or already declares taskId", () => {
+    expect(() => serializeInputSchema(wrapped(defineJsonSchema({ type: "string" })))).toThrow(
+      "A resumable tool's inputSchema must describe an object",
+    );
+    expect(() =>
+      serializeInputSchema(
+        wrapped(defineJsonSchema({ properties: { taskId: { type: "number" } }, type: "object" })),
+      ),
+    ).toThrow('A resumable tool\'s inputSchema cannot declare "taskId"');
   });
 
-  it("leaves a value that is not a tool schema as it is", () => {
-    const plain = { type: "object" };
-    expect(withTaskIdParameter(plain)).toBe(plain);
+  it("refuses a value that is not a tool schema instead of leaving taskId out", () => {
+    expect(() => withTaskIdParameter({ type: "object" })).toThrow(
+      "A resumable tool's input schema must be an eve tool schema to take taskId.",
+    );
+  });
+});
+
+describe("resumableInputSchemaError", () => {
+  it("accepts an object schema, or one that leaves its type out", () => {
+    expect(resumableInputSchemaError({ properties: { request: {} }, type: "object" })).toBe(
+      undefined,
+    );
+    expect(resumableInputSchemaError({})).toBeUndefined();
+  });
+
+  it("says why a schema cannot take taskId", () => {
+    expect(resumableInputSchemaError({ type: "array" })).toBe(
+      'A resumable tool\'s inputSchema must describe an object, because eve adds "taskId" to it for sends to the tool\'s tasks; this one has type "array".',
+    );
+    expect(resumableInputSchemaError({ properties: { taskId: {} }, type: "object" })).toBe(
+      "A resumable tool's inputSchema cannot declare \"taskId\", because eve adds it for sends to the tool's tasks; rename that property.",
+    );
   });
 });

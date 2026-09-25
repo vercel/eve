@@ -540,6 +540,61 @@ describe("applyWorkflowGenerationStep", () => {
     });
   });
 
+  it("adopts the run that reports when a retried start recorded its exited duplicate", async () => {
+    const duplicate = { ...NOTES, child: { ...RUN, runId: "run-duplicate" } };
+    const owned = createTaskRecord({
+      callId: "call-1:hook-1",
+      child: { continuationToken: "tok", kind: "local", sessionId: "child-1" },
+      id: "researcher-7k2m9q",
+      name: "researcher",
+      workflowCaller: { replyTo: "hook-1", runId: RUN.runId },
+    });
+
+    const update = await applyWorkflowGenerationStep({
+      ...reply(1, "first draft"),
+      sessionState: ownerState(taskTableState([duplicate, owned])),
+    });
+
+    // Cancels and hard stops now reach the run that holds the task's hook.
+    const notes = records(update.sessionState).find((record) => record.id === NOTES.id);
+    expect(notes).toMatchObject({ child: RUN, generation: 1, status: "completed" });
+    expect(update.replies).toEqual([expect.objectContaining({ replyTo: "hook-1" })]);
+  });
+
+  it("adopts the generation a run started for a send whose delivery failed", async () => {
+    const idle = {
+      ...NOTES,
+      delivered: true,
+      lastSeq: 1,
+      status: "completed" as const,
+      undelivered: [{ callId: "call-2", seq: 1, turnId: "turn-2" }],
+    };
+
+    const started = await applyWorkflowGenerationStep({
+      message: { from: { ...from, callId: "call-2", generation: 2 }, kind: "started", send: 1 },
+      serializedContext: {},
+      sessionState: ownerState(taskTableState([idle])),
+    });
+
+    expect(started.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ callId: "call-2", taskId: NOTES.id, turnId: "turn-2" }),
+        type: "task.started",
+      }),
+    ]);
+    // Its reply is no longer stale: it settles the adopted generation.
+    const replied = await applyWorkflowGenerationStep({
+      ...reply(2, "second draft"),
+      sessionState: started.sessionState,
+    });
+    expect(replied.events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ callId: "call-2", output: "second draft" }),
+        type: "task.settled",
+      }),
+    ]);
+  });
+
   it("drops a reply for a generation that is not the task's current one", async () => {
     const state = ownerState(taskTableState([{ ...NOTES, generation: 2 }]));
 

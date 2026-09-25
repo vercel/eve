@@ -107,6 +107,48 @@ describe("createGenerations", () => {
     ]);
   });
 
+  it("starts no generation from a read the body raced before a cancel and abandoned", async () => {
+    const state = createGenerations(FIRST);
+    // The body races a read against its work, and the work wins the race.
+    const abandoned = state.receive();
+    let taken = false;
+    void abandoned.then(() => {
+      taken = true;
+    });
+    state.cancel("Stopped by the model.");
+    state.deliver(1, { note: "next" }, call(1));
+    await Promise.resolve();
+    expect(taken).toBe(false);
+    // The cancelled work's late reply settles its own generation, not the send's.
+    state.reply("stale");
+    expect(summary(drain(state))).toEqual(["reply g1 cancelled read []"]);
+
+    // A read after the cancel takes the send and starts its generation.
+    const next = state.receive();
+    await expect(next).resolves.toEqual({ note: "next" });
+    state.reply("fresh");
+    expect(summary(drain(state))).toEqual([
+      "started g2 send 1 (call-1)",
+      "reply g2 completed read []",
+    ]);
+  });
+
+  it("confirms a cancel only from a read that follows it", async () => {
+    const state = createGenerations(FIRST);
+    const before = state.receive();
+    state.cancel("Stopped by the model.");
+    state.deliver(1, { note: "next" }, call(1));
+    expect(drain(state)).toEqual([]);
+    // The read after the cancel shares the pending read and settles the stopped generation.
+    const after = state.receive();
+    expect(after).toBe(before);
+    await expect(after).resolves.toEqual({ note: "next" });
+    expect(summary(drain(state))).toEqual([
+      "reply g1 cancelled read []",
+      "started g2 send 1 (call-1)",
+    ]);
+  });
+
   it("settles a cancelled generation cancelled even when the body replies", () => {
     const state = createGenerations(FIRST);
     state.cancel("Stopped by the model.");

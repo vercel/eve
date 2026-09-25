@@ -221,7 +221,7 @@ describe("renderTasksNote", () => {
       [
         "[Tasks]",
         "<tasks>",
-        '<task id="researcher-7k2m9q" name="researcher" status="working" started="2026-09-24T14:02Z"/>',
+        '<task id="researcher-7k2m9q" tool="researcher" status="working" started="2026-09-24T14:02Z"/>',
         "</tasks>",
         "<idle>",
         '<task id="d0-2b0c1a" tool="d0">Answered the &lt;Q3&gt; revenue question.</task>',

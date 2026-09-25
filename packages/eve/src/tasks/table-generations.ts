@@ -1,12 +1,17 @@
 import type { JsonObject } from "#shared/json.js";
 import { isTerminalTaskStatus, type TaskMessage, type TaskOutcome } from "#tasks/protocol.js";
 import { childCallId, isOpenResumableTask, type TaskRecord, type TaskSend } from "#tasks/record.js";
-import { TASK_ENDED_BEFORE_READ_MESSAGE, TASK_ENDED_BEFORE_REPLY_MESSAGE } from "#tasks/render.js";
+import {
+  TASK_ENDED_BEFORE_READ_MESSAGE,
+  TASK_ENDED_BEFORE_REPLY_MESSAGE,
+  TASK_RESULT_LOST_MESSAGE,
+} from "#tasks/render.js";
 import {
   cancelConfirmBy,
   findTask,
   generationDeadline,
   issueCommand,
+  MAX_UNREAD_SENDS,
   replaceRecord,
   settleRecord,
   withoutUndefined,
@@ -23,16 +28,18 @@ import {
 
 export type SendTaskResult =
   /** A replayed send; its command already went out. */
-  | { readonly kind: "existing"; readonly record: TaskRecord }
-  | {
-      readonly kind: "sent";
-      readonly table: TaskTable;
-      readonly record: TaskRecord;
-      /** The send started the task's next generation at once: the task was idle. */
-      readonly started: boolean;
-      /** The input command for the child, unless it is an idle agent's next turn. */
-      readonly effects: readonly TaskEffect[];
-    };
+  { readonly kind: "existing"; readonly record: TaskRecord } | SentTask;
+
+export interface SentTask {
+  readonly kind: "sent";
+  readonly table: TaskTable;
+  readonly record: TaskRecord;
+  readonly send: TaskSend;
+  /** The send started the task's next generation at once: the task was idle. */
+  readonly started: boolean;
+  /** The input command for the child, unless it is an idle agent's next turn. */
+  readonly effects: readonly TaskEffect[];
+}
 
 /**
  * Numbers a send and records it. An idle task starts its next generation for
@@ -73,6 +80,7 @@ export function sendTask(
       effects: commanded.effects,
       kind: "sent",
       record: queued,
+      send,
       started: false,
       table: commanded.table,
     };
@@ -84,29 +92,130 @@ export function sendTask(
   });
   const started = replaceRecord(table, next);
   if (next.kind === "agent") {
-    return { effects: [], kind: "sent", record: next, started: true, table: started };
+    return { effects: [], kind: "sent", record: next, send, started: true, table: started };
   }
   const commanded = issueCommand(started, next, command);
   return {
     effects: commanded.effects,
     kind: "sent",
     record: next,
+    send,
     started: true,
     table: commanded.table,
   };
 }
 
-/** Forgets a send its child never received, so no generation waits for it. */
-export function withdrawSend(table: TaskTable, taskId: string, seq: number): TaskTable {
+/**
+ * Takes back a send whose delivery failed: no generation waits for it, and
+ * its number is spent, so a later send never reuses it. The failure may be
+ * ambiguous, the child having taken the input before the call failed, so a
+ * workflow task keeps the send's call and turn for a generation its run may
+ * still report starting for it (see {@link adoptStartedGeneration}). `table`
+ * may predate the send, as when the send would have started the task's next
+ * generation.
+ */
+export function withdrawSend(table: TaskTable, taskId: string, send: TaskSend): TaskTable {
   const record = findTask(table, taskId);
-  const sends = record?.sends?.filter((send) => send.seq !== seq);
-  if (record === undefined || sends === undefined || sends.length === record.sends?.length) {
-    return table;
-  }
+  if (record === undefined) return table;
+  const kept = { callId: send.callId, seq: send.seq, turnId: send.turnId };
   return replaceRecord(
     table,
-    withoutUndefined({ ...record, sends: sends.length === 0 ? undefined : sends }),
+    withoutUndefined({
+      ...record,
+      lastSeq: Math.max(record.lastSeq ?? 0, send.seq),
+      sends: nonEmpty(record.sends?.filter((entry) => entry.seq !== send.seq)),
+      undelivered:
+        record.kind === "workflow"
+          ? [...(record.undelivered ?? []), kept].slice(-MAX_UNREAD_SENDS)
+          : record.undelivered,
+    }),
   );
+}
+
+/**
+ * Checks a generation a workflow run reports starting for a send against the
+ * owner's own attribution, and adopts the run's when they differ. The run
+ * is the authority on which send it read: a delivery the owner saw fail may
+ * have reached it. When the owner gave that generation another send, that
+ * send goes back to the front of the queue, where the run holds it. When the
+ * run started a generation the owner has not, the owner starts it for that
+ * send; a generation the owner still thought working settled in the run, and
+ * its reply never arrived. A send the owner no longer knows is attributed to
+ * the latest generation's call, the same principal's. Only the owner's next
+ * generation can be adopted; anything else is stale or unrecoverable.
+ *
+ * Sends reach the run in the order the owner numbered them, and the run
+ * reads them in that order, so every send numbered below the adopted one
+ * was already read or will never arrive: none of them starts a generation.
+ */
+export function adoptStartedGeneration(
+  table: TaskTable,
+  record: TaskRecord,
+  generation: number,
+  seq: number,
+  now: string,
+): TaskTransition {
+  const unchanged = { effects: [], table };
+  if (record.kind !== "workflow" || record.ended === true) return unchanged;
+  const later = (send: TaskSend) => send.seq > seq;
+  if (generation === record.generation) {
+    if (record.startedBy === seq) return unchanged;
+    // A generation the owner already stopped stopped the run's work on its send too.
+    const displaced: TaskSend[] =
+      record.startedBy === undefined
+        ? []
+        : [
+            withoutUndefined({
+              callId: record.callId,
+              cancelled: isTerminalTaskStatus(record.status) ? (true as const) : undefined,
+              seq: record.startedBy,
+              turnId: record.turnId,
+            }),
+          ];
+    const send = knownSend(record, seq);
+    const next = withoutUndefined({
+      ...record,
+      callId: send.callId,
+      sends: nonEmpty([...displaced, ...(record.sends ?? [])].filter(later)),
+      startedBy: seq,
+      turnId: send.turnId,
+      undelivered: nonEmpty(record.undelivered?.filter(later)),
+    });
+    return { effects: [], table: replaceRecord(table, next) };
+  }
+  if (generation !== record.generation + 1) return unchanged;
+  const effects: TaskEffect[] = [];
+  let current = record;
+  if (!isTerminalTaskStatus(current.status)) {
+    const outcome = endedOutcome(TASK_RESULT_LOST_MESSAGE);
+    current = settleRecord(current, outcome);
+    effects.push({ kind: "settled", outcome, record: current });
+  } else if (current.cancelConfirmBy !== undefined) {
+    current = withoutUndefined({ ...current, cancelConfirmBy: undefined });
+    effects.push({ kind: "confirmed", record: current });
+  }
+  const send = knownSend(current, seq);
+  const rest = withoutUndefined({
+    ...current,
+    sends: nonEmpty(current.sends?.filter(later)),
+    undelivered: nonEmpty(current.undelivered?.filter(later)),
+  });
+  const started = nextGeneration(rest, send, now);
+  const next = send.cancelled === true ? cancelledGeneration(started, send, now) : started;
+  effects.push({ kind: send.cancelled === true ? "cancelled" : "started", record: next });
+  return { effects, table: replaceRecord(table, next) };
+}
+
+/**
+ * Points a workflow task at the run that reports for it. A start retried
+ * after the run began records the duplicate run, which exits at once: only
+ * the run that claimed the task's command hook reports, and cancels, hard
+ * stops, and deadline reads must reach that run.
+ */
+export function adoptWorkflowRun(table: TaskTable, taskId: string, runId: string): TaskTable {
+  const record = findTask(table, taskId);
+  if (record?.child?.kind !== "workflow" || record.child.runId === runId) return table;
+  return replaceRecord(table, { ...record, child: { ...record.child, runId } });
 }
 
 /**
@@ -123,15 +232,20 @@ export function readSendSeqs(
   return (record.sends ?? []).slice(0, message.steers).map((send) => send.seq);
 }
 
-/** The record's sends without those read and the one that started the current generation. */
-export function withoutSends(
+/**
+ * The record's sends without those read and the one that started the
+ * current generation, and its undelivered sends without those read.
+ */
+export function withoutRead(
   record: TaskRecord,
   read: readonly number[],
-): readonly TaskSend[] | undefined {
-  const rest = record.sends?.filter(
-    (send) => !read.includes(send.seq) && send.seq !== record.startedBy,
-  );
-  return rest === undefined || rest.length === 0 ? undefined : rest;
+): Pick<TaskRecord, "sends" | "undelivered"> {
+  return {
+    sends: nonEmpty(
+      record.sends?.filter((send) => !read.includes(send.seq) && send.seq !== record.startedBy),
+    ),
+    undelivered: nonEmpty(record.undelivered?.filter((send) => !read.includes(send.seq))),
+  };
 }
 
 /**
@@ -190,7 +304,7 @@ export function endTask(
     next = settleRecord(next, outcome);
     effects.push({ kind: "settled", outcome, record: next });
   }
-  for (const send of withoutSends(next, []) ?? []) {
+  for (const send of withoutRead(next, []).sends ?? []) {
     const started = nextGeneration(next, send, now);
     if (send.cancelled === true) {
       next = cancelledGeneration(started, send, now);
@@ -208,6 +322,7 @@ export function endTask(
     child: undefined,
     ended: true as const,
     sends: undefined,
+    undelivered: undefined,
   });
   effects.push({ kind: "ended", record: next });
   return { effects, table: replaceRecord(table, next) };
@@ -266,4 +381,20 @@ function cancelledGeneration(started: TaskRecord, send: TaskSend, now: string): 
 
 function endedOutcome(message: string): TaskOutcome {
   return { error: { code: "EXECUTION_FAILED", message }, status: "failed" };
+}
+
+/** A send by its number: queued, undelivered, or else the latest generation's call. */
+function knownSend(record: TaskRecord, seq: number): TaskSend {
+  return (
+    record.sends?.find((send) => send.seq === seq) ??
+    record.undelivered?.find((send) => send.seq === seq) ?? {
+      callId: record.callId,
+      seq,
+      turnId: record.turnId,
+    }
+  );
+}
+
+function nonEmpty<T>(values: readonly T[] | undefined): readonly T[] | undefined {
+  return values === undefined || values.length === 0 ? undefined : values;
 }

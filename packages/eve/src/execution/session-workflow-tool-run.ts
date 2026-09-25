@@ -14,6 +14,7 @@ import {
   surfaceTaskInput,
 } from "#tasks/owner-body.js";
 import { isTerminalTaskStatus } from "#tasks/protocol.js";
+import { WORKFLOW_CALL_NOT_WORKING_MESSAGE } from "#tasks/render.js";
 import { findWorkflowTask, getTaskTable } from "#tasks/state.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { dismissStaleWorkflowRequestStep } from "#execution/tools/workflow/stale-request-step.js";
@@ -107,10 +108,7 @@ async function handleWorkflowToolRunRequest(
             isError: true,
             kind: "subagent-result",
             origin: "dispatch",
-            output: {
-              code: "AGENT_INVOCATION_NOT_ADMITTED",
-              message: "The workflow tool run no longer owns this agent invocation.",
-            },
+            output: { code: "TASK_NOT_WORKING", message: WORKFLOW_CALL_NOT_WORKING_MESSAGE },
             subagentName: message.request.input.target,
           },
         ],

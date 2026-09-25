@@ -80,6 +80,57 @@ export async function resumableCancelWorkflow(input: NotesInput, ctx: WorkflowTo
   }
 }
 
+/**
+ * Waits on a gate while sends queue, reads `reads` of them into its first
+ * generation, answers the next send in a second, then returns: the sends it
+ * never read end with the task.
+ */
+export async function resumableQueueWorkflow(
+  input: NotesInput & { readonly gate: string; readonly reads: number },
+  ctx: WorkflowToolContext,
+) {
+  "use workflow";
+  const task = ctx as NotesContext;
+  await createHook<void>({ token: input.gate });
+  const read: string[] = [];
+  for (let count = 0; count < input.reads; count++) read.push((await task.receive()).request);
+  task.reply([input.request, ...read].join("+"));
+  const next = await task.receive();
+  task.reply(`next ${next.request}`);
+  return undefined;
+}
+
+/**
+ * Starts an agent without awaiting it, waits on a gate, then either replies
+ * (which cancels the agent it still owns) or aborts the agent call's signal.
+ * Either way, the generation's result says how the agent call ended.
+ */
+export async function resumableAgentWorkflow(
+  input: NotesInput & { readonly gate: string; readonly abort?: boolean },
+  ctx: WorkflowToolContext,
+) {
+  "use workflow";
+  const task = ctx as NotesContext;
+  const controller = new AbortController();
+  const call = task
+    .agent("researcher", { message: input.request }, { signal: controller.signal })
+    .then(
+      () => "finished",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+  await createHook<void>({ token: input.gate });
+  if (input.abort === true) {
+    controller.abort(new Error("Alice no longer needs the research."));
+    task.reply(`agent: ${await call}`);
+    return undefined;
+  }
+  task.reply("replied first");
+  const ended = await call;
+  const next = await task.receive();
+  task.reply(`${next.request}: agent ${ended}`);
+  return undefined;
+}
+
 function untilAborted(signal: AbortSignal): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
     if (signal.aborted) reject(signal.reason);

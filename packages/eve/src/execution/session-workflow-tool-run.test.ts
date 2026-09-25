@@ -10,6 +10,7 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelTasksStep } from "#tasks/cancel.js";
 import { startAgentTasks, surfaceTaskInput } from "#tasks/owner-body.js";
 import type { TaskRecord } from "#tasks/record.js";
+import { WORKFLOW_CALL_NOT_WORKING_MESSAGE } from "#tasks/render.js";
 import { getTaskTable } from "#tasks/state.js";
 
 vi.mock("#tasks/owner-body.js", async (importOriginal) => ({
@@ -110,10 +111,7 @@ it.each([
         isError: true,
         kind: "subagent-result",
         origin: "dispatch",
-        output: {
-          code: "AGENT_INVOCATION_NOT_ADMITTED",
-          message: "The workflow tool run no longer owns this agent invocation.",
-        },
+        output: { code: "TASK_NOT_WORKING", message: WORKFLOW_CALL_NOT_WORKING_MESSAGE },
         subagentName: "researcher",
       },
     ],

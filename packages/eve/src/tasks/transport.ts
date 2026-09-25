@@ -164,13 +164,10 @@ export async function sendTaskInput(input: {
     permanent,
   });
   if (child?.kind === "workflow") {
-    const call = input.call ?? {
-      callId: record.callId,
-      stepIndex: 0,
-      turn: { id: record.turnId, sequence: 0 },
-    };
+    // A workflow task's child is its run from the start, so its sends are never held.
+    if (input.call === undefined) throw new Error("A send to a workflow task needs its call.");
     const message: WorkflowToolRunControlMessage = {
-      call,
+      call: input.call,
       input: command.input,
       kind: "input",
       seq: command.seq,

@@ -1,4 +1,7 @@
-import type { WorkflowToolRunOutcomeMessage } from "#execution/tools/workflow/messages.js";
+import type {
+  WorkflowToolRunGenerationMessage,
+  WorkflowToolRunOutcomeMessage,
+} from "#execution/tools/workflow/messages.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
 
@@ -33,6 +36,25 @@ export async function logUndeliveredWorkflowOutcomeStep(input: {
     "a workflow tool run could not report its outcome to its owner",
     rebuildSerializableError(input.error),
     fields,
+  );
+}
+
+/**
+ * Logs a resumable run's lifecycle message that never reached its owner. The
+ * run goes on, so its later messages, and the task's end, still go out.
+ */
+export async function logUndeliveredGenerationStep(input: {
+  readonly error: unknown;
+  readonly message: WorkflowToolRunGenerationMessage;
+}): Promise<void> {
+  "use step";
+
+  const { from, kind } = input.message;
+  logError(
+    createLogger("execution.workflow-tool-run"),
+    "a resumable workflow tool run could not report to its owner",
+    rebuildSerializableError(input.error),
+    { generation: from.generation, kind, runId: from.runId, taskId: from.taskId },
   );
 }
 

@@ -15,6 +15,7 @@ import {
   renderTaskMismatch,
   renderTaskOtherPrincipal,
   renderTooManyTasks,
+  renderTooManyUnreadSends,
   renderUnknownSendTask,
   renderUnknownTask,
 } from "#tasks/render.js";
@@ -22,11 +23,14 @@ import { readTaskCreator, sameTaskPrincipal } from "#tasks/results.js";
 import { isTerminalTaskStatus, type TaskError } from "#tasks/protocol.js";
 import {
   findTask,
+  MAX_UNREAD_SENDS,
   MAX_WORKING_TASKS,
-  removeTasks,
   workingDetachedTaskIds,
+  type TaskEffect,
   type TaskTable,
+  type TaskTransition,
 } from "#tasks/table.js";
+import { endTask } from "#tasks/table-generations.js";
 
 // How the owner resolves one task call: sends, lookups, idle retirement, and
 // the child report that settles an agent call.
@@ -41,22 +45,21 @@ import {
 export const MAX_RETAINED_IDLE_TASKS = 50;
 
 /**
- * Removes idle tasks past {@link MAX_RETAINED_IDLE_TASKS}, least recently
+ * Ends idle tasks past {@link MAX_RETAINED_IDLE_TASKS}, least recently
  * started first. The calling principal's own idle tasks go before anyone
  * else's, so in a shared session one caller's new tasks end another caller's
- * tasks only once the first has none idle. The owner ends each retired task's
- * child; a later send to it fails `UNKNOWN_TASK`.
+ * tasks only once the first has none idle. Each retired task ends like any
+ * other, so its record is pruned; `retired` keeps each one's child for the
+ * owner to end. A later send to it fails `UNKNOWN_TASK`.
  */
 export function retireIdleTasks(
   table: TaskTable,
   caller: SessionAuthContext | null,
-): {
-  readonly table: TaskTable;
-  readonly retired: readonly TaskRecord[];
-} {
+  now: string,
+): TaskTransition & { readonly retired: readonly TaskRecord[] } {
   const idle = table.records.filter(isIdleTask);
   const excess = idle.length - MAX_RETAINED_IDLE_TASKS;
-  if (excess <= 0) return { retired: [], table };
+  if (excess <= 0) return { effects: [], retired: [], table };
   const others = (record: TaskRecord) =>
     sameTaskPrincipal(readTaskCreator(record.creator).auth, caller) ? 0 : 1;
   const retired = idle
@@ -65,10 +68,14 @@ export function retireIdleTasks(
         others(left) - others(right) || Date.parse(left.startedAt) - Date.parse(right.startedAt),
     )
     .slice(0, excess);
-  return {
-    retired,
-    table: removeTasks(table, new Set(retired.map((record) => record.id))),
-  };
+  let next = table;
+  const effects: TaskEffect[] = [];
+  for (const record of retired) {
+    const ended = endTask(next, record, now);
+    next = ended.table;
+    effects.push(...ended.effects);
+  }
+  return { effects, retired, table: next };
 }
 
 /**
@@ -78,9 +85,11 @@ export function retireIdleTasks(
  * and keeps their conversation. Every unauthenticated caller is the same
  * anonymous principal, so this separates no two of them. A workflow body
  * awaits the result of the work it started, so a generation a body awaits
- * takes no send, and a body's send never joins work it did not start. A send
- * that starts an idle task's next generation counts toward the working-task
- * cap like any start.
+ * takes no send, and a body's send never joins work it did not start. A task
+ * holds at most {@link MAX_UNREAD_SENDS} sends it has not read. A send that
+ * starts an idle task's next generation counts toward the working-task cap
+ * like any start. The principal is checked first, so another caller learns
+ * nothing about the task, not even its tool.
  */
 export function checkSend(input: {
   readonly caller: SessionAuthContext | null;
@@ -102,14 +111,14 @@ export function checkSend(input: {
   ) {
     return { code: "UNKNOWN_TASK", message: renderUnknownSendTask(taskId, toolName) };
   }
+  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
+    return { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) };
+  }
   if (
     record.name !== toolName ||
     (input.nodeId !== undefined && record.nodeId !== undefined && record.nodeId !== input.nodeId)
   ) {
     return { code: "TASK_MISMATCH", message: renderTaskMismatch(record) };
-  }
-  if (!sameTaskPrincipal(readTaskCreator(record.creator).auth, input.caller)) {
-    return { code: "TASK_OTHER_PRINCIPAL", message: renderTaskOtherPrincipal(record.id) };
   }
   const working = !isTerminalTaskStatus(record.status);
   if (working && record.workflowCaller !== undefined) {
@@ -117,6 +126,12 @@ export function checkSend(input: {
   }
   if (working && input.fromWorkflow === true) {
     return { code: "TASK_BUSY", message: renderTaskBusy(record.id, toolName, "workflow-caller") };
+  }
+  if ((record.sends?.length ?? 0) >= MAX_UNREAD_SENDS) {
+    return {
+      code: "TASK_BUSY",
+      message: renderTooManyUnreadSends(record.id, toolName, MAX_UNREAD_SENDS),
+    };
   }
   if (working || input.fromWorkflow === true) return undefined;
   const busy = workingDetachedTaskIds(input.table);

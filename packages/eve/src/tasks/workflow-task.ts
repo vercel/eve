@@ -33,15 +33,10 @@ import type { TaskRecord } from "#tasks/record.js";
 import { startReceiptResult, tooManyTasksResult } from "#tasks/receipts.js";
 import { encodeTaskCreator, type TaskCreator } from "#tasks/results.js";
 import { findWorkflowTask, getTaskTable, setTaskTable } from "#tasks/state.js";
-import {
-  applyTaskMessage,
-  findTask,
-  markTaskDelivered,
-  startTask,
-  type TaskEffect,
-} from "#tasks/table.js";
+import { applyTaskMessage, findTask, markTaskDelivered, startTask } from "#tasks/table.js";
+import { adoptWorkflowRun } from "#tasks/table-generations.js";
 import { runCommands } from "#tasks/transport.js";
-import { routeDetachedResult } from "#tasks/wait.js";
+import { routeSettledResults } from "#tasks/wait.js";
 
 // Owner-side lifecycle of workflow tool calls: each call is a task whose
 // child is one workflow tool run.
@@ -232,7 +227,7 @@ export function settleWorkflowTask(input: {
   );
   const results = attached ? [result] : [];
   if (!attached) {
-    const routed = routeGenerationResults(next, applied.effects);
+    const routed = routeSettledResults(next, applied.effects);
     next = routed.session;
     results.push(...routed.results);
   }
@@ -261,7 +256,9 @@ function toWorkflowTaskOutcome(
 
 /**
  * Applies one generation message of a resumable run: a generation it started
- * (a consistency check), a reply, or the task's end. A reply or the end
+ * (checked against the owner's own, see `adoptStartedGeneration`), a reply,
+ * or the task's end. Each message names the run that sent it, which the task
+ * adopts (see `adoptWorkflowRun`). A reply or the end
  * first cancels the tasks the run still owns, such as an un-awaited
  * `ctx.agent` call, so their results precede the generation's own: its
  * result could no longer reflect them. Each cancelled call's awaiting body
@@ -278,8 +275,7 @@ export async function applyWorkflowGenerationStep(input: {
   const now = new Date().toISOString();
   const { message } = input;
   const session = readDurableSession(input.sessionState);
-  const table = getTaskTable(session);
-  const record = findWorkflowTask(table, message.from);
+  const record = findWorkflowTask(getTaskTable(session), message.from);
   if (record === undefined) {
     return {
       events: [],
@@ -290,6 +286,17 @@ export async function applyWorkflowGenerationStep(input: {
     };
   }
   const { runId } = message.from;
+  const table = adoptWorkflowRun(getTaskTable(session), record.id, runId);
+  if (
+    message.kind === "started" &&
+    (message.from.generation !== record.generation || message.send !== record.startedBy)
+  ) {
+    log.warn("a workflow task's run started a generation the owner did not expect; adopting it", {
+      expected: { generation: record.generation, send: record.startedBy },
+      reported: { generation: message.from.generation, send: message.send },
+      taskId: record.id,
+    });
+  }
   const ownedCalls =
     message.kind === "started"
       ? []
@@ -304,7 +311,7 @@ export async function applyWorkflowGenerationStep(input: {
   if (owned.commands.length > 0) {
     await runCommands(owned.commands, await readContext(input.serializedContext));
   }
-  const routed = routeGenerationResults(setTaskTable(session, applied.table), applied.effects);
+  const routed = routeSettledResults(setTaskTable(session, applied.table), applied.effects);
   return {
     events: [...owned.events, ...taskEvents(applied.effects, session.sessionId)],
     replies: ownedCalls.map(cancelledCallReply),
@@ -350,20 +357,4 @@ function cancelledCallReply(record: TaskRecord): WorkflowCallerReply {
       subagentName: record.name,
     },
   };
-}
-
-/** Sends each detached result among the effects to a live `task_wait` or holds it. */
-function routeGenerationResults<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  effects: readonly TaskEffect[],
-): { readonly session: T; readonly results: readonly RuntimeToolResultActionResult[] } {
-  let next = session;
-  const results: RuntimeToolResultActionResult[] = [];
-  for (const effect of effects) {
-    if (effect.kind !== "settled") continue;
-    const routed = routeDetachedResult(next, effect.record, effect.outcome);
-    next = routed.session;
-    if (routed.result !== undefined) results.push(routed.result);
-  }
-  return { results, session: next };
 }

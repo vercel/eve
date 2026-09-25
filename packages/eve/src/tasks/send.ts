@@ -8,14 +8,14 @@ import type {
   RuntimeToolResultActionResult,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
-import { taskStartedEvent } from "#tasks/events.js";
+import { taskEvents, taskStartedEvent } from "#tasks/events.js";
 import { checkSend, retireIdleTasks } from "#tasks/owner-calls.js";
 import { isTerminalTaskStatus, type TaskCommand } from "#tasks/protocol.js";
 import { sendReceiptResult, taskToolErrorResult } from "#tasks/receipts.js";
 import { renderUnknownSendTask } from "#tasks/render.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { TASK_CANCEL_CONFIRM_MS, type TaskTable } from "#tasks/table.js";
-import { sendTask, withdrawSend } from "#tasks/table-generations.js";
+import { findTask, TASK_CANCEL_CONFIRM_MS, type TaskTable } from "#tasks/table.js";
+import { endTask, sendTask, withdrawSend, type SentTask } from "#tasks/table-generations.js";
 import { armChildHardStop } from "#tasks/timer-steps.js";
 import {
   RETIRED_IDLE_TASK_REASON,
@@ -25,6 +25,7 @@ import {
   type CommandEffect,
   type SendFailure,
 } from "#tasks/transport.js";
+import { routeSettledResults } from "#tasks/wait.js";
 
 // The owner's sends, a call to a resumable tool with a task's `taskId`, and
 // the retirement of idle tasks past the cap.
@@ -33,33 +34,66 @@ const log = createLogger("tasks.send");
 
 type Session = { readonly sessionId: string; readonly state?: SessionStateMap };
 
+type InputCommand = Extract<TaskCommand, { readonly kind: "input" }>;
+
+/** What the owner publishes and returns after a transition it applied for a call. */
+interface OwnerChange<T> {
+  readonly events: readonly UnstampedMessageStreamEvent[];
+  /** Results of live `task_wait` calls the transition settled. */
+  readonly results: readonly RuntimeToolResultActionResult[];
+  readonly session: T;
+}
+
 /**
- * Delivers the input commands of a send to its task's child. Returns the
- * call's error when the child did not take the input; the owner then keeps
- * no record of the send.
+ * Delivers a recorded send's input to its task's child, when the child is
+ * started and takes input now, and writes the table after it. A send the
+ * child did not take is withdrawn (see `withdrawSend`), and a child gone for
+ * good ends its task, failing the work it held.
  */
-export async function deliverSends(input: {
+export async function deliverSend<T extends Session>(input: {
   readonly callbackAlias: string | undefined;
   /** A workflow run's generation takes the send's call context. */
   readonly call?: WorkflowToolRunSendCall;
   readonly ctx: ContextContainer | undefined;
-  readonly effects: readonly CommandEffect[];
-  readonly ownerSessionId: string;
-}): Promise<SendFailure | undefined> {
-  for (const effect of input.effects) {
-    for (const command of effect.commands) {
-      if (command.kind !== "input") continue;
-      const failure = await sendTaskInput({ ...input, command, record: effect.record });
-      if (failure !== undefined) return failure;
-    }
+  readonly now: string;
+  readonly sent: SentTask;
+  /** The session before the send. */
+  readonly session: T;
+}): Promise<OwnerChange<T> & { readonly failure?: SendFailure }> {
+  const { sent, session } = input;
+  const command = sent.effects.flatMap((effect) =>
+    effect.kind === "send" ? effect.commands.filter(isInputCommand) : [],
+  )[0];
+  const failure =
+    command === undefined
+      ? undefined
+      : await sendTaskInput({
+          ...input,
+          command,
+          ownerSessionId: session.sessionId,
+          record: sent.record,
+        });
+  if (failure === undefined) {
+    return { events: [], results: [], session: setTaskTable(session, sent.table) };
   }
-  return undefined;
+  const withdrawn = withdrawSend(getTaskTable(session), sent.record.id, sent.send);
+  const ended = failure.permanent
+    ? endTask(withdrawn, findTask(withdrawn, sent.record.id)!, input.now)
+    : { effects: [], table: withdrawn };
+  const routed = routeSettledResults(setTaskTable(session, ended.table), ended.effects);
+  return {
+    events: taskEvents(ended.effects, session.sessionId),
+    failure,
+    results: routed.results,
+    session: routed.session,
+  };
 }
 
 /**
  * Applies a send to a resumable workflow tool's task, from a model call with
  * `taskId`. The input goes to the run's command hook at once; the call
- * returns its receipt, or the send's error, such as `UNKNOWN_TASK`.
+ * returns its receipt, or the send's error, such as `UNKNOWN_TASK`, first
+ * among its results.
  */
 export async function applyWorkflowSend<T extends Session>(input: {
   readonly call: WorkflowToolRunSendCall;
@@ -68,11 +102,7 @@ export async function applyWorkflowSend<T extends Session>(input: {
   readonly now: string;
   readonly request: RuntimeWorkflowTaskRequest & { readonly taskId: string };
   readonly session: T;
-}): Promise<{
-  readonly events: readonly UnstampedMessageStreamEvent[];
-  readonly result: RuntimeToolResultActionResult;
-  readonly session: T;
-}> {
+}): Promise<OwnerChange<T>> {
   const { request, session } = input;
   const table = getTaskTable(session);
   const refused = checkSend({
@@ -95,8 +125,9 @@ export async function applyWorkflowSend<T extends Session>(input: {
     code: "UNKNOWN_TASK",
     message: renderUnknownSendTask(request.taskId, request.toolName),
   };
-  if (sent === undefined)
-    return { events: [], result: taskToolErrorResult(request, error), session };
+  if (sent === undefined) {
+    return { events: [], results: [taskToolErrorResult(request, error)], session };
+  }
   const receipt = (started: boolean) =>
     sendReceiptResult({
       callId: request.callId,
@@ -105,27 +136,25 @@ export async function applyWorkflowSend<T extends Session>(input: {
       toolName: request.toolName,
     });
   if (sent.kind === "existing") {
-    return { events: [], result: receipt(sent.record.callId === request.callId), session };
+    return { events: [], results: [receipt(sent.record.callId === request.callId)], session };
   }
-  const failure = await deliverSends({
+  const delivered = await deliverSend({
     call: input.call,
     callbackAlias: undefined,
     ctx: input.ctx,
-    effects: sent.effects.filter((effect) => effect.kind === "send"),
-    ownerSessionId: session.sessionId,
+    now: input.now,
+    sent,
+    session,
   });
-  if (failure !== undefined) {
-    return {
-      events: [],
-      result: {
-        callId: request.callId,
-        isError: true,
-        kind: "tool-result",
-        output: failure.output,
-        toolName: request.toolName,
-      },
-      session,
+  if (delivered.failure !== undefined) {
+    const failed: RuntimeToolResultActionResult = {
+      callId: request.callId,
+      isError: true,
+      kind: "tool-result",
+      output: delivered.failure.output,
+      toolName: request.toolName,
     };
+    return { ...delivered, results: [failed, ...delivered.results] };
   }
   const child = sent.record.child;
   return {
@@ -133,14 +162,14 @@ export async function applyWorkflowSend<T extends Session>(input: {
       sent.started && child !== undefined
         ? [taskStartedEvent({ child, ownerSessionId: session.sessionId, record: sent.record })]
         : [],
-    result: receipt(sent.started),
-    session: setTaskTable(session, sent.table),
+    results: [receipt(sent.started)],
+    session: delivered.session,
   };
 }
 
 /**
  * Runs the commands held for a child that just reported `task.started`. A
- * held send that cannot be delivered then is dropped and logged, and no
+ * held send that cannot be delivered then is withdrawn and logged, and no
  * generation waits for it; the call that sent it already returned its
  * receipt. A stopped task's held sends are not sent.
  */
@@ -157,18 +186,14 @@ export async function flushHeldCommands(input: {
     const rest = effect.commands.filter((command) => command.kind !== "input");
     if (rest.length > 0) others.push({ ...effect, commands: rest });
     if (isTerminalTaskStatus(effect.record.status)) continue;
-    for (const command of effect.commands) {
-      if (command.kind !== "input") continue;
-      const failure = await sendTaskInput({
-        ...input,
-        command: command as Extract<TaskCommand, { readonly kind: "input" }>,
-        record: effect.record,
-      });
+    for (const command of effect.commands.filter(isInputCommand)) {
+      const failure = await sendTaskInput({ ...input, command, record: effect.record });
       if (failure === undefined) continue;
       log.error("a held send did not reach its task; its result will not reflect it", {
         taskId: effect.record.id,
       });
-      table = withdrawSend(table, effect.record.id, command.seq);
+      const send = effect.record.sends?.find((entry) => entry.seq === command.seq);
+      if (send !== undefined) table = withdrawSend(table, effect.record.id, send);
     }
   }
   await runCommands(others, input.ctx);
@@ -186,14 +211,15 @@ export async function retireIdleTaskChildren<T extends Session>(input: {
   readonly ctx: ContextContainer | undefined;
   readonly now: string;
   readonly session: T;
-}): Promise<T> {
-  const retired = retireIdleTasks(getTaskTable(input.session), input.caller);
-  if (retired.retired.length === 0) return input.session;
+}): Promise<Omit<OwnerChange<T>, "results">> {
+  const retired = retireIdleTasks(getTaskTable(input.session), input.caller, input.now);
+  if (retired.retired.length === 0) return { events: [], session: input.session };
   const session = setTaskTable(input.session, retired.table);
+  const events = taskEvents(retired.effects, session.sessionId);
   const unreached = (
     await Promise.all(retired.retired.map((record) => retireIdleTask(record, input.ctx)))
   ).filter((child) => child !== undefined);
-  if (unreached.length === 0) return session;
+  if (unreached.length === 0) return { events, session };
   try {
     await armChildHardStop({
       endReason: RETIRED_IDLE_TASK_REASON,
@@ -206,5 +232,9 @@ export async function retireIdleTaskChildren<T extends Session>(input: {
       ownerSessionId: session.sessionId,
     });
   }
-  return session;
+  return { events, session };
+}
+
+function isInputCommand(command: TaskCommand): command is InputCommand {
+  return command.kind === "input";
 }

@@ -26,7 +26,13 @@ import {
 } from "#tasks/render.js";
 import { holdTaskResult, takeTaskResult } from "#tasks/results.js";
 import { getTaskTable, setTaskTable } from "#tasks/state.js";
-import { findTask, markTaskDelivered, readTaskTable, setTaskWait } from "#tasks/table.js";
+import {
+  findTask,
+  markTaskDelivered,
+  readTaskTable,
+  setTaskWait,
+  type TaskEffect,
+} from "#tasks/table.js";
 import { isTaskWaitRequest, readTaskWaitInput, type TaskWaitOutput } from "#tasks/wait-tool.js";
 
 // Owner side of `task_wait`. A wait is the `wait` field of its task's record:
@@ -134,6 +140,22 @@ export function routeDetachedResult<T extends Session>(
   const waited = takeLiveWait(session, record, outcome);
   if (waited.result !== undefined) return waited;
   return { session: holdTaskResult(waited.session, record, outcome) };
+}
+
+/** Routes each detached result a transition settled (see {@link routeDetachedResult}). */
+export function routeSettledResults<T extends Session>(
+  session: T,
+  effects: readonly TaskEffect[],
+): { readonly session: T; readonly results: readonly RuntimeToolResultActionResult[] } {
+  let next = session;
+  const results: RuntimeToolResultActionResult[] = [];
+  for (const effect of effects) {
+    if (effect.kind !== "settled") continue;
+    const routed = routeDetachedResult(next, effect.record, effect.outcome);
+    next = routed.session;
+    if (routed.result !== undefined) results.push(routed.result);
+  }
+  return { results, session: next };
 }
 
 /**

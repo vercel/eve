@@ -23,10 +23,11 @@ import {
 } from "#tasks/record.js";
 import { renderLastStatus } from "#tasks/render.js";
 import {
+  adoptStartedGeneration,
   continueWithSends,
   endTask,
   readSendSeqs,
-  withoutSends,
+  withoutRead,
 } from "#tasks/table-generations.js";
 
 /** Session state key holding the owner's task records. */
@@ -49,6 +50,13 @@ export const DEFAULT_AGENT_TIMEOUT_MS = 2 * 60 * 60_000;
 
 /** Working detached tasks one session may hold; a start over the cap fails `TOO_MANY_TASKS`. */
 export const MAX_WORKING_TASKS = 20;
+
+/**
+ * Sends one task may hold unread, queued in its child or held for a child
+ * still starting. A send past the cap fails `TASK_BUSY`, so neither the
+ * record nor the child's queue grows without bound.
+ */
+export const MAX_UNREAD_SENDS = 20;
 
 const MAX_DATE_MS = 8.64e15;
 
@@ -306,12 +314,17 @@ export function applyTaskMessage(
       ? { effects: [], table }
       : endTask(table, record, now, message.unread);
   }
+  // A run's report of a generation it started for a send, checked against the owner's own.
+  if (message.kind === "task.started" && message.send !== undefined) {
+    return record === undefined
+      ? { effects: [], table }
+      : adoptStartedGeneration(table, record, message.generation, message.send, now);
+  }
   if (record === undefined || record.generation !== message.generation) {
     return { effects: [], table };
   }
   switch (message.kind) {
     case "task.started": {
-      // A later generation's start confirms what the owner derived from its sends.
       if (record.child !== undefined || message.child === undefined) return { effects: [], table };
       const pending = record.pendingCommands ?? [];
       const next = withoutUndefined({
@@ -349,19 +362,19 @@ export function applyTaskMessage(
       }
       const answerSeq = message.answer ?? record.answerSeq;
       // Sends the child read during this generation, and the one that started it.
-      const sends = withoutSends(record, readSendSeqs(record, message));
+      const read = withoutRead(record, readSendSeqs(record, message));
       const effects: TaskEffect[] = [];
       let next: TaskRecord;
       if (isTerminalTaskStatus(record.status) && record.cancelConfirmBy !== undefined) {
         // A child the owner stopped (cancelled or timed out) confirms here.
-        next = withoutUndefined({ ...record, answerSeq, cancelConfirmBy: undefined, sends });
+        next = withoutUndefined({ ...record, ...read, answerSeq, cancelConfirmBy: undefined });
         effects.push(
           withoutUndefined({ kind: "confirmed" as const, record: next, usage: message.usage }),
         );
       } else if (isTerminalTaskStatus(record.status)) {
         return { effects: [], table };
       } else {
-        next = withoutUndefined({ ...settleRecord(record, message.outcome), answerSeq, sends });
+        next = withoutUndefined({ ...settleRecord(record, message.outcome), ...read, answerSeq });
         effects.push(
           withoutUndefined({
             kind: "settled" as const,
@@ -382,10 +395,7 @@ export function applyTaskMessage(
   }
 }
 
-/**
- * Settles a working task failed with `error` and asks its child to stop:
- * a timeout, or a generation that starts over the working-task cap.
- */
+/** Settles a working task failed with `error`, such as a timeout, and asks its child to stop. */
 export function failTask(
   table: TaskTable,
   taskId: string,
@@ -475,12 +485,6 @@ export function setTaskWait(
   const record = findTask(table, taskId);
   if (record === undefined || record.wait === wait) return table;
   return replaceRecord(table, withoutUndefined({ ...record, wait }));
-}
-
-/** Removes records whose children the owner has already ended. */
-export function removeTasks(table: TaskTable, taskIds: ReadonlySet<string>): TaskTable {
-  const records = table.records.filter((record) => !taskIds.has(record.id));
-  return records.length === table.records.length ? table : toTable(records);
 }
 
 /**

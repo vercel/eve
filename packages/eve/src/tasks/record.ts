@@ -44,7 +44,10 @@ export interface TaskRecord {
   readonly clockStoppedAt?: string;
   /** After cancellation, the owner hard-stops a local child that has not confirmed by then. */
   readonly cancelConfirmBy?: string;
-  /** Commands issued before the child reported `task.started`. */
+  /**
+   * Commands issued before the child reported `task.started`. Each input
+   * among them is also one of `sends`, so the unread cap bounds them.
+   */
   readonly pendingCommands?: readonly TaskCommand[];
   /** The `input.requested` batches the task waits on; present exactly while `input_required`. */
   readonly input?: readonly TaskInputBatch[];
@@ -61,8 +64,15 @@ export interface TaskRecord {
    * the agent answers.
    */
   readonly sends?: readonly TaskSend[];
-  /** The last send number the owner assigned. */
+  /** The last send number the owner assigned, delivered or not: numbers never repeat. */
   readonly lastSeq?: number;
+  /**
+   * Sends whose delivery failed, oldest first and at most the unread cap. A
+   * failed delivery may still have reached the run, so a generation the run
+   * reports starting for one takes that send's call and turn. Workflow tasks
+   * only: an agent reports how many messages it read, not which.
+   */
+  readonly undelivered?: readonly TaskSend[];
   /** The send that started the current generation. */
   readonly startedBy?: number;
   /**
@@ -301,6 +311,13 @@ export function decodeTaskRecord(value: unknown): TaskRecordDecodeResult {
   )
     return fail("invalid sends");
   if (value.lastSeq !== undefined && !isCount(value.lastSeq)) return fail("invalid lastSeq");
+  if (
+    value.undelivered !== undefined &&
+    (!Array.isArray(value.undelivered) ||
+      value.undelivered.length === 0 ||
+      !value.undelivered.every(isTaskSend))
+  )
+    return fail("invalid undelivered");
   if (value.startedBy !== undefined && !isCount(value.startedBy)) return fail("invalid startedBy");
   if (!isOptionalString(value.childCallId)) return fail("invalid childCallId");
   if (value.answerSeq !== undefined && !isCount(value.answerSeq)) return fail("invalid answerSeq");
