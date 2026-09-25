@@ -92,7 +92,8 @@ export function resolveInvokeOperation(input: {
   const prompt = input.prompt?.trim();
   const previous = input.previous;
   if (previous === undefined) {
-    if (!prompt) throw new Error("eve invoke requires a prompt unless --resume is provided.");
+    if (!prompt)
+      throw new Error("eve remote invoke requires a prompt unless --resume is provided.");
     return { kind: "send", payload: { message: prompt } };
   }
 
@@ -208,7 +209,7 @@ async function observeInvocation(
       return {
         status: "failed",
         message:
-          "Local eve invoke cannot pause for connection authorization because its temporary server must remain available for the callback. Run eve dev, then invoke its URL with --url.",
+          "Local invocations are not supported. Start eve dev, then use eve remote invoke with its URL.",
       };
     }
     return { status: "authorization-required", authorizations, resume };

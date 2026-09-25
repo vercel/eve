@@ -1,37 +1,31 @@
 ---
 title: "CLI"
-description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, traces, link, deploy, eval, channels, extension, and telemetry."
+description: "Reference for every eve CLI command."
 ---
 
 Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
-| Command                        | Description                                                                                                                        |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `eve`                          | Initialize the current directory, or start development when it is already an eve project                                           |
-| `eve init [target]`            | Create a new agent, or add an agent to an existing project                                                                         |
-| `eve info`                     | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
-| `eve build`                    | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
-| `eve start`                    | Serve the built `.output/` app; prints the listening URL                                                                           |
-| `eve dev`                      | Start the local dev server and open the terminal UI                                                                                |
-| `eve dev <url>`                | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
-| `eve acp [url]`                | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
-| `eve logs [logid]`             | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
-| `eve logs ls`                  | List `eve dev` diagnostic logs, most recent first                                                                                  |
-| `eve traces ls`                | List locally captured agent traces, most recent first                                                                              |
-| `eve traces [trace]`           | Show a local span tree (the most recent when omitted)                                                                              |
-| `eve telemetry <command>`      | Show, enable, or disable CLI telemetry collection                                                                                  |
-| `eve link`                     | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
-| `eve deploy`                   | Deploy the agent to Vercel production (links first if needed)                                                                      |
-| `eve eval`                     | Run evals against the local app or a remote target                                                                                 |
-| `eve channels list`            | List user-authored channels                                                                                                        |
-| `eve extension init [target]`  | Create a new extension package                                                                                                     |
-| `eve extension build`          | Build the current package as an extension                                                                                          |
-| `eve set`                      | Change the root agent's model and reasoning effort                                                                                 |
-| `eve add <item>`               | Install an item from the official or a configured shadcn registry                                                                  |
-| `eve integration setup <kind>` | Run a built-in setup flow directly after its registry files are installed                                                          |
-| `eve registry <command>`       | Add sources and list, search, or view registry catalog items                                                                       |
+| Command                                        | Description                                            |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| `eve init [target]`                            | Create a new agent, or add one to an existing project  |
+| `eve dev`                                      | Start the local development server and terminal UI     |
+| `eve remote connect <url>`                     | Open the terminal UI for an existing agent             |
+| `eve remote invoke <url> [prompt]`             | Invoke an existing agent without a terminal UI         |
+| `eve remote info <url>`                        | Inspect an existing agent                              |
+| `eve acp [url]`                                | Serve a local or existing agent through ACP over stdio |
+| `eve info`                                     | Inspect the local application                          |
+| `eve set model <model> [--reasoning <effort>]` | Change model settings                                  |
+| `eve set reasoning <effort>`                   | Change reasoning effort                                |
+| `eve build` / `eve start`                      | Build or serve the application                         |
+| `eve logs show [logid]` / `eve logs list`      | Inspect local diagnostic logs                          |
+| `eve traces show [trace]` / `eve traces list`  | Inspect local traces                                   |
+| `eve link` / `eve deploy`                      | Link or deploy a Vercel project                        |
+| `eve eval`                                     | Run evals against a local or remote target             |
+| `eve add [item]` / `eve registry <command>`    | Install and browse registry items                      |
+| `eve extension <command>`                      | Create and build extension packages                    |
+| `eve telemetry <command>`                      | Manage CLI telemetry collection                        |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -101,19 +95,19 @@ Builds the complete agent-shaped extension tree into its configured dist root, e
 Change the root agent's AI Gateway model and reasoning effort without opening the dev TUI:
 
 ```bash
-eve set \
-  --model openai/gpt-6-sol \
-  --reasoning high
+eve set model openai/gpt-6-sol --reasoning high
+eve set reasoning medium
 ```
 
-Pass either flag by itself to change one setting. When you pass both, eve writes
-them to `agent/agent.ts` in one source edit. `--reasoning` accepts
+Use `eve set model` to change the model, optionally with its reasoning effort.
+Use `eve set reasoning` to change only the reasoning effort. When you set both,
+eve writes them to `agent/agent.ts` in one source edit. `--reasoning` accepts
 `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`;
 `provider-default` removes the authored `reasoning` field.
 
 The command uses the same model ID validation and source editor as `/model` in
-the local dev TUI. It does not configure model credentials. The `--model` flag
-cannot rewrite models defined with `defineDynamic`, an environment expression,
+the local dev TUI. It does not configure model credentials. The `model`
+argument cannot rewrite models defined with `defineDynamic`, an environment expression,
 or a provider-authored SDK model; change those models in `agent.ts`.
 `--reasoning` can still update an editable root config when its model comes from
 an SDK call.
@@ -211,66 +205,51 @@ For self-hosted deployments, copy the app source, `.output/`, and installed depe
 
 ```bash
 eve dev [options]
-eve dev https://your-app.vercel.app
 ```
 
-Pass a bare URL and the UI connects to that server instead of booting a local one (same as `--url`), which lets you smoke-test a preview or production deployment. The interactive UI turns off in a non-TTY terminal.
+Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect <url>`.
 
-| Flag                                | Type   | Default            | Description                                                                               |
-| ----------------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------- |
-| `--host <host>`                     | string | all interfaces     | Host interface to bind                                                                    |
-| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                                                         |
-| `-u, --url <url>`                   | string | none               | Connect to an existing server URL instead of starting one                                 |
-| `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
-| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
-| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                                               |
-| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                                            |
-| `--input <text>`                    | string | none               | Pre-fill the prompt input                                                                 |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
-| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`         |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden` |
-| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic: `tokens` \| `tokensPerSecond`                                 |
-| `--context-size <tokens>`           | number | none               | Model context window size, shown as a usage percentage                                    |
-| `--logs <mode>`                     | enum   | `stderr`           | Server/agent logs to show: `all` \| `stderr` \| `sandbox` \| `none`                       |
+| Flag                                | Type   | Default            | Description                                 |
+| ----------------------------------- | ------ | ------------------ | ------------------------------------------- |
+| `--host <host>`                     | string | all interfaces     | Host interface to bind                      |
+| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                           |
+| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI  |
+| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions |
+| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI              |
+| `--input <text>`                    | string | none               | Pre-fill the prompt input                   |
+| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                         |
+| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                         |
+| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering                  |
+| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering          |
+| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                  |
+| `--context-size <tokens>`           | number | none               | Model context window size                   |
+| `--logs <mode>`                     | enum   | `stderr`           | Server and agent logs to show               |
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
-`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
+`eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
+
+## `eve remote`
+
+Use `eve remote` only with an explicit existing agent URL:
+
+```bash
+eve remote connect https://agent.example.com
+eve remote invoke https://agent.example.com "Summarize station telemetry"
+eve remote info https://agent.example.com
+```
+
+`connect` opens the terminal UI. `invoke` emits a JSON result after a turn completes or reaches a blocking input or authorization event. It supports `--resume`, repeatable `-H, --header <header>`, and `--scope <team>`. `info` verifies the target and prints its inspection response. Remote commands never start a local application.
 
 A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
 
 For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 
 ```bash
-eve dev https://user:pass@your-app.example.com
+eve remote connect https://user:pass@your-app.example.com
 ```
 
 For bearer tokens or custom schemes, pass explicit headers with `-H`.
-
-### `eve invoke`
-
-| Option                  | Type   | Default | Description                                     |
-| ----------------------- | ------ | ------- | ----------------------------------------------- |
-| `[prompt]`              | string | none    | Prompt, follow-up, or answer to a pending input |
-| `-u, --url <url>`       | string | local   | Invoke an existing server                       |
-| `-H, --header <header>` | string | none    | Request header for a URL target; repeatable     |
-| `--resume`              | flag   | off     | Read a previous resumable result from stdin     |
-| `--scope <team>`        | string | current | Vercel team that owns the URL target            |
-| `--json-schema`         | flag   | off     | Print the result JSON Schema and exit           |
-
-Use `eve invoke` to submit a turn without opening the TUI. It emits JSON after the invocation completes or reaches a blocking input or authorization event.
-
-```bash
-eve invoke "Summarize station telemetry"
-result=$(eve invoke "Deploy the application")
-printf '%s' "$result" | eve invoke --resume "approve"
-eve invoke --json-schema
-```
-
-`--resume` reads a complete previous result from stdin. Supply text for a `ready` follow-up or pending input; the agent harness resolves input text against all pending requests. A `ready` result includes the previous turn's completed or failed `outcome`. An `authorization-required` result lists every unresolved challenge in `authorizations`; complete them, then resume without text. Pass explicit headers again for protected remote servers. If the URL belongs to another Vercel team, pass its slug with `--scope`; this does not relink the current directory. Pass the scope again when resuming. Paused invocations exit `3`; failures exit `1`.
-
-Local callback-based connection authorization requires a persistent server. Run `eve dev`, then use `eve invoke --url <dev-url>` instead. If a waiting invocation receives `SIGINT` or `SIGTERM` after acceptance, it emits a final resumable `running` result before exiting.
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
@@ -282,17 +261,17 @@ Local development records traces under `.eve/traces/` by default and bounds that
 
 ```bash
 eve logs            # print the most recent diagnostic log
-eve logs ls         # list logs, most recent first
-eve logs <logid>    # print a specific log
+eve logs list         # list logs, most recent first
+eve logs show <logid>    # print a specific log
 eve logs --dump     # prepend the log's environment dump
 eve logs --events   # interleave session events from the local workflow store
 ```
 
 Each interactive `eve dev` process writes a private diagnostic log under `.eve/logs/` capturing stderr, stdout (including sandbox and rebuild lines), tool failures, workflow errors, and eve framework log records — regardless of what the transcript shows. The file is JSON Lines — every line is one JSON record with `at` and `source` fields. `eve logs` reads those files back.
 
-A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead — so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
+A log id is the file name without `.log` (for example `dev-2026-07-15T12-00-00.000Z-123`). `eve logs show <logid>` also accepts the file name, the `.eve/logs/...` path printed in the dev transcript, or any unambiguous prefix of the id with or without the `dev-` lead — so `eve logs 2026-07-15` works when a single log matches. An ambiguous prefix fails and lists the candidates.
 
-`eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs ls`; `eve logs ls --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
+`eve logs` prints nothing but records — no path banner on either stream — so `eve logs 2>&1 | jq -c .` always parses. Discover ids and file paths with `eve logs list`; `eve logs list --json` emits a machine-readable array with `id`, `path`, `startedAt`, and `sizeBytes`.
 
 `eve logs --events` resolves session events (`session.started`, `turn.failed`, message deltas, …) from the local workflow store (`.eve/.workflow-data`) at query time and interleaves them into the output by timestamp as `source: "event"` records — the log file itself never stores them, so nothing is duplicated at capture time. Selection is by the log's time window (its start through the next log's start), so events from concurrently running `eve dev` processes may appear.
 
@@ -301,10 +280,10 @@ Each log has a same-named `.dump` sibling holding environment diagnostics and se
 ## `eve traces`
 
 ```bash
-eve traces ls              # list traces, most recent first
-eve traces ls --json       # emit machine-readable trace summaries
-eve traces                 # show the most recent span tree
-eve traces <trace>         # show one span tree
+eve traces list              # list traces, most recent first
+eve traces list --json       # emit machine-readable trace summaries
+eve traces show            # show the most recent span tree
+eve traces show <trace>         # show one span tree
 eve traces --verbose       # expand every span with all attributes and events
 eve traces --json          # dump the full trace as JSON
 ```
@@ -384,18 +363,6 @@ Runs all discovered evals when no eval ids are given; ids match exactly or by di
 | `--verbose`              | flag   | off     | Stream per-eval logs and workflow run IDs to stdout           |
 
 See [Evals](../evals/overview) for authoring evals.
-
-## `eve channels list`
-
-```bash
-eve channels list [--json]
-```
-
-Lists the user-authored channels in the current project.
-
-| Flag     | Type | Default | Description    |
-| -------- | ---- | ------- | -------------- |
-| `--json` | flag | off     | Output as JSON |
 
 ## Recommended loop
 

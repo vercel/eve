@@ -87,7 +87,7 @@ export function resolveDevDiagnosticLog(
   if (matches.length === 1) return matches[0]!;
   if (matches.length === 0) {
     throw new Error(
-      `No diagnostic log matches "${reference}". Run \`eve logs ls\` to see available logs.`,
+      `No diagnostic log matches "${reference}". Run \`eve logs list\` to see available logs.`,
     );
   }
   throw new Error(
@@ -115,7 +115,7 @@ export interface LogsShowCommandOptions {
  * when `logid` is omitted. The output carries nothing but records (no
  * resolved-path banner, no progress notes on either stream), so
  * `eve logs 2>&1 | jq` always parses; discover ids and paths with
- * `eve logs ls`. With `--dump`, the log's environment dump (a JSON
+ * `eve logs list`. With `--dump`, the log's environment dump (a JSON
  * document) is prepended to the JSONL log body, forming one
  * self-contained, parseable report. With `--events`, session events are
  * resolved from the local workflow store at query time — never duplicated
@@ -233,7 +233,7 @@ export interface LogsListCommandOptions {
   json?: boolean;
 }
 
-/** Machine-readable row emitted by `eve logs ls --json`. */
+/** Machine-readable row emitted by `eve logs list --json`. */
 export interface DevDiagnosticLogJson {
   id: string;
   path: string;
@@ -241,7 +241,7 @@ export interface DevDiagnosticLogJson {
   sizeBytes: number;
 }
 
-/** `eve logs ls`: lists diagnostic logs, most recent first. */
+/** `eve logs list`: lists diagnostic logs, most recent first. */
 export async function runLogsListCommand(
   logger: CliLogsLogger,
   appRoot: string,

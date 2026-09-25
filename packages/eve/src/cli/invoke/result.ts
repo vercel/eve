@@ -70,7 +70,7 @@ const invokeResultSchema = z.discriminatedUnion("status", [
     .strict(),
 ]);
 
-/** Durable session coordinates emitted by `eve invoke`. Credentials are deliberately excluded. */
+/** Durable session coordinates emitted by `eve remote invoke`. Credentials are deliberately excluded. */
 export type InvokeResume = z.infer<typeof invokeResumeSchema>;
 export type InvocationInputRequest = z.infer<typeof invocationInputRequestSchema>;
 /** Result emitted by one non-interactive agent invocation. */
@@ -92,13 +92,13 @@ export function projectInvocationInputRequest(request: InputRequest): Invocation
   };
 }
 
-/** Parses a complete, resumable result from a previous `eve invoke` command. */
+/** Parses a complete, resumable result from a previous `eve remote invoke` command. */
 export function parseInvokeResumeInput(value: unknown): InvokeResult & { resume: InvokeResume } {
   const result = invokeResultSchema.safeParse(value);
   if (result.success && "resume" in result.data && result.data.resume !== undefined) {
     return result.data as InvokeResult & { resume: InvokeResume };
   }
-  throw new Error("Resume JSON is not a valid resumable eve invoke result.");
+  throw new Error("Resume JSON is not a valid resumable eve remote invoke result.");
 }
 
 /** JSON Schema generated from the canonical invoke result runtime schema. */
@@ -109,5 +109,5 @@ export const invokeResultJsonSchema = {
     unrepresentable: "any",
   }),
   $id: "https://eve.dev/schemas/invoke-result.json",
-  title: "eve invoke result",
+  title: "eve remote invoke result",
 };

@@ -39,12 +39,14 @@ describe("parseInvokeResumeInput", () => {
   });
 
   it("rejects standalone capsules, malformed results, and non-resumable results", () => {
-    expect(() => parseInvokeResumeInput(resume)).toThrow("valid resumable eve invoke result");
+    expect(() => parseInvokeResumeInput(resume)).toThrow(
+      "valid resumable eve remote invoke result",
+    );
     expect(() =>
       parseInvokeResumeInput({ status: "running", resume: { ...resume, session: {} } }),
-    ).toThrow("valid resumable eve invoke result");
+    ).toThrow("valid resumable eve remote invoke result");
     expect(() => parseInvokeResumeInput({ status: "failed", message: "boom" })).toThrow(
-      "valid resumable eve invoke result",
+      "valid resumable eve remote invoke result",
     );
   });
 });
@@ -196,7 +198,7 @@ describe("runInvoke", () => {
     ).resolves.toEqual({
       status: "failed",
       message:
-        "Local eve invoke cannot pause for connection authorization because its temporary server must remain available for the callback. Run eve dev, then invoke its URL with --url.",
+        "Local invocations are not supported. Start eve dev, then use eve remote invoke with its URL.",
     });
   });
 

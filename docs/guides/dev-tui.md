@@ -31,7 +31,7 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 | `/help`     | List available commands.                                                                                                                                     |
 | `/exit`     | Quit the UI.                                                                                                                                                 |
 
-`/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
+`/login`, `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects through `eve remote connect`.
 
 ## Set up a new agent
 
@@ -131,14 +131,14 @@ Use `--host` and `--port` to bind the local server, or `--no-ui` to run without 
 Pass a URL to use the terminal UI with an existing eve server instead of starting one locally:
 
 ```bash
-eve dev https://your-app.vercel.app
+eve remote connect https://your-app.vercel.app
 ```
 
-The URL form is shorthand for `--url`. To send credentials or custom request headers, use a URL with HTTP Basic credentials or repeat `-H, --header`:
+Use `eve remote connect` for an existing agent. To send credentials or custom request headers, use a URL with HTTP Basic credentials or repeat `-H, --header`:
 
 ```bash
-eve dev https://user:pass@your-app.example.com
-eve dev https://your-app.example.com -H 'Authorization: Bearer your_token_here'
+eve remote connect https://user:pass@your-app.example.com
+eve remote connect https://your-app.example.com -H 'Authorization: Bearer your_token_here'
 ```
 
 Remote Vercel sessions reuse an existing authorized CLI session. They do not open an account login flow or modify the local project's Vercel link or `.env.local`.

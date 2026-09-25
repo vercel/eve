@@ -1,6 +1,7 @@
 import { InvalidArgumentError, Option, type Command } from "#compiled/commander/index.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
 import { agentCommand } from "#cli/agent-command.js";
+import { inspectVerifiedRemoteAgent } from "#setup/verified-remote-agent.js";
 import { eveCliBanner } from "#cli/banner.js";
 import { FORCED_EXIT_BACKSTOP_MS, installShutdownSignal } from "#cli/shutdown.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
@@ -30,10 +31,6 @@ interface DevelopmentCommandLogger {
 }
 
 interface DevelopmentCommandRuntime {
-  isActiveDevelopmentServerForApp?(input: {
-    readonly appRoot: string;
-    readonly serverUrl: string;
-  }): Promise<boolean>;
   runDevelopmentTui?: (input: RunDevelopmentTuiInput) => Promise<void>;
   startHost?: (appRoot: string, options?: DevelopmentServerOptions) => DevelopmentServer;
 }
@@ -52,14 +49,114 @@ async function loadStartHost(): Promise<NonNullable<DevelopmentCommandRuntime["s
   return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 }
 
-const loadIsActiveDevelopmentServerForApp = async () =>
-  (await import("#internal/nitro/host.js")).isActiveDevelopmentServerForApp;
-
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-/** Registers the local and remote development server command. */
+/** Registers an interactive client for existing eve agents. */
+export function registerRemoteCommands(input: {
+  applicationContext: CliApplicationContext;
+  logger: DevelopmentCommandLogger;
+  program: Command;
+  runtime: DevelopmentCommandRuntime;
+  telemetry: DevelopmentCommandTelemetry;
+}): void {
+  const { applicationContext, logger, program, runtime, telemetry } = input;
+  const theme = createCliTheme();
+
+  program
+    .command("info <url>")
+    .description("Inspect an existing eve agent.")
+    .option("--json", "Output as JSON")
+    .action(async (url: string, options: { json?: boolean }) => {
+      const serverUrl = parseDevelopmentServerUrl(url);
+      const inspection = await inspectVerifiedRemoteAgent({
+        prompter:
+          process.stdin.isTTY && process.stdout.isTTY
+            ? (await import("#setup/prompter.js")).createPrompter()
+            : undefined,
+        serverUrl,
+        workspaceRoot: applicationContext.root,
+      });
+      logger.log(JSON.stringify(inspection.info, null, options.json === true ? 0 : 2));
+    });
+
+  program
+    .command("connect <url>")
+    .description("Open the terminal UI for an existing eve agent.")
+    .option(
+      "-H, --header <header>",
+      'Request header for the URL target, in "Name: value" form (repeatable)',
+      parseDevelopmentHeaderOption,
+    )
+    .option("--name <name>", "Title shown in the terminal UI")
+    .option("--input <text>", "Pre-fill the prompt input")
+    .option(
+      "--tools <mode>",
+      "How tool calls render: full | collapsed | auto-collapsed | hidden",
+      parseDisplayMode,
+    )
+    .option(
+      "--reasoning <mode>",
+      "How reasoning renders: full | collapsed | auto-collapsed | hidden",
+      parseDisplayMode,
+    )
+    .option(
+      "--subagents <mode>",
+      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
+      parseDisplayMode,
+    )
+    .option(
+      "--connection-auth <mode>",
+      "How connection authorization renders: full | collapsed | auto-collapsed | hidden",
+      parseDisplayMode,
+    )
+    .option(
+      "--assistant-response-stats <mode>",
+      "Assistant header statistic: tokens | tokensPerSecond",
+      parseStatsMode,
+    )
+    .option(
+      "--context-size <tokens>",
+      "Model context window size, shown as a usage percentage",
+      parseContextSizeOption,
+    )
+    .option(
+      "--logs <mode>",
+      "Which server/agent logs to show: all | stderr | sandbox | none",
+      parseLogsMode,
+    )
+    .action(async (url: string, options: DevelopmentCliOptions) => {
+      const remoteTarget = resolveDevelopmentUrlTarget({ ...options, url }, undefined)!;
+      const mode = resolveDevUiMode({ options, interactive: hasInteractiveTerminal() });
+      if (mode === "headless") {
+        throw new InvalidArgumentError("eve remote connect requires an interactive terminal.");
+      }
+      telemetry.trackDevContext({ target: "remote", ui: mode });
+      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+      await loadDevelopmentEnvironmentFiles(applicationContext.root);
+      logger.log(`↗ remote agent ${theme.info(new URL(remoteTarget.serverUrl).host)}`);
+      logger.log("");
+      const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
+      try {
+        await runInteractiveDevelopmentUi({
+          applicationRoot: applicationContext.root,
+          existingLocalServer: false,
+          lifecycle,
+          onOnboardingStep: telemetry.trackSetupStep,
+          onOnboardingTerminal: telemetry.trackSetupTerminal,
+          options,
+          remoteTarget,
+          runDevelopmentTui: runtime.runDevelopmentTui,
+          server: { serverUrl: remoteTarget.serverUrl },
+        });
+      } finally {
+        lifecycle.dispose();
+      }
+    });
+}
+
+/** Registers the local development server command. */
 export function registerDevelopmentCommand(input: {
   applicationContext: CliApplicationContext;
   logger: DevelopmentCommandLogger;
@@ -70,23 +167,10 @@ export function registerDevelopmentCommand(input: {
   const { applicationContext, logger, program, runtime, telemetry } = input;
   const theme = createCliTheme();
 
-  agentCommand(program.command("dev"), applicationContext, (command) => {
-    const options = command.opts<DevelopmentCliOptions>();
-    return (
-      resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
-      undefined
-    );
-  })
-    .description("Start the eve development server or connect to an existing URL.")
-    .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
+  agentCommand(program.command("dev"), applicationContext)
+    .description("Start the local eve development server.")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 2000)", parsePortOption)
-    .option("-u, --url <url>", "Connect to an existing server URL", parseDevelopmentServerUrl)
-    .option(
-      "-H, --header <header>",
-      'Request header for a URL target, in "Name: value" form (repeatable)',
-      parseDevelopmentHeaderOption,
-    )
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--no-default-extensions", "Do not mount default development extensions")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
@@ -127,66 +211,14 @@ export function registerDevelopmentCommand(input: {
       "Which server/agent logs to show: all | stderr | sandbox | none",
       parseLogsMode,
     )
-    .addHelpText(
-      "after",
-      "\nYou can also pass a bare URL, for example: eve dev https://example.com\n",
-    )
-    .action(async (positionalUrl: string | undefined, options: DevelopmentCliOptions) => {
-      const remoteTarget = resolveDevelopmentUrlTarget(options, positionalUrl);
-      const remoteServerUrl = remoteTarget?.serverUrl;
+    .action(async (options: DevelopmentCliOptions) => {
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
-      telemetry.trackDevContext({ target: remoteTarget ? "remote" : "local", ui: mode });
+      telemetry.trackDevContext({ target: "local", ui: mode });
       if (mode === "headless") logger.log(eveCliBanner());
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
-      let existingLocalDevelopmentServer = false;
-      if (remoteServerUrl !== undefined) {
-        const isActive =
-          runtime.isActiveDevelopmentServerForApp ?? (await loadIsActiveDevelopmentServerForApp());
-        existingLocalDevelopmentServer = await isActive({
-          appRoot: applicationContext.root,
-          serverUrl: remoteServerUrl,
-        });
-      }
-      if (remoteServerUrl) {
-        const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-        await loadDevelopmentEnvironmentFiles(applicationContext.root);
-        logger.log(
-          `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
-        );
-        if (mode === "headless") {
-          logger.log(
-            renderCliTaggedLine(theme, {
-              message: "Interactive UI disabled because the current terminal is not a TTY.",
-              tag: "dev",
-              tone: "warning",
-            }),
-          );
-          return;
-        }
-
-        logger.log("");
-        const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
-        try {
-          await runInteractiveDevelopmentUi({
-            applicationRoot: applicationContext.root,
-            existingLocalServer: existingLocalDevelopmentServer,
-            lifecycle,
-            onOnboardingStep: telemetry.trackSetupStep,
-            onOnboardingTerminal: telemetry.trackSetupTerminal,
-            options,
-            remoteTarget,
-            runDevelopmentTui: runtime.runDevelopmentTui,
-            server: { serverUrl: remoteServerUrl },
-          });
-        } finally {
-          lifecycle.dispose();
-        }
-        return;
-      }
-
       const buildProgress = mode === "tui" ? startCliLiveRow(logger, { elapsed: true }) : undefined;
       const onBootProgress = createDevBootProgressReporter(buildProgress);
       buildProgress?.update("Starting your agent");

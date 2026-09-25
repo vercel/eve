@@ -116,7 +116,7 @@ curl https://your_agent.example.com/eve/v1/health
 Then connect the development TUI and complete a real turn:
 
 ```bash
-eve dev https://your_agent.example.com
+eve remote connect https://your_agent.example.com
 ```
 
 ## Continue configuring production

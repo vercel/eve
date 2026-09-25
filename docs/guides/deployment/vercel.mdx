@@ -143,14 +143,14 @@ For a single unnamed agent, check the health route and connect the development T
 
 ```bash
 curl https://your_agent.vercel.app/eve/v1/health
-eve dev https://your_agent.vercel.app
+eve remote connect https://your_agent.vercel.app
 ```
 
 For a workspace agent, include its public `/eve/<name>` mount. For example:
 
 ```bash
 curl https://your_agent.vercel.app/eve/support/v1/health
-eve dev https://your_agent.vercel.app/eve/support
+eve remote connect https://your_agent.vercel.app/eve/support
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally before connecting if the deployment uses Deployment Protection.

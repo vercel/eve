@@ -99,7 +99,7 @@ describe("CLI command registration", () => {
 
     const help = output.join("\n");
     expect(help).toContain("init [options] [target]");
-    expect(help).toContain("set [options]");
+    expect(help).toContain("set");
     expect(help).toContain("link");
     expect(help).toContain("deploy");
     expect(help).toContain("registry");
@@ -122,7 +122,7 @@ describe("CLI command registration", () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runSetCommand.mockClear();
 
-    await runCli(["set", "--model", "openai/gpt-5.6-sol", "--reasoning", "high"], logger);
+    await runCli(["set", "model", "openai/gpt-5.6-sol", "--reasoning", "high"], logger);
 
     expect(runSetCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), {
       model: "openai/gpt-5.6-sol",
@@ -169,7 +169,7 @@ describe("CLI command registration", () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
     runSetCommand.mockClear();
 
-    await runCli(["set", "--model", "openai/gpt-5.6-sol"], logger, {
+    await runCli(["set", "model", "openai/gpt-5.6-sol"], logger, {
       resolveApplicationProject: resolveProject,
     });
 
@@ -184,7 +184,7 @@ describe("CLI command registration", () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
     await runCli(
-      ["set", "--help"],
+      ["set", "model", "--help"],
       { error: vi.fn(), log: vi.fn() },
       {
         resolveApplicationProject: resolveProject,
@@ -197,13 +197,13 @@ describe("CLI command registration", () => {
   it("lists model and reasoning options for the set command", async () => {
     const output: string[] = [];
 
-    await runCli(["set", "--help"], {
+    await runCli(["set", "model", "--help"], {
       error: (message) => output.push(message),
       log: (message) => output.push(message),
     });
 
     const help = output.join("\n");
-    expect(help).toContain("--model <model>");
+    expect(help).toContain("<model>");
     expect(help).toContain("--reasoning <effort>");
   });
 
@@ -211,7 +211,7 @@ describe("CLI command registration", () => {
     const logger = { error: vi.fn(), log: vi.fn() };
     runSetCommand.mockClear();
 
-    await expect(runCli(["set", "--reasoning", "extreme"], logger)).rejects.toThrow();
+    await expect(runCli(["set", "reasoning", "extreme"], logger)).rejects.toThrow();
 
     expect(runSetCommand).not.toHaveBeenCalled();
   });
@@ -407,7 +407,7 @@ describe("eve init compatibility flags", () => {
 
     const help = output.join("\n");
     expect(help).toContain("-y, --yes");
-    expect(help).toContain("--model <model>");
+    expect(help).toContain("<model>");
     expect(help).toContain("--reasoning <effort>");
     expect(help).toContain("-n, --non-interactive");
   });
@@ -519,8 +519,8 @@ describe("eve CLI malformed argument handling", () => {
 describe("eve dev --input", () => {
   it("forwards the initial draft to the interactive TUI", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
-      "--url",
+      "remote",
+      "connect",
       "https://example.com",
       "--input",
       "/model",
@@ -541,11 +541,11 @@ describe("eve dev --input", () => {
   it("rejects the option when the terminal cannot run the interactive UI", async () => {
     await expect(
       runCli(
-        ["dev", "--url", "https://example.com", "--input", "/model"],
+        ["remote", "connect", "https://example.com", "--input", "/model"],
         { error: () => {}, log: () => {} },
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
-    ).rejects.toThrow("--input requires the interactive UI");
+    ).rejects.toThrow("eve remote connect requires an interactive terminal.");
   });
 
   it.each([false, true])(
@@ -638,7 +638,7 @@ describe("eve dev --input", () => {
   });
 });
 
-describe("eve invoke", () => {
+describe("eve remote invoke", () => {
   it("runs a fresh remote task without starting the TUI", async () => {
     const runInvoke = vi.fn(async () => ({
       status: "ready" as const,
@@ -651,7 +651,7 @@ describe("eve invoke", () => {
     const output: string[] = [];
 
     await runCli(
-      ["invoke", "--url", "https://example.com", "--scope", "target-team", "do foo"],
+      ["remote", "invoke", "https://example.com", "--scope", "target-team", "do foo"],
       { error: () => {}, log: (message) => output.push(message) },
       { runInvoke },
     );
@@ -670,15 +670,6 @@ describe("eve invoke", () => {
       status: "ready",
       outcome: { status: "completed", message: "done" },
     });
-  });
-
-  it("rejects a Vercel scope without a URL target", async () => {
-    await expect(
-      runCli(["invoke", "--scope", "target-team", "do foo"], {
-        error: () => {},
-        log: () => {},
-      }),
-    ).rejects.toThrow("--scope option requires a URL target");
   });
 
   it("accepts an explicitly supplied URL equivalent to the stored resume target", async () => {
@@ -706,7 +697,7 @@ describe("eve invoke", () => {
 
     try {
       await runCli(
-        ["invoke", "--resume", "--url", "https://example.com", "follow up"],
+        ["remote", "invoke", "https://example.com", "--resume", "follow up"],
         { error: () => {}, log: () => {} },
         { runInvoke },
       );
@@ -721,25 +712,9 @@ describe("eve invoke", () => {
     );
   });
 
-  it("prints the JSON schema without resolving or invoking an agent", async () => {
-    const runInvoke = vi.fn();
-    const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
-    const output: string[] = [];
-
-    await runCli(
-      ["invoke", "--json-schema"],
-      { error: () => {}, log: (message) => output.push(message) },
-      { resolveApplicationProject: resolveProject, runInvoke },
-    );
-
-    expect(resolveProject).not.toHaveBeenCalled();
-    expect(runInvoke).not.toHaveBeenCalled();
-    expect(JSON.parse(output[0]!)).toMatchObject({ title: "eve invoke result" });
-  });
-
   it("requires a prompt for a fresh invocation", async () => {
     await expect(
-      runCli(["invoke", "--url", "https://example.com"], {
+      runCli(["remote", "invoke", "https://example.com"], {
         error: () => {},
         log: () => {},
       }),
@@ -747,11 +722,11 @@ describe("eve invoke", () => {
   });
 });
 
-describe("eve dev --url protocol", () => {
+describe("eve remote connect", () => {
   it("does not resolve a local application for a remote URL", async () => {
     const resolveProject = vi.fn(async () => resolvedProject("/workspace/weather"));
 
-    await runInteractiveDev(["dev", "https://example.com"], {
+    await runInteractiveDev(["remote", "connect", "https://example.com"], {
       resolveApplicationProject: resolveProject,
     });
 
@@ -760,7 +735,8 @@ describe("eve dev --url protocol", () => {
 
   it("preserves query parameters on the remote target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
       "https://example.com?x-vercel-protection-bypass=secret",
     ]);
 
@@ -777,7 +753,8 @@ describe("eve dev --url protocol", () => {
 
   it("lowers URL userinfo to a Basic authorization header and strips it from the target URL", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
       "https://test%40user:p%20ss@example.com",
     ]);
 
@@ -797,7 +774,8 @@ describe("eve dev --url protocol", () => {
 
   it("prefers explicit authorization headers over URL userinfo", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
+      "remote",
+      "connect",
       "https://user:pass@example.com",
       "-H",
       "Authorization: Bearer explicit-token",
@@ -819,8 +797,8 @@ describe("eve dev --url protocol", () => {
 
   it("forwards repeatable request headers to the remote TUI", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
-      "--url",
+      "remote",
+      "connect",
       "https://example.com",
       "-H",
       "Authorization: Basic dGVzdDpzZWNyZXQ=",
@@ -846,42 +824,20 @@ describe("eve dev --url protocol", () => {
   it("rejects malformed request headers", async () => {
     await expect(
       runCli(
-        ["dev", "--url", "https://example.com", "-H", "Authorization"],
+        ["remote", "connect", "https://example.com", "-H", "Authorization"],
         { error: () => {}, log: () => {} },
         { runDevelopmentTui: vi.fn(async () => {}) },
       ),
     ).rejects.toThrow('Expected header in "Name: value" format');
   });
 
-  it("rejects request headers without a URL target", async () => {
-    await expect(
-      runCli(["dev", "-H", "Authorization: Bearer dev-token"], {
-        error: () => {},
-        log: () => {},
-      }),
-    ).rejects.toThrow("The --header option can only be used with --url or a bare URL.");
-  });
-
-  it("uses the local TUI credential path only for this app's running dev server", async () => {
-    const runDevelopmentTui = await runInteractiveDev(["dev", "--url", "http://127.0.0.1:2000"], {
-      isActiveDevelopmentServerForApp: async () => true,
-    });
-
-    expect(runDevelopmentTui).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target: {
-          kind: "local",
-          serverUrl: "http://127.0.0.1:2000/",
-          workspaceRoot: process.cwd(),
-        },
-      }),
-    );
-  });
-
   it("keeps an unverified loopback URL on the remote credential path", async () => {
-    const runDevelopmentTui = await runInteractiveDev(["dev", "--url", "http://127.0.0.1:2000"], {
-      isActiveDevelopmentServerForApp: async () => false,
-    });
+    const runDevelopmentTui = await runInteractiveDev(
+      ["remote", "connect", "http://127.0.0.1:2000"],
+      {
+        isActiveDevelopmentServerForApp: async () => false,
+      },
+    );
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -894,14 +850,6 @@ describe("eve dev --url protocol", () => {
     );
   });
 
-  it("rejects an http:// remote URL up front instead of crashing during connect", async () => {
-    await expect(
-      runCli(["dev", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
-    ).rejects.toThrow(/https/);
-  });
-});
-
-describe("eve eval --url protocol", () => {
   it("rejects an http:// remote URL up front", async () => {
     await expect(
       runCli(["eval", "--url", "http://my-app.vercel.app"], { error: () => {}, log: () => {} }),
@@ -912,8 +860,8 @@ describe("eve eval --url protocol", () => {
 describe("eve dev --logs", () => {
   it("accepts sandbox as the initial TUI log mode", async () => {
     const runDevelopmentTui = await runInteractiveDev([
-      "dev",
-      "--url",
+      "remote",
+      "connect",
       "https://example.com",
       "--logs",
       "sandbox",

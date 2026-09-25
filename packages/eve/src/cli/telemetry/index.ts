@@ -117,8 +117,6 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["acp", "acp"],
   ["add", "add"],
   ["build", "build"],
-  ["channels", "channels"],
-  ["channels:list", "channels:list"],
   ["deploy", "deploy"],
   ["dev", "dev"],
   ["eval", "eval"],
@@ -130,10 +128,13 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["integration", "integration"],
   ["integration:connect", "integration:connect"],
   ["integration:setup", "integration:setup"],
-  ["invoke", "invoke"],
+  ["remote", "remote"],
+  ["remote:connect", "remote:connect"],
+  ["remote:info", "remote:info"],
+  ["remote:invoke", "remote:invoke"],
   ["link", "link"],
   ["logs", "logs:show"],
-  ["logs:ls", "logs:ls"],
+  ["logs:list", "logs:list"],
   ["logs:show", "logs:show"],
   ["registry", "registry"],
   ["registry:add", "registry:add"],
@@ -141,13 +142,16 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["registry:search", "registry:search"],
   ["registry:view", "registry:view"],
   ["set", "set"],
+  ["set:model", "set:model"],
+  ["set:reasoning", "set:reasoning"],
   ["start", "start"],
   ["telemetry", "telemetry"],
   ["telemetry:disable", "telemetry:disable"],
   ["telemetry:enable", "telemetry:enable"],
   ["telemetry:status", "telemetry:status"],
-  ["traces", "traces:show"],
-  ["traces:ls", "traces:ls"],
+  ["traces", "traces"],
+  ["traces:list", "traces:list"],
+  ["traces:show", "traces:show"],
 ]);
 
 /** Explicit privacy allowlist for command values emitted by CLI telemetry. */
@@ -165,6 +169,7 @@ export function canonicalCommand(argv: readonly string[]): string {
   const commandIndex = argv.findIndex((argument) => !argument.startsWith("-"));
   const command = argv[commandIndex];
   if (command === undefined || /^https?:\/\//.test(command)) return "dev";
+  if (command === "traces" && argv.length === commandIndex + 1) return "traces:show";
 
   const nested = argv.slice(commandIndex + 1).find((argument) => !argument.startsWith("-"));
   if (nested !== undefined) {
