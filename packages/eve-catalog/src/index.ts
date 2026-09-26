@@ -19,7 +19,12 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation" | "memory";
+export type IntegrationKind =
+  | "channel"
+  | "connection"
+  | "extension"
+  | "instrumentation"
+  | "memory";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -72,7 +77,9 @@ export interface IntegrationEntry {
 }
 
 /** Protocols a connection speaks, derived from its declared transports. */
-export function connectionProtocols(connection: ConnectionIdentity): ConnectionProtocol[] {
+export function connectionProtocols(
+  connection: ConnectionIdentity,
+): ConnectionProtocol[] {
   return [
     connection.mcp ? ("mcp" as const) : null,
     connection.openapi ? ("openapi" as const) : null,
@@ -89,7 +96,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "slack",
     name: "Slack",
     kind: "channel",
-    tagline: "Mention your agent in channels and DMs, with Connect-managed auth.",
+    tagline:
+      "Mention your agent in channels and DMs, with Connect-managed auth.",
     surfaces: { scaffoldable: true, registry: true, gallery: true },
   },
   {
@@ -117,7 +125,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "twilio",
     name: "Twilio",
     kind: "channel",
-    tagline: "Put your agent on a phone number: SMS and speech-transcribed calls.",
+    tagline:
+      "Put your agent on a phone number: SMS and speech-transcribed calls.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -154,7 +163,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "buzz",
     name: "Buzz",
     kind: "channel",
-    tagline: "Talk to your eve agent from Buzz through its ACP desktop harness.",
+    tagline:
+      "Talk to your eve agent from Buzz through its ACP desktop harness.",
     surfaces: { scaffoldable: false, registry: false, gallery: true },
   },
   {
@@ -168,7 +178,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-whatsapp",
     name: "WhatsApp",
     kind: "channel",
-    tagline: "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
+    tagline:
+      "Customer messaging through WhatsApp Business Cloud via the Chat SDK.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -182,21 +193,24 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-messenger",
     name: "Messenger",
     kind: "channel",
-    tagline: "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
+    tagline:
+      "Facebook Messenger bots with templates, buttons, and reactions via the Chat SDK.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-zernio",
     name: "Zernio",
     kind: "channel",
-    tagline: "Reach seven social and messaging platforms through one Zernio integration.",
+    tagline:
+      "Reach seven social and messaging platforms through one Zernio integration.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-velt",
     name: "Velt",
     kind: "channel",
-    tagline: "Add agents to anchored comments across documents, canvases, PDFs, and video.",
+    tagline:
+      "Add agents to anchored comments across documents, canvases, PDFs, and video.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -217,21 +231,24 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-liveblocks",
     name: "Liveblocks",
     kind: "channel",
-    tagline: "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
+    tagline:
+      "Bring your agent into Liveblocks comment threads, mentions, and reactions.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "linq",
     name: "Linq",
     kind: "channel",
-    tagline: "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
+    tagline:
+      "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "chat-sdk-kapso",
     name: "Kapso",
     kind: "channel",
-    tagline: "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
+    tagline:
+      "Managed WhatsApp conversations, media, buttons, and history through Kapso.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -245,7 +262,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-dial",
     name: "Dial",
     kind: "channel",
-    tagline: "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
+    tagline:
+      "Give your agent a phone number for SMS, MMS, iMessage, and voice transcripts.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -259,7 +277,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-lark",
     name: "Lark / Feishu",
     kind: "channel",
-    tagline: "Lark and Feishu chats with native card streaming via the Chat SDK.",
+    tagline:
+      "Lark and Feishu chats with native card streaming via the Chat SDK.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -280,49 +299,56 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "chat-sdk-gmail",
     name: "Gmail",
     kind: "channel",
-    tagline: "Turn labelled Gmail threads into agent conversations via the Chat SDK.",
+    tagline:
+      "Turn labelled Gmail threads into agent conversations via the Chat SDK.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "agent-browser",
     name: "agent-browser",
     kind: "extension",
-    tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
+    tagline:
+      "Add browser automation tools backed by agent-browser to an eve agent.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "blitzreels",
     name: "BlitzReels",
     kind: "extension",
-    tagline: "Turn long videos into short clips, generate media, repair edits, and export.",
+    tagline:
+      "Turn long videos into short clips, generate media, repair edits, and export.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "mux-video",
     name: "Mux Video",
     kind: "extension",
-    tagline: "Create and inspect video assets, make clips, and run Mux Robots workflows.",
+    tagline:
+      "Create and inspect video assets, make clips, and run Mux Robots workflows.",
     surfaces: { scaffoldable: false, registry: false, gallery: true },
   },
   {
     slug: "browserbase",
     name: "Browserbase",
     kind: "extension",
-    tagline: "Search, fetch, and automate the web with Browserbase and Stagehand.",
+    tagline:
+      "Search, fetch, and automate the web with Browserbase and Stagehand.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "github-tools",
     name: "GitHub Tools",
     kind: "extension",
-    tagline: "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
+    tagline:
+      "Add scoped GitHub tools with Vercel Connect authentication and approval rules.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "jetty",
     name: "Jetty",
     kind: "extension",
-    tagline: "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
+    tagline:
+      "Grade agent turns, compare experiments, and store durable evaluation trajectories.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -369,14 +395,16 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "hindsight",
     name: "Hindsight",
     kind: "extension",
-    tagline: "Recall relevant context before every turn and retain each exchange automatically.",
+    tagline:
+      "Recall relevant context before every turn and retain each exchange automatically.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "browser-use",
     name: "Browser Use",
     kind: "connection",
-    tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
+    tagline:
+      "Run managed browser automation tasks through Browser Use's MCP server.",
     surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description:
@@ -385,10 +413,24 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "dataforseo",
+    name: "DataForSEO",
+    kind: "connection",
+    tagline:
+      "Run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
+    connection: {
+      description:
+        "DataForSEO: run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
+      mcp: { url: "https://mcp.dataforseo.com/v3/mcp" },
+    },
+  },
+  {
     slug: "vercel",
     name: "Vercel",
     kind: "connection",
-    tagline: "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
+    tagline:
+      "Manage Vercel projects, deployments, and logs through Vercel's MCP server.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description:
@@ -441,7 +483,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Explore traces and run queries through Honeycomb's MCP server.",
     surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
-      description: "Honeycomb: explore traces, run queries, and inspect datasets.",
+      description:
+        "Honeycomb: explore traces, run queries, and inspect datasets.",
       mcp: { url: "https://mcp.honeycomb.io/mcp" },
     },
   },
@@ -475,7 +518,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Shorten links, generate QR Codes, and track performance.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Bitly: shorten links, generate QR Codes, and track link performance.",
+      description:
+        "Bitly: shorten links, generate QR Codes, and track link performance.",
       mcp: { url: "https://api-ssl.bitly.com/v4/mcp" },
     },
   },
@@ -519,7 +563,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Manage, transform, and deliver your images and videos.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Cloudinary: manage, transform, and deliver image and video assets.",
+      description:
+        "Cloudinary: manage, transform, and deliver image and video assets.",
       mcp: { url: "https://asset-management.mcp.cloudinary.com/sse" },
     },
   },
@@ -575,7 +620,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Access the Hugging Face Hub and thousands of Gradio apps.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Hugging Face: models, datasets, Spaces, and Gradio apps on the Hub.",
+      description:
+        "Hugging Face: models, datasets, Spaces, and Gradio apps on the Hub.",
       mcp: { url: "https://huggingface.co/mcp?login&gradio=none" },
     },
   },
@@ -586,7 +632,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "AI visibility and local search intelligence.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Local Falcon: local search rankings and AI visibility reports.",
+      description:
+        "Local Falcon: local search rankings and AI visibility reports.",
       mcp: { url: "https://mcp.localfalcon.com" },
     },
   },
@@ -664,7 +711,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Manage Neon projects, run queries, and make schema changes.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Neon: manage projects, run queries, and make schema changes.",
+      description:
+        "Neon: manage projects, run queries, and make schema changes.",
       mcp: { url: "https://mcp.neon.tech/mcp" },
     },
   },
@@ -694,7 +742,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "planetscale",
     name: "PlanetScale",
     kind: "connection",
-    tagline: "Authenticated access to your PlanetScale Postgres and MySQL databases.",
+    tagline:
+      "Authenticated access to your PlanetScale Postgres and MySQL databases.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
       description: "PlanetScale: query Postgres and MySQL databases.",
@@ -752,7 +801,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Real-time web, mobile app, and market data.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Similarweb: web traffic, app, and market intelligence data.",
+      description:
+        "Similarweb: web traffic, app, and market intelligence data.",
       mcp: { url: "https://mcp.similarweb.com" },
     },
   },
@@ -760,10 +810,12 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "shopify",
     name: "Shopify",
     kind: "connection",
-    tagline: "Search products and manage carts and checkouts on a Shopify storefront.",
+    tagline:
+      "Search products and manage carts and checkouts on a Shopify storefront.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Search products and build carts and checkouts on a Shopify storefront.",
+      description:
+        "Search products and build carts and checkouts on a Shopify storefront.",
       mcp: { url: "https://{shop}.myshopify.com/api/ucp/mcp" },
     },
   },
@@ -774,7 +826,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     tagline: "Payment processing and financial infrastructure tools.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
     connection: {
-      description: "Stripe: payments, customers, billing, and financial infrastructure.",
+      description:
+        "Stripe: payments, customers, billing, and financial infrastructure.",
       mcp: { url: "https://mcp.stripe.com" },
     },
   },
@@ -885,7 +938,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "braintrust",
     name: "Braintrust",
     kind: "instrumentation",
-    tagline: "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
+    tagline:
+      "Export AI SDK spans to Braintrust for tracing, evals, and monitoring.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -899,21 +953,24 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "sentry-instrumentation",
     name: "Sentry",
     kind: "instrumentation",
-    tagline: "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
+    tagline:
+      "Send agent traces to Sentry's OTLP endpoint for tracing and debugging.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "datadog-instrumentation",
     name: "Datadog",
     kind: "instrumentation",
-    tagline: "Export agent traces to Datadog APM alongside the rest of your stack.",
+    tagline:
+      "Export agent traces to Datadog APM alongside the rest of your stack.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "honeycomb-instrumentation",
     name: "Honeycomb",
     kind: "instrumentation",
-    tagline: "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
+    tagline:
+      "Send OpenTelemetry traces to Honeycomb and query every agent turn.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -927,14 +984,16 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "raindrop",
     name: "Raindrop",
     kind: "instrumentation",
-    tagline: "Send agent traces to Raindrop to detect and debug AI product issues.",
+    tagline:
+      "Send agent traces to Raindrop to detect and debug AI product issues.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "jaeger",
     name: "Jaeger",
     kind: "instrumentation",
-    tagline: "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
+    tagline:
+      "Trace your agent with a local or self-hosted Jaeger OTLP backend.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
 ];
@@ -942,7 +1001,9 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
 const BY_SLUG = new Map(INTEGRATIONS.map((entry) => [entry.slug, entry]));
 
 /** Returns the catalog entry for a slug, or `undefined` when not catalogued. */
-export function getIntegrationEntry(slug: string): IntegrationEntry | undefined {
+export function getIntegrationEntry(
+  slug: string,
+): IntegrationEntry | undefined {
   return BY_SLUG.get(slug);
 }
 

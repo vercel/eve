@@ -37,8 +37,12 @@ interface Registry {
 }
 
 const docsRoot = join(import.meta.dirname, "..");
-const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
-const items = registry.items.filter((item) => item.name.startsWith("connection/"));
+const registry = JSON.parse(
+  await readFile(join(docsRoot, "registry.json"), "utf8"),
+) as Registry;
+const items = registry.items.filter((item) =>
+  item.name.startsWith("connection/"),
+);
 const expectedSlugs = connectionEntries()
   .filter((entry) => entry.surfaces.registry)
   .map((entry) => entry.slug);
@@ -94,7 +98,7 @@ for (const item of items) {
   }
 
   const slug = item.name.slice("connection/".length);
-  if (slug !== "browser-use") {
+  if (slug !== "browser-use" && slug !== "dataforseo") {
     const creationType = CONNECT_CREATION_TYPES[slug];
     const connectionMethod = CONNECT_METHODS[slug];
     const principalType = CONNECT_PRINCIPAL_TYPES[slug];
@@ -116,9 +120,15 @@ for (const item of items) {
               slug,
               CONNECT_SERVICES[slug] ?? slug,
               slug,
-              ...(creationType === undefined ? [] : ["--creation-type", creationType]),
-              ...(connectionMethod === undefined ? [] : ["--connection-method", connectionMethod]),
-              ...(principalType === undefined ? [] : ["--principal-type", principalType]),
+              ...(creationType === undefined
+                ? []
+                : ["--creation-type", creationType]),
+              ...(connectionMethod === undefined
+                ? []
+                : ["--connection-method", connectionMethod]),
+              ...(principalType === undefined
+                ? []
+                : ["--principal-type", principalType]),
             ],
           };
     if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
@@ -133,7 +143,11 @@ for (const item of items) {
   const expectedPath = `registry/connections/${slug}.ts`;
   const expectedTarget = `agent/connections/${slug}.ts`;
   const file = item.files?.[0];
-  if (item.files?.length !== 1 || file?.path !== expectedPath || file.target !== expectedTarget) {
+  if (
+    item.files?.length !== 1 ||
+    file?.path !== expectedPath ||
+    file.target !== expectedTarget
+  ) {
     throw new Error(
       `Registry item "${item.name}" must write ${expectedPath} to ${expectedTarget}.`,
     );
@@ -142,16 +156,35 @@ for (const item of items) {
 
   switch (slug) {
     case "browser-use": {
-      if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
+      if (
+        item.dependencies !== undefined ||
+        !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))
+      ) {
         throw new Error(
           'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
         );
       }
       break;
     }
+    case "dataforseo": {
+      const envVars = item.envVars ?? {};
+      if (
+        item.dependencies !== undefined ||
+        !("DATAFORSEO_LOGIN" in envVars) ||
+        !("DATAFORSEO_PASSWORD" in envVars)
+      ) {
+        throw new Error(
+          'Registry item "connection/dataforseo" must declare its credentials without Vercel Connect.',
+        );
+      }
+      break;
+    }
+
     case "shopify": {
       if (item.dependencies !== undefined) {
-        throw new Error('Registry item "connection/shopify" must not declare dependencies.');
+        throw new Error(
+          'Registry item "connection/shopify" must not declare dependencies.',
+        );
       }
       if (item.envVars !== undefined) {
         throw new Error(
@@ -162,7 +195,9 @@ for (const item of items) {
     }
     default: {
       if (!item.dependencies?.includes("@vercel/connect")) {
-        throw new Error(`Registry item "${item.name}" must depend on @vercel/connect.`);
+        throw new Error(
+          `Registry item "${item.name}" must depend on @vercel/connect.`,
+        );
       }
     }
   }
