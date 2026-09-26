@@ -5,12 +5,10 @@ import {
   type GatewayCatalogModel,
 } from "#shared/gateway-model-catalog.js";
 
-import { select, type Asker, type SelectOption } from "../ask.js";
-import type { SetupState } from "../state.js";
-import type { SetupBox } from "../step.js";
+import type { SelectOption } from "../ask.js";
+
 const FETCH_TIMEOUT_MS = 5000;
 const WEB_SEARCH_TAG = "web-search";
-const MODEL_PROMPT_MESSAGE = "Which model should your agent use?";
 
 export type { GatewayCatalogModel } from "#shared/gateway-model-catalog.js";
 
@@ -56,7 +54,7 @@ function providerLabel(provider: string): string {
   return PROVIDER_BRANDS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
-/** Fetches the raw AI Gateway catalog. The default for {@link SelectModelDeps}. */
+/** Fetches the raw AI Gateway catalog. */
 export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<GatewayCatalogModel[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -128,90 +126,4 @@ export function modelOptionsFromCatalog(
     hint,
     featured: FEATURED_MODEL_IDS.includes(value) || undefined,
   }));
-}
-
-async function buildModelOptions(
-  fetchModels: (signal?: AbortSignal) => Promise<GatewayCatalogModel[]>,
-  signal?: AbortSignal,
-): Promise<SelectOption<string>[]> {
-  try {
-    return modelOptionsFromCatalog(await fetchModels(signal));
-  } catch {
-    signal?.throwIfAborted();
-    return FALLBACK_MODELS;
-  }
-}
-
-/** Injected for tests; defaults to the real AI Gateway catalog fetch. */
-export interface SelectModelDeps {
-  fetchModels: (signal?: AbortSignal) => Promise<GatewayCatalogModel[]>;
-}
-
-export interface SelectModelOptions {
-  /** Resolves the model question; the composed stack decides how. */
-  asker: Asker;
-  /**
-   * Resolve to this value without fetching the catalog or asking. Stays a
-   * factory option (not a `withAnswers` rung) because a preset must keep
-   * short-circuiting the catalog fetch and must keep accepting ids the
-   * filtered catalog does not list, exactly as the dual-face box did.
-   */
-  presetModel?: string;
-  /**
-   * Pre-select this model in the picker so enter confirms it. Falls back to the
-   * top catalog entry when omitted or not present in the catalog.
-   */
-  defaultModel?: string;
-  deps?: SelectModelDeps;
-}
-
-/**
- * THE MODEL BOX: pick the default model baked into `agent/agent.ts`. The
- * gather fetches the AI Gateway catalog and asks one required "model" select
- * through the box's asker, so an interactive stack offers a searchable picker
- * while a headless stack refuses structurally when no preset answered it.
- * The model is the first thing the interview decides about the agent itself;
- * how the credential is wired (gateway vs your own provider key) is the
- * provisioning box's later decision, and the byok scaffold derives its
- * provider block from whatever model was picked here.
- */
-export function selectModel(options: SelectModelOptions): SetupBox<SetupState, string, string> {
-  const deps = options.deps ?? { fetchModels: fetchGatewayCatalog };
-
-  return {
-    id: "select-model",
-
-    async gather({ signal }): Promise<string> {
-      const preset = options.presetModel;
-      if (preset !== undefined && preset.length > 0) return preset;
-      const models = await buildModelOptions(deps.fetchModels, signal);
-      const recommended =
-        options.defaultModel !== undefined && models.some((m) => m.value === options.defaultModel)
-          ? options.defaultModel
-          : models.some((m) => m.value === DEFAULT_AGENT_MODEL_ID)
-            ? DEFAULT_AGENT_MODEL_ID
-            : models[0]?.value;
-      return options.asker.ask(
-        select({
-          key: "model",
-          message: MODEL_PROMPT_MESSAGE,
-          options: models,
-          recommended,
-          // A headless run without a preset must fail rather than guess a
-          // model, as the dual-face box did.
-          required: true,
-          search: true,
-          placeholder: "type to search",
-        }),
-      );
-    },
-
-    async perform({ input }): Promise<string> {
-      return input;
-    },
-
-    apply(state, payload) {
-      return { ...state, modelId: payload };
-    },
-  };
 }

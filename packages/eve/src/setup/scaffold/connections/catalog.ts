@@ -191,39 +191,6 @@ export function isValidConnectionSlug(slug: string): boolean {
   return CONNECTION_SLUG_PATTERN.test(slug);
 }
 
-/**
- * The `vercel connect create <service>` identifier for a Connect-backed
- * connection: the explicit `auth.service` when set, otherwise the MCP host.
- * Returns `undefined` when neither is available, in which case the connector
- * must be provisioned out of band.
- */
-export function connectorServiceForEntry(
-  entry: Pick<ConnectionCatalogEntry, "mcp" | "auth">,
-): string | undefined {
-  if (entry.auth.kind !== "connect") return undefined;
-  if (entry.auth.service) return entry.auth.service;
-  return mcpServiceHost(entry.mcp?.url);
-}
-
-/** Canonical connector name attempted before offering discovery or creation. */
-export function canonicalConnectorNameForEntry(entry: {
-  auth?: ConnectionAuthSpec;
-}): string | undefined {
-  if (entry.auth?.kind !== "connect") return undefined;
-  const name = entry.auth.connector.trim();
-  return name.length > 0 ? name : undefined;
-}
-
-/** Extracts the bare host from an MCP URL, or `undefined` when unparseable. */
-export function mcpServiceHost(url: string | undefined): string | undefined {
-  if (!url) return undefined;
-  try {
-    return new URL(url).host || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Returns the endpoint block required for a protocol, or `null` when missing. */
 export function endpointForProtocol(
   entry: Pick<ConnectionCatalogEntry, "mcp" | "openapi">,

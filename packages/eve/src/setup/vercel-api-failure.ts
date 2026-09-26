@@ -46,11 +46,6 @@ export function isNotFoundApiFailure(failure: VercelCaptureFailure): boolean {
   return /(^|\W)(404|not_found)(\W|$)|not found/.test(apiFailureText(failure));
 }
 
-/** Whether a Vercel API failure proves that the requested resource already exists. */
-export function isConflictApiFailure(failure: VercelCaptureFailure): boolean {
-  return /(^|\W)(409|conflict)(\W|$)|already exists/.test(apiFailureText(failure));
-}
-
 /** Whether a scoped Vercel API request was denied. */
 export function isForbiddenApiFailure(failure: VercelCaptureFailure): boolean {
   return /(^|\W)(403|forbidden|not_authorized|team_unauthorized|sso|saml)(\W|$)|not authorized/.test(

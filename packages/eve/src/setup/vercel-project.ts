@@ -60,44 +60,8 @@ export interface LinkProjectOperationOptions extends CreatedProjectFrameworkOpti
   traceSampling?: boolean;
 }
 
-/** Effects used to ensure an interactive Vercel project link. */
-export interface EnsureLinkedVercelProjectDeps {
-  readProjectLink: typeof readProjectLink;
-  runVercel: typeof runVercel;
-}
-
-/**
- * Returns the existing Vercel project link or creates one through the Vercel
- * CLI's interactive flow. The CLI owns team and project selection.
- */
-export async function ensureLinkedVercelProject(input: {
-  projectRoot: string;
-  prompter: Prompter;
-  signal?: AbortSignal;
-  deps?: EnsureLinkedVercelProjectDeps;
-}): Promise<NonNullable<Awaited<ReturnType<typeof readProjectLink>>>> {
-  const deps = input.deps ?? { readProjectLink, runVercel };
-  const existing = await deps.readProjectLink(input.projectRoot);
-  if (existing !== undefined) return existing;
-
-  const link = () => deps.runVercel(["link"], { cwd: input.projectRoot, signal: input.signal });
-  const linked = await (input.prompter.withInheritedStdio?.(link) ?? link());
-  if (!linked) {
-    input.signal?.throwIfAborted();
-    throw new Error("Vercel project linking failed.");
-  }
-  const project = await deps.readProjectLink(input.projectRoot);
-  if (project === undefined) throw new Error("Vercel project linking failed.");
-  return project;
-}
-
 export function unresolvedProject(): ProjectResolution {
   return { kind: "unresolved" };
-}
-
-/** Resolves the linked project id from a resolution, if any. */
-export function projectIdFromResolution(project: ProjectResolution): string | undefined {
-  return project.kind === "unresolved" ? undefined : project.projectId;
 }
 
 function parseProjectReference(stdout: string, description: string): VercelProjectIdentity {
@@ -240,24 +204,6 @@ export function requireVercelAuth(failure: VercelCaptureFailure): never {
  * not-authenticated diagnostic.
  */
 export type VercelAuthStatus = "authenticated" | "logged-out" | "cli-missing" | "unavailable";
-
-/** Returns the user-facing reason Vercel-backed setup is unavailable. */
-export function vercelAuthBlockerReason(authStatus: VercelAuthStatus): string | undefined {
-  switch (authStatus) {
-    case "authenticated":
-      return undefined;
-    case "cli-missing":
-      return "Vercel CLI not found, see /deploy";
-    case "logged-out":
-      return "Log in to Vercel first, see /deploy";
-    case "unavailable":
-      return "Couldn't reach Vercel, check your connection";
-    default: {
-      const exhaustive: never = authStatus;
-      return exhaustive;
-    }
-  }
-}
 
 export async function getVercelAuthStatus(
   projectRoot: string,

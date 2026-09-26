@@ -9,7 +9,6 @@ import {
   initAgentDevHandoff,
   initAgentInstructions,
   initAgentReadySummary,
-  initAgentReplPrompt,
   initExtensionHandoff,
   initExtensionInstructions,
   SETUP_SECTIONS,
@@ -106,18 +105,6 @@ describe("initAgentDevHandoff", () => {
     expect(handoff).toContain("npm exec -- eve dev --no-ui");
     expect(handoff).toMatch(/give them the interactive\s+command/);
     expect(handoff).not.toContain("{{");
-  });
-});
-
-describe("initAgentReplPrompt", () => {
-  it("uses the shared guidance without interpolating the project path into the launch argument", () => {
-    const prompt = initAgentReplPrompt({ devCommand: "pnpm exec eve dev" });
-
-    expect(prompt).toContain("The project at `.` is already scaffolded.");
-    expect(prompt).toContain("What should the agent do?");
-    expect(prompt).toContain("`eve registry search <query>`");
-    expect(prompt).toContain("pnpm exec eve dev --no-ui");
-    expect(prompt).not.toContain("{{");
   });
 });
 

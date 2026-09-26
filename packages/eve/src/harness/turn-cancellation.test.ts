@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  isSessionLimitDecline,
   isTurnCancellation,
   SessionLimitDeclinedError,
   throwIfTurnAborted,
@@ -53,29 +52,11 @@ describe("isTurnCancellation", () => {
 });
 
 describe("SessionLimitDeclinedError", () => {
-  it("is a turn cancellation carrying the decline marker", () => {
+  it("is a turn cancellation with the canonical name", () => {
     const error = new SessionLimitDeclinedError();
     // Keeps the canonical name so every existing cancellation check matches.
     expect(error.name).toBe("TurnCancelledError");
     expect(isTurnCancellation(error)).toBe(true);
-    expect(isSessionLimitDecline(error)).toBe(true);
-  });
-});
-
-describe("isSessionLimitDecline", () => {
-  it("walks the cause chain and ignores plain cancellations", () => {
-    const wrapped = new Error("outer", { cause: new SessionLimitDeclinedError() });
-    expect(isSessionLimitDecline(wrapped)).toBe(true);
-
-    expect(isSessionLimitDecline(new TurnCancelledError())).toBe(false);
-    expect(isSessionLimitDecline(undefined)).toBe(false);
-  });
-
-  it("survives a cause cycle", () => {
-    const a = new Error("a");
-    const b = new Error("b", { cause: a });
-    (a as { cause?: unknown }).cause = b;
-    expect(isSessionLimitDecline(a)).toBe(false);
   });
 });
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ClientError } from "#client/client-error.js";
 import {
-  formatVercelAuthChallengeMessage,
+  formatDevelopmentOidcTokenFailure,
   isVercelAuthChallenge,
   vercelTrustedSourcesErrorCode,
 } from "#services/dev-client/vercel-auth-error.js";
@@ -166,14 +166,13 @@ describe("vercelTrustedSourcesErrorCode", () => {
   it("returns undefined for an unrelated error", () => {
     expect(vercelTrustedSourcesErrorCode("Unavailable")).toBeUndefined();
   });
+});
 
+describe("formatDevelopmentOidcTokenFailure", () => {
   it("includes invalid local OIDC claims in the repair context", () => {
-    const message = formatVercelAuthChallengeMessage({
-      serverUrl: "https://example.vercel.app",
-      oidcTokenFailure: {
-        kind: "invalid-claims",
-        invalidClaims: ["owner_id", "project_id"],
-      },
+    const message = formatDevelopmentOidcTokenFailure({
+      kind: "invalid-claims",
+      invalidClaims: ["owner_id", "project_id"],
     });
 
     expect(message).toContain("invalid claims");
@@ -182,12 +181,9 @@ describe("vercelTrustedSourcesErrorCode", () => {
   });
 
   it("identifies the claims that do not match the resolved target", () => {
-    const message = formatVercelAuthChallengeMessage({
-      serverUrl: "https://example.vercel.app",
-      oidcTokenFailure: {
-        kind: "target-mismatch",
-        mismatchedClaims: ["owner_id", "project_id"],
-      },
+    const message = formatDevelopmentOidcTokenFailure({
+      kind: "target-mismatch",
+      mismatchedClaims: ["owner_id", "project_id"],
     });
 
     expect(message).toContain("owner_id");

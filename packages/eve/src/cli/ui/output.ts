@@ -259,26 +259,6 @@ export function createCliTheme(input: { color?: boolean } = {}): CliTheme {
 }
 
 /**
- * Renders a CLI banner with an optional subtitle.
- */
-export function renderCliBanner(
-  theme: CliTheme,
-  input: {
-    readonly subtitle?: string;
-    readonly title: string;
-  },
-): string {
-  const title = sanitizeForTerminal(input.title);
-  const lines = [theme.heading(title), theme.muted("=".repeat(title.length))];
-
-  if (input.subtitle) {
-    lines.push(theme.muted(sanitizeForTerminal(input.subtitle)));
-  }
-
-  return lines.join("\n");
-}
-
-/**
  * Renders one labeled section with aligned values.
  */
 export function renderCliSection(
@@ -323,30 +303,6 @@ export function renderCliTaggedLine(
 ): string {
   const message = sanitizeForTerminal(input.message);
   const prefix = `[${sanitizeForTerminal(input.tag).toUpperCase()}]`;
-  const valueLines = renderIndentedLines(
-    applyTone(theme, input.tone ?? "default", message).split("\n"),
-    `${" ".repeat(prefix.length)} `,
-  );
-  const [firstLine = "", ...rest] = valueLines;
-
-  return (
-    [theme.muted(prefix), firstLine].join(" ") + (rest.length > 0 ? `\n${rest.join("\n")}` : "")
-  );
-}
-
-/**
- * Renders one speaker-prefixed line such as `agent>`.
- */
-export function renderCliSpeakerLine(
-  theme: CliTheme,
-  input: {
-    readonly message: string;
-    readonly speaker: string;
-    readonly tone?: CliMessageTone;
-  },
-): string {
-  const message = sanitizeForTerminal(input.message);
-  const prefix = `${sanitizeForTerminal(input.speaker)}>`;
   const valueLines = renderIndentedLines(
     applyTone(theme, input.tone ?? "default", message).split("\n"),
     `${" ".repeat(prefix.length)} `,

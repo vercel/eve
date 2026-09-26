@@ -1,9 +1,6 @@
 import type { Nitro } from "nitro/types";
 
-import {
-  EVE_SCHEDULE_TASK_NAME_PREFIX,
-  type ScheduleRegistration,
-} from "#runtime/schedules/register.js";
+import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import { stringifyEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 
@@ -31,17 +28,6 @@ export interface RegisterScheduleTaskHandlersInput {
   readonly artifactsConfig: NitroArtifactsConfig;
   readonly dispatchModulePath: string;
   readonly registrations: readonly ScheduleRegistration[];
-}
-
-/**
- * Inputs needed to reconcile schedule task handlers when authored sources
- * change in dev mode.
- */
-export interface SyncScheduleTaskHandlersInput {
-  readonly artifactsConfig: NitroArtifactsConfig;
-  readonly dispatchModulePath: string;
-  readonly next: readonly ScheduleRegistration[];
-  readonly previous: readonly ScheduleRegistration[];
 }
 
 /**
@@ -75,71 +61,6 @@ export function registerScheduleTaskHandlers(
       dispatchModulePath: input.dispatchModulePath,
       registration,
     });
-  }
-}
-
-/**
- * Replaces the currently-registered eve schedule task handlers when the
- * compiled authored schedule set changes.
- *
- * Returns `true` when the registration set changed (and the caller should
- * trigger a Nitro rebuild reload), `false` when it was a structural no-op.
- */
-export function syncScheduleTaskHandlers(
-  nitro: ScheduleTaskNitro,
-  input: SyncScheduleTaskHandlersInput,
-): boolean {
-  const hasChanged = !areScheduleRegistrationsEqual(input.previous, input.next);
-
-  removeScheduleTaskHandlers(nitro);
-  registerScheduleTaskHandlers(nitro, {
-    artifactsConfig: input.artifactsConfig,
-    dispatchModulePath: input.dispatchModulePath,
-    registrations: input.next,
-  });
-
-  return hasChanged;
-}
-
-/**
- * Removes every eve-owned schedule task entry, virtual handler module, and
- * cron entry from the Nitro options. Used by the dev watcher before
- * re-registering the latest compiled set.
- */
-export function removeScheduleTaskHandlers(nitro: ScheduleTaskNitro): void {
-  for (const taskName of Object.keys(nitro.options.tasks)) {
-    if (taskName.startsWith(EVE_SCHEDULE_TASK_NAME_PREFIX)) {
-      delete nitro.options.tasks[taskName];
-    }
-  }
-
-  for (const virtualId of Object.keys(nitro.options.virtual)) {
-    if (virtualId.startsWith(EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX)) {
-      delete nitro.options.virtual[virtualId];
-    }
-  }
-
-  for (const [cron, scheduledTask] of Object.entries(nitro.options.scheduledTasks)) {
-    const filtered = normalizeScheduledTasks(scheduledTask).filter(
-      (taskName) => !taskName.startsWith(EVE_SCHEDULE_TASK_NAME_PREFIX),
-    );
-
-    if (filtered.length === 0) {
-      delete nitro.options.scheduledTasks[cron];
-      continue;
-    }
-
-    if (filtered.length === 1) {
-      const [singleTask] = filtered;
-
-      if (singleTask !== undefined) {
-        nitro.options.scheduledTasks[cron] = singleTask;
-      }
-
-      continue;
-    }
-
-    nitro.options.scheduledTasks[cron] = filtered;
   }
 }
 
@@ -194,39 +115,4 @@ function appendScheduledTask(nitro: ScheduleTaskNitro, cron: string, taskName: s
   if (!existingScheduleTasks.includes(taskName)) {
     existingScheduleTasks.push(taskName);
   }
-}
-
-function normalizeScheduledTasks(value: string | string[]): string[] {
-  return typeof value === "string" ? [value] : [...value];
-}
-
-function areScheduleRegistrationsEqual(
-  left: readonly ScheduleRegistration[],
-  right: readonly ScheduleRegistration[],
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    const leftRegistration = left[index];
-    const rightRegistration = right[index];
-
-    if (leftRegistration === undefined || rightRegistration === undefined) {
-      return false;
-    }
-
-    if (
-      leftRegistration.cron !== rightRegistration.cron ||
-      leftRegistration.description !== rightRegistration.description ||
-      leftRegistration.logicalPath !== rightRegistration.logicalPath ||
-      leftRegistration.scheduleId !== rightRegistration.scheduleId ||
-      leftRegistration.sourceId !== rightRegistration.sourceId ||
-      leftRegistration.taskName !== rightRegistration.taskName
-    ) {
-      return false;
-    }
-  }
-
-  return true;
 }

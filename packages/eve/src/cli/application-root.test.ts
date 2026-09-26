@@ -1,11 +1,8 @@
-import { resolve } from "node:path";
-
 import { describe, expect, it, vi } from "vitest";
 
 import {
   findCliApplicationRoot,
   resolveCliApplicationProject,
-  resolveCliApplicationRoot,
   type ResolveCliApplicationRootDependencies,
 } from "#cli/application-root.js";
 import {
@@ -30,7 +27,7 @@ function dependencies(
   return { resolveDiscoveryProject: vi.fn(implementation) };
 }
 
-describe("resolveCliApplicationRoot", () => {
+describe("CLI application root", () => {
   it("returns the complete project resolved by discovery", async () => {
     const project = {
       agentRoot: "/repo/agent",
@@ -40,16 +37,6 @@ describe("resolveCliApplicationRoot", () => {
     const deps = dependencies(async () => project);
 
     await expect(resolveCliApplicationProject("/repo/agent/tools", deps)).resolves.toEqual(project);
-  });
-
-  it("uses the application root resolved by project discovery", async () => {
-    const deps = dependencies(async () => ({
-      agentRoot: "/repo/agent",
-      appRoot: "/repo",
-      layout: "nested",
-    }));
-
-    await expect(resolveCliApplicationRoot("/repo/agent/tools", deps)).resolves.toBe("/repo");
   });
 
   it("finds a named agent workspace member", async () => {
@@ -84,21 +71,11 @@ describe("resolveCliApplicationRoot", () => {
     await expect(findCliApplicationRoot("/workspace/packages", deps)).resolves.toBeUndefined();
   });
 
-  it("preserves cwd when resolving from outside an application", async () => {
-    const deps = dependencies(async (path) => {
-      throw projectNotFound(path ?? process.cwd());
-    });
-
-    await expect(resolveCliApplicationRoot("./workspace/packages", deps)).resolves.toBe(
-      resolve("./workspace/packages"),
-    );
-  });
-
   it("does not hide unexpected discovery failures", async () => {
     const deps = dependencies(async () => {
       throw new Error("read failed");
     });
 
-    await expect(resolveCliApplicationRoot("/workspace", deps)).rejects.toThrow("read failed");
+    await expect(findCliApplicationRoot("/workspace", deps)).rejects.toThrow("read failed");
   });
 });

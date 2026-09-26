@@ -9,7 +9,6 @@ import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
   readActionTraceContext,
-  readCurrentSessionTraceDecision,
   readTurnTraceContext,
 } from "#tracing/agent-trace-context-store.js";
 
@@ -243,21 +242,6 @@ describe("readTurnTraceContext", () => {
     expect(readTurnTraceContext(await serializeContext(context), "session-1", "turn-1")).toEqual({
       ...spanContext("3", "4"),
       decision: { action: "record", recordInputs: false, recordOutputs: true },
-    });
-  });
-});
-
-describe("readCurrentSessionTraceDecision", () => {
-  it("reads the decision bound in the current worker context", async () => {
-    const context = new ContextContainer();
-    const decision = { action: "record", recordInputs: false, recordOutputs: true } as const;
-    await contextStorage.run(context, () => {
-      new ContextAgentTraceStateStore().setSession("session-1", {
-        context: spanContext("1", "2"),
-        decision,
-        rootSessionId: "session-1",
-      });
-      expect(readCurrentSessionTraceDecision("session-1")).toEqual(decision);
     });
   });
 });

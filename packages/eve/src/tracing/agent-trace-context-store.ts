@@ -98,14 +98,6 @@ function pruneTraceOwnership(
   context.set(AgentTraceContextKey, { ...state, actionAnchors, invocations });
 }
 
-/** Reads the decision already bound to a session in the current worker context. */
-export function readCurrentSessionTraceDecision(
-  sessionId: string,
-): InstrumentationDecision | undefined {
-  const context = contextStorage.getStore();
-  return context === undefined ? undefined : readSessionTraceDecision(context, sessionId);
-}
-
 export function readSessionTraceDecision(
   context: ContextAccessor,
   sessionId: string,

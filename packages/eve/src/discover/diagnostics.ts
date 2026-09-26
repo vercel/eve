@@ -105,10 +105,3 @@ export function summarizeDiscoverDiagnostics(
     },
   );
 }
-
-/**
- * Returns whether discovery diagnostics include at least one error.
- */
-export function hasDiscoverErrors(diagnostics: readonly DiscoverDiagnostic[]): boolean {
-  return diagnostics.some((diagnostic) => diagnostic.severity === "error");
-}

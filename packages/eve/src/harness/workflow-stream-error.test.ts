@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  extractWorkflowStreamWriteErrorDetails,
-  isWorkflowStreamWriteError,
-} from "#harness/workflow-stream-error.js";
+import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 
 describe("extractWorkflowStreamWriteErrorDetails", () => {
   it("parses status, url, and vercel headers from the timeout signature", () => {
@@ -66,17 +63,5 @@ describe("extractWorkflowStreamWriteErrorDetails", () => {
     expect(extractWorkflowStreamWriteErrorDetails(null)).toBeNull();
     expect(extractWorkflowStreamWriteErrorDetails("Stream write failed: HTTP 504")).toBeNull();
     expect(extractWorkflowStreamWriteErrorDetails(504)).toBeNull();
-  });
-});
-
-describe("isWorkflowStreamWriteError", () => {
-  it("is true for a workflow stream-write failure", () => {
-    expect(
-      isWorkflowStreamWriteError(new Error("Stream write failed: HTTP 504 (PUT https://x): t")),
-    ).toBe(true);
-  });
-
-  it("is false for a model-call error", () => {
-    expect(isWorkflowStreamWriteError(new Error("model overloaded"))).toBe(false);
   });
 });

@@ -4,12 +4,10 @@ import {
   GitHubApiError,
   callGitHubApi,
   createGitHubIssueComment,
-  createGitHubPullRequestReviewComment,
   createGitHubReaction,
   createGitHubReviewCommentReply,
   getGitHubPullRequest,
   listGitHubPullRequestFiles,
-  updateGitHubPullRequestReviewComment,
 } from "#public/channels/github/api.js";
 import {
   clearGitHubInstallationTokenCache,
@@ -80,53 +78,6 @@ describe("GitHub API helpers", () => {
       "https://github.test/repos/vercel/eve/pulls/7/comments/99/replies",
     );
     expect(requestBody(fetchMock.mock.calls[0]?.[1])).toEqual({ body: "inline reply" });
-  });
-
-  it("creates inline pull request review comments through the pull comments API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 12 }));
-
-    await createGitHubPullRequestReviewComment({
-      api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-      body: {
-        body: "inline comment",
-        commit_id: "abc123",
-        line: 10,
-        path: "src/file.ts",
-      },
-      credentials,
-      installationId: 123,
-      owner: "vercel",
-      pullRequestNumber: 7,
-      repo: "eve",
-    });
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://github.test/repos/vercel/eve/pulls/7/comments",
-    );
-    expect(requestBody(fetchMock.mock.calls[0]?.[1])).toMatchObject({
-      body: "inline comment",
-      path: "src/file.ts",
-    });
-  });
-
-  it("updates review-thread comments through the pull request comments API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 11 }));
-
-    await updateGitHubPullRequestReviewComment({
-      api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-      body: "updated inline reply",
-      commentId: 99,
-      credentials,
-      installationId: 123,
-      owner: "vercel",
-      repo: "eve",
-    });
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://github.test/repos/vercel/eve/pulls/comments/99",
-    );
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("PATCH");
-    expect(requestBody(fetchMock.mock.calls[0]?.[1])).toEqual({ body: "updated inline reply" });
   });
 
   it("creates reactions on issue comments and throws owned API errors for non-2xx", async () => {

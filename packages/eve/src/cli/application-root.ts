@@ -1,5 +1,3 @@
-import { resolve } from "node:path";
-
 import {
   DiscoveryProjectResolutionError,
   resolveDiscoveryProject,
@@ -33,12 +31,4 @@ export async function findCliApplicationRoot(
     if (error instanceof DiscoveryProjectResolutionError) return undefined;
     throw error;
   }
-}
-
-/** Uses the nearest enclosing eve application, or preserves cwd when none exists. */
-export async function resolveCliApplicationRoot(
-  cwd: string = process.cwd(),
-  dependencies: ResolveCliApplicationRootDependencies = defaultDependencies,
-): Promise<string> {
-  return (await findCliApplicationRoot(cwd, dependencies)) ?? resolve(cwd);
 }

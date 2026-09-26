@@ -9,7 +9,6 @@ import {
   isMediaTypeAllowed,
   isUploadsDisabled,
   mergeUploadPolicy,
-  stripDisallowedFileParts,
   type UploadPolicy,
   type UploadPolicyConfig,
   type UploadPolicyViolation,
@@ -273,33 +272,6 @@ describe("collectUploadPolicyViolations", () => {
     expect(collectUploadPolicyViolations(content, { allowedMediaTypes: [], maxBytes: 1 })).toEqual(
       [],
     );
-  });
-});
-
-describe("stripDisallowedFileParts", () => {
-  it("removes violating file parts and keeps text/image parts", () => {
-    const policy: UploadPolicy = {
-      allowedMediaTypes: ["text/csv"],
-      maxBytes: 4,
-    };
-    const content: UserContent = [
-      { type: "text", text: "hi" },
-      filePart({ data: makeBytes(1), filename: "keep.csv", mediaType: "text/csv" }),
-      filePart({ data: makeBytes(64), filename: "drop-size.csv", mediaType: "text/csv" }),
-      filePart({ filename: "drop-type.png", mediaType: "image/png" }),
-    ];
-
-    const stripped = stripDisallowedFileParts(content, policy);
-
-    expect(Array.isArray(stripped)).toBe(true);
-    expect(stripped).toHaveLength(2);
-    const parts = stripped as ReadonlyArray<FilePart | { type: "text"; text: string }>;
-    expect(parts[0]).toEqual({ type: "text", text: "hi" });
-    expect((parts[1] as FilePart).filename).toBe("keep.csv");
-  });
-
-  it("returns the input unchanged for plain strings", () => {
-    expect(stripDisallowedFileParts("untouched", DEFAULT_UPLOAD_POLICY)).toBe("untouched");
   });
 });
 

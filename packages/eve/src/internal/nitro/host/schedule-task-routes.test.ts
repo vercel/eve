@@ -1,16 +1,8 @@
 import type { Nitro } from "nitro/types";
 import { describe, expect, it } from "vitest";
 
-import {
-  EVE_SCHEDULE_TASK_NAME_PREFIX,
-  createScheduleRegistrations,
-  type ScheduleRegistration,
-} from "#runtime/schedules/register.js";
-import {
-  registerScheduleTaskHandlers,
-  removeScheduleTaskHandlers,
-  syncScheduleTaskHandlers,
-} from "#internal/nitro/host/schedule-task-routes.js";
+import { createScheduleRegistrations } from "#runtime/schedules/register.js";
+import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
 
 const DISPATCH_MODULE_PATH = "/framework/schedule-task.ts";
 
@@ -98,116 +90,17 @@ describe("schedule task routes", () => {
     expect(nitro.options.scheduledTasks).toEqual({});
     expect(nitro.options.virtual).toEqual({});
   });
-
-  it("removes only eve-owned task entries, virtual modules, and cron mappings", () => {
-    const nitro = createNitroStub({
-      scheduledTasks: {
-        "0 8 * * *": ["eve.schedule.example", "user-task"],
-        "0 0 * * *": "eve.schedule.alone",
-      },
-      tasks: {
-        "eve.schedule.example": { description: "eve", handler: "#eve-schedule-task/example" },
-        "eve.schedule.alone": { description: "eve", handler: "#eve-schedule-task/alone" },
-        "user-task": { description: "user", handler: "/user/task.ts" },
-      },
-      virtual: {
-        "#eve-schedule-task/example": "...",
-        "#eve-schedule-task/alone": "...",
-        "#user/virtual": "...",
-      },
-    });
-
-    removeScheduleTaskHandlers(nitro);
-
-    expect(nitro.options.tasks).toEqual({
-      "user-task": { description: "user", handler: "/user/task.ts" },
-    });
-    expect(nitro.options.virtual).toEqual({
-      "#user/virtual": "...",
-    });
-    expect(nitro.options.scheduledTasks).toEqual({
-      "0 8 * * *": "user-task",
-    });
-  });
-
-  it("syncs registrations and reports whether the registration set changed", () => {
-    const nitro = createNitroStub();
-    const previous = makeRegistration({
-      cron: "0 8 * * *",
-      logicalPath: "schedules/daily.md",
-      scheduleId: "daily",
-      sourceId: "schedules/daily.md",
-    });
-    const next = makeRegistration({
-      cron: "0 0 * * *",
-      logicalPath: "schedules/nightly.md",
-      scheduleId: "nightly",
-      sourceId: "schedules/nightly.md",
-    });
-
-    registerScheduleTaskHandlers(nitro, {
-      artifactsConfig: ARTIFACTS_CONFIG,
-      dispatchModulePath: DISPATCH_MODULE_PATH,
-      registrations: [previous],
-    });
-
-    const changed = syncScheduleTaskHandlers(nitro, {
-      artifactsConfig: ARTIFACTS_CONFIG,
-      dispatchModulePath: DISPATCH_MODULE_PATH,
-      next: [next],
-      previous: [previous],
-    });
-
-    expect(changed).toBe(true);
-    expect(nitro.options.tasks[previous.taskName]).toBeUndefined();
-    expect(nitro.options.tasks[next.taskName]).toBeDefined();
-    expect(nitro.options.scheduledTasks).toEqual({
-      [next.cron]: next.taskName,
-    });
-
-    const unchanged = syncScheduleTaskHandlers(nitro, {
-      artifactsConfig: ARTIFACTS_CONFIG,
-      dispatchModulePath: DISPATCH_MODULE_PATH,
-      next: [next],
-      previous: [next],
-    });
-
-    expect(unchanged).toBe(false);
-    expect(nitro.options.tasks[next.taskName]).toBeDefined();
-  });
 });
 
-function createNitroStub(
-  input: {
-    scheduledTasks?: Record<string, string | string[]>;
-    tasks?: Record<string, { description?: string; handler?: string }>;
-    virtual?: Record<string, string>;
-  } = {},
-): Nitro {
+function createNitroStub(): Nitro {
   return {
     options: {
       experimental: {
         tasks: false,
       },
-      scheduledTasks: input.scheduledTasks ?? {},
-      tasks: input.tasks ?? {},
-      virtual: input.virtual ?? {},
+      scheduledTasks: {},
+      tasks: {},
+      virtual: {},
     },
   } as unknown as Nitro;
-}
-
-function makeRegistration(input: {
-  cron: string;
-  logicalPath: string;
-  scheduleId: string;
-  sourceId: string;
-}): ScheduleRegistration {
-  return {
-    cron: input.cron,
-    description: `Run schedule "${input.scheduleId}".`,
-    logicalPath: input.logicalPath,
-    scheduleId: input.scheduleId,
-    sourceId: input.sourceId,
-    taskName: `${EVE_SCHEDULE_TASK_NAME_PREFIX}${input.scheduleId}`,
-  };
 }

@@ -200,34 +200,6 @@ export function collectUploadPolicyViolations(
 }
 
 /**
- * Returns a copy of `content` with every {@link FilePart} that violates
- * `policy` removed.
- *
- * Callers that want a hard-fail contract (HTTP) should use
- * {@link collectUploadPolicyViolations} and return a 4xx response
- * instead. Callers that want best-effort delivery (Slack: drop the bad
- * upload, keep the turn going) use this helper and log the dropped
- * attachments.
- */
-export function stripDisallowedFileParts(
-  content: string | UserContent,
-  policy: UploadPolicy,
-): string | UserContent {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  const filtered = content.filter((part) => {
-    if (part.type !== "file") {
-      return true;
-    }
-    return evaluateFilePart(part, policy) === null;
-  });
-
-  return filtered;
-}
-
-/**
  * Renders a {@link UploadPolicyViolation} as a short human-readable
  * string. Used by channel error responses and warning logs.
  */

@@ -363,13 +363,6 @@ export function isFreeformAction(actionId: string): boolean {
   return actionId.startsWith(HITL_FREEFORM_ACTION_PREFIX);
 }
 
-/**
- * Extracts the requestId from a freeform-answer button's `action_id`.
- */
-export function freeformRequestIdFromActionId(actionId: string): string | undefined {
-  return decodeFreeformHitlActionId(actionId)?.requestId;
-}
-
 export function decodeFreeformHitlActionId(actionId: string): DecodedHitlActionId | null {
   if (!isFreeformAction(actionId)) return null;
   return decodeHitlActionId(

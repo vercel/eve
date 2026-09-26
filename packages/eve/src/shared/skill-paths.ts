@@ -8,28 +8,6 @@ export const FALLBACK_SKILL_ROOT = "/workspace/skills";
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 const sandboxHomeCache = new WeakMap<SandboxSession, Promise<string | null>>();
 
-export function formatSkillModelPath(input: {
-  readonly name: string;
-  readonly relativePath: string;
-}): string {
-  return formatSkillPath({
-    name: input.name,
-    relativePath: input.relativePath,
-    root: MODEL_SKILL_ROOT,
-  });
-}
-
-export function formatFallbackSkillPath(input: {
-  readonly name: string;
-  readonly relativePath: string;
-}): string {
-  return formatSkillPath({
-    name: input.name,
-    relativePath: input.relativePath,
-    root: FALLBACK_SKILL_ROOT,
-  });
-}
-
 /**
  * Resolves where skills live in the sandbox: under the probed home when it has
  * one, and under {@link FALLBACK_SKILL_ROOT} when it does not.
@@ -65,20 +43,6 @@ export async function resolveSandboxModelPath(input: {
   }
 
   return input.path;
-}
-
-export async function resolveSandboxSkillReadPaths(input: {
-  readonly name: string;
-  readonly relativePath: string;
-  readonly sandbox: SandboxSession;
-}): Promise<readonly string[]> {
-  return [
-    formatSkillPath({
-      name: input.name,
-      relativePath: input.relativePath,
-      root: await resolveSandboxSkillRoot({ sandbox: input.sandbox }),
-    }),
-  ];
 }
 
 export async function resolveSandboxSkillWritePath(input: {

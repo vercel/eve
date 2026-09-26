@@ -87,7 +87,7 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
-import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
+import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionUsageLimitViolation,
   getSessionTokenUsage,
@@ -2496,7 +2496,7 @@ describe("createToolLoopHarness", () => {
     // execution layer settles as `turn.cancelled` → `session.waiting` (and,
     // for delegated sessions, escalates to a root-turn cancel). No failure
     // or completion events are emitted here.
-    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
+    await expect(declined).rejects.toBeInstanceOf(SessionLimitDeclinedError);
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
     expect(events.some((event) => event.type === "session.completed")).toBe(false);
