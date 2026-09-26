@@ -3,11 +3,11 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
-import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
+import { releaseAgentInvocationOwnerHandles } from "#subagents/handles/query.js";
 
 vi.mock("#execution/tools/subagent/task-agent-requests.js", () => ({
   applyTaskAgentRequest: vi.fn(),
@@ -15,11 +15,25 @@ vi.mock("#execution/tools/subagent/task-agent-requests.js", () => ({
 vi.mock("#execution/tools/subagent/task-cancel.js", () => ({
   cancelAgentInvocationOwnerStep: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
-  releaseAgentInvocationOwnerStep: vi.fn(),
-}));
 
 beforeEach(() => vi.resetAllMocks());
+
+it("does not release handles that belong to another workflow-tool run", () => {
+  const unrelated = {
+    address: {
+      kind: "agent/local" as const,
+      sessionId: "unrelated-child-session",
+      continuationToken: "unrelated-child-token",
+    },
+    identity: { id: "unrelated-agent-id", name: "agent", nodeId: "subagents/agent" },
+    phase: "available" as const,
+  };
+  const state = setAgentHandleStore(undefined, { handles: [unrelated] });
+
+  expect(releaseAgentInvocationOwnerHandles(state, { cancelled: false, ownerId: "run" })).toEqual({
+    claimedHandles: [],
+  });
+});
 
 it.each(["completed", "cancelled"] as const)(
   "settles the agent request once and releases its handle after a %s workflow outcome",
@@ -31,12 +45,34 @@ it.each(["completed", "cancelled"] as const)(
       continuationToken: "child-token",
     };
     const identity = { id: "agent-id", name: "agent", nodeId: "subagents/agent" };
+    const reservedIdentity = {
+      id: "reserved-agent-id",
+      name: "agent",
+      nodeId: "subagents/agent",
+    };
+    const unrelatedAddress = {
+      kind: "agent/local" as const,
+      sessionId: "unrelated-child-session",
+      continuationToken: "unrelated-child-token",
+    };
+    const unrelatedIdentity = {
+      id: "unrelated-agent-id",
+      name: "agent",
+      nodeId: "subagents/agent",
+    };
     const session = registerWorkflowToolRun(
       {
         ...sessionState.snapshot.session,
         state: setAgentHandleStore(sessionState.snapshot.session.state, {
           handles: [
             { address, identity, operationId: "operation", ownerId: "run", phase: "claimed" },
+            {
+              identity: reservedIdentity,
+              operationId: "reserved-operation",
+              ownerId: "run",
+              phase: "reserved",
+            },
+            { address: unrelatedAddress, identity: unrelatedIdentity, phase: "available" },
           ],
         }),
       },
@@ -81,15 +117,6 @@ it.each(["completed", "cancelled"] as const)(
       serializedContext: {},
       sessionState: state,
     });
-    const handleStore = getAgentHandleStore(state.snapshot.session.state);
-    const releasedHandle =
-      status === "completed"
-        ? { address, identity, phase: "available" as const }
-        : { address, identity, lastStatus: "(cancelled)", phase: "parked" as const };
-    vi.mocked(releaseAgentInvocationOwnerStep).mockResolvedValue({
-      claimedHandles: [{ address, identity }],
-      handleStore: { handles: [releasedHandle] },
-    });
     await handleWorkflowToolRunMessage({
       callbackMetadataUrl: "https://parent.example",
       cursor,
@@ -118,19 +145,20 @@ it.each(["completed", "cancelled"] as const)(
             output: "The workflow tool run was cancelled.",
           },
     );
-    expect(releaseAgentInvocationOwnerStep).toHaveBeenCalledWith({
-      cancelled: status === "cancelled",
-      handleStore,
-      ownerId: "run",
-    });
     expect(cancelAgentInvocationOwnerStep).toHaveBeenCalledWith({
       handles: [{ address, identity }],
       ownerId: "run",
     });
     expect(getAgentHandleStore(cursor.sessionState.snapshot.session.state)?.handles).toEqual(
       status === "completed"
-        ? [{ address, identity, phase: "available" }]
-        : [{ address, identity, lastStatus: "(cancelled)", phase: "parked" }],
+        ? [
+            { address, identity, phase: "available" },
+            { address: unrelatedAddress, identity: unrelatedIdentity, phase: "available" },
+          ]
+        : [
+            { address, identity, lastStatus: "(cancelled)", phase: "parked" },
+            { address: unrelatedAddress, identity: unrelatedIdentity, phase: "available" },
+          ],
     );
   },
 );

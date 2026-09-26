@@ -19,7 +19,6 @@ import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/state-key.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
 import {
   readDurableSession,
@@ -31,15 +30,11 @@ import {
   getAgentHandleStore,
   writeHandles,
   type AgentHandle,
-  type AgentHandleStore,
   type AgentHandleStoreCommand,
   type AgentHandleStoreCommandResult,
   type TaskOwnedAgentHandle,
 } from "#subagents/handles/store.js";
-import {
-  abandonAgentInvocationOwners,
-  applyTaskAgentHandleCommand,
-} from "#subagents/handles/transitions.js";
+import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import {
   AGENT_BUSY,
   AGENT_MISMATCH,
@@ -496,49 +491,6 @@ export async function settleTaskAgentInvocationStep(input: {
     serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
-}
-
-type WorkflowToolRunClaimedHandle = Pick<
-  Extract<AgentHandle, { phase: "claimed" }>,
-  "address" | "identity"
->;
-
-/** Prepares owner-scoped cleanup using only the workflow tool's handle store. */
-export async function releaseAgentInvocationOwnerStep(input: {
-  readonly cancelled: boolean;
-  readonly handleStore: unknown;
-  readonly ownerId: string;
-}): Promise<{
-  readonly claimedHandles: readonly WorkflowToolRunClaimedHandle[];
-  readonly handleStore?: AgentHandleStore;
-}> {
-  "use step";
-
-  const session = { state: { [AGENT_HANDLES_STATE_KEY]: input.handleStore } };
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  const ownedHandles = handles.filter(
-    (handle) =>
-      (handle.phase === "reserved" || handle.phase === "claimed") &&
-      handle.ownerId === input.ownerId,
-  );
-  const claimedHandles = ownedHandles.flatMap((handle) =>
-    handle.phase === "claimed" ? [{ address: handle.address, identity: handle.identity }] : [],
-  );
-  if (ownedHandles.length === 0) return { claimedHandles };
-
-  const updatedSession = input.cancelled
-    ? abandonAgentInvocationOwners(session, new Set([input.ownerId]))
-    : applyTaskAgentHandleCommand(session, {
-        kind: "release-owner",
-        ownerId: input.ownerId,
-      }).session;
-  if (updatedSession === session) return { claimedHandles };
-
-  const updatedStore = getAgentHandleStore(updatedSession.state);
-  if (updatedStore === undefined) {
-    throw new Error("Agent handle store disappeared during workflow owner cleanup.");
-  }
-  return { claimedHandles, handleStore: updatedStore };
 }
 
 function readClaimedHandle(

@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   dispatchAgentInvocation,
   dispatchTaskAgentInvocationStep,
-  releaseAgentInvocationOwnerStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
 import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
@@ -590,54 +589,6 @@ describe("task-owned agent settlement", () => {
     ]);
   });
 });
-
-it.each(["completed", "cancelled"] as const)(
-  "prepares compact handle cleanup after a %s workflow-tool outcome",
-  async (status) => {
-    const claimed = {
-      ...availableRecord,
-      callId: "call-1",
-      operationId: "operation-1",
-      ownerId: "workflow-run-1",
-      phase: "claimed" as const,
-    };
-    const reserved = {
-      callId: "reserved-call",
-      identity: { id: "reserved-agent", name: "research", nodeId: "subagents/research" },
-      operationId: "operation-2",
-      ownerId: "workflow-run-1",
-      phase: "reserved" as const,
-    };
-    const unrelated = {
-      ...availableRecord,
-      identity: { ...availableRecord.identity, id: "unrelated-agent" },
-    };
-    const handleStore = getAgentHandleStore(
-      setAgentHandleStore(undefined, { handles: [claimed, reserved, unrelated] }),
-    );
-
-    const cleanup = await releaseAgentInvocationOwnerStep({
-      cancelled: status === "cancelled",
-      handleStore,
-      ownerId: "workflow-run-1",
-    });
-
-    expect(cleanup.claimedHandles).toEqual([
-      { address: claimed.address, identity: claimed.identity },
-    ]);
-    expect(cleanup.handleStore?.handles).toEqual([
-      status === "completed"
-        ? { address: claimed.address, identity: claimed.identity, phase: "available" }
-        : {
-            address: claimed.address,
-            identity: claimed.identity,
-            lastStatus: "(cancelled)",
-            phase: "parked",
-          },
-      unrelated,
-    ]);
-  },
-);
 
 async function dispatch() {
   return await dispatchAgentInvocation({
