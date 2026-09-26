@@ -1541,41 +1541,6 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
-  it("removes streamed text for a null message completion", () => {
-    const reducer = defaultMessageReducer();
-    const data = reduceServerEvents(reducer, reducer.initial(), [
-      createMessageCompletedEvent({
-        message: "Earlier step.",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createMessageAppendedEvent({
-        messageDelta: "<eve-empty-delivery/>",
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_1",
-      }),
-      createMessageCompletedEvent({
-        message: null,
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_1",
-      }),
-    ]);
-
-    expect(data.messages[0]?.parts).toEqual([
-      { type: "step-start" },
-      {
-        state: "done",
-        stepIndex: 0,
-        text: "Earlier step.",
-        type: "text",
-      },
-      { type: "step-start" },
-    ]);
-  });
-
   it("keeps an earlier completed response when a reused step index has a null completion", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [

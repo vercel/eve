@@ -2453,21 +2453,35 @@ describe("EveTUIRunner native continuation state", () => {
         type: "message.appended",
         data: { messageDelta: " world", sequence: 1, stepIndex: 0, turnId: "t0" },
       } as UnstampedMessageStreamEvent,
-      2,
+      3,
+    );
+    const requested = stampTestEvent(
+      {
+        type: "actions.requested",
+        data: {
+          actions: [{ callId: "call-1", kind: "tool-call", toolName: "lookup", input: {} }],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t0",
+        },
+      } as UnstampedMessageStreamEvent,
+      1,
     );
     const session = stubSession();
     vi.spyOn(session, "send")
       .mockResolvedValueOnce(
         messageResponseOf([
           text,
-          stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 1),
+          requested,
+          stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 2),
         ]),
       )
       .mockResolvedValueOnce(
         messageResponseOf([
           text,
+          requested,
           more,
-          stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 3),
+          stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 4),
         ]),
       );
     const emitted: AgentTUIStreamEvent[] = [];
@@ -2487,40 +2501,7 @@ describe("EveTUIRunner native continuation state", () => {
       { type: "assistant-delta", id: "text:t0:0", delta: "Hello" },
       { type: "assistant-delta", id: "text:t0:0", delta: " world" },
     ]);
-  });
-
-  it("does not render repeated tool calls after a later stream replays the same events", async () => {
-    const requested = stampTestEvent(
-      {
-        type: "actions.requested",
-        data: {
-          actions: [{ callId: "call-1", kind: "tool-call", toolName: "lookup", input: {} }],
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "t0",
-        },
-      } as UnstampedMessageStreamEvent,
-      0,
-    );
-    const boundary = stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 1);
-    const session = stubSession();
-    vi.spyOn(session, "send").mockImplementation(async () =>
-      messageResponseOf([requested, boundary]),
-    );
-    const calls: AgentTUIStreamEvent[] = [];
-    const renderer = fakeRenderer({
-      readPrompt: vi
-        .fn()
-        .mockResolvedValueOnce("first")
-        .mockResolvedValueOnce("second")
-        .mockResolvedValueOnce(undefined),
-      renderStream: vi.fn(async (result) => {
-        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>)
-          calls.push(event);
-      }),
-    });
-    await new EveTUIRunner({ session, renderer, name: "Agent" }).run();
-    expect(calls.filter((event) => event.type === "tool-call")).toHaveLength(1);
+    expect(emitted.filter((event) => event.type === "tool-call")).toHaveLength(1);
   });
 
   it("does not prompt again when a prior stream replays an answered approval", async () => {
@@ -3089,6 +3070,26 @@ describe("EveTUIRunner failure rendering", () => {
   });
 });
 
+async function projectWebAndTerminal(trace: UnstampedMessageStreamEvent[]) {
+  const stamped = trace.map((event, index) => stampTestEvent(event, index));
+  const reducer = defaultMessageReducer();
+  const web = stamped.reduce((state, event) => reducer.reduce(state, event), reducer.initial());
+  const terminal: AgentTUIStreamEvent[] = [];
+  const renderer = fakeRenderer({
+    readPrompt: vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined),
+    renderStream: vi.fn(async (result) => {
+      for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>)
+        terminal.push(event);
+    }),
+  });
+  await new EveTUIRunner({
+    session: sessionYielding(stamped),
+    renderer,
+    name: "Weather Agent",
+  }).run();
+  return { web, terminal };
+}
+
 describe("EveTUIRunner reused step indexes", () => {
   it("renders a follow-up turn carried by the same steering stream", async () => {
     const prompts: Array<string | undefined> = ["start", undefined];
@@ -3144,39 +3145,6 @@ describe("EveTUIRunner reused step indexes", () => {
     ]);
   });
 
-  it("handles a null completion after a streamed channel-delivery marker", async () => {
-    const emitted: AgentTUIStreamEvent[] = [];
-    const session = sessionYielding([
-      { type: "step.started", data: { modelId: "test", sequence: 0, stepIndex: 0, turnId: "t0" } },
-      {
-        type: "message.appended",
-        data: { messageDelta: "<eve-empty-delivery/>", sequence: 0, stepIndex: 0, turnId: "t0" },
-      },
-      {
-        type: "message.completed",
-        data: { finishReason: "stop", message: null, sequence: 0, stepIndex: 0, turnId: "t0" },
-      },
-      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
-      {
-        type: "session.waiting",
-        data: { continuationToken: "session-id", wait: "next-user-message" },
-      },
-    ]);
-    const renderer: AgentTUIRenderer = {
-      readPrompt: vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined),
-      renderStream: vi.fn(async (result) => {
-        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
-          emitted.push(event);
-        }
-      }),
-    };
-    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
-    expect(emitted.filter((event) => event.type.startsWith("assistant-"))).toEqual([
-      { type: "assistant-delta", id: "text:t0:0", delta: "<eve-empty-delivery/>" },
-      { type: "assistant-remove", id: "text:t0:0" },
-    ]);
-  });
-
   it("agrees with the web reducer across a streamed reply, null delivery, and reused step", async () => {
     const trace = [
       { type: "step.started", data: { modelId: "test", sequence: 0, stepIndex: 0, turnId: "t0" } },
@@ -3226,22 +3194,7 @@ describe("EveTUIRunner reused step indexes", () => {
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
-    const stamped = trace.map((event, index) => stampTestEvent(event, index));
-    const reducer = defaultMessageReducer();
-    const web = stamped.reduce((state, event) => reducer.reduce(state, event), reducer.initial());
-    const emitted: AgentTUIStreamEvent[] = [];
-    const renderer: AgentTUIRenderer = {
-      readPrompt: vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined),
-      renderStream: vi.fn(async (result) => {
-        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>)
-          emitted.push(event);
-      }),
-    };
-    await new EveTUIRunner({
-      session: sessionYielding(stamped),
-      renderer,
-      name: "Weather Agent",
-    }).run();
+    const { web, terminal: emitted } = await projectWebAndTerminal(trace);
     const blocks = new Map<string, string>();
     for (const event of emitted) {
       if (event.type === "assistant-delta")
@@ -3250,6 +3203,7 @@ describe("EveTUIRunner reused step indexes", () => {
         blocks.set(event.id, event.text);
       if (event.type === "assistant-remove") blocks.delete(event.id);
     }
+    expect(emitted).toContainEqual({ type: "assistant-remove", id: "text:t0:0#1" });
     expect([...blocks.values()]).toEqual(["First.", "Last."]);
     expect(
       web.messages
@@ -3293,22 +3247,7 @@ describe("EveTUIRunner reused step indexes", () => {
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
-    const stamped = trace.map((event, index) => stampTestEvent(event, index));
-    const reducer = defaultMessageReducer();
-    const web = stamped.reduce((state, event) => reducer.reduce(state, event), reducer.initial());
-    const emitted: AgentTUIStreamEvent[] = [];
-    const renderer: AgentTUIRenderer = {
-      readPrompt: vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined),
-      renderStream: vi.fn(async (result) => {
-        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>)
-          emitted.push(event);
-      }),
-    };
-    await new EveTUIRunner({
-      session: sessionYielding(stamped),
-      renderer,
-      name: "Weather Agent",
-    }).run();
+    const { web, terminal: emitted } = await projectWebAndTerminal(trace);
     expect(emitted.filter((event) => event.type.startsWith("assistant-"))).toEqual([
       { type: "assistant-delta", id: "text:t0:0", delta: "First" },
       { type: "assistant-delta", id: "text:t0:1", delta: "Second" },
@@ -3376,22 +3315,7 @@ describe("EveTUIRunner reused step indexes", () => {
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
     ] as UnstampedMessageStreamEvent[];
-    const stamped = trace.map((event, index) => stampTestEvent(event, index));
-    const reducer = defaultMessageReducer();
-    const web = stamped.reduce((state, event) => reducer.reduce(state, event), reducer.initial());
-    const emitted: AgentTUIStreamEvent[] = [];
-    const renderer: AgentTUIRenderer = {
-      readPrompt: vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined),
-      renderStream: vi.fn(async (result) => {
-        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>)
-          emitted.push(event);
-      }),
-    };
-    await new EveTUIRunner({
-      session: sessionYielding(stamped),
-      renderer,
-      name: "Weather Agent",
-    }).run();
+    const { web, terminal: emitted } = await projectWebAndTerminal(trace);
     expect(
       emitted
         .filter((event) => event.type === "assistant-delta")
@@ -3406,38 +3330,6 @@ describe("EveTUIRunner reused step indexes", () => {
         .filter((part) => part.type === "text")
         .map((part) => part.text),
     ).toEqual(["Before tool.", "After tool."]);
-  });
-
-  it("replaces a streamed reasoning draft under its original block id", async () => {
-    const emitted: AgentTUIStreamEvent[] = [];
-    const session = sessionYielding([
-      { type: "step.started", data: { modelId: "test", sequence: 0, stepIndex: 0, turnId: "t0" } },
-      {
-        type: "reasoning.appended",
-        data: { reasoningDelta: "Draft", sequence: 0, stepIndex: 0, turnId: "t0" },
-      },
-      {
-        type: "reasoning.completed",
-        data: { reasoning: "Revised", sequence: 0, stepIndex: 0, turnId: "t0" },
-      },
-      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
-      {
-        type: "session.waiting",
-        data: { continuationToken: "session-id", wait: "next-user-message" },
-      },
-    ]);
-    const renderer: AgentTUIRenderer = {
-      readPrompt: vi.fn().mockResolvedValueOnce("hello").mockResolvedValueOnce(undefined),
-      renderStream: vi.fn(async (result) => {
-        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>)
-          emitted.push(event);
-      }),
-    };
-    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
-    expect(emitted.filter((event) => event.type.startsWith("reasoning-"))).toEqual([
-      { type: "reasoning-delta", id: "reasoning:t0:0", delta: "Draft" },
-      { type: "reasoning-complete", id: "reasoning:t0:0", text: "Revised" },
-    ]);
   });
 
   it("renders the post-subagent message that the harness emits under a reused stepIndex", async () => {
