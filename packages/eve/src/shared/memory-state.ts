@@ -277,12 +277,6 @@ export function clearMemorySessionState(state: SessionStateMap | undefined): Ses
   return remaining;
 }
 
-export function readMemoryLocks(
-  state: SessionStateMap | undefined,
-): Readonly<Record<string, InternalMemoryLock>> {
-  return readMemorySessionState(state).locks;
-}
-
 function validateMemoryNamespace(namespace: string): void {
   if (namespace.trim().length === 0) throw new Error("Memory namespace must be non-empty.");
   if (utf8Bytes(namespace) > MEMORY_NAMESPACE_MAX_BYTES) {

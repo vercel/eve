@@ -9,7 +9,6 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   clearPendingSessionLimitPrompt,
   consumeDeferredStepInput,
-  createRuntimeToolCallActionFromToolCall,
   getApprovedTools,
   getPendingInputRequestIds,
   hasDeferredStepInput,
@@ -19,6 +18,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 import { buildToolApproval, buildToolSet } from "#harness/tools.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 

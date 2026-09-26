@@ -114,13 +114,6 @@ export function getPendingCoordinationBatch(
   return batch;
 }
 
-/**
- * Returns true when the session is parked on pending task/control coordination.
- */
-export function hasPendingCoordinationBatch(state: SessionStateMap | undefined): boolean {
-  return getPendingCoordinationBatch(state) !== undefined;
-}
-
 export function clearPendingCoordinationBatch(session: HarnessSession): HarnessSession {
   if (session.state?.[PENDING_COORDINATION_BATCH_KEY] === undefined) {
     return session;

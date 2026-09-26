@@ -3,12 +3,7 @@ import { existsSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import {
-  eveDevArguments,
-  runPackageManagerInstall,
-  runPnpmInstall,
-  spawnPnpm,
-} from "./run-pnpm.js";
+import { eveDevArguments, runPackageManagerInstall, runPnpmInstall, spawnPnpm } from "./pm/run.js";
 import { packageManagerInstallSucceeded } from "./pm/run.js";
 import { resultSucceeded } from "./pm/process-result.js";
 import { pnpmPackageManager } from "./pm/pnpm.js";

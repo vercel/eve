@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Card, CardText } from "#compiled/chat/index.js";
-import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
+import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import {
   buildSlackBinding,
   callSlackApi,

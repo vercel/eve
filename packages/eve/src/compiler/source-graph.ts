@@ -589,11 +589,6 @@ export async function loadProgrammaticModuleNamespace(input: {
   return namespace;
 }
 
-export function canonicalModuleSlot(logicalPath: string): string {
-  validateProgrammaticLogicalPath(logicalPath);
-  return canonicalSourceSlot(logicalPath);
-}
-
 /**
  * Canonical composition slot for one logical path. Module extensions, folder
  * forms, and skill packages collapse onto the same authored primitive identity.

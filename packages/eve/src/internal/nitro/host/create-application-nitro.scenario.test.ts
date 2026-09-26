@@ -19,7 +19,6 @@ import {
   resolveInstalledPackageInfo,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
-import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -228,6 +227,10 @@ async function createPreparedHost(
       workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
     },
   };
+}
+
+function resolveNitroBuildDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "nitro");
 }
 
 function createProductionOptions(preparedHost: PreparedApplicationHost) {

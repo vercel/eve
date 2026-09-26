@@ -7,7 +7,7 @@ import {
   clearMemorySessionState,
   createMemoryLock,
   projectMemoryHistory,
-  readMemoryLocks,
+  projectMemoryHistoryFromSessionState,
   shouldCanonicalizeMemory,
   validateMemoryRecallResult,
 } from "#shared/memory-state.js";
@@ -135,7 +135,7 @@ describe("memory record state", () => {
 
     expect(identical.history).toHaveLength(second.history.length);
     expect(
-      projectMemoryHistory({ locks: readMemoryLocks(second.state), messages: second.history }),
+      projectMemoryHistoryFromSessionState({ messages: second.history, state: second.state }),
     ).toEqual([
       { content: "first note", kind: "memory.load", role: "user" },
       { content: "new profile", kind: "memory.load", role: "user" },

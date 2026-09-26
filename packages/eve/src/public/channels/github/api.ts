@@ -173,26 +173,6 @@ export async function createGitHubIssueComment(
   return toPostedComment(response.body);
 }
 
-/** Updates an issue or PR timeline comment. */
-export async function updateGitHubIssueComment(
-  input: GitHubResourceInput & {
-    readonly body: string | GitHubCommentBody;
-    readonly commentId: number;
-  },
-): Promise<GitHubPostedComment> {
-  const response = await callGitHubApi({
-    api: input.api,
-    body: normalizeCommentBody(input.body),
-    credentials: input.credentials,
-    installationId: input.installationId,
-    method: "PATCH",
-    path: `/repos/${encodePath(input.owner)}/${encodePath(input.repo)}/issues/comments/${
-      input.commentId
-    }`,
-  });
-  return toPostedComment(response.body);
-}
-
 /** Replies to an inline pull-request review comment thread. */
 export async function createGitHubReviewCommentReply(
   input: GitHubResourceInput & {
@@ -212,25 +192,6 @@ export async function createGitHubReviewCommentReply(
     }/comments/${input.commentId}/replies`,
   });
   return toPostedComment(response.body);
-}
-
-/** Creates a pull-request review. */
-export function createGitHubPullRequestReview(
-  input: GitHubResourceInput & {
-    readonly body: GitHubJsonObject;
-    readonly pullRequestNumber: number;
-  },
-): Promise<GitHubApiResponse> {
-  return callGitHubApi({
-    api: input.api,
-    body: input.body,
-    credentials: input.credentials,
-    installationId: input.installationId,
-    method: "POST",
-    path: `/repos/${encodePath(input.owner)}/${encodePath(input.repo)}/pulls/${
-      input.pullRequestNumber
-    }/reviews`,
-  });
 }
 
 /** Minimal pull-request metadata returned by {@link getGitHubPullRequest}. */

@@ -2714,5 +2714,3 @@ export const integrations: Integration[] = [
 
 export const getIntegration = (slug: string): Integration | undefined =>
   integrations.find((integration) => integration.slug === slug);
-
-export const integrationSlugs = (): string[] => integrations.map((integration) => integration.slug);

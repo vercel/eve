@@ -28,15 +28,6 @@ import {
   type SlackConnectorLookup,
 } from "./slack-connect-lifecycle.js";
 
-// Re-exported so the Connect parsers remain importable from the provisioning
-// entry point (and unit-testable alongside it).
-export {
-  parseCreatedSlackConnector,
-  parseSlackConnectorDetails,
-  pickSlackConnector,
-  type SlackConnectorRef,
-} from "./slack-connect.js";
-
 /** Injected for tests; defaults to the real Vercel CLI subprocess primitives. */
 export interface SlackbotProvisionDeps extends SlackConnectLifecycleDeps, SlackConnectorCreateDeps {
   /** Test seam for the linked Vercel project and team lookup. */

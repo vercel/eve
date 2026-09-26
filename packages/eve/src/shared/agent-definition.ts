@@ -80,10 +80,6 @@ export type AgentModelResolver = (
 
 export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult>;
 
-export interface PublicAgentDynamicModelDefinitionInput {
-  readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
-}
-
 export function isDynamicModelDefinition(
   value: unknown,
 ): value is PublicAgentDynamicModelDefinition {

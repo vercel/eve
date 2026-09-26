@@ -28,13 +28,12 @@ vi.mock("#context/build-callback-context.js", () => ({
 
 // Import after mock so the module picks up the mock
 const {
-  replayDynamicSessionTools,
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
   rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
 } = await import("#context/dynamic-tool-lifecycle.js");
-const { buildDynamicTools, buildResponseAuthorizationTools } =
+const { buildDynamicTools, buildResponseAuthorizationTools, replayDynamicTools } =
   await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
@@ -217,7 +216,7 @@ describe("durable callback capture validation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// replayDynamicSessionTools — name+phase lookup + closure replay
+// replayDynamicTools — name+phase lookup + closure replay
 // ---------------------------------------------------------------------------
 
 function callbackOwner(
@@ -264,7 +263,9 @@ function requireCurrentMetadata(
   return metadata;
 }
 
-describe("replayDynamicSessionTools", () => {
+const SESSION_SCOPE = { sessionId: "test-session", scope: "session" } as const;
+
+describe("replayDynamicTools", () => {
   function metadata(name: string, closure: JsonObject = {}): CurrentDynamicToolMetadata {
     return {
       callbacks: { execute: { closure } },
@@ -277,7 +278,7 @@ describe("replayDynamicSessionTools", () => {
   }
 
   it("fails execution closed when the registered callback is unavailable", async () => {
-    const [tool] = replayDynamicSessionTools([metadata("unregistered")], [], "test-session");
+    const [tool] = replayDynamicTools([metadata("unregistered")], SESSION_SCOPE);
     await expect(tool!.execute!({}, executeOptions)).rejects.toThrow(
       'Dynamic tool "unregistered" cannot replay its execute callback',
     );
@@ -296,7 +297,7 @@ describe("replayDynamicSessionTools", () => {
         tenantName: "Acme",
       });
 
-      const tools = replayDynamicSessionTools([durable], [], "test-session");
+      const tools = replayDynamicTools([durable], SESSION_SCOPE);
       expect(tools).toHaveLength(1);
       expect(tools[0]!.name).toBe("replay-tool");
       expect(tools[0]!.description).toBe("replay-tool description");
@@ -316,12 +317,12 @@ describe("replayDynamicSessionTools", () => {
 
   it("runs the latest registered implementation after a redeploy rebinds the name", async () => {
     registerTestCallback("latest-tool", "execute", () => ({ version: 1 }));
-    const tools = replayDynamicSessionTools([metadata("latest-tool")], [], "test-session");
+    const tools = replayDynamicTools([metadata("latest-tool")], SESSION_SCOPE);
     await expect(tools[0]!.execute!({}, executeOptions)).resolves.toEqual({ version: 1 });
 
     // A redeploy re-resolves and replaces the binding under the same identity.
     registerTestCallback("latest-tool", "execute", () => ({ version: 2 }));
-    const rebound = replayDynamicSessionTools([metadata("latest-tool")], [], "test-session");
+    const rebound = replayDynamicTools([metadata("latest-tool")], SESSION_SCOPE);
     await expect(rebound[0]!.execute!({}, executeOptions)).resolves.toEqual({ version: 2 });
     getDynamicCallbackRegistry().delete("latest-tool");
   });
@@ -335,11 +336,7 @@ describe("replayDynamicSessionTools", () => {
 
     try {
       const closureVars = { counter: 1, label: "v1" };
-      const tools = replayDynamicSessionTools(
-        [metadata("snapshot-tool", closureVars)],
-        [],
-        "test-session",
-      );
+      const tools = replayDynamicTools([metadata("snapshot-tool", closureVars)], SESSION_SCOPE);
 
       const tool = tools[0]!;
       tool.execute!({}, executeOptions);
@@ -367,7 +364,7 @@ describe("replayDynamicSessionTools", () => {
         metadata("tenant__export", { tenant: "acme" }),
       ];
 
-      const tools = replayDynamicSessionTools(durable, [], "test-session");
+      const tools = replayDynamicTools(durable, SESSION_SCOPE);
       expect(tools).toHaveLength(2);
       expect(tools[0]!.name).toBe("tenant__query");
       expect(tools[1]!.name).toBe("tenant__export");

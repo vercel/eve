@@ -1,8 +1,4 @@
-import type {
-  GitHubCredentialProvider,
-  GitHubCredentialRequest,
-  ResolvedGitHubCredentials,
-} from "./config.js";
+import type { GitHubCredentialProvider, ResolvedGitHubCredentials } from "./config.js";
 
 export const SELF_MODIFICATION_GITHUB_TOKEN_ENV = "EVE_SELF_MODIFICATION_GITHUB_TOKEN";
 
@@ -25,11 +21,6 @@ export function createGitHubCredentialProvider(
       return token.trim();
     },
   };
-}
-
-/** Resolves a PAT GitHub credential without exposing it to authored code. */
-export async function resolveGitHubCredential(request: GitHubCredentialRequest): Promise<string> {
-  return defaultGitHubCredentialProvider.resolve(request);
 }
 
 export const defaultGitHubCredentialProvider: GitHubCredentialProvider = {

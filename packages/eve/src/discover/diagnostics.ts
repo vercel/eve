@@ -1,11 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
 /**
- * Structured discovery diagnostic severity.
- */
-export type DiscoverDiagnosticSeverity = z.infer<typeof discoverDiagnosticSeveritySchema>;
-
-/**
  * Zod schema for structured discovery diagnostic severities.
  */
 export const discoverDiagnosticSeveritySchema = z.union([z.literal("error"), z.literal("warning")]);

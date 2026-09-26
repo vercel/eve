@@ -7,11 +7,6 @@ import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
-// Re-exported so external consumers (tests, integrations) can keep
-// importing the error class from this path even though it now lives
-// in resolve-helpers.ts.
-export { ResolveAgentError } from "#runtime/resolve-helpers.js";
-
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
 import { resolveDynamicConnectionDefinition } from "#runtime/resolve-dynamic-connection.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -165,19 +164,6 @@ export function resolveTsConfigExtendsTargetPaths(input: {
   }
 
   return [...uniquePaths];
-}
-
-export function resolveFirstExistingTsConfigExtendsTarget(input: {
-  readonly configPath: string;
-  readonly extendsSpecifier: string;
-}): string | undefined {
-  for (const candidate of resolveTsConfigExtendsTargetPaths(input)) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return undefined;
 }
 
 function resolveFileExtendsCandidates(input: {

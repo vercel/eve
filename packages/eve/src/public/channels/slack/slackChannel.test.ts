@@ -20,7 +20,7 @@ import {
 } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { experimental_slackActivityStatus } from "#public/channels/slack/activity.js";
-import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
+import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import {
   HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
