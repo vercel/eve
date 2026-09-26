@@ -1221,6 +1221,48 @@ describe("EveAgentStore session resume", () => {
     expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
   });
 
+  it("publishes a settled replay only after catching up while preserving lifecycle callbacks", async () => {
+    const events = stampTestEvents(
+      Array.from({ length: 19 }, (_, index) => {
+        const turnId = `turn_${index}`;
+        return [
+          createTurnStartedEvent({ sequence: 0, turnId }),
+          createMessageReceivedEvent({ message: `Message ${index}`, sequence: 1, turnId }),
+          createMessageCompletedEvent({
+            finishReason: "stop",
+            message: `Reply ${index}`,
+            sequence: 2,
+            stepIndex: 0,
+            turnId,
+          }),
+          createSessionWaitingEvent(),
+        ];
+      }).flat(),
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse(events));
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: defaultMessageReducer(),
+    });
+    const onEvent = vi.fn();
+    const onSessionChange = vi.fn();
+    const published: Array<{ eventCount: number; status: string }> = [];
+    store.setCallbacks({ onEvent, onSessionChange });
+    store.subscribe(() => {
+      published.push({ eventCount: store.snapshot.events.length, status: store.snapshot.status });
+    });
+
+    await store.resume();
+
+    expect(onEvent).toHaveBeenCalledTimes(events.length);
+    expect(onEvent).toHaveBeenLastCalledWith(events.at(-1));
+    expect(onSessionChange).toHaveBeenCalledTimes(events.length + 1);
+    expect(published).toEqual([
+      { eventCount: 0, status: "resuming" },
+      { eventCount: events.length, status: "ready" },
+    ]);
+  });
+
   it("follows a turn accepted after the last settled event was persisted", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
