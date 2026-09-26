@@ -1,7 +1,6 @@
 import type {
   ContentPart,
   GenerateTextOnStepStartCallback,
-  LanguageModel,
   LanguageModelUsage,
   ModelMessage,
   PrepareStepFunction,
@@ -33,8 +32,7 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
-import { mergeGatewaySessionId } from "#internal/gateway.js";
+import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import {
   collectActionPresentation,
   createPresentedRuntimeActionRequestFromToolCall,
@@ -51,6 +49,7 @@ import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { AuthKey } from "#context/keys.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 
 // ---------------------------------------------------------------------------
 // Step result type
@@ -97,7 +96,6 @@ interface StepHooksInput {
    */
   readonly emitStepStarted?: boolean;
   readonly marker: AnthropicCacheMarker | undefined;
-  readonly model: LanguageModel;
   readonly session: HarnessSession;
 }
 
@@ -177,7 +175,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   // session history — no prepareStep snapshot required.
   // -------------------------------------------------------------------------
 
-  const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages }) => {
+  const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages, model }) => {
     let processed = messages;
 
     if (input.cachePath.kind === "anthropic-direct" && input.marker) {
@@ -189,15 +187,13 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     const modelReference = requireSessionModelReference(session);
-    const providerOptions = mergeGatewaySessionId(
-      input.model,
-      mergeProviderSafetyIdentifier(
-        modelReference,
-        modelReference.providerOptions,
-        input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
-      ),
-      session.rootSessionId ?? session.sessionId,
-    );
+    const providerOptions = resolveCallProviderOptions({
+      auth: input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
+      conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
+      model,
+      modelReference,
+      providerOptions: modelReference.providerOptions,
+    });
     if (input.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
         typeof stepResult.providerOptions

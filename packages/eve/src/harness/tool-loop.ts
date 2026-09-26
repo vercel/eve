@@ -19,7 +19,7 @@ import {
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
-import { mergeGatewaySessionId, resolveProviderHeaders } from "#internal/gateway.js";
+import { resolveProviderHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
@@ -215,7 +215,8 @@ import {
   readGatewayGenerationId,
   type HarnessStepResult,
 } from "#harness/step-hooks.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
+import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -1617,7 +1618,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         emissionState,
         emitStepStarted: opts.suppressStepStartedEmission !== true,
         marker,
-        model,
         session,
       });
 
@@ -3129,11 +3129,13 @@ async function maybeCompact(input: {
   });
   const compactionModelReference =
     session.agent.compactionModelReference ?? requireSessionModelReference(session);
-  const providerOptions = mergeGatewaySessionId(
-    compaction.model,
-    mergeProviderSafetyIdentifier(compactionModelReference, compaction.providerOptions, input.auth),
-    session.rootSessionId ?? session.sessionId,
-  ) as Parameters<typeof compactMessages>[3];
+  const providerOptions = resolveCallProviderOptions({
+    auth: input.auth,
+    conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
+    model: compaction.model,
+    modelReference: compactionModelReference,
+    providerOptions: compaction.providerOptions,
+  }) as Parameters<typeof compactMessages>[3];
 
   if (emit) {
     const ctx = contextStorage.getStore();

@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -36,7 +36,6 @@ describe("buildStepHooks", () => {
       emit,
       emissionState,
       marker: undefined,
-      model: "test-model",
       session: createSession(),
     });
     const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
@@ -82,10 +81,10 @@ describe("buildStepHooks", () => {
     const context = new ContextContainer();
     context.set(ConversationIdKey, "forwarded-conversation");
     const prepare = (
-      model: Parameters<typeof buildStepHooks>[0]["model"],
+      model: LanguageModel,
       cachePath: Parameters<typeof buildStepHooks>[0]["cachePath"],
     ) =>
-      buildStepHooks({ emissionState, marker: undefined, model, cachePath, session }).prepareStep({
+      buildStepHooks({ emissionState, marker: undefined, cachePath, session }).prepareStep({
         messages: [],
         model,
         instructions: undefined,
@@ -142,7 +141,6 @@ describe("buildStepHooks", () => {
       cachePath: { kind: "none" },
       emissionState,
       marker: undefined,
-      model: "anthropic/claude-sonnet-4-5",
       session: {
         ...createSession(),
         agent: {

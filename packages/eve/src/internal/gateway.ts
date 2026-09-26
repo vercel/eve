@@ -1,7 +1,6 @@
 import type { LanguageModel } from "ai";
 
 import { appendPackageUserAgent, withPackageUserAgent } from "#internal/user-agent.js";
-import { resolveConversationId } from "#tracing/conversation-context.js";
 
 const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
 
@@ -38,7 +37,7 @@ export function isGatewayModel(model: LanguageModel): boolean {
 export function mergeGatewaySessionId(
   model: LanguageModel,
   providerOptions: Readonly<Record<string, unknown>> | undefined,
-  rootSessionId: string,
+  conversationId: string,
 ): Record<string, unknown> | undefined {
   if (!isGatewayModel(model)) return providerOptions;
 
@@ -53,6 +52,6 @@ export function mergeGatewaySessionId(
 
   return {
     ...providerOptions,
-    gateway: { ...gatewayOptions, sessionId: resolveConversationId(rootSessionId) },
+    gateway: { ...gatewayOptions, sessionId: conversationId },
   };
 }

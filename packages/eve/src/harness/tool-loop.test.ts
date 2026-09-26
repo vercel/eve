@@ -1551,7 +1551,7 @@ describe("createToolLoopHarness", () => {
       const prepared = await prepareStep({
         context: undefined,
         messages: [],
-        model: null,
+        model: selectedModel,
         stepNumber: 0,
         steps: [],
       });
@@ -5817,7 +5817,7 @@ describe("createToolLoopHarness", () => {
       messages: [],
       stepNumber: 0,
       steps: [],
-      model: null,
+      model: agentCall?.model,
       context: undefined,
     });
     expect(stepResult.providerOptions).toEqual({
@@ -8605,7 +8605,7 @@ describe("createToolLoopHarness", () => {
       const prepared = await prepareStep({
         context: undefined,
         messages,
-        model: undefined,
+        model: settings.model,
         stepNumber: 0,
         steps: [],
       });
@@ -9514,6 +9514,7 @@ describe("createToolLoopHarness", () => {
       };
       type PromptAgentSettings = MockAgentSettings & {
         instructions?: unknown;
+        model: LanguageModel;
         tools?: Record<
           string,
           { description?: unknown; inputSchema?: unknown; providerOptions?: unknown }
@@ -9541,7 +9542,7 @@ describe("createToolLoopHarness", () => {
         const prepared = await prepareStep({
           context: undefined,
           messages: call.messages,
-          model: {},
+          model: settings.model,
           stepNumber: 0,
           steps: [],
         });
@@ -9773,7 +9774,7 @@ describe("createToolLoopHarness", () => {
           await prepareStep({
             context: undefined,
             messages: [],
-            model: null,
+            model: agentCall?.model,
             stepNumber: 0,
             steps: [],
           })
@@ -9818,7 +9819,7 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
@@ -9864,7 +9865,7 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
@@ -9910,7 +9911,7 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
@@ -10025,7 +10026,7 @@ describe("createToolLoopHarness", () => {
         ],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
 
@@ -10072,7 +10073,7 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toBeUndefined();

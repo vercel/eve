@@ -1,4 +1,4 @@
-import { resolveConversationId } from "#tracing/conversation-context.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import { AGENT_TRACE_SCHEMA_VERSION } from "#tracing/agent-span-contract.js";
 
 export function agentTraceIdentityAttributes(input: {

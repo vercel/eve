@@ -65,7 +65,7 @@ import { readInstrumentationSessionContext } from "#instrumentation/session-cont
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 import {
   getInstrumentationRuntime,
   registerInstrumentationRuntime,
