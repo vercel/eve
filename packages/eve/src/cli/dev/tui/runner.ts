@@ -113,8 +113,6 @@ import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-projec
 import type { DevDiagnostics } from "../diagnostics.js";
 import type { CommandLifecycle } from "../../shutdown.js";
 
-export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
-
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
 const idleChatGptAuthPollMs = 5_000;

@@ -567,15 +567,15 @@ describe("eveChannel — stream cursor", () => {
     await vi.waitFor(() => expect(cancelled).toHaveBeenCalledOnce());
   });
 
-  it("forwards negative tail-relative start indices", async () => {
+  it.each([-1, 42])("forwards start index %i to the durable stream", async (startIndex) => {
     const handler = createEveStreamHandler({ auth: none() });
 
     const response = await handler.fetch(
-      "https://eve.test/eve/v1/session/test-session-id/stream?startIndex=-1",
+      `https://eve.test/eve/v1/session/test-session-id/stream?startIndex=${startIndex}`,
     );
 
     expect(response.status).toBe(200);
-    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex: -1 });
+    expect(handler.getEventStream).toHaveBeenCalledWith({ startIndex });
   });
 
   it.each(["1.5", "1junk", "0x10", "1e2", ""])(

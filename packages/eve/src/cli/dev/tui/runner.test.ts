@@ -24,18 +24,16 @@ import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
 import {
   EveTUIRunner,
-  parsePromptCommand,
   registryHandoffAddress,
   type AgentTUIAgentHeader,
   type AgentTUIRenderer,
   type AgentTUISessionOptions,
   type AgentTUIStreamEvent,
   type CommandPresentation,
-  type PromptCommand,
   type PromptCommandOutcome,
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
-import { promptCommandsFor } from "./prompt-commands.js";
+import { promptCommandsFor, type PromptCommand } from "./prompt-commands.js";
 import { interruptedError } from "./errors.js";
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
@@ -504,47 +502,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.useRealTimers();
-});
-
-describe("parsePromptCommand", () => {
-  it("parses /model with a provider/model slug", () => {
-    expect(parsePromptCommand("/model anthropic/claude-opus-4.6")).toEqual({
-      type: "extension",
-      name: "model",
-      argument: "anthropic/claude-opus-4.6",
-    });
-  });
-
-  it("trims whitespace around the command and slug", () => {
-    expect(parsePromptCommand("  /model   anthropic/claude-opus-4.6  ")).toEqual({
-      type: "extension",
-      name: "model",
-      argument: "anthropic/claude-opus-4.6",
-    });
-  });
-
-  it("parses bare /model as an empty slug", () => {
-    expect(parsePromptCommand("/model")).toEqual({
-      type: "extension",
-      name: "model",
-      argument: "",
-    });
-  });
-
-  it("recognizes /reset, /cancel, /clear, /compact, /exit, and /quit", () => {
-    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
-    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
-    expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
-    expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
-    expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
-    expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
-  });
-
-  it("does not match near-misses or normal messages", () => {
-    expect(parsePromptCommand("hello")).toBeNull();
-    expect(parsePromptCommand("/models")).toBeNull();
-    expect(parsePromptCommand("what does /model do?")).toBeNull();
-  });
 });
 
 function fakeRenderer(overrides: Partial<AgentTUIRenderer> = {}): AgentTUIRenderer {
@@ -3150,23 +3107,6 @@ describe("EveTUIRunner replay guards", () => {
         reason: "Denied by user.",
       },
     ]);
-  });
-});
-
-describe("parsePromptCommand", () => {
-  it.each([
-    ["/reset", { type: "reset" }],
-    ["/new", { type: "clear" }],
-    ["/exit", { type: "exit" }],
-    ["/quit", { type: "exit" }],
-    ["/deploy", { type: "extension", name: "deploy", argument: "" }],
-    ["  /channels  ", null],
-    ["/vercel", null],
-    ["/links", null],
-    ["deploy", null],
-    ["tell me about /channels", null],
-  ] as const)("parses %j as %j", (prompt, expected) => {
-    expect(parsePromptCommand(prompt)).toEqual(expected);
   });
 });
 

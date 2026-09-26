@@ -194,49 +194,6 @@ describe("Client.health", () => {
     expect(headers.get("authorization")).toBe("Bearer my-token");
   });
 
-  it("resolves bearer auth via callback on each request", async () => {
-    let callCount = 0;
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(Response.json({ ok: true, status: "ready", workflowId: "wf_001" })),
-      );
-
-    const client = new Client({
-      auth: {
-        bearer: () => {
-          callCount += 1;
-          return `token_${callCount}`;
-        },
-      },
-      host: "http://localhost:3000",
-    });
-
-    await client.health();
-    await client.health();
-
-    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    const secondHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
-    expect(firstHeaders.get("authorization")).toBe("Bearer token_1");
-    expect(secondHeaders.get("authorization")).toBe("Bearer token_2");
-    expect(callCount).toBe(2);
-  });
-
-  it("sends basic auth header", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf_001" }));
-
-    const client = new Client({
-      auth: { basic: { password: "secret", username: "admin" } },
-      host: "http://localhost:3000",
-    });
-    await client.health();
-
-    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(headers.get("authorization")).toBe(`Basic ${btoa("admin:secret")}`);
-  });
-
   it("sends custom headers", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

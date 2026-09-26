@@ -41,7 +41,7 @@ describe("session reset integration", () => {
         }),
       ).resolves.toEqual({ previousSessionId: first.runId, status: "reset" });
 
-      await expect(first.returnValue).resolves.toEqual([]);
+      await expect(first.returnValue).resolves.toBeUndefined();
       await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
 
       const second = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);

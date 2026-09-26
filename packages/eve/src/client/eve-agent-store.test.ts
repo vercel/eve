@@ -196,10 +196,161 @@ function createStore<TData>(
   return store;
 }
 
+/**
+ * Runs client reconnect backoff (250ms per attempt) on a fake clock. Call
+ * `fastForwardTimers` once no stream is held open: auto-advancing while a
+ * held stream is open would also fire its read-idle timeout.
+ */
+function useFakeBackoffClock(): void {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+}
+
+function fastForwardTimers(): void {
+  vi.setTimerTickMode("nextTimerAsync");
+}
+
 afterEach(() => {
   for (const cleanup of cleanupStores.splice(0)) cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("EveAgentStore lifecycle", () => {
+  it("starts in ready status with empty data", () => {
+    const store = createStore({ reducer: defaultMessageReducer() });
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages).toEqual([]);
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.events).toEqual([]);
+  });
+
+  it("sends a message and projects streamed events", async () => {
+    const events = turnEvents();
+    const start = Promise.withResolvers<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(start.promise)
+      .mockResolvedValueOnce(streamResponse(events));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const seenEvents: MessageStreamEvent[] = [];
+    const seenStreamIndexes: Array<number | undefined> = [];
+    store.setCallbacks({
+      onEvent: (event) => seenEvents.push(event),
+      onSessionChange: (session) => seenStreamIndexes.push(session?.streamIndex),
+    });
+
+    const sending = store.send({ message: "Hello" });
+    await Promise.resolve();
+
+    expect(store.snapshot.status).toBe("submitted");
+    expect(store.snapshot.data).toEqual({
+      messages: [
+        {
+          id: expect.stringMatching(/^optimistic:/),
+          metadata: { optimistic: true, status: "submitted" },
+          parts: [{ text: "Hello", type: "text" }],
+          role: "user",
+        },
+      ],
+    });
+
+    start.resolve(startedResponse());
+    await sending;
+
+    expect(seenEvents).toEqual(events);
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data).toEqual({
+      messages: [
+        {
+          id: expect.stringMatching(/^evt_.+:user$/),
+          metadata: { status: "complete", turnId: "turn_1" },
+          parts: [{ state: "done", text: "Hello", type: "text" }],
+          role: "user",
+        },
+        {
+          id: "turn_1:assistant",
+          metadata: { status: "complete", turnId: "turn_1" },
+          parts: [
+            { type: "step-start" },
+            { state: "done", stepIndex: 0, text: "Hi there.", type: "text" },
+          ],
+          role: "assistant",
+        },
+      ],
+    });
+    expect(seenStreamIndexes).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it("surfaces transport errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const onError = vi.fn();
+    store.setCallbacks({ onError });
+
+    await store.send({ message: "Hello" });
+
+    expect(onError).toHaveBeenCalledExactlyOnceWith(new Error("Network failed"));
+    expect(store.snapshot.status).toBe("error");
+    expect(store.snapshot.error?.message).toBe("Network failed");
+  });
+
+  it("resets state and creates a new session", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("fail"));
+    const store = createStore({ reducer: defaultMessageReducer() });
+
+    await store.send({ message: "Hello" });
+    expect(store.snapshot.status).toBe("error");
+
+    store.reset();
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages).toEqual([]);
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.events).toEqual([]);
+  });
+
+  it("unsubscribe removes the listener", () => {
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const listener = vi.fn();
+    const unsubscribe = store.subscribe(listener);
+
+    store.reset();
+    expect(listener).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    store.reset();
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("projects input responses before the resumed stream returns", async () => {
+    const start = Promise.withResolvers<Response>();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
+      init?.method === "POST"
+        ? await start.promise
+        : streamResponse(stampTestEvents([createSessionWaitingEvent()])),
+    );
+    const store = createStore<readonly string[]>({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: {
+        initial: () => [],
+        reduce: (data, event) => [...data, event.type],
+      },
+    });
+
+    const sending = store.send({
+      inputResponses: [{ optionId: "cancel", requestId: "approval_1" }],
+    });
+    await Promise.resolve();
+
+    expect(store.snapshot.status).toBe("submitted");
+    expect(store.snapshot.data).toEqual(["client.input.responded"]);
+
+    start.resolve(startedResponse());
+    await sending;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data).toEqual(["client.input.responded", "session.waiting"]);
+  });
 });
 
 describe("EveAgentStore prewarming", () => {
@@ -660,6 +811,8 @@ describe("EveAgentStore prewarming", () => {
 
 describe("EveAgentStore stream overlap", () => {
   it("reconstructs a split message across an in-memory stream reconnect", async () => {
+    useFakeBackoffClock();
+    fastForwardTimers();
     const events = streamingTurnEvents();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -695,6 +848,8 @@ describe("EveAgentStore stream overlap", () => {
   it.each(["21", "24"] as const)(
     "reconstructs a split message across a v%s-to-v25 reconnect",
     async (legacyVersion) => {
+      useFakeBackoffClock();
+      fastForwardTimers();
       const current = streamingTurnEvents();
       const received = current[0]!;
       const started = current[1]!;
@@ -1004,6 +1159,8 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("continues a split message from a complete hydrated prefix", async () => {
+    useFakeBackoffClock();
+    fastForwardTimers();
     const events = streamingTurnEvents();
     const prefix = events.slice(0, 3);
     const fetchMock = vi
@@ -1038,6 +1195,8 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("replays a split message from index zero when only its cursor was retained", async () => {
+    useFakeBackoffClock();
+    fastForwardTimers();
     const events = streamingTurnEvents();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -1121,6 +1280,7 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("moves an unsettled hydrated snapshot to streaming before following it", async () => {
+    useFakeBackoffClock();
     const [received, started, completed, waiting] = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
@@ -1157,6 +1317,7 @@ describe("EveAgentStore session resume", () => {
     live.emit(completed!);
     live.emit(waiting!);
     live.close();
+    fastForwardTimers();
     await resuming;
 
     expect(store.snapshot.status).toBe("ready");
@@ -1351,6 +1512,7 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("replays history and follows an interrupted turn through its boundary", async () => {
+    useFakeBackoffClock();
     const [received, started, completed, waiting] = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
@@ -1387,6 +1549,7 @@ describe("EveAgentStore session resume", () => {
     live.emit(completed!);
     live.emit(waiting!);
     live.close();
+    fastForwardTimers();
     await resuming;
 
     expect(store.snapshot.status).toBe("ready");

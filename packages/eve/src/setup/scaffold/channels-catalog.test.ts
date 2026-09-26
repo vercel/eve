@@ -10,35 +10,16 @@ describe("SCAFFOLDABLE_CHANNELS", () => {
       .sort();
     const overlaySlugs = SCAFFOLDABLE_CHANNELS.map((channel) => channel.slug).sort();
 
+    expect(channelEntries().some((entry) => !entry.surfaces.scaffoldable)).toBe(true);
     expect(overlaySlugs).toEqual(catalogScaffoldable);
   });
 
-  test("excludes channels the catalog marks gallery-only", () => {
-    const galleryOnly = channelEntries().filter((entry) => !entry.surfaces.scaffoldable);
-    const overlaySlugs = new Set(SCAFFOLDABLE_CHANNELS.map((channel) => channel.slug));
-
-    expect(galleryOnly.length).toBeGreaterThan(0);
-    for (const entry of galleryOnly) {
-      expect(overlaySlugs.has(entry.slug)).toBe(false);
-    }
-  });
-
-  test("surfaces the catalog's `eve` web-chat channel as scaffolder kind `web`", () => {
-    const eve = SCAFFOLDABLE_CHANNELS.find((channel) => channel.slug === "eve");
-    expect(eve?.kind).toBe("web");
-  });
-
-  test("maps slack identity straight through", () => {
-    const slack = SCAFFOLDABLE_CHANNELS.find((channel) => channel.slug === "slack");
-    expect(slack?.kind).toBe("slack");
-  });
-
   test("associates scaffoldable channels with canonical registry items", () => {
-    expect(SCAFFOLDABLE_CHANNELS.map(({ kind, registryItem }) => ({ kind, registryItem }))).toEqual(
-      [
-        { kind: "web", registryItem: "channel/web" },
-        { kind: "slack", registryItem: "channel/slack" },
-      ],
-    );
+    expect(
+      SCAFFOLDABLE_CHANNELS.map(({ kind, registryItem, slug }) => ({ kind, registryItem, slug })),
+    ).toEqual([
+      { kind: "web", registryItem: "channel/web", slug: "eve" },
+      { kind: "slack", registryItem: "channel/slack", slug: "slack" },
+    ]);
   });
 });

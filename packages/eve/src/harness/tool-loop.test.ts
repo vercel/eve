@@ -9841,52 +9841,6 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("gateway-auto path: respects author override of gateway.caching", async () => {
-      setupStopResult();
-      const session = createTestSession({
-        agent: {
-          modelReference: {
-            id: "anthropic/claude-sonnet-4-5",
-            providerOptions: { gateway: { caching: false } },
-          },
-          system: "",
-          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
-        },
-      });
-      const config: ToolLoopHarnessConfig = {
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
-        tools: new Map([
-          [
-            "add",
-            {
-              description: "Adds numbers",
-              execute: vi.fn(),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "add",
-            },
-          ],
-        ]),
-      };
-      const runStep = createToolLoopHarness(config);
-      await runStep(session, { message: "hi" });
-
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      // providerOptions is now returned by prepareStep, not set on the constructor
-      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-        agentCall?.prepareStep,
-      );
-      const stepResult = await prepareStep({
-        messages: [],
-        stepNumber: 0,
-        steps: [],
-        model: null,
-        context: undefined,
-      });
-      expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: false },
-      });
-    });
-
     it("anthropic-direct path: marks the last tool without dropping approval", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {

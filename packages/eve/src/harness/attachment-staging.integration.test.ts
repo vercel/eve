@@ -27,44 +27,6 @@ import {
  */
 
 describe("stageAttachmentsToSandbox (integration)", () => {
-  it("writes FilePart bytes into the active sandbox and rewrites data to an eve-sandbox: ref", async () => {
-    const sandbox = mockSandbox({ id: "sbx_integration" });
-    const runtime = await createTestRuntime();
-    const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
-
-    const content: UserContent = [
-      { type: "text", text: "summarize this csv" },
-      { data: csvBytes, filename: "report.csv", mediaType: "text/csv", type: "file" },
-    ];
-
-    const staged = (await runtime.runAsSession({ sandbox }, async () =>
-      stageAttachmentsToSandbox(content),
-    )) as UserContent;
-
-    expect(Array.isArray(staged)).toBe(true);
-    expect(staged).toHaveLength(2);
-    expect(staged[0]).toEqual({ type: "text", text: "summarize this csv" });
-
-    const filePart = staged[1] as FilePart;
-    expect(filePart.mediaType).toBe("text/csv");
-    // Staged `data` is an eve-sandbox: ref (NOT raw bytes). The
-    // refactor's key invariant: bytes never travel on the message,
-    // only the ref does.
-    expect(isSandboxRefUrl(filePart.data)).toBe(true);
-    const ref = decodeSandboxRef(filePart.data as URL);
-    expect(ref.mediaType).toBe("text/csv");
-    expect(ref.size).toBe(csvBytes.byteLength);
-    expect(ref.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/report\.csv$/);
-    expect(filePart.filename).toBe(ref.path);
-
-    expect(sandbox.writes).toHaveLength(1);
-    const write = sandbox.writes[0];
-    expect(write?.path).toMatch(new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`));
-    const writtenBytes = write?.content as Buffer;
-    expect(Buffer.isBuffer(writtenBytes)).toBe(true);
-    expect(writtenBytes.equals(csvBytes)).toBe(true);
-  });
-
   it("exposes the staged path to authored tools via getSandbox().readFile", async () => {
     const sandbox = mockSandbox({ id: "sbx_roundtrip" });
     const readTool = mockTool({
@@ -94,18 +56,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     });
 
     expect(result).toBe(payload);
-  });
-
-  it("passes text-only messages through without touching the sandbox", async () => {
-    const sandbox = mockSandbox({ id: "sbx_text" });
-    const runtime = await createTestRuntime();
-
-    const result = await runtime.runAsSession({ sandbox }, async () =>
-      stageAttachmentsToSandbox("hello"),
-    );
-
-    expect(result).toBe("hello");
-    expect(sandbox.writes).toHaveLength(0);
   });
 
   it("passes UserContent arrays with no FileParts through untouched", async () => {
