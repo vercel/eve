@@ -34,14 +34,22 @@ vi.mock("#internal/project-context.js", () => ({
   })),
 }));
 
-async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
+async function withInteractiveTerminal<T>(
+  fn: () => Promise<T>,
+  stdoutWrites: string[] = [],
+): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
   const stdoutDescriptor = Object.getOwnPropertyDescriptor(process.stdout, "isTTY");
   Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
   Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: true });
+  const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+    stdoutWrites.push(String(chunk));
+    return true;
+  });
   try {
     return await fn();
   } finally {
+    stdoutWrite.mockRestore();
     if (stdinDescriptor !== undefined) {
       Object.defineProperty(process.stdin, "isTTY", stdinDescriptor);
     } else {
@@ -1033,20 +1041,13 @@ describe("eve dev boot progress", () => {
       tuiReporter = input.onBootProgress;
       throw new Error("TUI startup failed");
     });
-    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      writes.push(String(chunk));
-      return true;
-    });
 
-    try {
-      await expect(
-        withInteractiveTerminal(() =>
-          runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
-        ),
-      ).rejects.toThrow("TUI startup failed");
-    } finally {
-      stdoutWrite.mockRestore();
-    }
+    await expect(
+      withInteractiveTerminal(
+        () => runCli(["dev"], { error: () => {}, log: () => {} }, { runDevelopmentTui, startHost }),
+        writes,
+      ),
+    ).rejects.toThrow("TUI startup failed");
 
     expect(hostReporter).toBeTypeOf("function");
     expect(tuiReporter).toBe(hostReporter);

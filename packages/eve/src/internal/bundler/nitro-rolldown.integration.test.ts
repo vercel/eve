@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   buildSingleRolldownChunk,
@@ -89,6 +89,43 @@ describe("buildSingleRolldownChunk", () => {
     } finally {
       rmSync(dir, { force: true, recursive: true });
     }
+  });
+
+  it("keeps authored warnings while silencing warnings from bundled dependencies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "eve-rolldown-dependency-warning-"));
+    const dependencyRoot = join(dir, "node_modules", "evaluator");
+    const entryPath = join(dir, "entry.mjs");
+    const warnings: string[] = [];
+    // Rolldown's default log handler prints warnings with console.warn.
+    const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+
+    try {
+      mkdirSync(dependencyRoot, { recursive: true });
+      writeFileSync(
+        join(dependencyRoot, "package.json"),
+        `${JSON.stringify({ main: "./index.js", name: "evaluator", version: "1.0.0" })}\n`,
+      );
+      writeFileSync(join(dependencyRoot, "index.js"), 'export const fromDependency = eval("1");\n');
+      writeFileSync(
+        entryPath,
+        'import { fromDependency } from "evaluator";\nexport const values = [fromDependency, eval("2")];\n',
+      );
+
+      await buildSingleRolldownChunk("dependency warning fixture", {
+        cwd: dir,
+        input: entryPath,
+        platform: "node",
+        output: { format: "esm" },
+      });
+    } finally {
+      warn.mockRestore();
+      rmSync(dir, { force: true, recursive: true });
+    }
+
+    expect(warnings.join("\n")).toContain("entry.mjs");
+    expect(warnings.join("\n")).not.toContain("evaluator");
   });
 
   it("inlines dynamic imports into one chunk instead of splitting", async () => {

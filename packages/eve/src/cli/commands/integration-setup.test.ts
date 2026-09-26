@@ -43,6 +43,8 @@ function logger(): RegistryCommandLogger & { errors: string[] } {
   return { errors, error: (message) => errors.push(message), log: () => {} };
 }
 
+const fakePrompterDeps = { createPrompter: () => createFakePrompter().prompter };
+
 afterEach(() => {
   process.exitCode = undefined;
   vi.unstubAllEnvs();
@@ -103,7 +105,13 @@ describe("runIntegrationSetupCommand", () => {
       completion: { facts: [] },
     });
 
-    await runIntegrationSetupCommand(logger(), "/workspace/agents/support", "slack");
+    await runIntegrationSetupCommand(
+      logger(),
+      "/workspace/agents/support",
+      "slack",
+      {},
+      fakePrompterDeps,
+    );
 
     expect(runIntegrationSetup).toHaveBeenCalledWith(
       "slack",
@@ -121,7 +129,13 @@ describe("runIntegrationSetupCommand", () => {
       completion: { facts: [] },
     });
 
-    await runIntegrationSetupCommand(logger(), "/project", "photon", { force: true });
+    await runIntegrationSetupCommand(
+      logger(),
+      "/project",
+      "photon",
+      { force: true },
+      fakePrompterDeps,
+    );
 
     expect(runIntegrationSetup).toHaveBeenCalledWith(
       "photon",
@@ -146,7 +160,7 @@ describe("runIntegrationSetupCommand", () => {
       return { kind: "done", completion: { facts: [] } };
     });
 
-    await runIntegrationSetupCommand(logger(), "/project", "web", { yes: true });
+    await runIntegrationSetupCommand(logger(), "/project", "web", { yes: true }, fakePrompterDeps);
   });
 
   it("passes answer-backed headless setup to the runner", async () => {
