@@ -160,13 +160,15 @@ export class SelfModificationHarness {
     this.#turns.add(liveParent);
     const parent = await liveParent.result();
     parent.expectOk();
-    const call = parent.requireToolCall(SELF_MODIFICATION_AGENT);
+    // The delegation blocks the turn, so it stays pending while the child waits on an approval.
+    const callStatus = parent.status === "waiting" ? "pending" : "completed";
+    const call = parent.requireToolCall(SELF_MODIFICATION_AGENT, { status: callStatus });
     const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
     const message = agentId === undefined ? undefined : call.input.message;
     if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");
 
-    let called = [...this.#turns]
+    const called = [...this.#turns]
       .filter((turn) => turn.sessionId === parent.sessionId)
       .flatMap((turn) => turn.events)
       .find(
@@ -177,45 +179,21 @@ export class SelfModificationHarness {
             ? liveParent.events.includes(event)
             : event.data.agentId === agentId),
       );
-    let continuation: EveEvalLiveTurn | undefined;
     if (called?.type !== "subagent.called") {
-      continuation = this.#t.target.watchTurn(parent.sessionId, {
-        startIndex: liveParent.session.state.streamIndex,
-      });
-      this.#turns.add(continuation);
-      const data: { name: string; agentId?: string } = { name: SELF_MODIFICATION_AGENT };
-      if (agentId !== undefined) data.agentId = agentId;
-      called = await continuation.waitForEvent("subagent.called", { data });
+      throw new Error("Self-modification parent turn did not start its child agent.");
     }
-    const [child] = await Promise.all([
-      this.#readChild(
-        called.data.childSessionId,
-        typeof message === "string" ? message : undefined,
-      ),
-      continuation?.result().then((turn) => turn.expectOk()),
-    ]);
+    const child = await this.#readChild(
+      called.data.childSessionId,
+      typeof message === "string" ? message : undefined,
+    );
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
   }
 
-  /** Approves the registry install on the parent and observes the resumed child turn. */
+  /** Approves the registry install the parent turn paused on and observes the resumed child turn. */
   async approveRegistry(run: SelfModificationRun): Promise<EveEvalTurn> {
     const toolName = "registry_add";
-    const liveParent = this.#t.target.watchTurn(run.session.sessionId, {
-      startIndex: run.session.state.streamIndex,
-    });
-    this.#turns.add(liveParent);
-    const approval = await liveParent.waitForEvent("input.requested", {
-      data: { requests: [{ action: { kind: "tool-call", toolName } }] },
-    });
-    const requests = approval.data.requests.filter(
-      (request) => request.action.kind === "tool-call" && request.action.toolName === toolName,
-    );
-    if (requests.length !== 1) {
-      throw new Error(`Expected one pending ${toolName} approval, found ${requests.length}.`);
-    }
-    (await liveParent.result()).expectOk();
-    const session = liveParent.session;
+    const session = run.session;
     session.requireInputRequest({ toolName });
     const childSessionId = run.child.sessionId;
     const previousChild = [...this.#turns]
