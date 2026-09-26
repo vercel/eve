@@ -38,6 +38,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ],
       };
     }
+    // The agent call returned a receipt; its result arrives in a <task_result> message.
+    if (mode === "direct") {
+      return taskResultOf(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
+    }
     const result = request.toolResults.find((entry) => entry.name === tool);
     return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);
   }
@@ -99,6 +103,16 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return "WORKFLOW-IDLE";
+}
+
+function taskResultOf(request: MockModelRequest, tool: string): string | undefined {
+  const pattern = new RegExp(`<task_result [^>]*tool="${tool}"[^>]*>([\\s\\S]*?)</task_result>`);
+  for (const message of [...request.messages].reverse()) {
+    if (message.role !== "user") continue;
+    const body = message.text.match(pattern)?.[1];
+    if (body !== undefined) return body;
+  }
+  return undefined;
 }
 
 const base = e2eAgentConfig({ mock: respond });

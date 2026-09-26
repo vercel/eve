@@ -11,7 +11,7 @@ export default defineEval({
 
     const omitted = await selected.session.send("Call omitted-marker exactly once.");
 
-    omitted.notEvent("subagent.called", { data: { name: "omitted-marker" } });
+    omitted.notEvent("task.started", { data: { name: "omitted-marker" } });
     omitted.noFailedActions();
   },
 });

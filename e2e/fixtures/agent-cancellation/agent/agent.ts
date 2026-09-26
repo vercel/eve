@@ -3,9 +3,12 @@ import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
+const AGENT_TASK_CANCEL = "AGENT-TASK-CANCEL";
+const SLEEPER_FOLLOW_UP = "SLEEPER-FOLLOW-UP";
 
 async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const message = request.lastUserMessage ?? "";
+  if (message.includes(AGENT_TASK_CANCEL)) return cancelAndContinueSleeper(request);
   if (message.includes("Alice is preparing the 2026 report.")) {
     await new Promise((resolve) => setTimeout(resolve, 30_000));
     return "Original 2026 report";
@@ -70,6 +73,35 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     };
   }
   return `Mock reply: ${message}`;
+}
+
+/**
+ * Calls the sleeper agent, waits briefly for it to reach its tool, cancels
+ * the task, then continues it by taskId and returns its follow-up result.
+ */
+function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse | string {
+  const calls = (name: string) => request.toolResults.filter((entry) => entry.name === name);
+  const [started, continued] = calls("sleeper");
+  if (started === undefined) {
+    return {
+      toolCalls: [{ input: { message: "Please wait for cancellation." }, name: "sleeper" }],
+    };
+  }
+  const taskId = /Started task (\S+)\./u.exec(String(started.output))?.[1];
+  if (taskId === undefined) throw new Error("The sleeper call returned no task receipt.");
+  if (calls("task_wait").length === 0) {
+    return { toolCalls: [{ input: { timeout: 2_000 }, name: "task_wait" }] };
+  }
+  if (calls("task_cancel").length === 0) {
+    return { toolCalls: [{ input: { taskId }, name: "task_cancel" }] };
+  }
+  if (continued === undefined) {
+    return { toolCalls: [{ input: { message: SLEEPER_FOLLOW_UP, taskId }, name: "sleeper" }] };
+  }
+  const result = [...request.messages]
+    .reverse()
+    .find((entry) => entry.role === "user" && entry.text.startsWith("<task_result"));
+  return result?.text ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
 }
 
 const base = e2eAgentConfig({ mock: respond });
