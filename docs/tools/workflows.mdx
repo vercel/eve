@@ -532,9 +532,9 @@ Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 
 ## Cancel and clean up: `abortSignal`
 
-The call's `abortSignal`, from `ctx.receive()`, aborts when the run is cancelled by explicit turn
-cancellation. It is durable — it survives replay, and a step that
-receives it observes the abort. Pass it into the steps that should stop, and clean up in
+The call's `abortSignal`, from `ctx.receive()`, aborts when the call is cancelled: by
+`session.cancel()` or by the end of the session. It is durable: it survives replay, and a step
+that receives it observes the abort. Pass it into the steps that should stop, and clean up in
 `try/finally`:
 
 ```ts
